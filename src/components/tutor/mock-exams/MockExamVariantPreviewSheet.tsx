@@ -49,6 +49,22 @@ const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
 );
 
+// TASK-OCR Round 7 (2026-05-21): mirror StudentMockExam.tsx markdown-detect
+// логика — task_text может содержать GFM-таблицы (КИМ 6/10/14/15/17 для
+// варианта 1, КИМ 6/20 для варианта 2). MathText один не рендерит таблицы;
+// MarkdownTaskText (react-markdown + remark-gfm + remark-math + rehype-katex)
+// рендерит. Не используем MarkdownTaskText напрямую для всех task_text —
+// тяжёлая (~80KB gz), lazy-load'им только когда регекс матчит таблицу.
+const MarkdownTableRenderer = lazy(() =>
+  import('@/components/student/mock-exam/MarkdownTaskText').then((m) => ({
+    default: m.MarkdownTaskText,
+  })),
+);
+
+// Single source of truth для GFM table detection — mirror
+// StudentMockExam::MARKDOWN_TABLE_RE (line ~229).
+const MARKDOWN_TABLE_RE = /\n\s*\|.+\|\s*\n\s*\|\s*[:\-| ]+\|\s*\n/;
+
 interface VariantSummaryRow {
   id: string;
   title: string;
@@ -145,6 +161,19 @@ async function resolveTaskImages(
 }
 
 function MathBlock({ text, className }: { text: string; className?: string }) {
+  // Round 7 (2026-05-21): markdown-table fast path — mirror StudentMockExam.
+  const hasMarkdownTable = MARKDOWN_TABLE_RE.test(text);
+  if (hasMarkdownTable) {
+    return (
+      <Suspense
+        fallback={
+          <div className={cn('whitespace-pre-wrap', className)}>{text}</div>
+        }
+      >
+        <MarkdownTableRenderer text={text} className={className} />
+      </Suspense>
+    );
+  }
   return (
     <Suspense
       fallback={
@@ -246,22 +275,37 @@ function PreviewTaskCard({ task, imageUrls }: PreviewTaskCardProps) {
         />
         {imageUrls.length > 0 && (
           <div className="mt-3 grid gap-2">
-            {imageUrls.map((url, idx) => (
-              <a
-                key={`${task.id}-${idx}`}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50"
-              >
-                <img
-                  src={url}
-                  alt={`Иллюстрация к заданию ${task.kim_number}`}
-                  className="max-h-72 w-full object-contain"
-                  loading="lazy"
-                />
-              </a>
-            ))}
+            {imageUrls.map((url, idx) => {
+              // Round 7 (2026-05-21) — mirror StudentMockExam.tsx caption logic
+              // для KIM 20 (выбор схем). Variant 1 KIM 20: 5 пронумерованных
+              // electrical схем; caption «Схема 1..5» нужна чтобы tutor
+              // понимал нумерацию. Variant 2 KIM 20 — табличная задача, без
+              // картинок → этот код не сработает (imageUrls пуст).
+              const caption =
+                task.kim_number === 20 ? `Схема ${idx + 1}` : null;
+              return (
+                <figure key={`${task.id}-${idx}`} className="m-0">
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50"
+                  >
+                    <img
+                      src={url}
+                      alt={caption ?? `Иллюстрация к заданию ${task.kim_number}`}
+                      className="max-h-72 w-full object-contain"
+                      loading="lazy"
+                    />
+                  </a>
+                  {caption && (
+                    <figcaption className="mt-1 text-center text-sm font-medium text-slate-700">
+                      {caption}
+                    </figcaption>
+                  )}
+                </figure>
+              );
+            })}
           </div>
         )}
         {/* Tutor-only collapsibles. */}
