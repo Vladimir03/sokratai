@@ -160,10 +160,14 @@ Deno.serve(async (req: Request) => {
   }
 
   const rawCode = extractInviteCode(req);
-  const normalizedCode = rawCode ? rawCode.toLowerCase() : null;
-  const validCode = normalizedCode && INVITE_CODE_RE.test(normalizedCode)
-    ? normalizedCode
-    : null;
+  // Регулярка `/^[a-z0-9]{8}$/i` уже case-insensitive — не норируем регистр
+  // ВНЕ regex (баг 2026-05-23: раньше `.toLowerCase()` → lookup `.eq("invite_code", "whzlydgt")`
+  // против DB-строки `WHZLYDGT` возвращал 0 строк, поэтому имя репетитора
+  // никогда не подставлялось). `generate_invite_code()` PL/pgSQL-функция в
+  // tutors.invite_code возвращает UPPERCASE. Сохраняем case from URL для
+  // редиректа (claim-invite endpoint case-sensitive), а DB lookup делаем
+  // case-insensitive через `.ilike()` (PostgREST case-insensitive equality).
+  const validCode = rawCode && INVITE_CODE_RE.test(rawCode) ? rawCode : null;
 
   // Generic fallback: для invalid/missing code отдаём preview без tutor name
   // и redirect на main landing. Не 404 — иначе preview в Telegram chat
@@ -184,14 +188,20 @@ Deno.serve(async (req: Request) => {
   }
 
   let tutorFirstName: string | null = null;
+  // canonicalCode из DB используется в redirect URL, чтобы claim-invite
+  // (case-sensitive `.eq()` lookup) точно нашёл запись. Если lookup провалится
+  // — используем validCode из URL as-is. invite_code в `tutors` не содержит
+  // спецсимволов LIKE (regex `[a-z0-9]{8}/i` validated), поэтому `.ilike()`
+  // безопасно использовать с raw value без escape.
+  let canonicalCode = validCode;
   try {
     const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false },
     });
     const { data, error } = await db
       .from("tutors")
-      .select("name")
-      .eq("invite_code", validCode)
+      .select("name, invite_code")
+      .ilike("invite_code", validCode)
       .maybeSingle();
 
     if (error) {
@@ -199,8 +209,13 @@ Deno.serve(async (req: Request) => {
         event: "invite_preview_lookup_failed",
         error: error.message,
       }));
-    } else if (data?.name) {
-      tutorFirstName = firstName(data.name);
+    } else if (data) {
+      if (typeof data.invite_code === "string" && data.invite_code.length > 0) {
+        canonicalCode = data.invite_code;
+      }
+      if (typeof data.name === "string" && data.name.trim().length > 0) {
+        tutorFirstName = firstName(data.name);
+      }
     }
   } catch (e) {
     // Lookup failure — non-fatal, отдаём generic «твой репетитор» preview.
@@ -217,9 +232,9 @@ Deno.serve(async (req: Request) => {
     has_tutor_name: Boolean(tutorFirstName),
   }));
 
-  const redirectUrl = `${PRODUCTION_URL}/invite/${validCode}`;
+  const redirectUrl = `${PRODUCTION_URL}/invite/${canonicalCode}`;
   return htmlResponse(buildHtml({
-    code: validCode,
+    code: canonicalCode,
     description: buildDescription(tutorFirstName),
     redirectUrl,
   }));
