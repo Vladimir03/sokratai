@@ -46,6 +46,25 @@ const tableComponents = {
   p: (props: { children?: React.ReactNode }) => (
     <p className="my-2 whitespace-pre-wrap leading-7">{props.children}</p>
   ),
+  // 2026-05-23 fix: Tailwind Preflight reset убирает list-style для <ol>/<ul>.
+  // Без этого override KIM 14 / 18 / 20 etc. (где варианты ответа записаны
+  // как `1)`, `2)` — GFM ordered list) теряют нумерацию: text «Период
+  // колебаний равен» вместо «1) Период колебаний равен». Возвращаем
+  // list-decimal для <ol> и list-disc для <ul>. Padding-left = 6 (≈24px)
+  // для отступа маркера от текста.
+  ol: (props: { children?: React.ReactNode }) => (
+    <ol className="my-2 list-decimal pl-6 leading-7 marker:text-slate-500">
+      {props.children}
+    </ol>
+  ),
+  ul: (props: { children?: React.ReactNode }) => (
+    <ul className="my-2 list-disc pl-6 leading-7 marker:text-slate-500">
+      {props.children}
+    </ul>
+  ),
+  li: (props: { children?: React.ReactNode }) => (
+    <li className="my-1">{props.children}</li>
+  ),
 };
 
 export function MarkdownTaskText({ text, className }: MarkdownTaskTextProps) {
