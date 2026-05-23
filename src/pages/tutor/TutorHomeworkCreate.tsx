@@ -30,7 +30,7 @@ import {
   type TutorHomeworkAssignmentDetails,
   HomeworkApiError,
 } from '@/lib/tutorHomeworkApi';
-import { getTutorInviteWebLink } from '@/utils/telegramLinks';
+import { getTutorInvitePreviewLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
 import { getSubjectLabel } from '@/types/homework';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
@@ -336,7 +336,8 @@ function TutorHomeworkCreateContent() {
     isRecovering: groupsIsRecovering,
     failureCount: groupsFailureCount,
   } = useTutorGroups(miniGroupsEnabled);
-  const inviteWebLink = tutor?.invite_code ? getTutorInviteWebLink(tutor.invite_code) : '';
+  // Preview-вариант (см. utils/telegramLinks.ts — для Telegram link preview).
+  const inviteWebLink = tutor?.invite_code ? getTutorInvitePreviewLink(tutor.invite_code) : '';
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://sokratai.ru';
   const studentLoginLink = `${appOrigin}/login`;
   const studentSignupLink = `${appOrigin}/signup`;

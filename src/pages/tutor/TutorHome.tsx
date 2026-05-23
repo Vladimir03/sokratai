@@ -19,7 +19,7 @@ import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { useTutorHomeData } from '@/hooks/useTutorHomeData';
 import {
   getTutorInviteTelegramLink,
-  getTutorInviteWebLink,
+  getTutorInvitePreviewLink,
 } from '@/utils/telegramLinks';
 
 function mean(values: number[]): number | null {
@@ -79,7 +79,8 @@ function TutorHomeContent() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
 
   const inviteCode = tutor?.invite_code ?? undefined;
-  const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
+  // Preview-вариант (см. utils/telegramLinks.ts — для Telegram link preview).
+  const inviteWebLink = inviteCode ? getTutorInvitePreviewLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode
     ? getTutorInviteTelegramLink(inviteCode)
     : '';

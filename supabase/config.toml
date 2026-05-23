@@ -25,6 +25,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.homework-reminder]
     verify_jwt = false
+  [functions.invite-preview]
+    verify_jwt = false
   [functions.oauth-google-callback]
     verify_jwt = false
   [functions.oauth-google-init]

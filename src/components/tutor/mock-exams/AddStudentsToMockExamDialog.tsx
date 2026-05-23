@@ -38,7 +38,7 @@ import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSect
 // AssignTab — local type in HWAssignSection (not exported). Inline for type safety.
 type AssignTab = 'groups' | 'students';
 import { useTutor, useTutorGroups } from '@/hooks/useTutor';
-import { getTutorInviteWebLink } from '@/utils/telegramLinks';
+import { getTutorInvitePreviewLink } from '@/utils/telegramLinks';
 import { assignMockExamStudents, MockExamApiError } from '@/lib/mockExamApi';
 import { MOCK_EXAM_ASSIGNMENT_QUERY_KEY } from '@/hooks/useMockExamAssignment';
 import { MOCK_EXAM_ASSIGNMENTS_QUERY_KEY } from '@/hooks/useMockExamAssignments';
@@ -76,8 +76,9 @@ export function AddStudentsToMockExamDialog({
   const { groups, loading: groupsLoading, error: groupsError, refetch: refetchGroups, isFetching: groupsIsFetching, isRecovering: groupsIsRecovering, failureCount: groupsFailureCount } =
     useTutorGroups(miniGroupsEnabled);
 
+  // Preview-вариант (см. utils/telegramLinks.ts — для Telegram link preview).
   const inviteWebLink = tutor?.invite_code
-    ? getTutorInviteWebLink(tutor.invite_code)
+    ? getTutorInvitePreviewLink(tutor.invite_code)
     : '';
   const appOrigin = getAppOrigin();
   const studentLoginLink = `${appOrigin}/login`;

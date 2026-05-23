@@ -189,6 +189,16 @@ function isPositiveInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 
+// max_score теперь допускает шаг 0.5 (см. миграцию
+// 20260523120000_homework_tutor_tasks_max_score_halfstep.sql + CLAUDE.md §40
+// "Score step invariant 0.5 для max_score"). Tolerance 1e-9 защищает от
+// floating-point junk (12.5 * 2 = 25.000000...01 в некоторых браузерах).
+function isPositiveHalfStepNumber(v: unknown): v is number {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return false;
+  const scaled = v * 2;
+  return Math.abs(scaled - Math.round(scaled)) < 1e-9;
+}
+
 function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
@@ -548,8 +558,8 @@ async function handleCreateAssignment(
     if (!isNonEmptyString(t.task_text) && !isNonEmptyString(t.task_image_url)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required (or provide task_image_url)`);
     }
-    if (t.max_score !== undefined && t.max_score !== null && !isPositiveInt(t.max_score)) {
-      return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive integer`);
+    if (t.max_score !== undefined && t.max_score !== null && !isPositiveHalfStepNumber(t.max_score)) {
+      return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive number with step 0.5`);
     }
     if (t.order_num !== undefined && t.order_num !== null && !isPositiveInt(t.order_num)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].order_num must be a positive integer`);
@@ -616,7 +626,7 @@ async function handleCreateAssignment(
     task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
     task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
     correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-    max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+    max_score: isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1,
     rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
     rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
     solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
@@ -1275,8 +1285,8 @@ async function handleUpdateAssignment(
       if (!isNonEmptyString(t.task_text) && !isNonEmptyString(t.task_image_url)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].task_text is required (or provide task_image_url)`);
       }
-      if (t.max_score !== undefined && t.max_score !== null && !isPositiveInt(t.max_score)) {
-        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive integer`);
+      if (t.max_score !== undefined && t.max_score !== null && !isPositiveHalfStepNumber(t.max_score)) {
+        return jsonError(cors, 400, "VALIDATION", `tasks[${i}].max_score must be a positive number with step 0.5`);
       }
       if (t.order_num !== undefined && t.order_num !== null && !isPositiveInt(t.order_num)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].order_num must be a positive integer`);
@@ -1413,7 +1423,7 @@ async function handleUpdateAssignment(
           updateFields.correct_answer = isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null;
         }
         if (t.max_score !== undefined) {
-          updateFields.max_score = isPositiveInt(t.max_score) ? t.max_score : 1;
+          updateFields.max_score = isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1;
         }
         if (t.rubric_text !== undefined) {
           updateFields.rubric_text = isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null;
@@ -1476,7 +1486,7 @@ async function handleUpdateAssignment(
               task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
               task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
               correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-              max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+              max_score: isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1,
               rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
               rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
               solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
@@ -1564,7 +1574,7 @@ async function handleUpdateAssignment(
           task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
           task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
           correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-          max_score: isPositiveInt(t.max_score) ? t.max_score : 1,
+          max_score: isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1,
           rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
           rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
           solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,

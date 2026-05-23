@@ -23,6 +23,70 @@
 
 **Симптом пропуска:** fix работает в конструкторе ДЗ, но ДЗ, созданные через «В ДЗ» с KB-карточки, оказываются с NULL в новой колонке. Именно это случилось с `solution_text` в коммите `adcdc12` и было исправлено в `f454f6e` (path B был пропущен).
 
+### Score step invariants — два разных шага для двух разных полей (2026-05-23)
+
+В системе домашек **два** numeric поля с независимыми step-инвариантами. **НЕ путать** при добавлении новых сайтов записи / валидации:
+
+| Поле | Шаг | Backend validator | Frontend input | DB column |
+|---|---|---|---|---|
+| `homework_tutor_tasks.max_score` | **0.5** | `isPositiveHalfStepNumber(v)` в `homework-api/index.ts` (`scaled = v * 2; Math.abs(scaled - Math.round(scaled)) < 1e-9`) | `<Input step={0.5} min={0.5} inputMode="decimal">` + snap-on-blur в `HWTaskCard.tsx` | `numeric(6,1)` (миграция `20260523120000_homework_tutor_tasks_max_score_halfstep.sql`) |
+| `homework_tutor_task_states.tutor_score_override` + `ai_score` | **0.1** | `isPositiveTenthStep`-pattern (`scaled = v * 10`) в `handleSetTutorScoreOverride` | `<input step={0.1}>` + validator в `EditScoreDialog.tsx` | `numeric(5,2)` (миграция `20260408120000`) |
+
+**Почему два разных шага:**
+- `max_score` — это БАЛЛЬНОСТЬ ЗАДАЧИ, задаётся репетитором при создании ДЗ. ФИПИ-критерии для физики ЕГЭ № 21-26 содержат half-step max scores. Шаг 0.1 здесь был бы лишней свободой (никто не оценивает «12.3 балла за задачу»).
+- `tutor_score_override` / `ai_score` — это БАЛЛ УЧЕНИКА в diapazone `[0, max_score]`. AI ставит дробные баллы по шагу 0.1 (за частичное решение); репетитор переопределяет в том же шаге.
+
+**Где это легко сломать — 6 callsite `max_score` в `homework-api/index.ts`:**
+1. `handleCreateAssignment` validator (line ~561)
+2. `handleCreateAssignment` taskRows insert default (line ~629)
+3. `handleUpdateAssignment` validator (line ~1288)
+4. `handleUpdateAssignment` update-with-submissions field (line ~1426)
+5. `handleUpdateAssignment` new-insert-no-submissions (line ~1489)
+6. `handleUpdateAssignment` update-no-submissions (line ~1577)
+
+ВСЕ 6 используют `isPositiveHalfStepNumber`. **НЕ** возвращай ни одно из них к `isPositiveInt` — иначе дробные значения 12.5 silently коллапсятся в 1 через `? t.max_score : 1` fallback (а validator пропустит запрос потому что валидируется ДРУГОЕ поле).
+
+**Двойной write-path остаётся применим** (см. §«Двойной write-path» выше): HWDrawer **не пишет** `max_score` явно — полагается на DB DEFAULT 1. Миграция сохраняет DEFAULT 1 (теперь numeric 1.0). При future change на `max_score` обязательно проверь оба пути.
+
+**Симптом нарушения инварианта:** репетитор вводит 12.5 в «Макс. баллов», save → backend 400 «must be a positive number with step 0.5» ИЛИ silently коллапсится в 1. Грепни `isPositive(Int|HalfStepNumber)\\((t|task)\\.max_score` — все совпадения должны быть `HalfStepNumber`.
+
+**Frontend UX контракт (HWTaskCard.tsx):**
+- Локальный `scoreText: string` state — раздельно от `task.max_score: number` — позволяет тутору печатать «12.» прежде чем дописать «5», без потери промежуточных нажатий.
+- Sync from outside через `useEffect([task.max_score])` — для reorder / KB import / form reset.
+- Snap-on-blur: 12.7 → 12.5 silently, без error modal. Negative / NaN / < 0.5 → 1 (safe default).
+- Hint под input: «Шаг 0.5 — например 1, 1.5, 12, 12.5».
+
+### Invite preview edge function — отдельный share URL (2026-05-23, 1-serene-finch)
+
+Существует **два** канонических helper'а для tutor invite-ссылки в `src/utils/telegramLinks.ts`. **НЕ путать назначение:**
+
+| Helper | URL | Назначение |
+|---|---|---|
+| `getTutorInviteWebLink(code)` | `https://sokratai.ru/invite/{code}` | **Внутренняя** навигация (редирект после claim, deep-link из push-уведомлений, internal routing). НЕ для share. |
+| `getTutorInvitePreviewLink(code)` | `https://api.sokratai.ru/functions/v1/invite-preview?c={code}` | **Share-сценарии** (копирование в clipboard для отправки ученику, QR-код, любая отправка через Telegram / WhatsApp / Discord). |
+
+**Почему два URL:** Telegram link preview парсит OpenGraph мета из HTML body URL'а, который вставляется в чат. `sokratai.ru/invite/{code}` обслуживается через SPA fallback из **глобального** `index.html` — OG там настроен под main landing для репетиторов («Сократ AI для репетиторов... 200 ₽ в месяц...»). Ученик в Telegram чате видел этот marketing-копирайт и пугался «как это, я платить должен?».
+
+Endpoint `supabase/functions/invite-preview/index.ts` отдаёт invite-specific HTML с правильными OG для Telegram bot scrape:
+- title: «Тебя пригласили в Сократ AI»
+- description: «{Имя репетитора} подключил тебя к Сократ AI — AI-помощнику для домашки. Задавай вопросы по задачам, AI поможет разобраться.»
+- og:image: `https://sokratai.ru/sokrat-logo.png`
+
+Browser fallback — `<meta http-equiv="refresh" content="0; url=https://sokratai.ru/invite/{code}">` + `window.location.replace()` JS fallback. Telegram bot НЕ выполняет meta-refresh / JS → видит только OG. Browser ученика мгновенно редиректится на canonical `/invite/{code}` страницу, где работает обычный claim flow без изменений.
+
+**Hard invariants:**
+
+1. **`tutors.name` lookup читается через `service_role`** в edge function (нет JWT). `firstName(fullName)` режет до первого слова для дружелюбности («Виталий» вместо «Виталий Иванович Петров»).
+2. **`escapeHtml(str)` обязателен** для всего пользовательского input, попадающего в HTML. Tutor может ввести `<script>` в `tutors.name`. Защищены: og:description, og:title, body redirect link, canonical URL.
+3. **Invalid / отсутствующий invite code → generic fallback preview**, не 404. Цель: preview в Telegram chat не должен выглядеть broken — это убивает доверие тутора при первом share.
+4. **`Cache-Control: no-store, must-revalidate`** — preview сам по себе для bot scrape, у browser-юзера живёт миллисекунды до redirect. У Telegram свой server-side кеш (~3 дня обычно), на это не влияем.
+5. **Telemetry server-side только**, PII-free: `{event, has_code, valid_code, has_tutor_name}`. **Никогда** не логировать invite_code в plain text (он = bearer token для ученика; знание чужого кода + claim flow допускает hijack ученика к чужому репетитору).
+6. **Tutor share UI source-of-truth** = 4 файла: `TutorStudents.tsx`, `TutorHome.tsx`, `TutorHomeworkCreate.tsx`, `mock-exams/AddStudentsToMockExamDialog.tsx`. ВСЕ компьютят `inviteWebLink` через `getTutorInvitePreviewLink`. Downstream callsite (`AddStudentDialog`, `HWAssignSection`, `HWSubmitSuccess`) получают URL через props — не вычисляют сами. При добавлении нового share-surface — **обязательно** через `getTutorInvitePreviewLink`, не через `getTutorInviteWebLink`.
+
+**Backward compat:** legacy `sokratai.ru/invite/{code}` URLs, уже отправленные репетиторами раньше в Telegram чатах (до этого fix), продолжают работать — claim flow на React странице intact. Просто preview-card в этих legacy сообщениях показывает старый текст из `index.html` (Telegram кеш стабилен, не сбрасывается ретроактивно).
+
+**При расширении на новый share-channel** (e.g. WhatsApp с разными OG): по-прежнему отдавать тот же preview URL — meta теги работают одинаково для всех Open Graph scrapers (Telegram, WhatsApp, Discord, Slack, iMessage).
+
 **Перед мержем PR, меняющим homework_tutor_tasks, проверь:**
 1. `grep -rn "from('homework_tutor_tasks')\\.insert\\|from('homework_tutor_tasks')\\.update" src/ supabase/`
 2. Оба пути пишут новое поле

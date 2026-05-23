@@ -420,6 +420,27 @@ export function HWTaskCard({
   // Local blob preview URLs keyed by storage ref (only for this-session uploads).
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const [zoom, setZoom] = useState<{ gallery: 'task' | 'rubric' | 'solution'; index: number } | null>(null);
+  // Раздельный draft-state для max_score input: позволяет ученику тутору ввести
+  // «12.», прежде чем дописать «5», без потери промежуточных нажатий. Snap к
+  // шагу 0.5 происходит на blur (см. handleScoreBlur ниже). Sync from outside —
+  // reorder, KB import — через useEffect на task.max_score.
+  const [scoreText, setScoreText] = useState<string>(() => String(task.max_score));
+  useEffect(() => {
+    setScoreText(String(task.max_score));
+  }, [task.max_score]);
+  const handleScoreBlur = useCallback(() => {
+    const raw = scoreText.replace(',', '.').trim();
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v) || v < 0.5) {
+      onUpdate({ ...task, max_score: 1 });
+      setScoreText('1');
+      return;
+    }
+    // Snap к ближайшему 0.5 (12.7 → 12.5, 0.3 → 0.5, 100.4 → 100.5).
+    const snapped = Math.round(v * 2) / 2;
+    onUpdate({ ...task, max_score: snapped });
+    setScoreText(String(snapped));
+  }, [scoreText, task, onUpdate]);
   // Ref mirrors created blob URLs so unmount cleanup sees the latest set (closure over [] would be stale).
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const { urls: resolvedTaskUrls } = useKBImagesSignedUrls(taskRefs, { enabled: taskRefs.length > 0 });
@@ -958,14 +979,15 @@ export function HWTaskCard({
               </Label>
               <Input
                 type="number"
-                min={1}
-                value={task.max_score}
-                onChange={(e) => {
-                  const v = parseInt(e.target.value, 10);
-                  onUpdate({ ...task, max_score: isNaN(v) || v < 1 ? 1 : v });
-                }}
+                min={0.5}
+                step={0.5}
+                inputMode="decimal"
+                value={scoreText}
+                onChange={(e) => setScoreText(e.target.value)}
+                onBlur={handleScoreBlur}
                 className="text-base"
               />
+              <p className="text-xs text-muted-foreground">Шаг 0.5 — например 1, 1.5, 12, 12.5</p>
             </div>
           </div>
 
