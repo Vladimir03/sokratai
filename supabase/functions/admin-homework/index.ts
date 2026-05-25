@@ -529,6 +529,12 @@ serve(async (req) => {
     switch (action) {
       case "tutors":
         return json({ tutors: await tutorsOverview(admin) });
+      case "tutor_extras": {
+        const start: string = body.start;
+        const end: string = body.end;
+        if (!start || !end) return json({ error: "start/end required" }, 400);
+        return json({ extras: await tutorExtras(admin, start, end) });
+      }
       case "assignments": {
         if (!body.tutorId) return json({ error: "tutorId required" }, 400);
         return json({ assignments: await assignmentsByTutor(admin, body.tutorId) });
