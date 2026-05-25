@@ -95,7 +95,34 @@ export const AdminTutorList = ({ onSelectTutor, reloadKey, startDate, endDate }:
   const tutorsWithBoth = tutors.filter(
     (t) => (extras[t.tutorId]?.lessons_total ?? 0) > 0 && (extras[t.tutorId]?.payments_count ?? 0) > 0,
   ).length;
+  // Cross-feature retention #3: ведут И расписание И ДЗ за период.
+  const tutorsWithScheduleAndAssignments = tutors.filter(
+    (t) =>
+      (extras[t.tutorId]?.lessons_total ?? 0) > 0 &&
+      (extras[t.tutorId]?.assignments_in_period ?? 0) > 0,
+  ).length;
   const totalGmv = tutors.reduce((sum, t) => sum + (extras[t.tutorId]?.gmv_paid ?? 0), 0);
+
+  // Averages per tutor #4 (фича: сколько в среднем на 1 репетитора в этом периоде).
+  // Делим на totalTutors, не на «активных» — даёт честную картину загрузки 1 репетитора в системе.
+  const totalStudentsInPeriod = tutors.reduce(
+    (sum, t) => sum + (extras[t.tutorId]?.students_in_period ?? 0),
+    0,
+  );
+  const totalAssignmentsInPeriod = tutors.reduce(
+    (sum, t) => sum + (extras[t.tutorId]?.assignments_in_period ?? 0),
+    0,
+  );
+  const avgStudentsPerTutor = totalTutors ? totalStudentsInPeriod / totalTutors : 0;
+  const avgAssignmentsPerTutor = totalTutors ? totalAssignmentsInPeriod / totalTutors : 0;
+  const avgGmvPerTutor = totalTutors ? totalGmv / totalTutors : 0;
+
+  // Frequency #5: avg distinct days активности на 1 репетитора в периоде.
+  const totalActiveDays = tutors.reduce(
+    (sum, t) => sum + (extras[t.tutorId]?.distinct_active_days ?? 0),
+    0,
+  );
+  const avgActiveDaysPerTutor = totalTutors ? totalActiveDays / totalTutors : 0;
 
   const topByGmv = [...tutors]
     .filter((t) => (extras[t.tutorId]?.gmv_paid ?? 0) > 0)
@@ -108,36 +135,68 @@ export const AdminTutorList = ({ onSelectTutor, reloadKey, startDate, endDate }:
 
   const hasExtras = Object.keys(extras).length > 0 && !!startDate && !!endDate;
   const pct = (num: number, den: number) => (den ? Math.round((num / den) * 100) : 0);
+  const fmtAvg = (n: number): string =>
+    n === 0 ? "0" : n < 10 ? n.toFixed(1) : Math.round(n).toString();
 
   return (
     <div className="space-y-4">
       {hasExtras && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <KpiCard
-            icon={<CalendarDays className="w-4 h-4 text-blue-600" />}
-            label="Ведут расписание"
-            value={`${tutorsWithSchedule}/${totalTutors}`}
-            sub={`${pct(tutorsWithSchedule, totalTutors)}%`}
-          />
-          <KpiCard
-            icon={<Wallet className="w-4 h-4 text-emerald-600" />}
-            label="Ведут оплаты"
-            value={`${tutorsWithPayments}/${totalTutors}`}
-            sub={`${pct(tutorsWithPayments, totalTutors)}%`}
-          />
-          <KpiCard
-            icon={<TrendingUp className="w-4 h-4 text-violet-600" />}
-            label="Расписание + оплаты"
-            value={`${tutorsWithBoth}/${totalTutors}`}
-            sub={`${pct(tutorsWithBoth, totalTutors)}%`}
-            tooltip="Использует обе фичи за выбранный период"
-          />
-          <KpiCard
-            icon={<Wallet className="w-4 h-4 text-emerald-700" />}
-            label="Общий GMV"
-            value={formatMoney(totalGmv)}
-            sub={`за период`}
-          />
+        <div className="space-y-3">
+          {/* Row 1: cross-feature adoption (binary) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <KpiCard
+              icon={<CalendarDays className="w-4 h-4 text-blue-600" />}
+              label="Ведут расписание"
+              value={`${tutorsWithSchedule}/${totalTutors}`}
+              sub={`${pct(tutorsWithSchedule, totalTutors)}%`}
+            />
+            <KpiCard
+              icon={<Wallet className="w-4 h-4 text-emerald-600" />}
+              label="Ведут оплаты"
+              value={`${tutorsWithPayments}/${totalTutors}`}
+              sub={`${pct(tutorsWithPayments, totalTutors)}%`}
+            />
+            <KpiCard
+              icon={<TrendingUp className="w-4 h-4 text-violet-600" />}
+              label="Расписание + оплаты"
+              value={`${tutorsWithBoth}/${totalTutors}`}
+              sub={`${pct(tutorsWithBoth, totalTutors)}%`}
+              tooltip="Использует обе фичи за выбранный период"
+            />
+            <KpiCard
+              icon={<BookOpen className="w-4 h-4 text-indigo-600" />}
+              label="Расписание + ДЗ"
+              value={`${tutorsWithScheduleAndAssignments}/${totalTutors}`}
+              sub={`${pct(tutorsWithScheduleAndAssignments, totalTutors)}%`}
+              tooltip="Ведут и расписание, и ДЗ — целевой профиль пилота"
+            />
+          </div>
+          {/* Row 2: totals + averages */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <KpiCard
+              icon={<Wallet className="w-4 h-4 text-emerald-700" />}
+              label="Общий GMV"
+              value={formatMoney(totalGmv)}
+              sub="за период"
+            />
+            <MultiStatKpiCard
+              icon={<Users className="w-4 h-4 text-violet-700" />}
+              label="Среднее на репетитора"
+              stats={[
+                { label: "учеников", value: fmtAvg(avgStudentsPerTutor) },
+                { label: "ДЗ", value: fmtAvg(avgAssignmentsPerTutor) },
+                { label: "GMV", value: formatMoney(avgGmvPerTutor) },
+              ]}
+              tooltip={`Все/общее ÷ ${totalTutors} репетитор(ов) в системе`}
+            />
+            <KpiCard
+              icon={<TrendingUp className="w-4 h-4 text-cyan-700" />}
+              label="Активных дней в среднем"
+              value={`${fmtAvg(avgActiveDaysPerTutor)} дн.`}
+              sub={`на 1 репетитора · ${totalActiveDays} всего`}
+              tooltip="Distinct days: уроки + оплаты + ДЗ + пробники. Sticky-индикатор vs одноразового использования"
+            />
+          </div>
         </div>
       )}
 
@@ -196,14 +255,41 @@ export const AdminTutorList = ({ onSelectTutor, reloadKey, startDate, endDate }:
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
-                    <Badge variant="outline" className="h-5 px-1.5 gap-1">
-                      <BookOpen className="w-3 h-3" />
-                      ДЗ: {t.totalAssignments} · <span className="text-emerald-700">{t.activeAssignments}</span> акт. · <span className="text-muted-foreground">{t.completedAssignments}</span> зав.
-                    </Badge>
-                    <Badge variant="outline" className="h-5 px-1.5 gap-1">
-                      <Users className="w-3 h-3" />
-                      {t.totalStudents} учеников · <span className="text-emerald-700">{t.activeStudents7d}</span> за 7д
-                    </Badge>
+                    {/* ДЗ: period-scoped когда есть extras, иначе fallback на all-time из overview */}
+                    {hasExtras ? (
+                      <Badge variant="outline" className="h-5 px-1.5 gap-1" title="ДЗ, созданные за выбранный период">
+                        <BookOpen className="w-3 h-3" />
+                        ДЗ: {ex?.assignments_in_period ?? 0}
+                        {(ex?.assignments_active_in_period ?? 0) > 0 && (
+                          <> · <span className="text-emerald-700">{ex!.assignments_active_in_period}</span> акт.</>
+                        )}
+                        {(ex?.assignments_completed_in_period ?? 0) > 0 && (
+                          <> · <span className="text-muted-foreground">{ex!.assignments_completed_in_period}</span> зав.</>
+                        )}
+                        <span className="text-muted-foreground/60 ml-0.5">/ {t.totalAssignments} all-time</span>
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="h-5 px-1.5 gap-1">
+                        <BookOpen className="w-3 h-3" />
+                        ДЗ: {t.totalAssignments} · <span className="text-emerald-700">{t.activeAssignments}</span> акт. · <span className="text-muted-foreground">{t.completedAssignments}</span> зав.
+                      </Badge>
+                    )}
+                    {/* Учеников: period-scoped когда есть extras */}
+                    {hasExtras ? (
+                      <Badge variant="outline" className="h-5 px-1.5 gap-1" title="Ученики, привязанные к ДЗ за период · активные = писали в чат за период">
+                        <Users className="w-3 h-3" />
+                        {ex?.students_in_period ?? 0} уч. за период
+                        {(ex?.active_students_in_period ?? 0) > 0 && (
+                          <> · <span className="text-emerald-700">{ex!.active_students_in_period}</span> активн.</>
+                        )}
+                        <span className="text-muted-foreground/60 ml-0.5">/ {t.totalStudents} all-time</span>
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="h-5 px-1.5 gap-1">
+                        <Users className="w-3 h-3" />
+                        {t.totalStudents} учеников · <span className="text-emerald-700">{t.activeStudents7d}</span> за 7д
+                      </Badge>
+                    )}
                   </div>
                     {hasExtras && (
                       <div className="flex items-center gap-2 mt-1 flex-wrap text-xs">
@@ -322,6 +408,40 @@ function KpiCard({
         </div>
         <div className="text-xl font-semibold tabular-nums">{value}</div>
         {sub && <div className="text-xs text-muted-foreground mt-0.5">{sub}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Компактная KPI-карточка с 3 связанными метриками в один блок (averages). */
+function MultiStatKpiCard({
+  icon,
+  label,
+  stats,
+  tooltip,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  stats: Array<{ label: string; value: string }>;
+  tooltip?: string;
+}) {
+  return (
+    <Card title={tooltip}>
+      <CardContent className="p-3">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+          {icon}
+          <span className="truncate">{label}</span>
+        </div>
+        <div className="grid grid-cols-3 gap-1.5">
+          {stats.map((s) => (
+            <div key={s.label} className="min-w-0">
+              <div className="text-base font-semibold tabular-nums truncate" title={s.value}>
+                {s.value}
+              </div>
+              <div className="text-[10px] text-muted-foreground truncate">{s.label}</div>
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );

@@ -86,7 +86,40 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
     .gte("created_at", start)
     .lt("created_at", end);
 
-  const extras = new Map<string, {
+  // Homework assignments в периоде (для cross-feature retention + period-scoped totals + averages).
+  // tutor_id здесь = auth.users.id, конвертация не нужна.
+  const { data: assignments } = await admin
+    .from("homework_tutor_assignments")
+    .select("id, tutor_id, status, created_at")
+    .gte("created_at", start)
+    .lt("created_at", end);
+  const assignmentIds = (assignments || []).map((a) => a.id);
+  const assignmentToTutor = new Map<string, string>();
+  (assignments || []).forEach((a) => {
+    if (a.tutor_id) assignmentToTutor.set(a.id, a.tutor_id);
+  });
+
+  // Student_assignments, привязанные к ДЗ в периоде → students_in_period.
+  const { data: studentAssignments } = assignmentIds.length
+    ? await admin
+        .from("homework_tutor_student_assignments")
+        .select("id, assignment_id, student_id")
+        .in("assignment_id", assignmentIds)
+    : { data: [] as Array<{ id: string; assignment_id: string; student_id: string }> };
+
+  // Threads с активностью ученика в периоде → active_students_in_period.
+  const saIds = (studentAssignments || []).map((sa) => sa.id);
+  const { data: activeThreads } = saIds.length
+    ? await admin
+        .from("homework_tutor_threads")
+        .select("student_assignment_id, last_student_message_at")
+        .in("student_assignment_id", saIds)
+        .gte("last_student_message_at", start)
+        .lt("last_student_message_at", end)
+    : { data: [] as Array<{ student_assignment_id: string; last_student_message_at: string }> };
+  const activeSaIds = new Set((activeThreads || []).map((t) => t.student_assignment_id));
+
+  type Extras = {
     lessons_total: number;
     lessons_done: number;
     lessons_cancelled: number;
@@ -96,19 +129,45 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
     gmv_pending: number;
     payments_count: number;
     mock_exams_count: number;
-  }>();
+    // Period-scoped homework metrics (фича #6, #3, #5)
+    assignments_in_period: number;
+    assignments_active_in_period: number;
+    assignments_completed_in_period: number;
+    students_in_period: number;
+    active_students_in_period: number;
+    distinct_active_days: number;
+  };
 
-  const ensure = (id: string) => {
+  const extras = new Map<string, Extras>();
+  // Set-based aggregators (финализируются в counts в конце)
+  const studentSetsByTutor = new Map<string, Set<string>>();
+  const activeStudentSetsByTutor = new Map<string, Set<string>>();
+  const daysByTutor = new Map<string, Set<string>>();
+
+  const ensure = (id: string): Extras => {
     let e = extras.get(id);
     if (!e) {
       e = {
         lessons_total: 0, lessons_done: 0, lessons_cancelled: 0, lessons_no_show: 0, lessons_recurring: 0,
         gmv_paid: 0, gmv_pending: 0, payments_count: 0,
         mock_exams_count: 0,
+        assignments_in_period: 0, assignments_active_in_period: 0, assignments_completed_in_period: 0,
+        students_in_period: 0, active_students_in_period: 0,
+        distinct_active_days: 0,
       };
       extras.set(id, e);
     }
     return e;
+  };
+
+  // Distinct active days: один Set<"YYYY-MM-DD"> на репетитора, union по 4 источникам.
+  const addDay = (userId: string, ts: string | null | undefined) => {
+    if (!ts) return;
+    const day = ts.slice(0, 10); // ISO YYYY-MM-DDTHH:MM:SS → YYYY-MM-DD
+    if (day.length !== 10) return;
+    let s = daysByTutor.get(userId);
+    if (!s) { s = new Set(); daysByTutor.set(userId, s); }
+    s.add(day);
   };
 
   lessons?.forEach((l) => {
@@ -121,6 +180,7 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
     else if (l.status === "cancelled" || l.status === "canceled") e.lessons_cancelled += 1;
     else if (l.status === "no_show") e.lessons_no_show += 1;
     if (l.is_recurring || l.parent_lesson_id) e.lessons_recurring += 1;
+    addDay(userId, l.start_at);
   });
 
   payments?.forEach((p) => {
@@ -131,12 +191,41 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
     const amt = Number(p.amount) || 0;
     if (p.status === "paid") e.gmv_paid += amt;
     else if (p.status === "pending") e.gmv_pending += amt;
+    addDay(userId, p.created_at);
   });
 
   mockExams?.forEach((m) => {
     if (!m.tutor_id) return;
     ensure(m.tutor_id).mock_exams_count += 1;
+    addDay(m.tutor_id, m.created_at);
   });
+
+  assignments?.forEach((a) => {
+    if (!a.tutor_id) return;
+    const e = ensure(a.tutor_id);
+    e.assignments_in_period += 1;
+    if (a.status === "active") e.assignments_active_in_period += 1;
+    else if (a.status === "closed" || a.status === "completed") e.assignments_completed_in_period += 1;
+    addDay(a.tutor_id, a.created_at);
+  });
+
+  studentAssignments?.forEach((sa) => {
+    const tutorId = assignmentToTutor.get(sa.assignment_id);
+    if (!tutorId) return;
+    let set = studentSetsByTutor.get(tutorId);
+    if (!set) { set = new Set(); studentSetsByTutor.set(tutorId, set); }
+    set.add(sa.student_id);
+    if (activeSaIds.has(sa.id)) {
+      let aset = activeStudentSetsByTutor.get(tutorId);
+      if (!aset) { aset = new Set(); activeStudentSetsByTutor.set(tutorId, aset); }
+      aset.add(sa.student_id);
+    }
+  });
+
+  // Финализация set-based счётчиков.
+  studentSetsByTutor.forEach((set, tid) => { ensure(tid).students_in_period = set.size; });
+  activeStudentSetsByTutor.forEach((set, tid) => { ensure(tid).active_students_in_period = set.size; });
+  daysByTutor.forEach((set, tid) => { ensure(tid).distinct_active_days = set.size; });
 
   return Object.fromEntries(extras);
 }

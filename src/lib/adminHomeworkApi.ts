@@ -74,6 +74,14 @@ export interface TutorExtras {
   gmv_pending: number;
   payments_count: number;
   mock_exams_count: number;
+  // Period-scoped homework metrics (опциональны для backward-compat со старым деплоем).
+  assignments_in_period?: number;
+  assignments_active_in_period?: number;
+  assignments_completed_in_period?: number;
+  students_in_period?: number;
+  active_students_in_period?: number;
+  /** Distinct days (YYYY-MM-DD) с любой активностью репетитора: уроки, оплаты, ДЗ, пробники. */
+  distinct_active_days?: number;
 }
 
 /* ─── API (delegates to admin-homework edge function) ─── */
