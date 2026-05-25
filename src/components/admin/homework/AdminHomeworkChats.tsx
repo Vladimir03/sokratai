@@ -8,7 +8,12 @@ import type { TutorOverview, AssignmentOverview, AssignmentStudentRow } from "@/
 
 type View = "tutors" | "assignments" | "students" | "thread";
 
-export const AdminHomeworkChats = () => {
+interface Props {
+  startDate?: string;
+  endDate?: string;
+}
+
+export const AdminHomeworkChats = ({ startDate, endDate }: Props = {}) => {
   const [view, setView] = useState<View>("tutors");
   const [tutor, setTutor] = useState<TutorOverview | null>(null);
   const [assignment, setAssignment] = useState<AssignmentOverview | null>(null);
@@ -48,6 +53,8 @@ export const AdminHomeworkChats = () => {
       {view === "tutors" && (
         <AdminTutorList
           reloadKey={reloadKey}
+          startDate={startDate}
+          endDate={endDate}
           onSelectTutor={(t) => {
             setTutor(t);
             setView("assignments");
