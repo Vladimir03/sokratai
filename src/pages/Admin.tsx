@@ -19,7 +19,7 @@ import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminMockExams } from "@/components/admin/AdminMockExams";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap } from "lucide-react";
 import { BusinessDashboard } from "@/components/admin/business/BusinessDashboard";
 import { ProductDiscoveryDashboard } from "@/components/admin/discovery/ProductDiscoveryDashboard";
 import { cn } from "@/lib/utils";
@@ -232,6 +232,10 @@ const Admin = () => {
               <FileText className="w-4 h-4" />
               Пробники
             </TabsTrigger>
+            <TabsTrigger value="tutors" className="flex items-center gap-2">
+              <GraduationCap className="w-4 h-4" />
+              Репетиторы
+            </TabsTrigger>
             <TabsTrigger value="payments" className="flex items-center gap-2">
               <CreditCard className="w-4 h-4" />
               Платежи
@@ -322,6 +326,13 @@ const Admin = () => {
 
           <TabsContent value="mock-exams">
             <AdminMockExams startDate={dateRange.from.toISOString()} endDate={dateRange.to.toISOString()} />
+          </TabsContent>
+
+          <TabsContent value="tutors">
+            <AdminHomeworkChats
+              startDate={dateRange.from.toISOString()}
+              endDate={dateRange.to.toISOString()}
+            />
           </TabsContent>
 
           <TabsContent value="payments">
