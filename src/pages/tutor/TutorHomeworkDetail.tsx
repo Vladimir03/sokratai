@@ -12,6 +12,7 @@ import {
   Paperclip,
   Share2,
   Trash2,
+  UserPlus,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +80,7 @@ function DetailSkeleton() {
 function DetailActions({
   status,
   assignmentId,
+  onAddStudents,
   onDelete,
   onOpenPreview,
   onOpenShare,
@@ -87,6 +89,7 @@ function DetailActions({
 }: {
   status: HomeworkAssignmentStatus;
   assignmentId: string;
+  onAddStudents: () => void;
   onDelete: () => void;
   onOpenPreview: () => void;
   onOpenShare: () => void;
@@ -99,6 +102,10 @@ function DetailActions({
       <Badge variant="outline" className={cfg?.className}>
         {cfg?.label ?? status}
       </Badge>
+      <Button variant="outline" size="sm" onClick={onAddStudents}>
+        <UserPlus className="h-4 w-4 md:mr-2" />
+        <span className="hidden md:inline">Добавить учеников</span>
+      </Button>
       <Button variant="outline" size="sm" asChild>
         <Link to={`/tutor/homework/${assignmentId}/edit`}>
           <Edit className="h-4 w-4 md:mr-2" />
@@ -158,6 +165,11 @@ const SaveTasksToKBDialog = lazy(() =>
 const SaveAsTemplateDialog = lazy(() =>
   import('@/components/tutor/homework-reuse/SaveAsTemplateDialog').then((m) => ({
     default: m.SaveAsTemplateDialog,
+  })),
+);
+const AddStudentsToHomeworkDialog = lazy(() =>
+  import('@/components/tutor/results/AddStudentsToHomeworkDialog').then((m) => ({
+    default: m.AddStudentsToHomeworkDialog,
   })),
 );
 
@@ -574,6 +586,8 @@ function TutorHomeworkDetailContent() {
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [saveKBDialogOpen, setSaveKBDialogOpen] = useState(false);
   const [saveTemplateDialogOpen, setSaveTemplateDialogOpen] = useState(false);
+  // ─── Add Students dialog (2026-05-25, quick-add без захода в Edit) ──────────
+  const [addStudentsOpen, setAddStudentsOpen] = useState(false);
 
   const handleOpenPreview = useCallback(() => {
     if (!id) return;
@@ -640,6 +654,7 @@ function TutorHomeworkDetailContent() {
               <DetailActions
                 status={details.assignment.status as HomeworkAssignmentStatus}
                 assignmentId={details.assignment.id}
+                onAddStudents={() => setAddStudentsOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
                 onOpenPreview={handleOpenPreview}
                 onOpenShare={() => setShareDialogOpen(true)}
@@ -790,6 +805,18 @@ function TutorHomeworkDetailContent() {
             assignmentTitle={details.assignment.title}
             assignmentSubject={details.assignment.subject}
             assignmentTopic={details.assignment.topic}
+          />
+        </Suspense>
+      ) : null}
+
+      {addStudentsOpen && details?.assignment ? (
+        <Suspense fallback={null}>
+          <AddStudentsToHomeworkDialog
+            open={addStudentsOpen}
+            onOpenChange={setAddStudentsOpen}
+            assignmentId={details.assignment.id}
+            assignmentTitle={details.assignment.title}
+            existingStudentIds={details.assigned_students.map((s) => s.student_id)}
           />
         </Suspense>
       ) : null}

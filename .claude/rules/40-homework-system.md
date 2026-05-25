@@ -23,6 +23,32 @@
 
 **Симптом пропуска:** fix работает в конструкторе ДЗ, но ДЗ, созданные через «В ДЗ» с KB-карточки, оказываются с NULL в новой колонке. Именно это случилось с `solution_text` в коммите `adcdc12` и было исправлено в `f454f6e` (path B был пропущен).
 
+### Два endpoint'а для assign students — quick-add vs edit-flow (2026-05-25)
+
+В `homework-api` есть **два независимых endpoint'а**, которые пишут в `homework_tutor_student_assignments`. При изменении любого общего инварианта (новая колонка таблицы, изменение `provisionGuidedThread` поведения, изменение draft→active activation, RLS-расширение) — править **оба**, иначе один flow работает, второй молча ломается. Симптом пропуска: quick-add из шапки Detail добавляет ученика без provision'а thread'а, а edit-flow добавляет нормально (или наоборот).
+
+| Endpoint | Когда вызывается | Notify cascade | Принимает body | Особенности возврата |
+|---|---|---|---|---|
+| `POST /assignments/:id/assign` (`handleAssignStudents`, line ~1624) | Edit-flow (`TutorHomeworkCreate.tsx` после save) | НЕТ (отдельный `/notify` call после) | `student_ids: string[]` + `group_id?: string \| null` | `students_without_telegram_names: string[]` для UI warning |
+| `POST /assignments/:id/assign-students` (`handleQuickAssignStudentsWithNotify`, line ~1803) | Quick-add dialog (`AddStudentsToHomeworkDialog`) в шапке `TutorHomeworkDetail` | ДА (push → telegram встроен, БЕЗ email — mirror моков, CLAUDE.md §29) | `student_ids: string[]` + `notify?: boolean` (default true) | `notify: {sent_push, sent_telegram, failed, failed_no_channel}` counters + `skipped_existing` |
+
+**Общая логика (sync при изменениях):**
+- `getOwnedAssignmentOrThrow` для ownership
+- Whitelist `tutor_students.student_id` (anti-injection: 403 `INVALID_STUDENTS`)
+- Idempotent upsert через UNIQUE `(assignment_id, student_id)` с `ignoreDuplicates: true`
+- `provisionGuidedThread(db, assignmentId, sa.id)` для каждого newly-inserted student_assignment id (eager bootstrap)
+- Activate `draft → active` если первый assign триггерит status flip
+
+**Отличие — group resolution:**
+- `/assign` принимает `group_id` и резолвит `tutor_group_memberships` server-side
+- `/assign-students` принимает **только flat** `student_ids[]` — `HWAssignSection` (client) резолвит группы перед отправкой через свой `selectedGroupIds` / manual add/remove state
+
+**Notify scope разный:**
+- Quick-add (`/assign-students`): push + telegram cascade, НЕ email. Vladimir UX choice mirror моков (CLAUDE.md §29). Если когда-то понадобится email — расширь `notifyHomeworkStudentAssigned` третьей веткой (требует homework-specific email template).
+- Bulk notify (`/notify` → `handleNotifyStudents`): полный cascade push → telegram → email с template + per-student status tracking (`delivery_status` enum). Не консолидировать с quick-add — у них разная UX-семантика (initial delivery с email vs re-engagement).
+
+**При добавлении нового assign-related endpoint:** не плоди N-й write-path. Сначала проверь — нельзя ли расширить существующий с opt-in параметром (e.g. `notify: 'auto' | 'silent'` в /assign). Если строго нужен новый — обнови эту таблицу + обнови оба cascade-цепочки на новый инвариант.
+
 ### Score step invariants — два разных шага для двух разных полей (2026-05-23)
 
 В системе домашек **два** numeric поля с независимыми step-инвариантами. **НЕ путать** при добавлении новых сайтов записи / валидации:

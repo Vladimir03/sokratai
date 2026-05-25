@@ -307,6 +307,49 @@ export async function assignTutorHomeworkStudents(
   );
 }
 
+/**
+ * Quick add students to existing homework — single-shot call для UX
+ * «+ Добавить учеников» в шапке TutorHomeworkDetail.
+ *
+ * Отличается от {@link assignTutorHomeworkStudents}:
+ *  - НЕ принимает group_id (HWAssignSection резолвит группы клиентом
+ *    и передаёт плоский student_ids[])
+ *  - Backend сам делает cascade notify (push → telegram, БЕЗ email)
+ *    для **только что добавленных** учеников — без отдельного /notify
+ *  - Идемпотентен: уже-assigned студенты тихо пропускаются, отдаются
+ *    в `skipped_existing` для toast
+ *
+ * Контракт mirror mock-exam-tutor-api::handleAssignStudents (CLAUDE.md §29).
+ */
+export interface QuickAssignHomeworkStudentsResponse {
+  added: number;
+  skipped_existing: number;
+  assignment_status: HomeworkAssignmentStatus;
+  notify: {
+    sent_push: number;
+    sent_telegram: number;
+    failed: number;
+    failed_no_channel: number;
+  };
+}
+
+export async function quickAssignHomeworkStudents(
+  assignmentId: string,
+  studentIds: string[],
+  options?: { notify?: boolean },
+): Promise<QuickAssignHomeworkStudentsResponse> {
+  return requestHomeworkApi<QuickAssignHomeworkStudentsResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/assign-students`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        student_ids: studentIds,
+        notify: options?.notify ?? true,
+      }),
+    },
+  );
+}
+
 export async function notifyTutorHomeworkStudents(
   assignmentId: string,
   options?: {

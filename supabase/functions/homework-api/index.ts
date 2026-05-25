@@ -1801,6 +1801,352 @@ async function handleAssignStudents(
   });
 }
 
+// ─── Endpoint: POST /assignments/:id/assign-students (quick add + notify) ────
+//
+// Single-shot add для UX «+ Добавить учеников» в шапке TutorHomeworkDetail.
+// Mirror mock-exam-tutor-api::handleAssignStudents (см. CLAUDE.md §29):
+//  - Ownership через getOwnedAssignmentOrThrow
+//  - Idempotent skip уже-assigned (newStudentIds = requested - existing)
+//  - Eager guided thread provisioning для новых
+//  - Activate draft → active если первый assign
+//  - Cascade notify per new student (push → telegram, БЕЗ email — mirror моков)
+//
+// Отличается от существующего POST /assignments/:id/assign:
+//  - notify cascade встроен (single round-trip для frontend)
+//  - НЕ принимает group_id (HWAssignSection резолвит группы client-side
+//    и присылает плоский student_ids[])
+//  - Возвращает counters {push, telegram, failed_no_channel} вместо
+//    students_without_telegram_names (детальная UI-логика остаётся
+//    у /assign + /notify edit-flow)
+//
+// Status gates: ОТСУТСТВУЮТ (Vladimir UX choice — разрешаем на любом
+// status, mirror моков). Drafts/active/archived все допустимы.
+
+interface QuickAssignCascadeResult {
+  channel: "push" | "telegram" | null;
+  failed_reason: string | null;
+}
+
+async function notifyHomeworkStudentAssigned(
+  db: SupabaseClient,
+  studentId: string,
+  assignmentId: string,
+  assignmentTitle: string,
+  subject: string,
+  deadline: string | null,
+  tutorName: string | null,
+): Promise<QuickAssignCascadeResult> {
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+    "https://sokratai.ru";
+  const url = `${appUrl}/homework/${assignmentId}`;
+  const deadlineHint = deadline
+    ? ` Дедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}.`
+    : "";
+  const tutorHint = tutorName ? `${tutorName} назначил` : "Тебе назначили";
+  const pushPayload: PushPayload = {
+    title: `Новое ДЗ: ${assignmentTitle}`,
+    body: `${tutorHint} домашнее задание по ${subject}.${deadlineHint}`,
+    url,
+  };
+
+  // 1) Push
+  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+    const { data: subs } = await db
+      .from("push_subscriptions")
+      .select("endpoint, p256dh, auth")
+      .eq("user_id", studentId);
+    for (const sub of (subs ?? []) as PushSubscriptionData[]) {
+      try {
+        const result = await sendPushNotification(
+          sub,
+          pushPayload,
+          VAPID_PUBLIC_KEY,
+          VAPID_PRIVATE_KEY,
+          VAPID_SUBJECT,
+        );
+        if (result.success) {
+          return { channel: "push", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("homework_assign_quick_push_send_error", {
+          student_id: studentId,
+          error: String(err),
+        });
+      }
+    }
+  }
+
+  // 2) Telegram fallback
+  if (TELEGRAM_BOT_TOKEN) {
+    const { data: profile } = await db
+      .from("profiles")
+      .select("telegram_user_id")
+      .eq("id", studentId)
+      .maybeSingle();
+    let chatId = (profile?.telegram_user_id as number | null) ?? null;
+    if (!chatId) {
+      const { data: session } = await db
+        .from("telegram_sessions")
+        .select("telegram_user_id")
+        .eq("user_id", studentId)
+        .maybeSingle();
+      chatId = (session?.telegram_user_id as number | null) ?? null;
+    }
+    if (chatId) {
+      try {
+        const text =
+          `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n` +
+          `Предмет: ${escapeHtmlEntities(subject)}` +
+          (deadline
+            ? `\nДедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}`
+            : "") +
+          `\n\n<a href="${escapeHtmlEntities(url)}">Открыть ДЗ</a>`;
+        const tgResp = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text,
+              parse_mode: "HTML",
+              disable_web_page_preview: false,
+            }),
+          },
+        );
+        if (tgResp.ok) {
+          return { channel: "telegram", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("homework_assign_quick_telegram_send_error", {
+          student_id: studentId,
+          error: String(err),
+        });
+      }
+    }
+  }
+
+  // 3) Email — out of scope (Vladimir UX choice mirror моков).
+  return { channel: null, failed_reason: "no_channels_available" };
+}
+
+async function handleQuickAssignStudentsWithNotify(
+  db: SupabaseClient,
+  tutorUserId: string,
+  tutorId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(
+    db,
+    assignmentId,
+    tutorUserId,
+    cors,
+  );
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  if (!Array.isArray(b.student_ids) || b.student_ids.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "student_ids must be non-empty array");
+  }
+  const requestedIds = Array.from(new Set(b.student_ids as string[]));
+  const invalidIds = requestedIds.filter((id) => !isUUID(id));
+  if (invalidIds.length > 0) {
+    return jsonError(cors, 400, "VALIDATION", "student_ids must be UUIDs", {
+      invalid_student_ids: invalidIds,
+    });
+  }
+  if (requestedIds.length > 100) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      "Cannot assign more than 100 students at once",
+    );
+  }
+  const notify = b.notify === true || b.notify === undefined; // default true
+
+  // Whitelist: all student_ids must be tutor's own students.
+  const { data: tutorStudents, error: tutorStudentsError } = await db
+    .from("tutor_students")
+    .select("student_id")
+    .eq("tutor_id", tutorId)
+    .in("student_id", requestedIds);
+  if (tutorStudentsError) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/assign-students",
+      assignment_id: assignmentId,
+      error: tutorStudentsError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to validate students");
+  }
+  const validIds = new Set(
+    (tutorStudents ?? []).map((r) => r.student_id as string),
+  );
+  const notMine = requestedIds.filter((id) => !validIds.has(id));
+  if (notMine.length > 0) {
+    return jsonError(
+      cors,
+      403,
+      "INVALID_STUDENTS",
+      "Some student_ids are not your students",
+      { invalid_student_ids: notMine },
+    );
+  }
+
+  // Idempotent skip: filter out already-assigned.
+  const { data: existing, error: existingErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("student_id")
+    .eq("assignment_id", assignmentId)
+    .in("student_id", requestedIds);
+  if (existingErr) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/assign-students",
+      assignment_id: assignmentId,
+      error: existingErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load existing assignments");
+  }
+  const existingIds = new Set(
+    (existing ?? []).map((r) => r.student_id as string),
+  );
+  const newStudentIds = requestedIds.filter((id) => !existingIds.has(id));
+  const skippedExisting = requestedIds.length - newStudentIds.length;
+
+  if (newStudentIds.length === 0) {
+    return jsonOk(cors, {
+      added: 0,
+      skipped_existing: skippedExisting,
+      assignment_status: assignment.status,
+      notify: { sent_push: 0, sent_telegram: 0, failed: 0, failed_no_channel: 0 },
+    });
+  }
+
+  // Insert new rows + provision threads + activate draft.
+  const rows = newStudentIds.map((sid) => ({
+    assignment_id: assignmentId,
+    student_id: sid,
+  }));
+  const { data: inserted, error: insertErr } = await db
+    .from("homework_tutor_student_assignments")
+    .upsert(rows, { onConflict: "assignment_id,student_id", ignoreDuplicates: true })
+    .select("id, student_id");
+  if (insertErr) {
+    console.error("homework_api_request_error", {
+      route: "POST /assignments/:id/assign-students",
+      assignment_id: assignmentId,
+      error: insertErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to assign students");
+  }
+
+  // Provision guided threads for the newly inserted rows.
+  if (inserted && inserted.length > 0) {
+    for (const sa of inserted as { id: string }[]) {
+      await provisionGuidedThread(db, assignmentId, sa.id);
+    }
+  }
+
+  // Activate draft → active (mirror existing /assign flow).
+  let assignmentStatus = String(assignment.status ?? "draft");
+  if (assignmentStatus === "draft") {
+    const { data: updated, error: statusErr } = await db
+      .from("homework_tutor_assignments")
+      .update({ status: "active" })
+      .eq("id", assignmentId)
+      .eq("status", "draft")
+      .select("status")
+      .maybeSingle();
+    if (statusErr) {
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/assign-students",
+        assignment_id: assignmentId,
+        error: statusErr.message,
+      });
+      // Non-fatal — students уже добавлены, статус подтянется при следующем edit.
+    } else if (updated?.status) {
+      assignmentStatus = updated.status as string;
+    }
+  }
+
+  // Cascade notify per new student (parallel, best-effort).
+  let sentPush = 0;
+  let sentTelegram = 0;
+  let failed = 0;
+  let failedNoChannel = 0;
+
+  if (notify) {
+    const { data: tutorRow } = await db
+      .from("tutors")
+      .select("name")
+      .eq("user_id", tutorUserId)
+      .maybeSingle();
+    const tutorName = (tutorRow?.name as string | null) ?? null;
+    const assignmentTitle = assignment.title as string;
+    const subject = assignment.subject as string;
+    const deadlineStr = (assignment.deadline as string | null) ?? null;
+
+    const results = await Promise.all(
+      newStudentIds.map((sid) =>
+        notifyHomeworkStudentAssigned(
+          db,
+          sid,
+          assignmentId,
+          assignmentTitle,
+          subject,
+          deadlineStr,
+          tutorName,
+        ).catch((err): QuickAssignCascadeResult => {
+          console.warn("homework_assign_quick_notify_student_failed", {
+            student_id: sid,
+            error: String(err),
+          });
+          return { channel: null, failed_reason: "exception" };
+        })
+      ),
+    );
+
+    for (const r of results) {
+      if (r.channel === "push") sentPush += 1;
+      else if (r.channel === "telegram") sentTelegram += 1;
+      else if (r.failed_reason === "no_channels_available") failedNoChannel += 1;
+      else failed += 1;
+    }
+  }
+
+  console.info("homework_assign_students_quick_completed", {
+    assignment_id: assignmentId,
+    requested: requestedIds.length,
+    added: newStudentIds.length,
+    skipped_existing: skippedExisting,
+    assignment_status_after: assignmentStatus,
+    notify,
+    sent_push: sentPush,
+    sent_telegram: sentTelegram,
+    failed,
+    failed_no_channel: failedNoChannel,
+  });
+
+  return jsonOk(cors, {
+    added: newStudentIds.length,
+    skipped_existing: skippedExisting,
+    assignment_status: assignmentStatus,
+    notify: {
+      sent_push: sentPush,
+      sent_telegram: sentTelegram,
+      failed,
+      failed_no_channel: failedNoChannel,
+    },
+  });
+}
+
 // ─── Endpoint: POST /assignments/:id/notify ──────────────────────────────────
 
 async function handleNotifyStudents(
@@ -8502,6 +8848,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "assign" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleAssignStudents(db, userId, tutor.id, seg[1], body, cors);
+    }
+
+    // POST /assignments/:id/assign-students (quick add + cascade notify, 2026-05-25)
+    if (
+      seg.length === 3 &&
+      seg[0] === "assignments" &&
+      seg[2] === "assign-students" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleQuickAssignStudentsWithNotify(db, userId, tutor.id, seg[1], body, cors);
     }
 
     // POST /assignments/:id/notify
