@@ -64,6 +64,20 @@ export interface AdminTaskState {
   task_id: string;
 }
 
+export interface TutorExtras {
+  lessons_total: number;
+  lessons_done: number;
+  lessons_cancelled: number;
+  lessons_no_show: number;
+  lessons_recurring: number;
+  gmv_paid: number;
+  gmv_pending: number;
+  payments_count: number;
+  debt_amount: number;
+  debt_students: number;
+  mock_exams_count: number;
+}
+
 /* ─── API (delegates to admin-homework edge function) ─── */
 
 async function invokeAdminHomework<T>(body: Record<string, unknown>): Promise<T> {
@@ -76,6 +90,16 @@ async function invokeAdminHomework<T>(body: Record<string, unknown>): Promise<T>
 export async function fetchTutorsOverview(): Promise<TutorOverview[]> {
   const data = await invokeAdminHomework<{ tutors: TutorOverview[] }>({ action: "tutors" });
   return data.tutors || [];
+}
+
+/** Aggregates schedule + payments + mock-exams per tutor for the given date range. */
+export async function fetchTutorExtras(start: string, end: string): Promise<Record<string, TutorExtras>> {
+  const data = await invokeAdminHomework<{ extras: Record<string, TutorExtras> }>({
+    action: "tutor_extras",
+    start,
+    end,
+  });
+  return data.extras || {};
 }
 
 export async function fetchAssignmentsByTutor(tutorId: string): Promise<AssignmentOverview[]> {
