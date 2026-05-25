@@ -321,7 +321,7 @@ const Admin = () => {
           </TabsContent>
 
           <TabsContent value="mock-exams">
-            <AdminMockExams startDate={dateRange.from} endDate={dateRange.to} />
+            <AdminMockExams startDate={dateRange.from.toISOString()} endDate={dateRange.to.toISOString()} />
           </TabsContent>
 
           <TabsContent value="payments">
