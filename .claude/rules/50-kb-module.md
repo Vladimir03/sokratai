@@ -81,6 +81,8 @@
 
 **При намеренном orphan-cleanup** (фикс для битых refs): сначала `UPDATE kb_tasks SET attachment_url=NULL`, потом удаление файлов.
 
+**Incident runbook** (диагностика + recovery SQL + история инцидентов): `docs/delivery/engineering/runbooks/kb-broken-storage-refs.md`. Использовать при появлении amber-плашки «Фото недоступно» в каталоге или 400 на `/storage/v1/object/sign/kb-attachments/...` в DevTools.
+
 ## Дизайн-токены KB
 - Primary: `bg-accent` / `fill-accent` (socrat green, #1B6B4A)
 - Folder: `bg-socrat-folder` / `bg-socrat-folder-bg` (purple, #5B5FC7)
