@@ -3882,6 +3882,28 @@ async function handleCreateTemplateFromAssignment(
     return jsonError(cors, 400, "VALIDATION", "include_ai_settings must be a boolean");
   }
 
+  // Phase 9 (2026-05-25) — pre-validate assignment.subject против VALID_SUBJECTS_CREATE,
+  // чтобы не получить generic 500 DB_ERROR при CHECK constraint violation.
+  // Миграция 20260525120000 расширила homework_tutor_templates_subject_check до 19
+  // canonical + legacy subjects (mirror homework_tutor_assignments_subject_check),
+  // но guard здесь работает как defense-in-depth: если в будущем CHECK constraint
+  // снова разойдётся, репетитор увидит понятную ошибку вместо generic toast.
+  const assignmentSubject = isString(assignment.subject)
+    ? (assignment.subject as string).trim()
+    : "";
+  if (!assignmentSubject || !(VALID_SUBJECTS_CREATE as readonly string[]).includes(assignmentSubject)) {
+    console.warn("homework_api_save_template_invalid_subject", {
+      assignment_id: assignmentId,
+      subject: assignmentSubject || null,
+    });
+    return jsonError(
+      cors,
+      400,
+      "INVALID_SUBJECT",
+      `Предмет «${assignmentSubject || "не указан"}» не поддерживается для шаблонов. Свяжитесь с поддержкой.`,
+    );
+  }
+
   // Read all tasks for this assignment. Ownership уже проверен выше.
   const { data: taskRows, error: tasksErr } = await db
     .from("homework_tutor_tasks")
@@ -3961,11 +3983,33 @@ async function handleCreateTemplateFromAssignment(
     .single();
 
   if (insertErr || !inserted) {
+    // Phase 9 (2026-05-25): catch Postgres CHECK constraint violation explicitly
+    // (code 23514). Defensive — pre-validate выше уже отбивает invalid subjects,
+    // но если миграция CHECK constraint снова разойдётся с VALID_SUBJECTS_CREATE,
+    // surface specific reason вместо generic «Не удалось сохранить шаблон».
+    const pgCode =
+      typeof (insertErr as { code?: unknown } | null)?.code === "string"
+        ? ((insertErr as { code: string }).code)
+        : null;
+    if (pgCode === "23514") {
+      console.warn("homework_api_save_template_check_violation", {
+        assignment_id: assignmentId,
+        subject: assignmentSubject,
+        error: insertErr?.message,
+      });
+      return jsonError(
+        cors,
+        409,
+        "CHECK_VIOLATION",
+        "Не удалось сохранить шаблон: данные не прошли валидацию схемы БД. Свяжитесь с поддержкой.",
+      );
+    }
     console.error("homework_api_request_error", {
       route: "POST /assignments/:id/save-as-template",
       error: insertErr?.message,
+      pg_code: pgCode,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон. Попробуйте ещё раз.");
   }
 
   // NOTE: include_materials — no schema support yet. Templates don't own

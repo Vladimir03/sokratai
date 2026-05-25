@@ -15,32 +15,52 @@ export const getTutorInviteTelegramLink = (inviteCode: string): string => {
 };
 
 /**
- * Генерирует веб-ссылку для приглашения (страница с инструкцией).
+ * **Canonical share-ссылка для tutor invite UI** (Phase 9, 2026-05-25).
  *
- * Используется только для **внутренней** навигации тутора (например, переход
- * после claim или redirect destination). Для **share-сценариев** (копирование
- * ученику, QR-код) используй `getTutorInvitePreviewLink`, который отдаёт
- * URL с invite-specific OpenGraph для Telegram link preview.
+ * Используется во ВСЕХ share-сценариях:
+ *   - копирование в clipboard для отправки ученику (Telegram, WhatsApp, любой канал)
+ *   - QR-код в `AddStudentDialog`
+ *   - share-кнопка в `TutorStudents` / `TutorHome` / `TutorHomeworkCreate` /
+ *     `AddStudentsToMockExamDialog`
+ *
+ * URL ведёт на canonical `sokratai.ru/invite/{code}` — React route claim-flow,
+ * который всегда корректно рендерится в любом браузере (включая Telegram in-app
+ * browser, Safari, Chrome). Telegram link preview-card использует global OG из
+ * `index.html` (после landing AI-crawlers refactor 2026-05-19 — sokratai-logo +
+ * generic title). Это generic preview без имени репетитора, trade-off в пользу
+ * reliability.
+ *
+ * **Не используй для внутренней навигации тутора** — для этого тоже подходит,
+ * но логичнее иметь dedicated tutor-routes (например, redirect на `/tutor/home`).
+ *
+ * История: до Phase 9 share UI использовал `getTutorInvitePreviewLink` (URL на
+ * edge function `invite-preview` с invite-specific OG). Этот URL ломал UX когда
+ * репетитор копировал и тестировал в браузере — видел raw HTML с broken encoding.
+ * Заменён на canonical claim URL во всех 4 share callsites.
  */
 export const getTutorInviteWebLink = (inviteCode: string): string => {
   return `${PRODUCTION_URL}/invite/${inviteCode}`;
 };
 
 /**
- * Генерирует share-ссылку для отправки ученику (через Telegram chat / WhatsApp).
+ * @deprecated Phase 9 (2026-05-25) — НЕ используй в новом коде для share UI.
  *
- * URL ведёт на edge function `invite-preview`, которая отдаёт HTML с invite-
- * specific OpenGraph meta-tags. Telegram bot scrape видит:
- *   - title «Тебя пригласили в Сократ AI»
- *   - description с именем репетитора + «AI-помощник для домашки»
- *   - НЕТ упоминания цены / «инструмент для репетитора»
+ * Этот URL ведёт на edge function `invite-preview`, которая отдаёт HTML с
+ * invite-specific OpenGraph meta-tags для Telegram bot scrape. Но когда tutor
+ * копировал URL и открывал в браузере для теста (или вставлял не в Telegram
+ * chat), браузер либо моментально редиректил на `sokratai.ru/invite/{code}`
+ * (meta-refresh + JS replace), либо показывал raw HTML с broken encoding
+ * (см. CLAUDE.md §33 — Phase 9 issue 2).
+ *
+ * Endpoint **не удалён** — backward compat с Telegram preview-картинками,
+ * которые могут лежать в Telegram cache недели после старого share.
  * (См. supabase/functions/invite-preview/index.ts).
  *
- * Браузер ученика после клика мгновенно редиректит на canonical `/invite/{code}`
- * (meta-refresh + window.location.replace fallback) — claim flow без изменений.
+ * Для нового share UI используй `getTutorInviteWebLink(code)` — canonical
+ * `sokratai.ru/invite/{code}` (всегда корректно рендерится в любом браузере).
  *
  * Hardcoded `https://api.sokratai.ru` per CLAUDE.md §«Network & Infrastructure»
- * (RU bypass — direct `*.supabase.co` блокируется некоторыми RU-провайдерами).
+ * (RU bypass).
  */
 export const getTutorInvitePreviewLink = (inviteCode: string): string => {
   return `https://api.sokratai.ru/functions/v1/invite-preview?c=${encodeURIComponent(inviteCode)}`;

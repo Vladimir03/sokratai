@@ -34,7 +34,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { useTutor, useTutorGroups } from '@/hooks/useTutor';
-import { getTutorInvitePreviewLink } from '@/utils/telegramLinks';
+import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import {
   quickAssignHomeworkStudents,
   type QuickAssignHomeworkStudentsResponse,
@@ -87,8 +87,9 @@ export function AddStudentsToHomeworkDialog({
     failureCount: groupsFailureCount,
   } = useTutorGroups(miniGroupsEnabled);
 
+  // Phase 9 (2026-05-25): canonical claim URL sokratai.ru/invite/{code}.
   const inviteWebLink = tutor?.invite_code
-    ? getTutorInvitePreviewLink(tutor.invite_code)
+    ? getTutorInviteWebLink(tutor.invite_code)
     : '';
   const appOrigin = getAppOrigin();
   const studentLoginLink = `${appOrigin}/login`;

@@ -5,6 +5,8 @@ import { ChevronDown, ChevronUp, Paperclip, ExternalLink, Upload, X } from 'luci
 import type { MaterialType } from '@/lib/tutorHomeworkApi';
 import { type DraftMaterial, createEmptyMaterial } from './types';
 import { usePasteImages } from '@/hooks/usePasteImages';
+import { useDragDropFiles } from '@/hooks/useDragDropFiles';
+import { cn } from '@/lib/utils';
 
 export interface HWMaterialsSectionProps {
   materials: DraftMaterial[];
@@ -40,14 +42,10 @@ export function HWMaterialsSection({ materials, onChange }: HWMaterialsSectionPr
     onChange(materials.filter((_, i) => i !== idx));
   }, [materials, onChange]);
 
-  // Ctrl+V support — accepts both images (compressed) and PDFs (passthrough).
-  // Auto-detect type from MIME, auto-expand accordion so tutor sees the new
-  // material immediately. Generated filename for clipboard images (which have
-  // no name in clipboard) — "Скриншот <timestamp>.jpg" after compression.
-  const handlePaste = usePasteImages({
-    acceptedTypes: ['image/', 'application/pdf'],
-    compress: true,
-    onImagePasted: (file: File) => {
+  // Helper: add file material с smart title derivation. Reuse'ится между paste
+  // и drag-drop, чтобы оба path производили identical materials state.
+  const appendFileMaterial = useCallback(
+    (file: File) => {
       const isPdf = file.type === 'application/pdf';
       const type: MaterialType = isPdf ? 'pdf' : 'image';
       // Clipboard images often have generic names like "image.png" — give
@@ -64,11 +62,49 @@ export function HWMaterialsSection({ materials, onChange }: HWMaterialsSectionPr
       onChange([...materials, { ...createEmptyMaterial(), type, file, title }]);
       setOpen(true);
     },
+    [materials, onChange],
+  );
+
+  // Ctrl+V support — accepts both images (compressed) and PDFs (passthrough).
+  // Auto-detect type from MIME, auto-expand accordion so tutor sees the new
+  // material immediately.
+  const handlePaste = usePasteImages({
+    acceptedTypes: ['image/', 'application/pdf'],
+    compress: true,
+    onImagePasted: appendFileMaterial,
     telemetryTag: 'hw_materials_paste',
   });
 
+  // Phase 9 (2026-05-25): drag-and-drop материалов (images + PDFs). Mirror
+  // paste path — same acceptedTypes, same MIME-based routing через
+  // appendFileMaterial. Несколько файлов поддерживаются (drop из Explorer).
+  const dragDrop = useDragDropFiles({
+    acceptedTypes: ['image/', 'application/pdf'],
+    compress: true,
+    onFilesDropped: (files: File[]) => {
+      for (const file of files) appendFileMaterial(file);
+    },
+    successToast: null, // appendFileMaterial silent — accordion auto-open сигнал достаточен
+    telemetryTag: 'hw_materials_drop',
+  });
+
   return (
-    <div className="space-y-2" onPaste={handlePaste}>
+    <div
+      className={cn(
+        'relative space-y-2 rounded-md transition-colors',
+        dragDrop.isDragging && 'ring-2 ring-dashed ring-accent',
+      )}
+      onPaste={handlePaste}
+      {...dragDrop.dragHandlers}
+    >
+      {dragDrop.isDragging && (
+        <div
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-accent/10 backdrop-blur-[1px]"
+          aria-hidden="true"
+        >
+          <p className="text-sm font-medium text-accent">Отпустите для добавления</p>
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -136,7 +172,7 @@ export function HWMaterialsSection({ materials, onChange }: HWMaterialsSectionPr
           </div>
           {materials.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              Или вставь скриншот:{' '}
+              Перетащи файл или вставь скриншот:{' '}
               <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
                 Ctrl
               </kbd>

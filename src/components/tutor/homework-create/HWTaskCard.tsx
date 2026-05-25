@@ -30,6 +30,8 @@ import {
 } from '@/lib/attachmentRefs';
 import { compressForUpload } from '@/lib/imageCompression';
 import { usePasteImages } from '@/hooks/usePasteImages';
+import { useDragDropFiles } from '@/hooks/useDragDropFiles';
+import { cn } from '@/lib/utils';
 
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
@@ -37,9 +39,12 @@ import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeOb
 // ─── Shared kbd hint for empty galleries ─────────────────────────────────────
 
 const PasteHint = memo(function PasteHint() {
+  // Phase 9 (2026-05-25): hint обновлён — теперь работает и drag-drop, и Ctrl+V.
+  // Drag-drop активен на wrapper-уровне всей секции (task / solution / rubric);
+  // визуальный feedback — dashed border + overlay «Отпустите для добавления».
   return (
     <p className="text-xs text-muted-foreground">
-      Или вставь скриншот:{' '}
+      Перетащи фото или вставь скриншот:{' '}
       <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
         Ctrl
       </kbd>
@@ -48,6 +53,22 @@ const PasteHint = memo(function PasteHint() {
         V
       </kbd>
     </p>
+  );
+});
+
+// ─── Drag-drop overlay (Phase 9, 2026-05-25) ─────────────────────────────────
+// Внутри section-обёрток. Появляется когда useDragDropFiles.isDragging === true.
+// `pointer-events-none` обязателен — иначе overlay перехватывает drop event
+// и hook не fire'ит. Section wrapper держит `relative` для absolute positioning.
+
+const DropOverlay = memo(function DropOverlay() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-accent/10 backdrop-blur-[1px] ring-2 ring-dashed ring-accent"
+      aria-hidden="true"
+    >
+      <p className="text-sm font-medium text-accent">Отпустите для добавления</p>
+    </div>
   );
 });
 
@@ -868,6 +889,48 @@ export function HWTaskCard({
     telemetryTag: 'hw_task_paste',
   });
 
+  // Phase 9 (2026-05-25): drag-and-drop в каждой из 3 секций. Per-section hooks
+  // вместо одного card-level — drag-drop НЕ имеет last-focused fallback (как
+  // paste), drop landing должен быть unambiguous. Routing идёт по тому, в какой
+  // wrapper упал файл. Compression false по той же причине, что у paste — она
+  // уже происходит в addTaskPhotos / addSolutionPhotos / addRubricPhotos.
+
+  const taskDragDrop = useDragDropFiles({
+    enabled: !task.uploading,
+    maxFiles: MAX_TASK_IMAGES,
+    currentCount: taskRefs.length,
+    onFilesDropped: async (files: File[]) => {
+      await addTaskPhotos(files);
+    },
+    compress: false,
+    successToast: null,
+    telemetryTag: 'hw_task_drop',
+  });
+
+  const solutionDragDrop = useDragDropFiles({
+    enabled: !task.uploading,
+    maxFiles: MAX_SOLUTION_IMAGES,
+    currentCount: solutionRefs.length,
+    onFilesDropped: async (files: File[]) => {
+      await addSolutionPhotos(files);
+    },
+    compress: false,
+    successToast: null,
+    telemetryTag: 'hw_solution_drop',
+  });
+
+  const rubricDragDrop = useDragDropFiles({
+    enabled: !task.uploading,
+    maxFiles: MAX_RUBRIC_IMAGES,
+    currentCount: rubricRefs.length,
+    onFilesDropped: async (files: File[]) => {
+      await addRubricPhotos(files);
+    },
+    compress: false,
+    successToast: null,
+    telemetryTag: 'hw_rubric_drop',
+  });
+
   return (
     <Card animate={false}>
       <CardContent className="p-4 space-y-4" onPaste={handleCardPaste}>
@@ -927,13 +990,19 @@ export function HWTaskCard({
           </div>
         </div>
 
-        {/* TASK SECTION — focus inside routes paste to addTaskPhotos */}
+        {/* TASK SECTION — paste routed via lastFocusedSection (whole-card),
+            drag-drop landing routed по этой секции (per-wrapper). */}
         <div
-          className="space-y-4"
+          className={cn(
+            'relative space-y-4 rounded-md transition-colors',
+            taskDragDrop.isDragging && 'ring-2 ring-dashed ring-accent',
+          )}
           onFocus={() => {
             lastFocusedSection.current = 'task';
           }}
+          {...taskDragDrop.dragHandlers}
         >
+          {taskDragDrop.isDragging && <DropOverlay />}
           <div className="space-y-2">
             <Label>Текст задачи {taskRefs.length === 0 && <span className="text-red-500">*</span>}</Label>
             <textarea
@@ -1013,12 +1082,18 @@ export function HWTaskCard({
           </div>
         </div>
 
-        {/* SOLUTION SECTION — focus inside routes paste to addSolutionPhotos */}
+        {/* SOLUTION SECTION — paste via lastFocusedSection, drag-drop per-wrapper. */}
         <div
+          className={cn(
+            'relative rounded-md transition-colors',
+            solutionDragDrop.isDragging && 'ring-2 ring-dashed ring-accent',
+          )}
           onFocus={() => {
             lastFocusedSection.current = 'solution';
           }}
+          {...solutionDragDrop.dragHandlers}
         >
+          {solutionDragDrop.isDragging && <DropOverlay />}
           <SolutionField
             value={task.solution_text}
             onChange={(v) => onUpdate({ ...task, solution_text: v })}
@@ -1033,12 +1108,18 @@ export function HWTaskCard({
           />
         </div>
 
-        {/* RUBRIC SECTION — focus inside routes paste to addRubricPhotos */}
+        {/* RUBRIC SECTION — paste via lastFocusedSection, drag-drop per-wrapper. */}
         <div
+          className={cn(
+            'relative rounded-md transition-colors',
+            rubricDragDrop.isDragging && 'ring-2 ring-dashed ring-accent',
+          )}
           onFocus={() => {
             lastFocusedSection.current = 'rubric';
           }}
+          {...rubricDragDrop.dragHandlers}
         >
+          {rubricDragDrop.isDragging && <DropOverlay />}
           <RubricField
             value={task.rubric_text}
             onChange={(v) => onUpdate({ ...task, rubric_text: v })}

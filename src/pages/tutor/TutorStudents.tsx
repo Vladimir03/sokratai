@@ -37,7 +37,7 @@ import {
   upsertTutorGroupMembership,
 } from '@/lib/tutors';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
-import { getTutorInvitePreviewLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
+import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import { toast } from 'sonner';
 import type { TutorGroup, TutorGroupMembership, TutorStudentWithProfile } from '@/types/tutor';
 
@@ -124,9 +124,8 @@ function TutorStudentsContent() {
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
-  // Preview-вариант: ведёт на edge function `invite-preview` с invite-specific
-  // OpenGraph для Telegram link preview (см. utils/telegramLinks.ts).
-  const inviteWebLink = inviteCode ? getTutorInvitePreviewLink(inviteCode) : '';
+  // Phase 9 (2026-05-25): canonical claim URL sokratai.ru/invite/{code}.
+  const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
 
   useEffect(() => {

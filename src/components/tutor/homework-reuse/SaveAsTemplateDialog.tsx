@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import {
   createTemplateFromAssignment,
+  HomeworkApiError,
   type CreateTemplateFromAssignmentPayload,
 } from '@/lib/tutorHomeworkApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
@@ -173,8 +174,25 @@ export function SaveAsTemplateDialog({
       toast.success('Шаблон сохранён');
       onOpenChange(false);
     } catch (err) {
+      // Phase 9 (2026-05-25): surface specific error reasons вместо generic toast.
+      // Backend handler возвращает:
+      //   400 INVALID_SUBJECT — assignment.subject вне VALID_SUBJECTS_CREATE
+      //   409 CHECK_VIOLATION — Postgres 23514 на insert (defense-in-depth)
+      //   500 DB_ERROR — иначе
+      // requestHomeworkApi уже распарсил nested `{ error: { code, message } }` shape.
       console.error('save_as_template_failed', err);
-      toast.error('Не удалось сохранить шаблон');
+      if (err instanceof HomeworkApiError) {
+        if (err.code === 'INVALID_SUBJECT' || err.code === 'CHECK_VIOLATION') {
+          // Backend message содержит russian phrase с предметом — показываем как есть.
+          toast.error(err.message, { duration: 8000 });
+        } else if (err.code === 'UNAUTHORIZED') {
+          toast.error('Сессия истекла. Перезайдите и попробуйте ещё раз.');
+        } else {
+          toast.error(err.message || 'Не удалось сохранить шаблон');
+        }
+      } else {
+        toast.error('Не удалось сохранить шаблон. Проверьте подключение к интернету.');
+      }
     } finally {
       setSubmitting(false);
     }

@@ -19,7 +19,7 @@ import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { useTutorHomeData } from '@/hooks/useTutorHomeData';
 import {
   getTutorInviteTelegramLink,
-  getTutorInvitePreviewLink,
+  getTutorInviteWebLink,
 } from '@/utils/telegramLinks';
 
 function mean(values: number[]): number | null {
@@ -79,8 +79,8 @@ function TutorHomeContent() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
 
   const inviteCode = tutor?.invite_code ?? undefined;
-  // Preview-вариант (см. utils/telegramLinks.ts — для Telegram link preview).
-  const inviteWebLink = inviteCode ? getTutorInvitePreviewLink(inviteCode) : '';
+  // Phase 9 (2026-05-25): canonical claim URL sokratai.ru/invite/{code}.
+  const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode
     ? getTutorInviteTelegramLink(inviteCode)
     : '';
