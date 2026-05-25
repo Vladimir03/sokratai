@@ -27,6 +27,115 @@ const displayName = (p: ProfileLite | undefined | null, tutorName?: string | nul
 
 /* ─────────── Actions ─────────── */
 
+/** Per-tutor extras for AdminTutorList chips: schedule + payments + mock exams aggregates, scoped by date range. */
+async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
+  // start/end are ISO strings; end is exclusive upper bound (we use < end).
+  // Lessons: aggregate by tutor_id over start_at in [start, end).
+  const { data: lessons } = await admin
+    .from("tutor_lessons")
+    .select("tutor_id, status, parent_lesson_id, is_recurring, start_at")
+    .gte("start_at", start)
+    .lt("start_at", end);
+
+  // Payments: join through tutor_students to map to tutor_id; created_at in range.
+  const { data: payments } = await admin
+    .from("tutor_payments")
+    .select("tutor_student_id, amount, status, paid_at, created_at, due_date")
+    .gte("created_at", start)
+    .lt("created_at", end);
+
+  // All-time pending/overdue for "current debts" (not date-range scoped).
+  const { data: openPayments } = await admin
+    .from("tutor_payments")
+    .select("tutor_student_id, amount, status")
+    .eq("status", "pending");
+
+  const studentIds = new Set<string>();
+  payments?.forEach((p) => p.tutor_student_id && studentIds.add(p.tutor_student_id));
+  openPayments?.forEach((p) => p.tutor_student_id && studentIds.add(p.tutor_student_id));
+  const { data: tutorStudents } = studentIds.size
+    ? await admin
+        .from("tutor_students")
+        .select("id, tutor_id")
+        .in("id", [...studentIds])
+    : { data: [] as Array<{ id: string; tutor_id: string }> };
+  const studentToTutor = new Map(tutorStudents?.map((s) => [s.id, s.tutor_id]) || []);
+
+  // Mock-exam counts per tutor (assignments created in range).
+  const { data: mockExams } = await admin
+    .from("mock_exam_assignments")
+    .select("tutor_id, created_at, status")
+    .gte("created_at", start)
+    .lt("created_at", end);
+
+  const extras = new Map<string, {
+    lessons_total: number;
+    lessons_done: number;
+    lessons_cancelled: number;
+    lessons_no_show: number;
+    lessons_recurring: number;
+    gmv_paid: number;
+    gmv_pending: number;
+    payments_count: number;
+    debt_amount: number;
+    debt_students: number;
+    mock_exams_count: number;
+  }>();
+
+  const ensure = (id: string) => {
+    let e = extras.get(id);
+    if (!e) {
+      e = {
+        lessons_total: 0, lessons_done: 0, lessons_cancelled: 0, lessons_no_show: 0, lessons_recurring: 0,
+        gmv_paid: 0, gmv_pending: 0, payments_count: 0,
+        debt_amount: 0, debt_students: 0, mock_exams_count: 0,
+      };
+      extras.set(id, e);
+    }
+    return e;
+  };
+
+  lessons?.forEach((l) => {
+    if (!l.tutor_id) return;
+    const e = ensure(l.tutor_id);
+    e.lessons_total += 1;
+    if (l.status === "done" || l.status === "completed") e.lessons_done += 1;
+    else if (l.status === "cancelled" || l.status === "canceled") e.lessons_cancelled += 1;
+    else if (l.status === "no_show") e.lessons_no_show += 1;
+    if (l.is_recurring || l.parent_lesson_id) e.lessons_recurring += 1;
+  });
+
+  payments?.forEach((p) => {
+    const tid = p.tutor_student_id ? studentToTutor.get(p.tutor_student_id) : null;
+    if (!tid) return;
+    const e = ensure(tid);
+    e.payments_count += 1;
+    const amt = Number(p.amount) || 0;
+    if (p.status === "paid") e.gmv_paid += amt;
+    else if (p.status === "pending") e.gmv_pending += amt;
+  });
+
+  // Debts (all-time pending), debt_students = distinct tutor_student_id.
+  const debtStudentsByTutor = new Map<string, Set<string>>();
+  openPayments?.forEach((p) => {
+    const tid = p.tutor_student_id ? studentToTutor.get(p.tutor_student_id) : null;
+    if (!tid) return;
+    const e = ensure(tid);
+    e.debt_amount += Number(p.amount) || 0;
+    let s = debtStudentsByTutor.get(tid);
+    if (!s) { s = new Set(); debtStudentsByTutor.set(tid, s); }
+    if (p.tutor_student_id) s.add(p.tutor_student_id);
+  });
+  debtStudentsByTutor.forEach((set, tid) => { ensure(tid).debt_students = set.size; });
+
+  mockExams?.forEach((m) => {
+    if (!m.tutor_id) return;
+    ensure(m.tutor_id).mock_exams_count += 1;
+  });
+
+  return Object.fromEntries(extras);
+}
+
 async function tutorsOverview(admin: SupabaseClient) {
   const { data: assignments, error: aErr } = await admin
     .from("homework_tutor_assignments")
@@ -420,6 +529,12 @@ serve(async (req) => {
     switch (action) {
       case "tutors":
         return json({ tutors: await tutorsOverview(admin) });
+      case "tutor_extras": {
+        const start: string = body.start;
+        const end: string = body.end;
+        if (!start || !end) return json({ error: "start/end required" }, 400);
+        return json({ extras: await tutorExtras(admin, start, end) });
+      }
       case "assignments": {
         if (!body.tutorId) return json({ error: "tutorId required" }, 400);
         return json({ assignments: await assignmentsByTutor(admin, body.tutorId) });
