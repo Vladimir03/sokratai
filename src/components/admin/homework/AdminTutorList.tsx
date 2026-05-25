@@ -12,7 +12,6 @@ import {
   BookOpen,
   CalendarDays,
   Wallet,
-  AlertTriangle,
   Repeat,
   ClipboardCheck,
   TrendingUp,
@@ -225,7 +224,7 @@ export const AdminTutorList = ({ onSelectTutor, reloadKey, startDate, endDate }:
                             <CalendarDays className="w-3 h-3" /> нет расп.
                           </Badge>
                         )}
-                        {(ex?.payments_count ?? 0) > 0 || (ex?.debt_amount ?? 0) > 0 ? (
+                        {(ex?.payments_count ?? 0) > 0 ? (
                           <Badge variant="outline" className="h-5 px-1.5 gap-1 border-emerald-200 bg-emerald-50/40">
                             <Wallet className="w-3 h-3 text-emerald-700" />
                             {formatMoney(ex?.gmv_paid ?? 0)}
@@ -236,12 +235,6 @@ export const AdminTutorList = ({ onSelectTutor, reloadKey, startDate, endDate }:
                         ) : (
                           <Badge variant="outline" className="h-5 px-1.5 gap-1 text-muted-foreground/60">
                             <Wallet className="w-3 h-3" /> нет оплат
-                          </Badge>
-                        )}
-                        {(ex?.debt_amount ?? 0) > 0 && (
-                          <Badge variant="outline" className="h-5 px-1.5 gap-1 border-rose-200 bg-rose-50/40 text-rose-700">
-                            <AlertTriangle className="w-3 h-3" />
-                            долг {formatMoney(ex!.debt_amount)} · {ex!.debt_students} уч.
                           </Badge>
                         )}
                         {(ex?.mock_exams_count ?? 0) > 0 && (

@@ -73,8 +73,6 @@ export interface TutorExtras {
   gmv_paid: number;
   gmv_pending: number;
   payments_count: number;
-  debt_amount: number;
-  debt_students: number;
   mock_exams_count: number;
 }
 

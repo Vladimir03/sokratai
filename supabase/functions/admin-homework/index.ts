@@ -27,41 +27,59 @@ const displayName = (p: ProfileLite | undefined | null, tutorName?: string | nul
 
 /* ─────────── Actions ─────────── */
 
-/** Per-tutor extras for AdminTutorList chips: schedule + payments + mock exams aggregates, scoped by date range. */
+/** Per-tutor extras for AdminTutorList chips: schedule + payments + mock exams aggregates, scoped by date range.
+ *
+ * ВНИМАНИЕ: в БД два разных смысла `tutor_id`:
+ *   - `homework_tutor_assignments.tutor_id` и `mock_exam_assignments.tutor_id` ссылаются на `auth.users.id`
+ *   - `tutor_lessons.tutor_id` и `tutor_students.tutor_id` ссылаются на `public.tutors.id` (PK)
+ * Фронт лукапит extras по `auth.users.id` (это и есть `TutorOverview.tutorId`), поэтому здесь конвертируем
+ * `tutors.id → tutors.user_id` через explicit lookup map. См. CLAUDE.md §8a.
+ */
 async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
   // start/end are ISO strings; end is exclusive upper bound (we use < end).
-  // Lessons: aggregate by tutor_id over start_at in [start, end).
+
+  // ID mapping: public.tutors.id (PK) → auth.users.id (FK used by homework/mock_exams).
+  // Загружаем ВСЕХ tutors один раз — таблица маленькая (десятки строк), это дешевле чем
+  // фильтровать по нужным tutorPkIds в каждом subquery.
+  const { data: tutorsList } = await admin
+    .from("tutors")
+    .select("id, user_id");
+  const tutorPkToUserId = new Map<string, string>(
+    (tutorsList || [])
+      .filter((t): t is { id: string; user_id: string } => Boolean(t.id) && Boolean(t.user_id))
+      .map((t) => [t.id, t.user_id]),
+  );
+
+  // Lessons: aggregate by tutor_id (public.tutors.id) over start_at in [start, end).
   const { data: lessons } = await admin
     .from("tutor_lessons")
     .select("tutor_id, status, parent_lesson_id, is_recurring, start_at")
     .gte("start_at", start)
     .lt("start_at", end);
 
-  // Payments: join through tutor_students to map to tutor_id; created_at in range.
+  // Payments: join through tutor_students to map tutor_student_id → tutor_id (public.tutors.id).
   const { data: payments } = await admin
     .from("tutor_payments")
     .select("tutor_student_id, amount, status, paid_at, created_at, due_date")
     .gte("created_at", start)
     .lt("created_at", end);
 
-  // All-time pending/overdue for "current debts" (not date-range scoped).
-  const { data: openPayments } = await admin
-    .from("tutor_payments")
-    .select("tutor_student_id, amount, status")
-    .eq("status", "pending");
-
   const studentIds = new Set<string>();
   payments?.forEach((p) => p.tutor_student_id && studentIds.add(p.tutor_student_id));
-  openPayments?.forEach((p) => p.tutor_student_id && studentIds.add(p.tutor_student_id));
   const { data: tutorStudents } = studentIds.size
     ? await admin
         .from("tutor_students")
         .select("id, tutor_id")
         .in("id", [...studentIds])
     : { data: [] as Array<{ id: string; tutor_id: string }> };
-  const studentToTutor = new Map(tutorStudents?.map((s) => [s.id, s.tutor_id]) || []);
+  // tutor_student_id → auth.users.id (через tutors.user_id), уже сконвертировано.
+  const studentToTutorUserId = new Map<string, string>();
+  tutorStudents?.forEach((s) => {
+    const userId = tutorPkToUserId.get(s.tutor_id);
+    if (userId) studentToTutorUserId.set(s.id, userId);
+  });
 
-  // Mock-exam counts per tutor (assignments created in range).
+  // Mock-exam counts per tutor (assignments created in range). tutor_id здесь уже auth.users.id.
   const { data: mockExams } = await admin
     .from("mock_exam_assignments")
     .select("tutor_id, created_at, status")
@@ -77,8 +95,6 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
     gmv_paid: number;
     gmv_pending: number;
     payments_count: number;
-    debt_amount: number;
-    debt_students: number;
     mock_exams_count: number;
   }>();
 
@@ -88,7 +104,7 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
       e = {
         lessons_total: 0, lessons_done: 0, lessons_cancelled: 0, lessons_no_show: 0, lessons_recurring: 0,
         gmv_paid: 0, gmv_pending: 0, payments_count: 0,
-        debt_amount: 0, debt_students: 0, mock_exams_count: 0,
+        mock_exams_count: 0,
       };
       extras.set(id, e);
     }
@@ -97,7 +113,9 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
 
   lessons?.forEach((l) => {
     if (!l.tutor_id) return;
-    const e = ensure(l.tutor_id);
+    const userId = tutorPkToUserId.get(l.tutor_id);
+    if (!userId) return;
+    const e = ensure(userId);
     e.lessons_total += 1;
     if (l.status === "done" || l.status === "completed") e.lessons_done += 1;
     else if (l.status === "cancelled" || l.status === "canceled") e.lessons_cancelled += 1;
@@ -106,27 +124,14 @@ async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
   });
 
   payments?.forEach((p) => {
-    const tid = p.tutor_student_id ? studentToTutor.get(p.tutor_student_id) : null;
-    if (!tid) return;
-    const e = ensure(tid);
+    const userId = p.tutor_student_id ? studentToTutorUserId.get(p.tutor_student_id) : null;
+    if (!userId) return;
+    const e = ensure(userId);
     e.payments_count += 1;
     const amt = Number(p.amount) || 0;
     if (p.status === "paid") e.gmv_paid += amt;
     else if (p.status === "pending") e.gmv_pending += amt;
   });
-
-  // Debts (all-time pending), debt_students = distinct tutor_student_id.
-  const debtStudentsByTutor = new Map<string, Set<string>>();
-  openPayments?.forEach((p) => {
-    const tid = p.tutor_student_id ? studentToTutor.get(p.tutor_student_id) : null;
-    if (!tid) return;
-    const e = ensure(tid);
-    e.debt_amount += Number(p.amount) || 0;
-    let s = debtStudentsByTutor.get(tid);
-    if (!s) { s = new Set(); debtStudentsByTutor.set(tid, s); }
-    if (p.tutor_student_id) s.add(p.tutor_student_id);
-  });
-  debtStudentsByTutor.forEach((set, tid) => { ensure(tid).debt_students = set.size; });
 
   mockExams?.forEach((m) => {
     if (!m.tutor_id) return;

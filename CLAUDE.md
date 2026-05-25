@@ -468,6 +468,12 @@ For architecture overview see: docs/delivery/engineering/architecture/README.md
 
 Фича `docs/delivery/features/tutor-profile/spec.md` (v0.3) добавляет профиль репетитора и Telegram-style identity в guided homework chat. Важный schema nuance: `homework_tutor_assignments.tutor_id` хранит `auth.users.id` репетитора, а не `public.tutors.id`; профиль читается через `tutors.user_id`.
 
+**Cross-table `tutor_id` инвариант (КРИТИЧНО для аналитики, 2026-05-25):**
+- `homework_tutor_assignments.tutor_id` / `mock_exam_assignments.tutor_id` → `auth.users.id`
+- `tutor_lessons.tutor_id` / `tutor_payments.tutor_id` (через `tutor_students.tutor_id`) → `public.tutors.id` (PK)
+
+Любой aggregator, который объединяет данные из homework/mock_exams и lessons/payments по «репетитору», **ОБЯЗАН** конвертировать `tutors.id → tutors.user_id` через explicit lookup map. Канонический пример — `supabase/functions/admin-homework/index.ts::tutorExtras` (после fix 2026-05-25): один SELECT `tutors(id, user_id)` строит `tutorPkToUserId: Map`, каждый `lessons.tutor_id` и `tutor_students.tutor_id` конвертируется перед aggregation. Симптом нарушения инварианта: KPI «Ведут расписание 0/N», «Ведут оплаты 0/N» в админ-панели при том, что в БД lessons/payments есть. Грепни новый aggregator: `from("tutor_lessons")` / `from("tutor_students")` без последующего lookup в `tutors` → баг.
+
 **Storage / RLS / data:**
 - Storage bucket `avatars` public-read; write path convention `avatars/<user_id>/<uuid>.<ext>`, owner write restricted by first folder = `auth.uid()` (migration `20260506150000_tutor_profile_infrastructure.sql`).
 - Колонки `profiles.avatar_url`, `profiles.gender`, `tutors.gender` (`'male'|'female'|null`) добавлены в той же миграции.
