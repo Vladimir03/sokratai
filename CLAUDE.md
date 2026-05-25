@@ -895,6 +895,46 @@ Defense-in-depth: даже если кто-то добавит новое sensit
 
 **Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` AC-P3 + `docs/delivery/features/mock-exams-v1-pilot-polish/tasks.md` TASK-3.
 
+**Часть 1 partial credit ФИПИ 2026 (mock-exams-v1-pilot-polish AC-P9, 2026-05-25):**
+
+После Round 7 Егор-pilot QA выявил что текущий checker — **pure binary** (0 или max_score), но ФИПИ 2026 официальные критерии требуют partial credit 1 балл для одной ошибки в multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17) задачах. Симптом: KIM 5 (correct=123, student=12) → 0/2 вместо 1/2; KIM 6 (correct=32, student=33) → 0/2 вместо 1/2.
+
+- **`gradeMultiChoice(correct, student, maxScore)` (KIM 5/9/14/18)** — set-based error counting:
+  - `correctSet = parseDigits(correct)` (Set), `studentSet = parseDigits(student)` (Set), оба через `toMultiChoiceSet` (existing parser, separator-agnostic).
+  - `matches = |correctSet ∩ studentSet|`
+  - `errors = max(|correctSet|, |studentSet|) - matches`
+  - `0 errors → maxScore (2)` · `1 error → 1 (partial)` · `2+ errors → 0`
+  - Покрывает все три ФИПИ cases: substitution (1 цифра неверная), extra (1 лишняя), missing (1 отсутствует).
+- **`gradeOrdered(correct, student, maxScore)` (KIM 6/10/15/17)** — Hamming distance:
+  - `correctClean = strip([,;]) from correctAnswer.toLowerCase()`, same for student.
+  - **Length mismatch → 0 (ФИПИ explicit: «больше требуемого → 0 баллов»)**.
+  - `distance = positions where studentClean[i] !== correctClean[i]`
+  - `0 → maxScore` · `1 → 1 (partial)` · `2+ → 0`
+- **Остальные режимы** (strict, unordered, task20, pair, manual) — **binary** (0 или maxScore). ФИПИ 2026 partial credit определён ТОЛЬКО для multi_choice и ordered.
+- **Backward compat:** старые `checkMultiChoice(correct, student): boolean` и `checkOrdered(correct, student): boolean` **сохранены** для existing tests + clarity. Они отражают «full match» (returns true только если 0 errors). Новые `grade*` функции — primary path для `checkPart1Answer` / `checkPart1` dispatch.
+- **Hard invariant — Deno mirror sync (CLAUDE.md §15a):** при изменении логики partial credit ОБЯЗАТЕЛЬНО править **обе** версии:
+  1. `src/lib/mockExamPart1Checker.ts` (browser preview + frontend canonical)
+  2. `supabase/functions/_shared/mock-exam-part1-checker.ts` (server submit + OCR + recheck)
+
+  Грепни `grep -n "gradeMultiChoice\|gradeOrdered" src/lib/mockExamPart1Checker.ts supabase/functions/_shared/mock-exam-part1-checker.ts` — обе реализации должны иметь одинаковый набор exports (gradeMultiChoice + gradeOrdered).
+- **Tutor-controlled re-grade existing data:** новый endpoint `POST /attempts/:id/recheck-part1` (`handleRecheckPart1` в `mock-exam-tutor-api/index.ts`) пересчитывает `score_source IN ('ocr', 'student_form', 'finalize_default')` rows. **Не трогает `score_source='tutor'`** — ручные правки preserved. Tutor explicit choice через button «По критериям ФИПИ» в `Part1BlankReviewPanel` header (рядом с retry-OCR + finalize). Auto-migration **не делается** — фейрность для pilot данных (Vladimir UX choice 2026-05-25).
+- **Endpoint contracts:**
+  - Status guard: `submitted` / `ai_checking` / `awaiting_review` / `approved` allowed. `in_progress` → 409 NOT_SUBMITTED; `manually_entered` → 409 MANUAL_ENTRY.
+  - Response: `{ updated_count, skipped_tutor_count, skipped_no_change_count, total_part1_answers }`. Tutor toast `«обновлено N баллов, сохранено M ручных правок»`.
+  - Recompute `total_part1_score` после upsert; non-fatal на partial failure (logs warning, updates persisted).
+- **Student-side UX (AC-P4 visual):** amber `Check` icon (Lucide) + дробь «N/max» (amber-700 font-semibold) для partial state на `StudentMockExamResult` Part1 table. Tooltip на hover/tap: «N балл из max — одна ошибка по критериям ФИПИ 2026. Полный балл — только при полном совпадении всех символов.» TooltipProvider уже wrapped в App.tsx root.
+- **Tutor-side UX** (`Part1BlankReviewPanel`): existing 5-state CellStatus (`correct/partial/wrong/no_answer/unknown`) уже supported partial visual (Lucide `Check` amber). Новая data из новой grading logic просто заполняет existing UI — никаких изменений в cell rendering.
+- **Test coverage:** `scripts/test-mockexam-checker.mjs` содержит 18 AC-P4 test cases:
+  - `gradeMultiChoice` — full / substitution / extra / missing / 2+ errors / edge / Егор pilot reproductions
+  - `gradeOrdered` — full / 1-position-wrong / both-wrong / length-mismatch / edge / Егор pilot
+  - Guardrail: gradeOrdered ≠ gradeMultiChoice для "21" (order matters)
+  - Dispatch via `checkPart1Answer` для обоих режимов
+  - Guardrail: partial credit НЕ применяется к strict / unordered / task20
+- **При расширении на новые check_mode** (e.g. если ФИПИ когда-то определит partial для pair или unordered): добавить новый `gradeX` helper + branch в dispatch. НЕ переписывать существующие grade-функции — они стабильные.
+- **При обновлении ФИПИ critериев в 2027:** Грепни `grep -nE "ФИПИ 2026|gradeMultiChoice|gradeOrdered"` в `src/lib/mockExamPart1Checker.ts` + `supabase/functions/_shared/mock-exam-part1-checker.ts` + CLAUDE.md. Обнови комментарии и константы. Регрессивные тесты в `test-mockexam-checker.mjs` (AC-P4 section) защитят от случайных регрессий.
+
+**Спека AC-P4:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` (раздел добавляется отдельной PR).
+
 ### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12; Phase 3.1 hotfixes 2026-05-13)
 
 Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`. **Phase 3 (2026-05-12, ✅ landed)** расширил screen на tablet (769–1279) + desktop (≥1280) split layout — `StudentHomeworkDetail` стал redirect-only для **всех** viewport'ов (`useIsMobile()` gate удалён), legacy `GuidedHomeworkWorkspace` рендеринг отключён со student-side (физическое удаление файла отложено на Phase 4 cleanup spec). **Без feature flag** — раскатка сразу всем юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing / Phase 3 split layouts) в `.claude/rules/40-homework-system.md` → секции «Student Homework Problem Screen — single-task surface + submission contract» + «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».

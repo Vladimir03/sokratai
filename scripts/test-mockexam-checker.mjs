@@ -30,6 +30,8 @@ const {
   checkTask20,
   checkPair,
   numericRoundingMatch,
+  gradeMultiChoice,
+  gradeOrdered,
 } = checker;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -234,4 +236,224 @@ test("checkPart1Answer: max_score=2 binary semantics", () => {
   });
   assert.equal(r.earnedScore, 2);
   assert.equal(r.isCorrect, true);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// AC-P4 (mock-exams-v1-pilot-polish 2026-05-25) — ФИПИ 2026 partial credit
+// для multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17). См. CLAUDE.md §15a.
+// ────────────────────────────────────────────────────────────────────────────
+
+test("AC-P4: gradeMultiChoice — full credit для exact set match", () => {
+  assert.equal(gradeMultiChoice("12", "12", 2), 2);
+  assert.equal(gradeMultiChoice("12", "21", 2), 2, "order doesn't matter");
+  assert.equal(gradeMultiChoice("123", "321", 2), 2);
+  assert.equal(gradeMultiChoice("123", "132", 2), 2);
+  assert.equal(gradeMultiChoice("123", "213", 2), 2);
+});
+
+test("AC-P4: gradeMultiChoice — partial для 1 substitution", () => {
+  // correct="12": "32" → set {2,3} → 1 error (substitute 1→3)
+  assert.equal(gradeMultiChoice("12", "32", 2), 1);
+  assert.equal(gradeMultiChoice("12", "23", 2), 1);
+  assert.equal(gradeMultiChoice("12", "42", 2), 1);
+  assert.equal(gradeMultiChoice("12", "24", 2), 1);
+  assert.equal(gradeMultiChoice("12", "52", 2), 1);
+  assert.equal(gradeMultiChoice("12", "25", 2), 1);
+  // 3-digit correct: one position substituted
+  assert.equal(gradeMultiChoice("123", "124", 2), 1);
+  assert.equal(gradeMultiChoice("123", "143", 2), 1);
+  assert.equal(gradeMultiChoice("123", "423", 2), 1);
+});
+
+test("AC-P4: gradeMultiChoice — partial для 1 extra digit", () => {
+  // correct="12": "123" → set {1,2,3} → 1 error (extra "3")
+  assert.equal(gradeMultiChoice("12", "123", 2), 1);
+  assert.equal(gradeMultiChoice("12", "312", 2), 1);
+  assert.equal(gradeMultiChoice("12", "213", 2), 1);
+  // 3-digit correct: 4-digit student
+  assert.equal(gradeMultiChoice("123", "1234", 2), 1);
+  assert.equal(gradeMultiChoice("123", "5123", 2), 1);
+});
+
+test("AC-P4: gradeMultiChoice — partial для 1 missing digit", () => {
+  // correct="12": "22" → toSet → {2} (dedup) → 1 error (missing "1")
+  assert.equal(gradeMultiChoice("12", "22", 2), 1);
+  // correct="123": "12" → 1 error (missing "3")
+  assert.equal(gradeMultiChoice("123", "12", 2), 1);
+  assert.equal(gradeMultiChoice("123", "13", 2), 1);
+  assert.equal(gradeMultiChoice("123", "23", 2), 1);
+});
+
+test("AC-P4: gradeMultiChoice — 0 для 2+ errors", () => {
+  // correct="12": "33" → set {3} → matches=0, max(2,1)-0=2 errors → 0
+  assert.equal(gradeMultiChoice("12", "33", 2), 0);
+  // correct="12": "45" → 0 matches, max(2,2)-0=2 errors → 0
+  assert.equal(gradeMultiChoice("12", "45", 2), 0);
+  // 2 extras + 0 wrong (matches=2, max(2,4)-2=2 errors)
+  assert.equal(gradeMultiChoice("12", "1234", 2), 0);
+  // 2 wrong + 1 right
+  assert.equal(gradeMultiChoice("123", "145", 2), 0);
+  // All wrong
+  assert.equal(gradeMultiChoice("123", "456", 2), 0);
+});
+
+test("AC-P4: gradeMultiChoice — edge cases", () => {
+  // Empty student → 0
+  assert.equal(gradeMultiChoice("12", "", 2), 0);
+  // Empty correct → 0 (defensive — shouldn't happen in real data)
+  assert.equal(gradeMultiChoice("", "12", 2), 0);
+  // Separator-agnostic (reuse toSet parsing)
+  assert.equal(gradeMultiChoice("12", "1,2", 2), 2);
+  assert.equal(gradeMultiChoice("1,2", "12", 2), 2);
+  // maxScore=1 (defensive — partial credit only applies if maxScore>=2)
+  assert.equal(gradeMultiChoice("12", "32", 1), 0, "no partial when maxScore<2");
+});
+
+test("AC-P4: gradeMultiChoice — Егор pilot screenshot reproductions", () => {
+  // Скриншот 2 пользователя: KIM 5 / 2, AI: 12, Верно: 123 → должно быть 1
+  assert.equal(gradeMultiChoice("123", "12", 2), 1, "Egor KIM 5: 12 vs 123 → 1 missing");
+  // Скриншот 3 пользователя: KIM 18 / 2, AI: 345, Верно: 35 → должно быть 1
+  assert.equal(gradeMultiChoice("35", "345", 2), 1, "Egor KIM 18: 345 vs 35 → 1 extra");
+});
+
+test("AC-P4: gradeOrdered — full credit для exact match", () => {
+  assert.equal(gradeOrdered("12", "12", 2), 2);
+  assert.equal(gradeOrdered("1,2", "12", 2), 2, "separator-agnostic");
+  assert.equal(gradeOrdered("12", "1,2", 2), 2, "separator-agnostic");
+});
+
+test("AC-P4: gradeOrdered — partial для 1 wrong position", () => {
+  // correct="12":
+  assert.equal(gradeOrdered("12", "22", 2), 1, "pos 0 wrong (substitute 1→2)");
+  assert.equal(gradeOrdered("12", "32", 2), 1, "pos 0 wrong");
+  assert.equal(gradeOrdered("12", "42", 2), 1, "pos 0 wrong");
+  assert.equal(gradeOrdered("12", "11", 2), 1, "pos 1 wrong (substitute 2→1)");
+  assert.equal(gradeOrdered("12", "13", 2), 1, "pos 1 wrong");
+  assert.equal(gradeOrdered("12", "14", 2), 1, "pos 1 wrong");
+});
+
+test("AC-P4: gradeOrdered — 0 для both positions wrong", () => {
+  // correct="12":
+  assert.equal(gradeOrdered("12", "21", 2), 0, "both wrong (swap)");
+  assert.equal(gradeOrdered("12", "33", 2), 0, "both wrong");
+  assert.equal(gradeOrdered("12", "31", 2), 0, "both wrong");
+  assert.equal(gradeOrdered("12", "44", 2), 0, "both wrong");
+});
+
+test("AC-P4: gradeOrdered — 0 для length mismatch (ФИПИ explicit)", () => {
+  // ФИПИ: «Если количество символов в ответе больше требуемого, выставляется 0 баллов»
+  assert.equal(gradeOrdered("12", "123", 2), 0, "extra digit → 0");
+  assert.equal(gradeOrdered("12", "1234", 2), 0, "2 extras → 0");
+  // Too short
+  assert.equal(gradeOrdered("12", "1", 2), 0, "missing digit → 0");
+});
+
+test("AC-P4: gradeOrdered — edge cases", () => {
+  // Empty student → 0
+  assert.equal(gradeOrdered("12", "", 2), 0);
+  // Empty correct → 0
+  assert.equal(gradeOrdered("", "12", 2), 0);
+  // maxScore=1 → no partial
+  assert.equal(gradeOrdered("12", "13", 1), 0, "no partial when maxScore<2");
+});
+
+test("AC-P4: gradeOrdered — Егор pilot screenshot reproduction", () => {
+  // Скриншот 2 пользователя: KIM 6 / 2, AI: 33, Верно: 32 → должно быть 1
+  assert.equal(gradeOrdered("32", "33", 2), 1, "Egor KIM 6: pos 1 wrong (3 vs 2)");
+});
+
+test("AC-P4 guardrail: gradeOrdered ≠ gradeMultiChoice for swap", () => {
+  // correct="12": "21" — order matters for ordered, doesn't for multi_choice
+  assert.equal(gradeOrdered("12", "21", 2), 0, "ordered: both positions wrong → 0");
+  assert.equal(gradeMultiChoice("12", "21", 2), 2, "multi_choice: set equal → 2");
+});
+
+test("AC-P4: checkPart1Answer dispatches multi_choice with partial", () => {
+  // KIM 5/9/14/18: max_score=2, partial credit
+  const r1 = checkPart1Answer({
+    correctAnswer: "12",
+    studentAnswer: "32",
+    checkMode: "multi_choice",
+    maxScore: 2,
+  });
+  assert.equal(r1.earnedScore, 1, "1 substitution → 1 балл");
+  assert.equal(r1.isCorrect, false, "partial не is_correct (есть 1 ошибка)");
+
+  // Full match
+  const r2 = checkPart1Answer({
+    correctAnswer: "12",
+    studentAnswer: "21",
+    checkMode: "multi_choice",
+    maxScore: 2,
+  });
+  assert.equal(r2.earnedScore, 2);
+  assert.equal(r2.isCorrect, true);
+
+  // 2+ errors → 0
+  const r3 = checkPart1Answer({
+    correctAnswer: "12",
+    studentAnswer: "45",
+    checkMode: "multi_choice",
+    maxScore: 2,
+  });
+  assert.equal(r3.earnedScore, 0);
+  assert.equal(r3.isCorrect, false);
+});
+
+test("AC-P4: checkPart1Answer dispatches ordered with partial", () => {
+  // KIM 6/10/15/17: max_score=2, partial credit
+  const r1 = checkPart1Answer({
+    correctAnswer: "12",
+    studentAnswer: "32",
+    checkMode: "ordered",
+    maxScore: 2,
+  });
+  assert.equal(r1.earnedScore, 1, "1 position wrong → 1 балл");
+  assert.equal(r1.isCorrect, false);
+
+  // Both wrong → 0
+  const r2 = checkPart1Answer({
+    correctAnswer: "12",
+    studentAnswer: "21",
+    checkMode: "ordered",
+    maxScore: 2,
+  });
+  assert.equal(r2.earnedScore, 0);
+});
+
+test("AC-P4 guardrail: partial credit ТОЛЬКО для multi_choice + ordered", () => {
+  // strict mode: 1-digit diff still binary (no partial credit для strict)
+  const r1 = checkPart1Answer({
+    correctAnswer: "250",
+    studentAnswer: "249",
+    checkMode: "strict",
+    maxScore: 1,
+  });
+  assert.equal(r1.earnedScore, 0, "strict: 1-digit diff still 0");
+
+  // unordered: 1-element diff — binary (legacy behaviour, no partial)
+  const r2 = checkPart1Answer({
+    correctAnswer: "1,2,3",
+    studentAnswer: "1,2,4",
+    checkMode: "unordered",
+    maxScore: 2,
+  });
+  assert.equal(r2.earnedScore, 0, "unordered: no partial credit");
+
+  // task20: any digit diff is binary 0
+  const r3 = checkPart1Answer({
+    correctAnswer: "312",
+    studentAnswer: "412",
+    checkMode: "task20",
+    maxScore: 2,
+  });
+  assert.equal(r3.earnedScore, 0, "task20: no partial credit");
+});
+
+test("AC-P4: backward compat — checkMultiChoice/checkOrdered (boolean) still work", () => {
+  // Старые helpers сохранены для tests + clarity
+  assert.equal(checkMultiChoice("12", "12"), true);
+  assert.equal(checkMultiChoice("12", "32"), false, "1 error не full match");
+  assert.equal(checkOrdered("1,3,2", "1,3,2"), true);
+  assert.equal(checkOrdered("12", "32"), false, "1 error не full match");
 });

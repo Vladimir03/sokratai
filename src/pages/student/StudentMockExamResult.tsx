@@ -20,6 +20,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -33,6 +34,11 @@ import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useStudentMockExamResult } from '@/hooks/useStudentMockExamResult';
 import { StudentMockExamApiError } from '@/lib/studentMockExamApi';
@@ -238,7 +244,13 @@ function Part1Card({
               <tbody className="divide-y divide-slate-100">
                 {answers.map((row) => {
                   const earned = row.earned_score ?? 0;
-                  const isCorrect = earned > 0 && earned === row.max_score;
+                  const hasScore = row.earned_score !== null && row.earned_score !== undefined;
+                  const isCorrect = hasScore && earned > 0 && earned === row.max_score;
+                  // AC-P4 (ФИПИ partial credit, 2026-05-25): 0 < earned < max
+                  // → амбер-Check + tooltip. KIM 5/9/14/18 (multi_choice) и
+                  // 6/10/15/17 (ordered) могут получить 1 из 2 баллов за
+                  // одну ошибку — см. CLAUDE.md §15a.
+                  const isPartial = hasScore && earned > 0 && earned < row.max_score;
                   return (
                     <tr key={row.kim_number} className="text-slate-700">
                       <td className="px-3 py-2 font-medium tabular-nums">
@@ -247,9 +259,34 @@ function Part1Card({
                       <td className="px-3 py-2">
                         <div className="flex items-start gap-2">
                           {isCorrect ? (
-                            <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600" />
+                            <CheckCircle2
+                              className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-600"
+                              aria-label="Верно"
+                            />
+                          ) : isPartial ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 cursor-help items-center justify-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                                  aria-label={`Частично верно: ${earned} из ${row.max_score}`}
+                                >
+                                  <Check className="h-4 w-4 text-amber-600" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs">
+                                <p className="text-xs leading-snug">
+                                  {earned} балл из {row.max_score} — одна ошибка
+                                  по критериям ФИПИ 2026. Полный балл — только
+                                  при полном совпадении всех символов.
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
                           ) : (
-                            <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500" />
+                            <XCircle
+                              className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500"
+                              aria-label="Неверно"
+                            />
                           )}
                           {row.student_answer ? (
                             <span className="break-all">{row.student_answer}</span>
@@ -271,7 +308,14 @@ function Part1Card({
                       <td className="px-3 py-2 text-slate-700">
                         {row.correct_answer ?? '—'}
                       </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-900">
+                      <td
+                        className={cn(
+                          'px-3 py-2 text-right tabular-nums',
+                          isPartial
+                            ? 'font-semibold text-amber-700'
+                            : 'text-slate-900',
+                        )}
+                      >
                         {earned}/{row.max_score}
                       </td>
                     </tr>

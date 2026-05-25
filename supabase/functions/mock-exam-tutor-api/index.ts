@@ -27,6 +27,7 @@ import {
   type PushSubscriptionData,
 } from "../_shared/push-sender.ts";
 import { rewriteToProxy } from "../_shared/proxy-url.ts";
+import { checkPart1, type CheckMode } from "../_shared/mock-exam-part1-checker.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -2066,6 +2067,194 @@ async function handleRetryPart1OCR(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// Endpoint: POST /attempts/:id/recheck-part1  (AC-P4, 2026-05-25)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Tutor пересчитывает Часть 1 по обновлённым ФИПИ 2026 partial credit
+// критериям. Use-case: pilot attempts с partial-correct ответами получили
+// earned_score=0 со старым binary checker'ом; после deploy partial credit
+// logic нужно манульно re-grade existing attempts (UX выбор Vladimir —
+// «tutor-controlled» через explicit button).
+//
+// Логика:
+//   1. Ownership-check через getOwnedAttemptOrThrow
+//   2. SELECT всех Часть 1 KIM из mock_exam_variant_tasks (correct_answer + check_mode + max_score)
+//   3. SELECT всех existing rows mock_exam_attempt_part1_answers
+//   4. Для каждой row: ЕСЛИ score_source === 'tutor' → skip (preserve manual edits)
+//      ИНАЧЕ → recompute earned_score через checkPart1(...) с partial credit logic
+//   5. Upsert только rows где earned_score изменился (минимум noise)
+//   6. Recompute total_part1_score через SUM
+//
+// Status guard: submitted/ai_checking/awaiting_review/approved (НЕ in_progress / manually_entered).
+// approved разрешён — tutor может захотеть пересчитать УЖЕ approved attempt
+// (Егор pilot — несколько approved с binary scoring). total_part1_score
+// обновится; tutor сам решает нужно ли вернуть status на awaiting_review.
+
+async function handleRecheckPart1(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt, assignment } = ownedOrErr;
+
+  if (attempt.status === "in_progress") {
+    return jsonError(cors, 409, "NOT_SUBMITTED",
+      "Ученик ещё не сдал работу. Пересчёт Часть 1 будет доступен после submit.");
+  }
+  if (attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "MANUAL_ENTRY",
+      "Этот пробник был занесён вручную — в нём нет per-task ответов для пересчёта.");
+  }
+  if (!assignment.variant_id) {
+    return jsonError(cors, 400, "INVALID_STATE", "Assignment has no variant_id");
+  }
+
+  // SELECT Часть 1 tasks с эталонами
+  const { data: variantTasks, error: tasksErr } = await db
+    .from("mock_exam_variant_tasks")
+    .select("kim_number, correct_answer, check_mode, max_score")
+    .eq("variant_id", assignment.variant_id as string)
+    .eq("part", 1)
+    .order("kim_number", { ascending: true });
+  if (tasksErr) {
+    console.error("mock_exam_recheck_part1_tasks_select_failed", { error: tasksErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить эталонные ответы Часть 1");
+  }
+
+  // SELECT existing answers
+  const { data: existingAnswers, error: answersErr } = await db
+    .from("mock_exam_attempt_part1_answers")
+    .select("kim_number, student_answer, earned_score, score_source")
+    .eq("attempt_id", attemptId);
+  if (answersErr) {
+    console.error("mock_exam_recheck_part1_answers_select_failed", { error: answersErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить ответы ученика");
+  }
+
+  const tasksByKim = new Map(
+    (variantTasks ?? []).map((t) => [
+      t.kim_number as number,
+      {
+        correctAnswer: t.correct_answer as string | null,
+        checkMode: t.check_mode as string | null,
+        maxScore: t.max_score as number,
+      },
+    ]),
+  );
+
+  const now = new Date().toISOString();
+  let updatedCount = 0;
+  let skippedTutorCount = 0;
+  let skippedNoChangeCount = 0;
+  const updates: Array<{
+    attempt_id: string;
+    kim_number: number;
+    student_answer: string | null;
+    earned_score: number;
+    score_source: string;
+    updated_at: string;
+  }> = [];
+
+  for (const ans of existingAnswers ?? []) {
+    const scoreSource = ans.score_source as string | null;
+    // Preserve manual tutor edits — explicit invariant из плана.
+    if (scoreSource === "tutor") {
+      skippedTutorCount += 1;
+      continue;
+    }
+    const kim = ans.kim_number as number;
+    const task = tasksByKim.get(kim);
+    if (!task || !task.correctAnswer || !task.checkMode) continue;
+    const studentAnswer = ans.student_answer as string | null;
+    const newResult = checkPart1(
+      task.correctAnswer,
+      studentAnswer,
+      task.checkMode as CheckMode,
+      task.maxScore,
+      kim,
+    );
+    const oldScore = (ans.earned_score as number | null) ?? 0;
+    if (newResult.earned === oldScore) {
+      skippedNoChangeCount += 1;
+      continue;
+    }
+    updates.push({
+      attempt_id: attemptId,
+      kim_number: kim,
+      student_answer: studentAnswer,
+      earned_score: newResult.earned,
+      score_source: scoreSource ?? "ocr",  // preserve original provenance
+      updated_at: now,
+    });
+    updatedCount += 1;
+  }
+
+  if (updates.length > 0) {
+    const { error: upsertErr } = await db
+      .from("mock_exam_attempt_part1_answers")
+      .upsert(updates, { onConflict: "attempt_id,kim_number" });
+    if (upsertErr) {
+      console.error("mock_exam_recheck_part1_upsert_failed", {
+        attempt_id: attemptId,
+        updates_count: updates.length,
+        error: upsertErr.message,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить обновлённые баллы");
+    }
+
+    // Recompute total_part1_score
+    const { data: allRows, error: sumErr } = await db
+      .from("mock_exam_attempt_part1_answers")
+      .select("earned_score")
+      .eq("attempt_id", attemptId);
+    if (sumErr) {
+      console.warn("mock_exam_recheck_part1_sum_failed", {
+        attempt_id: attemptId,
+        error: sumErr.message,
+      });
+      // Non-fatal — updates persisted, totals will lag until next finalize
+    } else {
+      const newTotal = (allRows ?? []).reduce(
+        (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
+        0,
+      );
+      const { error: attemptUpdateErr } = await db
+        .from("mock_exam_attempts")
+        .update({ total_part1_score: newTotal })
+        .eq("id", attemptId);
+      if (attemptUpdateErr) {
+        console.warn("mock_exam_recheck_part1_total_update_failed", {
+          attempt_id: attemptId,
+          new_total: newTotal,
+          error: attemptUpdateErr.message,
+        });
+      }
+    }
+  }
+
+  console.info(JSON.stringify({
+    event: "mock_exam_recheck_part1_completed",
+    attempt_id: attemptId,
+    updated_count: updatedCount,
+    skipped_tutor_count: skippedTutorCount,
+    skipped_no_change_count: skippedNoChangeCount,
+    total_part1_answers: existingAnswers?.length ?? 0,
+  }));
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    updated_count: updatedCount,
+    skipped_tutor_count: skippedTutorCount,
+    skipped_no_change_count: skippedNoChangeCount,
+    total_part1_answers: existingAnswers?.length ?? 0,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Phase 6 (2026-05-15) — POST /attempts/:id/assign-part2-photos
 // Tutor вручную привязывает фото из bulk-pack к Часть 2 задачам через
 // select dropdown в TutorMockExamReview. Body: `{ assignments: { kim: [photo_indices], ... } }`.
@@ -3066,6 +3255,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "retry-part1-ocr" && route.method === "POST"
     ) {
       return await handleRetryPart1OCR(db, userId, seg[1], cors);
+    }
+
+    // POST /attempts/:id/recheck-part1  (AC-P4 2026-05-25 — partial credit re-grade)
+    // Tutor manually re-grades Часть 1 по обновлённым ФИПИ 2026 critериям
+    // (gradeMultiChoice / gradeOrdered partial credit). Preserves manual tutor edits.
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "recheck-part1" && route.method === "POST"
+    ) {
+      return await handleRecheckPart1(db, userId, seg[1], cors);
     }
 
     // Phase 6 (2026-05-15) — POST /attempts/:id/assign-part2-photos

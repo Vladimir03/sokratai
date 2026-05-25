@@ -69,6 +69,7 @@ import {
   approveMockExamTask,
   assignMockExamPart2Photos,
   finalizeMockExamPart1,
+  recheckMockExamPart1,
   regradeMockExamPart2,
   retryMockExamPart1OCR,
   setMockExamPart1ManualScore,
@@ -349,6 +350,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
   const [isRetryingOCR, setIsRetryingOCR] = useState(false);
+  const [isRechecking, setIsRechecking] = useState(false);
+  const [confirmRecheckOpen, setConfirmRecheckOpen] = useState(false);
 
   const isReadOnly =
     attempt.status === 'approved' || attempt.status === 'manually_entered';
@@ -477,6 +480,38 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
     }
   };
 
+  // AC-P4 (2026-05-25): tutor пересчитывает Часть 1 по обновлённым ФИПИ 2026
+  // partial credit критериям. Сохраняет manual tutor edits (score_source='tutor').
+  // См. CLAUDE.md §15a «Часть 1 partial credit ФИПИ».
+  const handleRecheckPart1 = async () => {
+    setIsRechecking(true);
+    try {
+      const res = await recheckMockExamPart1(attempt.id);
+      const parts: string[] = [];
+      parts.push(`обновлено ${res.updated_count} ${res.updated_count === 1 ? 'балл' : 'баллов'}`);
+      if (res.skipped_tutor_count > 0) {
+        parts.push(`сохранено ${res.skipped_tutor_count} ручных правок`);
+      }
+      if (res.updated_count === 0 && res.skipped_no_change_count > 0) {
+        toast.info('Все ответы уже соответствуют новым критериям ФИПИ');
+      } else if (res.updated_count === 0) {
+        toast.info('Нет ответов для пересчёта');
+      } else {
+        toast.success(`Пересчёт завершён: ${parts.join(', ')}`);
+      }
+      setConfirmRecheckOpen(false);
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+      });
+    } catch (err) {
+      const msg =
+        err instanceof MockExamApiError ? err.message : 'Не удалось пересчитать Часть 1';
+      toast.error(msg);
+    } finally {
+      setIsRechecking(false);
+    }
+  };
+
   const draftSum = useMemo(() => {
     let sum = 0;
     for (const t of variantPart1Tasks) {
@@ -582,6 +617,26 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 >
                   <RotateCcw className={cn('h-3.5 w-3.5', isRetryingOCR && 'animate-spin')} aria-hidden="true" />
                   {isRetryingOCR ? 'Запускаем…' : ocrJson ? 'Перезапустить AI' : 'Запустить AI OCR'}
+                </Button>
+              )}
+              {/* AC-P4: пересчёт Часть 1 по новым ФИПИ 2026 partial credit
+                  критериям. Доступно даже на approved attempts — pilot data
+                  с binary scoring можно re-grade. */}
+              {attempt.status !== 'manually_entered' && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setConfirmRecheckOpen(true)}
+                  disabled={isRechecking}
+                  className="touch-manipulation text-xs gap-1.5 min-h-9"
+                  title="Пересчитать Часть 1 по новым критериям ФИПИ (partial credit)"
+                >
+                  <RotateCcw
+                    className={cn('h-3.5 w-3.5', isRechecking && 'animate-spin')}
+                    aria-hidden="true"
+                  />
+                  {isRechecking ? 'Пересчёт…' : 'По критериям ФИПИ'}
                 </Button>
               )}
             </div>
@@ -843,6 +898,50 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 : savingKims.size > 0
                   ? `Ждём saves (${savingKims.size})…`
                   : 'Сохранить и отправить ученику'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AC-P4 (2026-05-25): пересчёт Часть 1 по новым ФИПИ 2026 partial credit
+          критериям. Use-case: pilot attempts с partial-correct ответами получили
+          binary 0/2 со старым checker'ом, нужно re-grade существующие. */}
+      <AlertDialog open={confirmRecheckOpen} onOpenChange={setConfirmRecheckOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Пересчитать Часть 1 по критериям ФИПИ?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm">
+              <span className="block">
+                Все баллы Часть 1 будут пересчитаны по обновлённой логике{' '}
+                <strong>partial credit ФИПИ 2026</strong>:
+              </span>
+              <ul className="list-disc list-inside text-xs space-y-1 leading-relaxed pl-2">
+                <li>
+                  <strong>KIM 5, 9, 14, 18</strong> (множ. выбор) — 1 балл, если
+                  одна цифра лишняя / отсутствует / неверная.
+                </li>
+                <li>
+                  <strong>KIM 6, 10, 15, 17</strong> (последов.) — 1 балл, если
+                  на одной позиции неверная цифра.
+                </li>
+              </ul>
+              <span className="block pt-1">
+                <strong>Твои ручные правки сохранятся</strong> — пересчитываются
+                только AI/auto-check баллы.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRechecking}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleRecheckPart1();
+              }}
+              disabled={isRechecking}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isRechecking ? 'Пересчитываем…' : 'Пересчитать'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

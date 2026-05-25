@@ -87,19 +87,75 @@ export function checkUnordered(c: string, s: string): boolean {
   return true;
 }
 
+/**
+ * Парсит ответ multi_choice в Set цифр. Mirror frontend canonical
+ * `toMultiChoiceSet` из `src/lib/mockExamPart1Checker.ts`.
+ */
+function toMultiChoiceSet(raw: string): Set<string> {
+  const tokens = normalizeBasic(raw)
+    .split(/[,;]/)
+    .flatMap((part) => (/^\d+$/.test(part) ? part.split("") : [part]))
+    .map((x) => x.toLowerCase())
+    .filter(Boolean);
+  return new Set(tokens);
+}
+
 export function checkMultiChoice(c: string, s: string): boolean {
-  const toSet = (raw: string): Set<string> => {
-    const tokens = normalizeBasic(raw)
-      .split(/[,;]/)
-      .flatMap((part) => (/^\d+$/.test(part) ? part.split("") : [part]))
-      .map((x) => x.toLowerCase())
-      .filter(Boolean);
-    return new Set(tokens);
-  };
-  const setC = toSet(c), setS = toSet(s);
+  const setC = toMultiChoiceSet(c), setS = toMultiChoiceSet(s);
   if (setC.size === 0 || setC.size !== setS.size) return false;
   for (const item of setC) if (!setS.has(item)) return false;
   return true;
+}
+
+/**
+ * Partial credit для multi_choice (KIM 5/9/14/18). ФИПИ 2026 AC-P4.
+ * Mirror `gradeMultiChoice` из frontend canonical. См. JSDoc там.
+ *
+ * Hard invariant (CLAUDE.md §15a): любое изменение этой функции ОБЯЗАНО
+ * синхронно править `src/lib/mockExamPart1Checker.ts::gradeMultiChoice`.
+ */
+export function gradeMultiChoice(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctSet = toMultiChoiceSet(correct);
+  const studentSet = toMultiChoiceSet(student);
+  if (correctSet.size === 0) return 0;
+  if (studentSet.size === 0) return 0;
+  let matches = 0;
+  for (const item of studentSet) {
+    if (correctSet.has(item)) matches += 1;
+  }
+  const errors = Math.max(correctSet.size, studentSet.size) - matches;
+  if (errors === 0) return maxScore;
+  if (errors === 1 && maxScore >= 2) return 1;
+  return 0;
+}
+
+/**
+ * Partial credit для ordered (KIM 6/10/15/17). ФИПИ 2026 AC-P4.
+ * Hamming distance после нормализации разделителей. См. JSDoc frontend.
+ *
+ * Hard invariant (CLAUDE.md §15a): mirror frontend `gradeOrdered`.
+ */
+export function gradeOrdered(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctClean = normalizeBasic(correct).toLowerCase().replace(/[,;]+/g, "");
+  const studentClean = normalizeBasic(student).toLowerCase().replace(/[,;]+/g, "");
+  if (correctClean.length === 0) return 0;
+  if (studentClean.length === 0) return 0;
+  if (studentClean.length !== correctClean.length) return 0;
+  let errors = 0;
+  for (let i = 0; i < correctClean.length; i += 1) {
+    if (studentClean[i] !== correctClean[i]) errors += 1;
+  }
+  if (errors === 0) return maxScore;
+  if (errors === 1 && maxScore >= 2) return 1;
+  return 0;
 }
 
 export function checkTask20(c: string, s: string): boolean {
@@ -163,6 +219,17 @@ export function checkPart1(
   if (!studentAnswer || !correctAnswer || !checkMode || checkMode === "manual") {
     return { earned: 0, correct: false };
   }
+
+  // ФИПИ 2026 partial credit (AC-P4) для multi_choice и ordered.
+  if (checkMode === "multi_choice") {
+    const earned = gradeMultiChoice(correctAnswer, studentAnswer, maxScore);
+    return { earned, correct: earned === maxScore };
+  }
+  if (checkMode === "ordered") {
+    const earned = gradeOrdered(correctAnswer, studentAnswer, maxScore);
+    return { earned, correct: earned === maxScore };
+  }
+
   let ok = false;
   switch (checkMode) {
     case "strict":
@@ -181,9 +248,7 @@ export function checkPart1(
         }
       }
       break;
-    case "ordered": ok = checkOrdered(correctAnswer, studentAnswer); break;
     case "unordered": ok = checkUnordered(correctAnswer, studentAnswer); break;
-    case "multi_choice": ok = checkMultiChoice(correctAnswer, studentAnswer); break;
     case "task20": ok = checkTask20(correctAnswer, studentAnswer); break;
     case "pair": ok = checkPair(correctAnswer, studentAnswer); break;
     default: ok = false;

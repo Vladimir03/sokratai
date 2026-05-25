@@ -257,6 +257,16 @@ npm run lint && npm run build && npm run smoke-check
 - **AC-P8a (F8 — authenticated lead):** ✅ Landed 2026-05-14 (TASK-7). Authenticated ученик открывает `/p/mock-invite/:slug`, заполняет имя+Telegram+consent, submit → confirm dialog «Готов начать? 4 часа» → клик «Готов начать» → navigate на `/student/mock-exams/:assignment_id` → первая задача видна. Нет промежуточного экрана «ожидайте одобрения Vladimir». **«1 клик после submit + confirm»** — confirm dialog как explicit start gate (олимпиадный UX, не approval gate), не дополнительная задержка.
 - **AC-P8b (F8 — anonymous lead):** ❌ **Deferred to TASK-12 (anonymous mode), вне scope pilot-polish.** Anonymous incognito пользователь после submit+confirm упирается в `AuthGuard` на `/student/mock-exams/:id` → редирект на login → returns flow прерывается. Документировано как known limitation в TASK-7 done-блоке (commit 84a4621). Pre-polish review (Codex, 2026-05-14) подтвердил FAIL для anonymous path; решение product team: оставить deferred до отдельной спеки TASK-12. Wedge P1-2 (lead-gen для репетитора) пилот закрывает через authenticated path — репетитор отправляет invite уже зарегистрированному ученику; full anonymous funnel — Phase 2.
 
+- **AC-P9 (Часть 1 partial credit ФИПИ 2026):** ✅ Landed 2026-05-25. Авточекер Часть 1 для multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17) задач **поддерживает 1 балл из 2** по официальным критериям ФИПИ 2026:
+  - **multi_choice (KIM 5/9/14/18):** «1 лишняя цифра / 1 недостающая / 1 неверная» → 1 балл. 2+ ошибки → 0. Set-based error counting через новый helper `gradeMultiChoice(correct, student, maxScore)`. Реализация: `src/lib/mockExamPart1Checker.ts` + Deno mirror `supabase/functions/_shared/mock-exam-part1-checker.ts`.
+  - **ordered (KIM 6/10/15/17):** «на одной позиции неверный символ» → 1 балл. 2+ позиции неверны → 0. Length mismatch (ученик ввёл 3 цифры вместо 2) → 0 баллов (ФИПИ explicit «больше требуемого — 0»). Hamming distance через `gradeOrdered(correct, student, maxScore)`.
+  - **Автоматически работает для всех новых submitted attempts** после deploy (form mode `handleSubmitAttempt` + blank mode `runPart1OCR` оба используют обновлённый Deno mirror).
+  - **Существующие pilot attempts (Егор)** — НЕ пересчитываются автоматически (tutor-controlled UX choice 2026-05-25). Tutor использует новую кнопку **«По критериям ФИПИ»** в `Part1BlankReviewPanel` header → AlertDialog confirm → backend endpoint `POST /attempts/:id/recheck-part1` → пересчитывает `score_source IN ('ocr', 'student_form', 'finalize_default')` rows, preserves `score_source='tutor'` ручные правки.
+  - **Student UX:** на `StudentMockExamResult` Part1 table для partial state — amber `Check` icon (Lucide) + `Tooltip` («N балл из max — одна ошибка по критериям ФИПИ 2026»). Дробь `1/2` в Балл column рендерится amber-700 font-semibold. Existing emerald ✓ (full) и rose ✗ (zero) не тронуты.
+  - **Тесты (18 новых AC-P9 cases в `scripts/test-mockexam-checker.mjs`):** full / partial substitution / partial extra / partial missing / 2+ errors / edge cases / Егор pilot screenshot reproductions / guardrails (gradeOrdered ≠ gradeMultiChoice для "21") / dispatch / backward compat (старые `checkMultiChoice` / `checkOrdered` boolean helpers сохранены).
+  - **Остальные режимы** (strict, unordered, task20, pair, manual) — **остаются binary** (0 или maxScore). ФИПИ 2026 partial credit определён ТОЛЬКО для multi_choice + ordered.
+  - **Спека деталей:** CLAUDE.md §15a → секция «Часть 1 partial credit ФИПИ 2026».
+
 ### Связь с pilot KPI
 
 Из `docs/discovery/product/tutor-ai-agents/18-pilot-execution-playbook-sokrat.md`:
@@ -308,6 +318,7 @@ npm run lint && npm run build && npm run smoke-check
 | AC-P7 (matching tables) | PASS | KIM 6/10/15/17 |
 | AC-P8a (authenticated lead) | PASS | landed TASK-7 |
 | AC-P8b (anonymous lead) | DEFERRED | TASK-12 anonymous mode, отдельная спека |
+| AC-P9 (Часть 1 partial credit ФИПИ 2026) | PASS | landed 2026-05-25 (FIPI-1..FIPI-8). 32 unit tests pass (18 новых AC-P9). См. CLAUDE.md §15a. |
 
 **Не-AC обнаружения** (false positives, документация добавлена):
 - «solution_text leak на result page» — это **намеренный state-aware reveal**, не нарушение. Result page показывает Часть 2 разбор только после `attempt.status === 'approved'` (CLAUDE.md §15). Mock-exams anti-leak ≠ homework tutor-only invariant — это разные semantic'и (см. CLAUDE.md §10 cross-reference, добавлено 2026-05-14).

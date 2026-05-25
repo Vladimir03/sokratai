@@ -301,6 +301,33 @@ export async function retryMockExamPart1OCR(
   );
 }
 
+/**
+ * AC-P4 (mock-exams-v1-pilot-polish 2026-05-25) — tutor пересчитывает
+ * Часть 1 по обновлённым ФИПИ 2026 partial credit критериям
+ * (gradeMultiChoice / gradeOrdered). Use-case: pilot attempts с partial-correct
+ * ответами получили binary 0/2 со старым checker'ом, нужно re-grade.
+ *
+ * Preserves manual tutor edits (`score_source='tutor'`).
+ * После пересчёта обновляет `total_part1_score`.
+ *
+ * Spec: docs/delivery/features/mock-exams-v1-pilot-polish/spec.md AC-P4
+ */
+export async function recheckMockExamPart1(
+  attemptId: string,
+): Promise<{
+  ok: true;
+  attempt_id: string;
+  updated_count: number;
+  skipped_tutor_count: number;
+  skipped_no_change_count: number;
+  total_part1_answers: number;
+}> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/recheck-part1`,
+    { method: 'POST' },
+  );
+}
+
 // ─── Invite link ─────────────────────────────────────────────────────────────
 
 export async function createMockExamInviteLink(

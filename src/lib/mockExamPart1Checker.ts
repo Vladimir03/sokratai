@@ -42,9 +42,13 @@ export interface CheckPart1Input {
 }
 
 export interface CheckPart1Result {
-  /** 0 или maxScore — Часть 1 binary, без частичного зачёта. */
+  /**
+   * Заработанный балл. ФИПИ 2026 partial credit для multi_choice (KIM 5/9/14/18)
+   * и ordered (KIM 6/10/15/17) — поддерживает значения 0 / 1 / maxScore.
+   * Для остальных режимов (strict/unordered/task20/pair) — binary (0 или maxScore).
+   */
   earnedScore: number;
-  /** true ⟺ earnedScore === maxScore. */
+  /** true ⟺ earnedScore === maxScore (полностью верно). Partial (1/2) → false. */
   isCorrect: boolean;
 }
 
@@ -168,26 +172,106 @@ export function checkUnordered(correct: string, student: string): boolean {
   return true;
 }
 
+/**
+ * Парсит ответ multi_choice в Set цифр. Разделители "," ";", whitespace
+ * допустимы; "13" → {1,3}, "1,3" → {1,3}, "1 3" → {1,3}. Дубликаты не
+ * сохраняются — multi_choice не позволяет выбрать опцию дважды.
+ * Module-scope helper (раньше был closure внутри checkMultiChoice),
+ * используется и в gradeMultiChoice для partial credit.
+ */
+function toMultiChoiceSet(raw: string): Set<string> {
+  const tokens = normalizeBasic(raw)
+    .split(/[,;]/)
+    .flatMap((part) => (/^\d+$/.test(part) ? part.split('') : [part]))
+    .map((x) => x.toLowerCase())
+    .filter(Boolean);
+  return new Set(tokens);
+}
+
 export function checkMultiChoice(correct: string, student: string): boolean {
   // Multiple correct options (typically 2 of 5). Set equality, ученик может
   // ввести "13" или "1,3" или "1 3" — приводим к {1,3}. Дубликаты игнорируем
   // (multi_choice не может выбрать опцию дважды).
-  const toSet = (raw: string): Set<string> => {
-    const tokens = normalizeBasic(raw)
-      .split(/[,;]/)
-      .flatMap((part) => (part.includes('') && /^\d+$/.test(part) ? part.split('') : [part]))
-      .map((x) => x.toLowerCase())
-      .filter(Boolean);
-    return new Set(tokens);
-  };
-  const c = toSet(correct);
-  const s = toSet(student);
+  const c = toMultiChoiceSet(correct);
+  const s = toMultiChoiceSet(student);
   if (c.size === 0 || s.size === 0) return false;
   if (c.size !== s.size) return false;
   for (const item of c) {
     if (!s.has(item)) return false;
   }
   return true;
+}
+
+/**
+ * Partial credit для multi_choice (KIM 5/9/14/18 ЕГЭ физика 2026).
+ *
+ * ФИПИ официальный критерий: «Выставляется 1 балл, если только один из символов,
+ * указанных в ответе, не соответствует эталону (в том числе есть один лишний
+ * символ наряду с остальными верными) или только один символ отсутствует;
+ * во всех других случаях выставляется 0 баллов.»
+ *
+ * Set-based error counting:
+ *   errors = max(|correctSet|, |studentSet|) - matches
+ *   где matches = |correctSet ∩ studentSet|
+ *
+ *   0 errors → maxScore (полный балл)
+ *   1 error  → 1 (partial — 1 substitution, 1 extra, или 1 missing)
+ *   2+ errors → 0
+ *
+ * Spec: docs/delivery/features/mock-exams-v1-pilot-polish/spec.md AC-P4
+ */
+export function gradeMultiChoice(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctSet = toMultiChoiceSet(correct);
+  const studentSet = toMultiChoiceSet(student);
+  if (correctSet.size === 0) return 0; // нет эталона → не оцениваем
+  if (studentSet.size === 0) return 0; // ученик ничего не ввёл
+  let matches = 0;
+  for (const item of studentSet) {
+    if (correctSet.has(item)) matches += 1;
+  }
+  const errors = Math.max(correctSet.size, studentSet.size) - matches;
+  if (errors === 0) return maxScore;
+  if (errors === 1 && maxScore >= 2) return 1;
+  return 0;
+}
+
+/**
+ * Partial credit для ordered (KIM 6/10/15/17 ЕГЭ физика 2026).
+ *
+ * ФИПИ официальный критерий: «Выставляется 1 балл, если на любой одной
+ * позиции ответа записан не тот символ, который представлен в эталоне.
+ * Во всех других случаях выставляется 0 баллов. Если количество символов
+ * в ответе больше требуемого, выставляется 0 баллов.»
+ *
+ * Hamming distance после нормализации разделителей "," ";" whitespace:
+ *   length mismatch → 0 (ФИПИ explicit)
+ *   distance === 0 → maxScore
+ *   distance === 1 → 1 (partial — одна позиция неверна)
+ *   distance >= 2 → 0
+ *
+ * Spec: docs/delivery/features/mock-exams-v1-pilot-polish/spec.md AC-P4
+ */
+export function gradeOrdered(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctClean = normalizeBasic(correct).toLowerCase().replace(/[,;]+/g, '');
+  const studentClean = normalizeBasic(student).toLowerCase().replace(/[,;]+/g, '');
+  if (correctClean.length === 0) return 0;
+  if (studentClean.length === 0) return 0;
+  if (studentClean.length !== correctClean.length) return 0; // ФИПИ: больше требуемого → 0
+  let errors = 0;
+  for (let i = 0; i < correctClean.length; i += 1) {
+    if (studentClean[i] !== correctClean[i]) errors += 1;
+  }
+  if (errors === 0) return maxScore;
+  if (errors === 1 && maxScore >= 2) return 1;
+  return 0;
 }
 
 /**
@@ -272,6 +356,22 @@ export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
     return { earnedScore: 0, isCorrect: false };
   }
 
+  // ФИПИ 2026 partial credit (AC-P4) для multi_choice и ordered:
+  // grade-функции возвращают 0 / 1 / maxScore напрямую. Для остальных
+  // режимов — binary (0 или maxScore) через check-функции.
+  switch (checkMode) {
+    case 'multi_choice': {
+      const earned = gradeMultiChoice(correctAnswer, studentAnswer, maxScore);
+      return { earnedScore: earned, isCorrect: earned === maxScore };
+    }
+    case 'ordered': {
+      const earned = gradeOrdered(correctAnswer, studentAnswer, maxScore);
+      return { earnedScore: earned, isCorrect: earned === maxScore };
+    }
+    default:
+      break;
+  }
+
   let isCorrect = false;
   switch (checkMode) {
     case 'strict':
@@ -293,14 +393,8 @@ export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
         }
       }
       break;
-    case 'ordered':
-      isCorrect = checkOrdered(correctAnswer, studentAnswer);
-      break;
     case 'unordered':
       isCorrect = checkUnordered(correctAnswer, studentAnswer);
-      break;
-    case 'multi_choice':
-      isCorrect = checkMultiChoice(correctAnswer, studentAnswer);
       break;
     case 'task20':
       isCorrect = checkTask20(correctAnswer, studentAnswer);
