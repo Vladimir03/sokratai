@@ -31,6 +31,7 @@ import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { usePasteImages } from '@/hooks/usePasteImages';
+import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
 const STICKY_BOTTOM_THRESHOLD_PX = 100;
 
@@ -40,6 +41,41 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   completed: 'Завершена',
   skipped: 'Пропущена',
 };
+
+/**
+ * AI address preview chip (mini-version для GuidedThreadViewer).
+ * Compact one-line: «AI видит ученика как: <name> · <gender label>».
+ * Click → expands example sentence.
+ */
+function AiAddressPreviewMini({
+  name,
+  gender,
+}: {
+  name: string | null | undefined;
+  gender: 'male' | 'female' | null;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = useMemo(() => buildAiAddressPreview(name, gender), [name, gender]);
+  const styles = AI_ADDRESS_SEVERITY_STYLES[preview.severity];
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded((v) => !v)}
+      className={`w-full text-left rounded-md border px-2.5 py-1.5 text-xs ${styles.bg} ${styles.border} ${styles.text} hover:opacity-90 transition-opacity`}
+      aria-expanded={expanded}
+      title="Кликни чтобы увидеть пример обращения"
+    >
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="opacity-70 font-medium">{styles.label}:</span>
+        <span>{preview.summary}</span>
+        <span className="ml-auto opacity-50 text-[10px]">{expanded ? '−' : '+'}</span>
+      </div>
+      {expanded && (
+        <div className="mt-1 italic text-[12px]">«{preview.exampleSentence}»</div>
+      )}
+    </button>
+  );
+}
 
 // ─── Task condition gallery with click-to-zoom ─────────────────────────────
 function TaskContextGallery({
@@ -483,6 +519,14 @@ export function GuidedThreadViewer({
 
           {threadQuery.data && (
             <>
+              {/* Phase 8.1 (2026-05-26): AI address preview chip — что AI
+                  использует для этого ученика. Помогает диагностировать
+                  «почему AI обращается без имени / в нейтральном роде». */}
+              <AiAddressPreviewMini
+                name={threadQuery.data.student.display_name ?? studentDisplayLabel}
+                gender={threadQuery.data.student.gender ?? null}
+              />
+
               {hideTaskFilter ? null : (
                 <div className="flex flex-wrap gap-2">
                   <Button

@@ -52,6 +52,45 @@ import {
   removeTutorStudentFromCache,
 } from '@/lib/tutorStudentCacheSync';
 import type { MockExam, TutorGroupMembership } from '@/types/tutor';
+import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
+
+/**
+ * AI preview chip — показывает что AI использует в обращении к ученику.
+ * Live-обновляется по мере того как тутор печатает в форме (editDisplayName / editGender).
+ */
+function AiAddressPreviewChip({
+  displayName,
+  gender,
+}: {
+  displayName: string;
+  gender: 'male' | 'female' | null;
+}) {
+  const preview = useMemo(
+    () => buildAiAddressPreview(displayName, gender),
+    [displayName, gender],
+  );
+  const styles = AI_ADDRESS_SEVERITY_STYLES[preview.severity];
+  return (
+    <div
+      className={`rounded-lg border px-3 py-2 text-sm ${styles.bg} ${styles.border} ${styles.text}`}
+      role="note"
+      aria-label="Превью обращения AI"
+    >
+      <div className="flex items-center gap-1.5 text-xs font-medium mb-1">
+        <span className="opacity-70">{styles.label}:</span>
+        <span>{preview.summary}</span>
+      </div>
+      <div className="text-sm italic">«{preview.exampleSentence}»</div>
+      {preview.severity !== 'ok' && (
+        <p className="text-[11px] mt-1 opacity-80">
+          {preview.severity === 'missing'
+            ? 'Заполни имя и пол выше — AI будет обращаться корректно.'
+            : 'Заполни оставшееся поле — AI станет ещё точнее в обращениях.'}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // =============================================
 // Компонент профиля ученика
@@ -895,6 +934,14 @@ function TutorStudentProfileContent() {
                       AI использует правильный грамматический род в обращениях. Особенно полезно для иностранных имён (Anastasiia, Marie), которые AI может неправильно угадать.
                     </p>
                   </div>
+
+                  {/* Phase 8.1 (2026-05-26) — AI preview chip. Показывает что AI
+                      реально использует с текущими настройками display_name + gender.
+                      Mirror buildStudentNameGuidance из guided_ai.ts. */}
+                  <AiAddressPreviewChip
+                    displayName={editDisplayName || editName}
+                    gender={editGender || null}
+                  />
 
                   <div className="space-y-2">
                     <Label htmlFor="editTelegram">Telegram username</Label>

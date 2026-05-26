@@ -8140,16 +8140,13 @@ async function handleGetTutorStudentThread(
     .eq("id", studentId)
     .maybeSingle();
 
-  // Resolve tutor identity (avatar + name + gender) and student display_name
-  // in parallel — both are point-lookups and the viewer needs them upfront for
-  // the chat-bubble UI (Telegram-style identity above each message). Mirrors
-  // `fetchStudentThread` (line ~5847) so tutor and student threads have
-  // symmetric `tutor_profile` shape. resolveStudentDisplayName follows the
-  // canonical priority chain (tutor_students.display_name → profiles.full_name
-  // → profiles.username filtered → null) — same source AI prompts use.
-  const [tutorProfile, studentDisplayName] = await Promise.all([
+  // Resolve tutor identity (avatar + name + gender) and student identity
+  // (name + gender) in parallel. Phase 8.1: returns both fields so the tutor
+  // viewer can display AI-address preview chip showing exactly how AI talks
+  // to this student (CLAUDE.md §28 Phase 8.1).
+  const [tutorProfile, studentIdentity] = await Promise.all([
     resolveTutorProfileForAssignment(db, assignmentId),
-    resolveStudentDisplayName(db, studentAssignment.id),
+    resolveStudentIdentity(db, studentAssignment.id),
   ]);
 
   const threadWithTutorProfile = {
@@ -8164,7 +8161,10 @@ async function handleGetTutorStudentThread(
       id: profile?.id ?? studentId,
       full_name: profile?.full_name ?? null,
       username: profile?.username ?? null,
-      display_name: studentDisplayName,
+      display_name: studentIdentity.name,
+      // Phase 8.1: AI gender для preview chip в GuidedThreadViewer.
+      // Resolved through canonical priority: tutor_students.gender → profiles.gender → null.
+      gender: studentIdentity.gender,
     },
   });
 }

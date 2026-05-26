@@ -52,6 +52,13 @@ export const StudentCard = memo(function StudentCard({
   const subject = student.subject;
   const isAiConnected = Boolean(student.profiles?.telegram_user_id);
 
+  // Phase 8.1 (2026-05-26): AI настройки (имя + пол) для visibility chip.
+  // Amber-dot indicator показывается если у ученика НЕ настроен gender —
+  // тутор может видеть это сразу в списке и пройтись настроить.
+  const hasCuratedName = Boolean(student.display_name?.trim());
+  const hasCuratedGender = student.gender === 'male' || student.gender === 'female';
+  const showAiSetupNudge = !hasCuratedName || !hasCuratedGender;
+
   // Activation status
   const lastSignIn = student.last_sign_in_at ?? null;
   const isActivated = lastSignIn != null;
@@ -89,7 +96,26 @@ export const StudentCard = memo(function StudentCard({
           {/* Name row + activation badge */}
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <h3 className="font-medium text-foreground truncate">{displayName}</h3>
+              <h3 className="font-medium text-foreground truncate flex items-center gap-1.5">
+                {displayName}
+                {showAiSetupNudge && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        className="inline-flex h-2 w-2 rounded-full bg-amber-500 cursor-help"
+                        aria-label="AI настройки не заполнены"
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="text-xs max-w-[240px]">
+                      {!hasCuratedName && !hasCuratedGender
+                        ? 'AI пишет нейтрально без имени. Открой профиль ученика и заполни «Как обращаться в AI-чате» + «Пол ученика».'
+                        : !hasCuratedGender
+                        ? 'AI пишет в нейтральном роде. Открой профиль и выбери «Пол ученика» для правильных глаголов.'
+                        : 'AI не использует имя в обращении. Открой профиль и заполни «Как обращаться в AI-чате».'}
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+              </h3>
               {subtitleParts.length > 0 && (
                 <p className="text-sm text-muted-foreground truncate">
                   {subtitleParts.join(' • ')}

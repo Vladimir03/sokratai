@@ -53,6 +53,12 @@ export interface TutorStudent {
    * supabase/functions/homework-api/index.ts).
    */
   display_name: string | null;
+  /**
+   * Tutor-curated gender для AI grammar conjugation. Primary source перед
+   * profiles.gender fallback. См. CLAUDE.md §28 Phase 8 + §28 Phase 8.1.
+   * Nullable — AI идёт в neutral path при отсутствии.
+   */
+  gender?: 'male' | 'female' | null;
   target_score: number | null;
   start_score: number | null;
   current_score: number | null;

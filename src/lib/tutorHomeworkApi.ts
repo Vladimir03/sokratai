@@ -833,6 +833,13 @@ export interface TutorStudentGuidedThreadResponse {
      * older edge function deploy that hasn't shipped this field yet.
      */
     display_name?: string | null;
+    /**
+     * Phase 8.1 (2026-05-26): AI gender используется для preview-chip в
+     * GuidedThreadViewer («AI видит ученика как: Ирина / женский род»).
+     * Resolved через canonical priority: tutor_students.gender →
+     * profiles.gender → null. Optional для backward-compat при rolling deploy.
+     */
+    gender?: 'male' | 'female' | null;
   };
 }
 
