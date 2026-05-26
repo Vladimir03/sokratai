@@ -386,11 +386,32 @@ function TutorHomeworkCreateContent() {
   const editGroupPrefilledRef = useRef(false);
 
   // ── Edit mode: fetch existing assignment ──
+  //
+  // Phase 10 (2026-05-26) — critical hotfix для production регрессии:
+  //
+  // ❌ DO NOT enable `refetchOnWindowFocus` (default `true`). Это write-form
+  //    query — local `tasks` state редактируется юзером и source of truth до
+  //    нажатия «Сохранить». Auto-refetch на focus вызывал race condition с
+  //    prefill effect (line 497) и **уничтожал** unsaved tasks при tab switch
+  //    (репорт Elena Ivanova 2026-05-26 в Telegram чате репетиторов).
+  //
+  // ❌ DO NOT decrease `staleTime` below 10 минут. Edit session обычно
+  //    укладывается в 10 минут; если tutor сидит дольше — explicit refresh
+  //    страницы возьмёт свежие данные. Короткий staleTime тоже включает
+  //    aggressive refetch behavior.
+  //
+  // Pattern для всех write-form queries: `{ refetchOnWindowFocus: false,
+  // staleTime: 10 * 60 * 1000 }`. Mock-exam parity в TutorMockExamCreate.tsx.
+  // Assertion в scripts/smoke-check.mjs section 8 enforces invariant.
+  //
+  // См. CLAUDE.md §34 + .claude/rules/40-homework-system.md «Homework
+  // constructor QA checklist».
   const editQuery = useQuery({
     queryKey: ['tutor', 'homework', 'detail', editId],
     queryFn: () => getTutorHomeworkAssignment(editId!),
     enabled: isEditMode,
-    staleTime: 30_000,
+    staleTime: 10 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
   const existingAssignment = editQuery.data;
 

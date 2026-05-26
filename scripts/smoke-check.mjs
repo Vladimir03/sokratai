@@ -447,4 +447,76 @@ if (declaredSets.size >= 2) {
 }
 
 console.log("");
+console.log("8. Homework constructor write-form query invariant (Phase 10, 2026-05-26)...");
+
+// Phase 10 critical hotfix invariant: edit-mode useQuery в homework constructor
+// (и future write-form pages) ОБЯЗАН иметь `refetchOnWindowFocus: false`. Default
+// React Query setting `true` вызывает race condition с prefill effect —
+// добавленные tutor'ом задачи теряются при tab switch (репорт Elena Ivanova
+// 2026-05-26). Hard rule: пока user editing local form state, server data
+// background-refetch'иться не должна. См. CLAUDE.md §34 + Phase 10 в
+// ~/.claude/plans/1-functional-meteor.md.
+//
+// Pattern: ищем `useQuery({` в write-form pages и assert'им что в config
+// есть `refetchOnWindowFocus: false`. Если кто-то добавит новый write-form
+// useQuery без guard — smoke fail с явной инструкцией.
+
+const writeFormPages = [
+  // Pages with edit mode + local form state from server data:
+  "src/pages/tutor/TutorHomeworkCreate.tsx",
+];
+
+const useQueryRe = /useQuery\s*\(\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\)/g;
+const hasRefetchOffRe = /refetchOnWindowFocus\s*:\s*false/;
+const hasQueryKeyRe = /queryKey\s*:/;
+
+let writeFormViolations = 0;
+for (const relativePath of writeFormPages) {
+  const fullPath = path.resolve(rootDir, relativePath);
+  if (!fs.existsSync(fullPath)) {
+    warn(`${relativePath} not found — write-form invariant skipped for this path`);
+    continue;
+  }
+  const content = fs.readFileSync(fullPath, "utf8");
+
+  // Find ВСЕ useQuery calls (могут быть несколько на странице — read lists +
+  // edit query). Match только тех у которых есть queryKey (real useQuery, не
+  // alias).
+  const matches = [...content.matchAll(useQueryRe)];
+  if (matches.length === 0) {
+    warn(`${relativePath}: no useQuery calls found — skipped`);
+    continue;
+  }
+
+  let pageViolations = 0;
+  for (const match of matches) {
+    const configBody = match[1];
+    if (!hasQueryKeyRe.test(configBody)) continue; // не real useQuery
+    if (!hasRefetchOffRe.test(configBody)) {
+      // Извлечь короткий identifier для error message — обычно queryKey прямо
+      // после `queryKey:` line.
+      const keyMatch = configBody.match(/queryKey\s*:\s*\[([^\]]+)\]/);
+      const keyHint = keyMatch ? keyMatch[1].trim().slice(0, 80) : "(unknown key)";
+      fail(
+        `${relativePath}: useQuery with queryKey [${keyHint}] missing 'refetchOnWindowFocus: false'.\n` +
+          `  Write-form queries MUST disable focus refetch — иначе race condition с prefill effect\n` +
+          `  уничтожит unsaved user edits при tab switch (Phase 10 hotfix invariant).\n` +
+          `  См. CLAUDE.md §34 + .claude/rules/40-homework-system.md «Homework constructor QA».`,
+      );
+      pageViolations += 1;
+    }
+  }
+
+  if (pageViolations === 0) {
+    ok(`${relativePath}: all useQuery calls have refetchOnWindowFocus: false`);
+  } else {
+    writeFormViolations += pageViolations;
+  }
+}
+
+if (writeFormViolations === 0 && writeFormPages.length > 0) {
+  ok(`Write-form query invariant: all ${writeFormPages.length} page(s) compliant`);
+}
+
+console.log("");
 console.log("=== Smoke Check Complete ===");

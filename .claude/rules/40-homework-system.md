@@ -1657,3 +1657,59 @@ Bug #2:
 ```
 
 **Спека:** plan `~/.claude/plans/toasty-weaving-meerkat.md` (Phase 3.1 hotfix section).
+
+### Homework constructor QA checklist (Phase 10, 2026-05-26)
+
+ДЗ-конструктор — **ключевой функционал** для репетиторов. Регрессии здесь блокируют пилот. Перед merge'ем любого PR трогающего `src/pages/tutor/TutorHomeworkCreate.tsx`, `src/components/tutor/homework-create/HWTasksSection.tsx`, `src/components/tutor/homework-create/HWTaskCard.tsx`, `src/components/tutor/homework-create/HWMaterialsSection.tsx` — **ОБЯЗАТЕЛЬНО** прогнать manual QA checklist ниже на dev preview ИЛИ на production после deploy.
+
+**Background:** 2026-05-26 репетитор Elena Ivanova сообщила что добавленные задачи **исчезают** при переключении вкладок браузера. Root cause: React Query default `refetchOnWindowFocus: true` triggered refetch для `editQuery`, новый `existingAssignment` reference вызывал race condition с prefill effect, перезаписывал unsaved tasks. Phase 10 fix отключил focus refetch + увеличил staleTime до 10 минут. История: аналогичные state-management regressions в constructor фиксились **5 раз** в апреле 2026 (`3660ee3` / `0cfda51` / `baf6638` / `387e0f4` / `270ecd4`). Это **хронический риск-зона** требующая дисциплины тестирования.
+
+**Manual QA checklist (выполнить ВСЕ пункты):**
+
+1. **Tab-switch preservation (P0 — Phase 10 hotfix test):**
+   - Открыть существующее ДЗ через `/tutor/homework/:id/edit`
+   - Дождаться prefill (видны изначальные задачи)
+   - Добавить 2-3 новые задачи через «+ Добавить задачу» и через KB picker
+   - Переключиться на другую вкладку браузера, подождать **31+ секунд** (past старый staleTime 30s)
+   - Вернуться на вкладку SokratAI
+   - **Expected:** все ранее добавленные задачи на месте, list unchanged
+   - Click «Сохранить изменения» → toast success → verify на `/tutor/homework/:id` все задачи в БД
+
+2. **Edit-mode save button readiness (P0 — против `387e0f4` регрессии):**
+   - Открыть существующее ДЗ через `/tutor/homework/:id/edit`
+   - Verify кнопка «Сохранить изменения» становится active **в течение ~1 секунды** (не зависает на «Подготавливаем...»)
+   - Если кнопка залипла >5 секунд — баг `editInitialSnapshot` init
+
+3. **KB picker append (двойной write-path invariant §0):**
+   - В constructor открыть «+ из БЗ» → выбрать 2 задачи → добавить
+   - Verify задачи появились в HWTasksSection с корректным `kb_source` бейджем
+   - Сохранить → reload → verify `homework_tutor_tasks.kb_task_id` заполнены (через Detail или БД)
+
+4. **HWDrawer path («В ДЗ» с KB карточки) — двойной write-path (§0):**
+   - Из KB folder → click «В ДЗ» на задаче → она попадает в `hwDraftStore` (localStorage)
+   - Открыть HWDrawer → click «Создать ДЗ» → новое ДЗ создаётся с этими задачами
+   - Verify `task_kind` и `check_format` правильно derived через `deriveTaskKindFromCheckFormat`
+
+5. **Drag-and-drop в секциях task / solution / rubric / materials (Phase 9):**
+   - Перетащить фото с desktop в каждую из 3 секций HWTaskCard
+   - Видеть `ring-2 ring-dashed ring-accent` + overlay «Отпустите для добавления»
+   - После drop — фото в галерее
+   - Ctrl+V paste в textarea тоже работает (regression check)
+
+6. **Subject = french / russian / literature (Phase 7+9):**
+   - Создать ДЗ с subject = «Французский язык»
+   - Verify save проходит без ошибок (Phase 9 fix `homework_tutor_templates.subject` CHECK)
+   - Verify в Detail видно subject = «Французский язык» корректно
+
+7. **Max score шаг 0.5 (Phase 8.5):**
+   - В HWTaskCard поле «Макс. баллов» — ввести `12.5` → blur → сохранилось `12.5` (не округлилось до 12 или 13)
+   - Ввести `12.7` → blur → snap на `12.5` без error modal
+
+**При расширении constructor'а:**
+- Любая новая `useQuery` в TutorHomeworkCreate / TutorMockExamCreate / new write-form page → **ОБЯЗАТЕЛЬНО** `{ refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 }`. Иначе smoke check Section 8 в `scripts/smoke-check.mjs` fail'нит.
+- Любое изменение `editPrefilledRef` / `editInitialSnapshot` / reset effect ordering — повторно run QA checklist (этот класс bug'ов чувствительный).
+- Любое изменение в `useEffect` deps для prefill effect — проверить что guard'ы работают на refetch.
+
+**Hard rule:** При commit'е, который трогает constructor files (см. список вверху секции), commit message **ОБЯЗАН** содержать строку `Manual QA: checklist в .claude/rules/40-homework-system.md пройден` или эквивалентное явное подтверждение. Это запрос-гейт для команды (включая AI агентов) — не silent assumption.
+
+**Спека:** plan `~/.claude/plans/1-functional-meteor.md` Phase 10 раздел + CLAUDE.md §34.
