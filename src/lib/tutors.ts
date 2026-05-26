@@ -226,7 +226,9 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
     return [];
   }
 
-  const students = (data ?? []) as TutorStudentWithProfile[];
+  // Cast through `unknown` — auto-generated supabase types.ts lags behind DB
+  // (profiles.full_name exists in DB, see CLAUDE.md §28 Phase 8.1).
+  const students = (data ?? []) as unknown as TutorStudentWithProfile[];
 
   // Parallel: debt map + email flags
   const studentIds = students.map((s) => s.student_id);
