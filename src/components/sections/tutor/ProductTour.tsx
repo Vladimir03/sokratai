@@ -61,7 +61,7 @@ export default function ProductTour({
           display: inline-block;
           margin: 0 4px;
           color: var(--sokrat-green-500);
-          font-weight: 900;
+          font-weight: 700;
         }
         .sokrat.sokrat-marketing .tour-h2-after {
           color: var(--sokrat-green-700);

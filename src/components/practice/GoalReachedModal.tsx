@@ -47,7 +47,7 @@ export const GoalReachedModal = ({ isOpen, onClose, stats }: GoalReachedModalPro
           <Award className="w-12 h-12 text-white" />
         </div>
 
-        <h2 className="text-2xl font-black mb-2 text-orange-600 uppercase tracking-tight">
+        <h2 className="text-2xl font-bold mb-2 text-orange-600 uppercase tracking-tight">
           Цель достигнута!
         </h2>
         <p className="text-muted-foreground mb-8 font-medium">

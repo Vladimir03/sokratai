@@ -13,7 +13,9 @@
 /* ============================================================
    GOLOS TEXT — canonical brand font (Cyrillic + Latin)
    Self-hosted from fonts/ (uploaded by brand team).
-   Weights 400, 500, 600, 700, 800, 900.
+   Weights 400, 500, 600, 700 (ExtraBold 800 + Black 900 dropped
+   2026-05-26 — экономия ~134KB на первой загрузке, см. Phase 0
+   plan docs/../1-nested-rain.md TASK-2).
    ============================================================ */
 @font-face {
   font-family: 'Golos Text';
@@ -34,16 +36,6 @@
   font-family: 'Golos Text';
   src: url('../fonts/GolosText-Bold.ttf') format('truetype');
   font-weight: 700; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: 'Golos Text';
-  src: url('../fonts/GolosText-ExtraBold.ttf') format('truetype');
-  font-weight: 800; font-style: normal; font-display: swap;
-}
-@font-face {
-  font-family: 'Golos Text';
-  src: url('../fonts/GolosText-Black.ttf') format('truetype');
-  font-weight: 900; font-style: normal; font-display: swap;
 }
 
 
@@ -159,8 +151,8 @@
   --sokrat-fw-medium:    500;
   --sokrat-fw-semibold:  600;
   --sokrat-fw-bold:      700;
-  --sokrat-fw-extrabold: 800;   /* marketing only */
-  --sokrat-fw-black:     900;   /* marketing only */
+  --sokrat-fw-extrabold: 700;   /* backward-compat alias → Bold (800/900 dropped 2026-05-26, см. TASK-2) */
+  --sokrat-fw-black:     700;   /* backward-compat alias → Bold */
 
 
   /* ============================================================

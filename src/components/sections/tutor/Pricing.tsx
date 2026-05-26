@@ -258,7 +258,7 @@ export default function Pricing() {
           color: var(--sokrat-fg-on-dark);
           border-radius: 6px;
           font-size: 13px;
-          font-weight: 800;
+          font-weight: 700;
           letter-spacing: 0.02em;
           line-height: 1.2;
         }
@@ -453,7 +453,7 @@ export default function Pricing() {
         .sokrat.sokrat-marketing .pp-roi-line::before {
           content: "✓ ";
           color: var(--sokrat-ochre-700);
-          font-weight: 800;
+          font-weight: 700;
           margin-right: 4px;
         }
         .sokrat.sokrat-marketing .pp-roi-line strong {

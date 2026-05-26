@@ -75,7 +75,7 @@ export const EgeNumberGrid = ({
               )}
 
               {/* Номер и Название */}
-              <span className="text-3xl font-black mb-1">{egeNum}</span>
+              <span className="text-3xl font-bold mb-1">{egeNum}</span>
               <span className="text-[11px] text-muted-foreground text-center font-medium leading-tight mb-3 line-clamp-1">
                 {data.name}
               </span>
