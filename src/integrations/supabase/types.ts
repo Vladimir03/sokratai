@@ -1734,6 +1734,7 @@ export type Database = {
         Row: {
           created_at: string
           deadline: string | null
+          default_exam_mode: string
           id: string
           mode: string
           status: string
@@ -1745,6 +1746,7 @@ export type Database = {
         Insert: {
           created_at?: string
           deadline?: string | null
+          default_exam_mode?: string
           id?: string
           mode: string
           status?: string
@@ -1756,6 +1758,7 @@ export type Database = {
         Update: {
           created_at?: string
           deadline?: string | null
+          default_exam_mode?: string
           id?: string
           mode?: string
           status?: string
@@ -1858,15 +1861,18 @@ export type Database = {
           assignment_id: string
           blank_photo_url: string | null
           created_at: string
+          exam_mode: string
           id: string
           manual_comment: string | null
           manual_entered_date: string | null
           part1_blank_photo_url: string | null
           part2_bulk_photo_urls: string | null
+          sessions: Json
           started_at: string | null
           status: string
           student_id: string | null
           submitted_at: string | null
+          total_active_ms: number
           total_part1_score: number | null
           total_part2_score: number | null
           total_score: number | null
@@ -1880,15 +1886,18 @@ export type Database = {
           assignment_id: string
           blank_photo_url?: string | null
           created_at?: string
+          exam_mode?: string
           id?: string
           manual_comment?: string | null
           manual_entered_date?: string | null
           part1_blank_photo_url?: string | null
           part2_bulk_photo_urls?: string | null
+          sessions?: Json
           started_at?: string | null
           status?: string
           student_id?: string | null
           submitted_at?: string | null
+          total_active_ms?: number
           total_part1_score?: number | null
           total_part2_score?: number | null
           total_score?: number | null
@@ -1902,15 +1911,18 @@ export type Database = {
           assignment_id?: string
           blank_photo_url?: string | null
           created_at?: string
+          exam_mode?: string
           id?: string
           manual_comment?: string | null
           manual_entered_date?: string | null
           part1_blank_photo_url?: string | null
           part2_bulk_photo_urls?: string | null
+          sessions?: Json
           started_at?: string | null
           status?: string
           student_id?: string | null
           submitted_at?: string | null
+          total_active_ms?: number
           total_part1_score?: number | null
           total_part2_score?: number | null
           total_score?: number | null
