@@ -49,9 +49,15 @@ export interface AdminThreadMessage {
   created_at: string;
   message_kind: string | null;
   visible_to_student: boolean;
+  /** Сырой dual-format ref string из БД (storage:// или JSON-array). Для debug-view. */
   image_url: string | null;
+  /** Уже резолвленные backend'ом signed URLs (с rewriteToProxy). Готовы для <img src>. */
+  image_urls?: string[];
+  task_id?: string | null;
   task_order: number | null;
   author_user_id: string | null;
+  submission_payload?: Record<string, unknown> | null;
+  message_delivery_status?: string | null;
 }
 
 export interface AdminTaskState {
@@ -61,7 +67,42 @@ export interface AdminTaskState {
   wrong_answer_count: number;
   earned_score: number | null;
   available_score: number | null;
+  attempts?: number | null;
+  best_score?: number | null;
+  ai_score?: number | null;
+  ai_score_comment?: string | null;
+  tutor_score_override?: number | null;
+  tutor_score_override_comment?: string | null;
+  tutor_score_override_at?: string | null;
+  tutor_force_completed_at?: string | null;
   task_id: string;
+}
+
+export interface AdminThreadMeta {
+  id: string;
+  student_assignment_id: string | null;
+  current_task_id: string | null;
+  status: string;
+  last_student_message_at: string | null;
+  tutor_last_viewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminAssignmentMeta {
+  assignment_id: string | null;
+  student_id: string | null;
+  tutor_id: string | null;
+  student_assignment_id: string | null;
+}
+
+export interface AdminTaskMeta {
+  id: string;
+  order_num: number;
+  max_score: number;
+  kim_number: number | null;
+  task_kind: string;
+  check_format: string;
 }
 
 export interface TutorExtras {
@@ -127,6 +168,9 @@ export async function fetchStudentsInAssignment(assignmentId: string): Promise<A
 export async function fetchThreadDetails(threadId: string): Promise<{
   messages: AdminThreadMessage[];
   taskStates: AdminTaskState[];
+  thread?: AdminThreadMeta | null;
+  assignmentMeta?: AdminAssignmentMeta;
+  tasks?: AdminTaskMeta[];
 }> {
   return invokeAdminHomework({ action: "thread", threadId });
 }

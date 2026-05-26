@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +17,81 @@ const json = (body: unknown, status = 200) =>
   });
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Default bucket for thread message attachments. Студенческие upload'ы лежат в
+ * `homework-submissions`, tutor — в `homework-images`. В Storage refs формата
+ * `storage://<bucket>/<path>` bucket указан явно; для bare paths (legacy)
+ * полагаемся на `homework-submissions` как наиболее частый случай.
+ */
+const DEFAULT_THREAD_ATTACHMENT_BUCKET = "homework-submissions";
+
+/** Path-traversal guard — defense-in-depth, mirror public-homework-share. */
+function hasUnsafeObjectPath(path: string): boolean {
+  return path
+    .split("/")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .some((s) => s === ".." || s.includes("\\") || s.includes("\0"));
+}
+
+function parseStorageRef(
+  value: string | null | undefined,
+  defaultBucket: string,
+): { bucket: string; objectPath: string } | null {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return null;
+  if (trimmed.startsWith("storage://")) {
+    const rest = trimmed.slice("storage://".length);
+    const slashIdx = rest.indexOf("/");
+    if (slashIdx <= 0 || slashIdx === rest.length - 1) return null;
+    const objectPath = rest.slice(slashIdx + 1).replace(/^\/+/, "");
+    if (hasUnsafeObjectPath(objectPath)) return null;
+    return { bucket: rest.slice(0, slashIdx), objectPath };
+  }
+  const objectPath = trimmed.replace(/^\/+/, "");
+  if (hasUnsafeObjectPath(objectPath)) return null;
+  return { bucket: defaultBucket, objectPath };
+}
+
+/**
+ * Resolve dual-format `image_url` (single ref OR JSON-array refs) в массив
+ * готовых HTTP signed URLs с rewriteToProxy для browser fetch через RU bypass.
+ * Failures (битые refs, missing files) silently dropped — admin viewer не должен
+ * крашиться из-за одной orphan ссылки.
+ */
+async function resolveThreadMessageImages(
+  admin: SupabaseClient,
+  rawImageUrl: string | null | undefined,
+): Promise<string[]> {
+  const refs = parseAttachmentUrls(rawImageUrl);
+  if (refs.length === 0) return [];
+
+  const urls: string[] = [];
+  for (const ref of refs) {
+    if (ref.startsWith("http://") || ref.startsWith("https://")) {
+      urls.push(ref);
+      continue;
+    }
+    const parsed = parseStorageRef(ref, DEFAULT_THREAD_ATTACHMENT_BUCKET);
+    if (!parsed) continue;
+    const { data, error } = await admin.storage
+      .from(parsed.bucket)
+      .createSignedUrl(parsed.objectPath, 3600);
+    if (error || !data?.signedUrl) {
+      console.warn("admin_thread_signed_url_failed", {
+        bucket: parsed.bucket,
+        objectPath: parsed.objectPath,
+        error: error?.message,
+      });
+      continue;
+    }
+    urls.push(rewriteToProxy(data.signedUrl));
+  }
+  return urls;
+}
 
 type ProfileLite = { username?: string | null; telegram_username?: string | null };
 
@@ -567,23 +644,82 @@ async function studentsInAssignment(admin: SupabaseClient, assignmentId: string)
 }
 
 async function threadDetails(admin: SupabaseClient, threadId: string) {
-  const [msgsRes, statesRes] = await Promise.all([
+  const [msgsRes, statesRes, threadRes] = await Promise.all([
     admin
       .from("homework_tutor_thread_messages")
-      .select("id, role, content, created_at, message_kind, visible_to_student, image_url, task_order, author_user_id")
+      .select(
+        "id, role, content, created_at, message_kind, visible_to_student, image_url, task_id, task_order, author_user_id, submission_payload, message_delivery_status",
+      )
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true }),
     admin
       .from("homework_tutor_task_states")
-      .select("id, status, hint_count, wrong_answer_count, earned_score, available_score, task_id")
+      .select(
+        "id, status, hint_count, wrong_answer_count, earned_score, available_score, attempts, best_score, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, task_id",
+      )
       .eq("thread_id", threadId),
+    admin
+      .from("homework_tutor_threads")
+      .select("id, student_assignment_id, current_task_id, status, last_student_message_at, tutor_last_viewed_at, created_at, updated_at")
+      .eq("id", threadId)
+      .maybeSingle(),
   ]);
   if (msgsRes.error) throw msgsRes.error;
   if (statesRes.error) throw statesRes.error;
+  if (threadRes.error) throw threadRes.error;
+
+  // Resolve `image_url` refs → готовые HTTP signed URLs (с rewriteToProxy для RU bypass).
+  const rawMessages = msgsRes.data || [];
+  const messagesWithImages = await Promise.all(
+    rawMessages.map(async (m) => ({
+      ...m,
+      image_urls: await resolveThreadMessageImages(admin, m.image_url),
+    })),
+  );
+
+  // Resolve student_assignment → assignment → tutor для metadata ID panel.
+  let assignmentMeta: {
+    assignment_id: string | null;
+    student_id: string | null;
+    tutor_id: string | null;
+    student_assignment_id: string | null;
+  } = { assignment_id: null, student_id: null, tutor_id: null, student_assignment_id: null };
+  if (threadRes.data?.student_assignment_id) {
+    const { data: sa } = await admin
+      .from("homework_tutor_student_assignments")
+      .select("id, assignment_id, student_id")
+      .eq("id", threadRes.data.student_assignment_id)
+      .maybeSingle();
+    if (sa) {
+      assignmentMeta.student_assignment_id = sa.id;
+      assignmentMeta.assignment_id = sa.assignment_id;
+      assignmentMeta.student_id = sa.student_id;
+      if (sa.assignment_id) {
+        const { data: asgn } = await admin
+          .from("homework_tutor_assignments")
+          .select("tutor_id")
+          .eq("id", sa.assignment_id)
+          .maybeSingle();
+        if (asgn) assignmentMeta.tutor_id = asgn.tutor_id;
+      }
+    }
+  }
+
+  // Fetch task meta (max_score, order_num, kim_number) для шапки.
+  const taskIds = (statesRes.data || []).map((s) => s.task_id).filter(Boolean);
+  const { data: tasksData } = taskIds.length
+    ? await admin
+        .from("homework_tutor_tasks")
+        .select("id, order_num, max_score, kim_number, task_kind, check_format")
+        .in("id", taskIds)
+    : { data: [] as Array<{ id: string; order_num: number; max_score: number; kim_number: number | null; task_kind: string; check_format: string }> };
 
   return {
-    messages: msgsRes.data || [],
+    messages: messagesWithImages,
     taskStates: statesRes.data || [],
+    thread: threadRes.data,
+    assignmentMeta,
+    tasks: tasksData || [],
   };
 }
 
