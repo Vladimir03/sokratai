@@ -2,9 +2,14 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
+import { visualizer } from "rollup-plugin-visualizer";
 
 const projectRoot = path.resolve(__dirname);
 
+// Bundle analyzer — gated by ANALYZE=1 env var (Phase 0 TASK-5, 2026-05-26).
+// Run via `npm run analyze:visual` → выдаёт dist/stats.html treemap.
+// Не в CI пока (отдельная задача после baseline measurement).
+const ANALYZE = process.env.ANALYZE === "1";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -14,8 +19,15 @@ export default defineConfig(({ mode }) => ({
     port: parseInt(process.env.PORT || '8080'),
   },
   plugins: [
-    react(), 
+    react(),
     mode === "development" && componentTagger(),
+    ANALYZE && visualizer({
+      filename: "dist/stats.html",
+      template: "treemap",   // sunburst | treemap | network
+      gzipSize: true,
+      brotliSize: true,
+      open: false,           // не открывать автоматически — Vladimir сам решит
+    }),
   ].filter(Boolean),
   resolve: {
     alias: {
