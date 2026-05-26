@@ -421,9 +421,10 @@ export function MockExamHeatmap({
       awaiting_review: 0,
       submitted: 1,
       in_progress: 2,
-      approved: 3,
-      manually_entered: 4,
-      not_started: 5,
+      paused: 3,
+      approved: 4,
+      manually_entered: 5,
+      not_started: 6,
     };
     return [...attempts].sort((a, b) => {
       const pa = priority[deriveDisplayStatus(a.status, a.started_at)];
