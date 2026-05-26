@@ -150,6 +150,15 @@ export interface StudentMockExamAssignmentView {
     total_part1_score: number | null;
     total_part2_score: number | null;
     total_score: number | null;
+    /**
+     * AC-P10 hotfix (2026-05-25 P0 #2 from code review): timer fields для
+     * active-time computation. Без них frontend timer считает wall-clock
+     * от started_at вместо active time для training mode → после resume
+     * через неделю timer показывает «-5 дней».
+     */
+    exam_mode: MockExamExamMode;
+    sessions: Array<{ started_at: string; ended_at: string | null }>;
+    total_active_ms: number;
   };
   part1_answers: StudentMockExamPart1Saved[];
   part2_solutions: StudentMockExamPart2Saved[];

@@ -998,6 +998,19 @@ JTBD-trigger (Володя 2026-05-25 от учеников): «не могу н
 3. При добавлении нового session-tracking field (e.g. `pause_count` для anti-abuse Phase 2) — придерживаться JSONB sessions structure, не дублировать в отдельную колонку.
 4. Phase 2 для full feature: TutorMockExamCreate toggle + start modal + per-session breakdown + paused KPI card.
 
+**Hotfix (2026-05-25, ChatGPT-5.5 code review — P0 #1, #2 + P2 #1):**
+- **P0 #1 — Legacy attempts cannot pause** (migration `20260525140000_attempt_sessions_backfill.sql`): existing pilot attempts с `started_at IS NOT NULL` AND `sessions='[]'` (после AC-P10 migration default) → click ⏸ Pause → 409 NO_ACTIVE_SESSION. Fix: backfill migration инициализирует sessions = `[{started_at, ended_at: null}]` для всех такая legacy in_progress attempts. Plus defensive synthesis в `handlePauseAttempt` (если sessions=[] && started_at — create+close session inline). Belt-and-suspenders.
+- **P0 #2 — Timer wall-clock instead of active time:** `StudentMockExam.tsx::TimerBadge` считал elapsed от `data.attempt.started_at` (wall-clock). Для training mode после resume через неделю timer показывал «-5 дней» или auto-submit срабатывал мгновенно. Fix:
+  1. `handleGetStudentAssignment` теперь возвращает `exam_mode`, `sessions`, `total_active_ms` в attempt response payload (ATTEMPT_SELECT расширен).
+  2. `StudentMockExamAssignmentView.attempt` TS type — required `exam_mode`, `sessions`, `total_active_ms`.
+  3. New helper `getActiveElapsedSeconds(examMode, startedAt, sessions, totalActiveMs)` — простой fallback на wall-clock для simulation; для training computes `total_active_ms + (now - latestOpenSession.started_at)` (sum closed sessions + offset open). Defensive legacy fallback: если sessions=[] но started_at — treat as single open session (matches server-side F2 synthesis).
+  4. `TimerBadge` receives new props (`examMode`, `sessions`, `totalActiveMs`, `onTimeExpired`). Auto-submit triggers через `onTimeExpired` callback (fire-once via ref) → opens submit dialog.
+- **P2 #1 — Resume failure silent navigate:** `StudentMockExams.tsx::handleClick` catch'ал resume errors и navigate'ил все равно → `StudentMockExam` useEffect redirect'ил обратно на list = invisible loop. Fix: `resumingAttemptId` state + disable card during pending + inline rose error message + «Скрыть» dismiss button. Multi-click protected.
+
+**Hotfix NOT applied** (deferred):
+- P1 #1 (CAS guards не verified): для pilot scale acceptable, downgraded to P2. Можно добавить `.select().maybeSingle()` post-update verification later.
+- P1 #2 (recheck endpoint no-ops на pilot data из-за `score_source='tutor'` backfill в `20260516130000`): требует UX decision Володи (Phase 2 — add `include_tutor_edits: bool` flag + checkbox в AlertDialog).
+
 **Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` AC-P10.
 
 ### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12; Phase 3.1 hotfixes 2026-05-13)

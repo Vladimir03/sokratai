@@ -108,6 +108,56 @@ function getElapsedSeconds(startedAt: string | null, nowMs = Date.now()): number
   return Math.max(0, Math.floor((nowMs - startedMs) / 1000));
 }
 
+/**
+ * AC-P10 hotfix (2026-05-25 P0 #2 from code review): для training mode timer
+ * считает active time (sum closed sessions + offset open session), а не
+ * wall-clock от started_at. После resume через неделю это критично — иначе
+ * timer показывает «-5 дней» или auto-submit срабатывает мгновенно.
+ *
+ * Algorithm:
+ *   simulation → (now - started_at) wall-clock (как реальный ЕГЭ)
+ *   training:
+ *     - сумма closed sessions (ended_at != null)
+ *     - + (now - latest.started_at) если latest.ended_at === null (in_progress)
+ *     - = 0 если latest.ended_at != null (status='paused', timer заморожен)
+ *
+ * Frontend mirror server-side computeTotalActiveMs (mock-exam-student-api).
+ */
+function getActiveElapsedSeconds(
+  examMode: 'simulation' | 'training',
+  startedAt: string | null,
+  sessions: Array<{ started_at: string; ended_at: string | null }> | null,
+  totalActiveMs: number | null,
+  nowMs = Date.now(),
+): number {
+  // Simulation: wall-clock as before.
+  if (examMode === 'simulation') {
+    return getElapsedSeconds(startedAt, nowMs);
+  }
+
+  // Training: active time from sessions.
+  let accumulatedMs = totalActiveMs ?? 0;
+  if (Array.isArray(sessions) && sessions.length > 0) {
+    const latest = sessions[sessions.length - 1];
+    // Open session (ended_at === null) — add (now - latest.started_at).
+    if (latest && latest.ended_at === null) {
+      const startMs = Date.parse(latest.started_at);
+      if (Number.isFinite(startMs) && nowMs > startMs) {
+        accumulatedMs += nowMs - startMs;
+      }
+    }
+    // If latest closed → status='paused', accumulatedMs = total_active_ms only.
+    // No open session offset — timer frozen.
+  } else if (startedAt) {
+    // Defensive fallback: legacy attempt с pre-AC-P10 era. sessions=[] но
+    // started_at set. Treat как single open session — это same logic как
+    // server-side handlePauseAttempt synthesis (F2).
+    accumulatedMs += getElapsedSeconds(startedAt, nowMs) * 1000;
+  }
+
+  return Math.max(0, Math.floor(accumulatedMs / 1000));
+}
+
 function getExamTitle(data: StudentMockExamAssignmentView): string {
   return data.variant?.title ?? data.assignment.title ?? 'Пробник';
 }
@@ -249,20 +299,45 @@ function MathBlock({ text, className }: { text: string; className?: string }) {
 function TimerBadge({
   startedAt,
   durationMinutes,
+  examMode,
+  sessions,
+  totalActiveMs,
+  onTimeExpired,
 }: {
   startedAt: string | null;
   durationMinutes: number;
+  // AC-P10 hotfix (P0 #2): timer fields для active time computation в training.
+  examMode: 'simulation' | 'training';
+  sessions: Array<{ started_at: string; ended_at: string | null }>;
+  totalActiveMs: number;
+  /** AC-P10 hotfix (F6): callback при истечении времени для auto-submit. */
+  onTimeExpired?: () => void;
 }) {
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+  const expiredFiredRef = useRef(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTimeMs(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const elapsedSeconds = getElapsedSeconds(startedAt, currentTimeMs);
+  const elapsedSeconds = getActiveElapsedSeconds(
+    examMode,
+    startedAt,
+    sessions,
+    totalActiveMs,
+    currentTimeMs,
+  );
   const remainingSeconds = durationMinutes * 60 - elapsedSeconds;
   const isOvertime = remainingSeconds < 0;
+
+  // F6: auto-submit при истечении времени. Fire-once через ref.
+  useEffect(() => {
+    if (isOvertime && !expiredFiredRef.current && onTimeExpired) {
+      expiredFiredRef.current = true;
+      onTimeExpired();
+    }
+  }, [isOvertime, onTimeExpired]);
 
   return (
     <div
@@ -276,7 +351,11 @@ function TimerBadge({
       <Clock3 className="h-4 w-4" />
       <span className="font-semibold">{formatDuration(remainingSeconds)}</span>
       <span className="hidden text-sm text-current/70 sm:inline">
-        {isOvertime ? 'сверх времени' : 'визуальный таймер'}
+        {isOvertime
+          ? 'сверх времени'
+          : examMode === 'training'
+            ? 'активное время'
+            : 'визуальный таймер'}
       </span>
     </div>
   );
@@ -1082,6 +1161,21 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     (blankPhoto.status === 'uploading' ? 1 : 0) +
     (bulkUploadStatus === 'uploading' ? 1 : 0);
 
+  // AC-P10 hotfix (F6): auto-submit при истечении времени. Fires once через
+  // ref в TimerBadge. Для simulation triggers wall-clock; для training —
+  // active time exhausted (sum sessions + open session offset >= duration).
+  const handleTimeExpired = useCallback(() => {
+    if (isSubmitting || data.attempt.status !== 'in_progress') return;
+    console.info('[mock-exam] auto-submit triggered: time expired', {
+      attempt_id: data.attempt.id,
+      exam_mode: examMode,
+    });
+    // Avoid race: open submit dialog instead of force submit. Ученик видит
+    // confirmation, click через 1-2 секунды → submit. Если AFK — closed time
+    // продолжает идти, но dialog visible signals что-то произошло.
+    setSubmitOpen(true);
+  }, [isSubmitting, data.attempt.status, data.attempt.id, examMode]);
+
   // AC-P10: Pause handler. Flush autosave → server pause → navigate to list.
   // List card покажет «Продолжить» CTA для возврата.
   const handlePause = async () => {
@@ -1186,7 +1280,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 )}
               </div>
               <div className="flex flex-col gap-2 sm:flex-row lg:flex-col xl:flex-row">
-                <TimerBadge startedAt={startedAt} durationMinutes={durationMinutes} />
+                <TimerBadge
+                  startedAt={startedAt}
+                  durationMinutes={durationMinutes}
+                  examMode={examMode}
+                  sessions={data.attempt.sessions ?? []}
+                  totalActiveMs={data.attempt.total_active_ms ?? 0}
+                  onTimeExpired={handleTimeExpired}
+                />
                 <SaveStatus
                   pendingCount={autosave.pendingCount}
                   isOffline={autosave.isOffline}

@@ -249,10 +249,15 @@ async function handleGetStudentAssignment(
   // Любая попытка (по assignment_id или по attempt_id) обязательно делает
   // ownership check `student_id = auth.uid()` — ученик не сможет открыть
   // чужой пробник.
+  // AC-P10 hotfix (2026-05-25 P0 #2): include exam_mode + sessions +
+  // total_active_ms в response. Без этого frontend timer считает wall-clock
+  // от started_at вместо active time для training mode → после resume через
+  // неделю timer показывает «-5 дней» или auto-submit срабатывает мгновенно.
   const ATTEMPT_SELECT =
     "id, assignment_id, status, started_at, submitted_at, blank_photo_url, " +
     "part1_blank_photo_url, part2_bulk_photo_urls, answer_method, " +
-    "total_part1_score, total_part2_score, total_score";
+    "total_part1_score, total_part2_score, total_score, " +
+    "exam_mode, sessions, total_active_ms";
   let attempt: Record<string, unknown> | null = null;
   {
     const byAssignment = await db
@@ -424,6 +429,11 @@ async function handleGetStudentAssignment(
       total_part1_score: attempt.total_part1_score,
       total_part2_score: attempt.total_part2_score,
       total_score: attempt.total_score,
+      // AC-P10 hotfix: timer fields для active-time computation в frontend.
+      exam_mode: (attempt.exam_mode as string | null) ?? "training",
+      sessions: Array.isArray(attempt.sessions) ? attempt.sessions : [],
+      total_active_ms:
+        typeof attempt.total_active_ms === "number" ? attempt.total_active_ms : 0,
     },
     part1_answers: part1Rows ?? [],
     part2_solutions: part2WithSignedUrls,
@@ -866,21 +876,39 @@ async function handlePauseAttempt(
       "Пауза недоступна в режиме «Симуляция ЕГЭ». Таймер идёт wall-clock как на реальном экзамене.");
   }
 
-  const sessions = Array.isArray(attempt.sessions) ? [...attempt.sessions] : [];
-  if (sessions.length === 0) {
-    return jsonError(cors, 409, "NO_ACTIVE_SESSION",
-      "Не найдена активная сессия для паузы. Возможно, пробник ещё не начат.");
-  }
-
-  // Close latest session if open.
   const nowIso = new Date().toISOString();
-  const lastIdx = sessions.length - 1;
-  const last = sessions[lastIdx] as Record<string, unknown> | null;
-  if (!last || typeof last !== "object" || last.ended_at !== null) {
-    return jsonError(cors, 409, "NO_OPEN_SESSION",
-      "Активная сессия уже закрыта. Обнови страницу.");
+  const sessions = Array.isArray(attempt.sessions) ? [...attempt.sessions] : [];
+
+  // AC-P10 hotfix (2026-05-25 P0 #1): defensive synthesis для legacy attempts.
+  // Если sessions=[] но started_at set (legacy attempt из pre-AC-P10 era ИЛИ
+  // attempt создан между deploy и backfill migration 20260525140000) — синтезируем
+  // open session из started_at. Migration backfill — primary fix, эта ветка —
+  // belt-and-suspenders на edge cases.
+  const startedAtStr = (attempt.started_at as string | null) ?? null;
+  if (sessions.length === 0) {
+    if (!startedAtStr) {
+      return jsonError(cors, 409, "NO_ACTIVE_SESSION",
+        "Не найдена активная сессия для паузы. Пробник ещё не начат.");
+    }
+    // Synthesize one session from started_at to now — equivalent to «пробник
+    // был активен с момента старта». Это close-immediately pattern: добавляем
+    // session с ended_at = now (закрытая на этом шаге).
+    sessions.push({ started_at: startedAtStr, ended_at: nowIso });
+    console.info(JSON.stringify({
+      event: "mock_exam_pause_synthesized_legacy_session",
+      attempt_id: attemptId,
+      started_at: startedAtStr,
+    }));
+  } else {
+    // Close latest session if open.
+    const lastIdx = sessions.length - 1;
+    const last = sessions[lastIdx] as Record<string, unknown> | null;
+    if (!last || typeof last !== "object" || last.ended_at !== null) {
+      return jsonError(cors, 409, "NO_OPEN_SESSION",
+        "Активная сессия уже закрыта. Обнови страницу.");
+    }
+    sessions[lastIdx] = { ...last, ended_at: nowIso };
   }
-  sessions[lastIdx] = { ...last, ended_at: nowIso };
 
   const totalActiveMs = computeTotalActiveMs(sessions);
 

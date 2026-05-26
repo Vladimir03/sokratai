@@ -138,6 +138,13 @@ export default function StudentMockExams() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempts, setAttempts] = useState<AttemptRow[]>([]);
+  // AC-P10 hotfix (F8 from code review, 2026-05-25): inline state для resume
+  // operation — disabled card + error message при failure (вместо silent navigate).
+  const [resumingAttemptId, setResumingAttemptId] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<{
+    attemptId: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,18 +224,32 @@ export default function StudentMockExams() {
       navigate(`/student/mock-exams/${target}/result`);
       return;
     }
-    // AC-P10 (2026-05-25): для paused — explicit resume call before navigate.
-    // Без этого StudentMockExam useEffect видит status='paused' и redirect'нёт
-    // обратно на list → infinite loop.
+    // AC-P10 hotfix (F8 from code review, 2026-05-25): для paused — explicit
+    // resume call before navigate. Без этого StudentMockExam useEffect видит
+    // status='paused' и redirect'нёт обратно на list → infinite loop.
+    //
+    // F8 fix: при failure НЕ navigate тихо — показываем toast и оставляем
+    // ученика на list. Disabled state защищает от double-click race.
     if (status === 'paused') {
+      if (resumingAttemptId !== null) {
+        // Click уже обрабатывается — ignore.
+        return;
+      }
+      setResumingAttemptId(row.id);
       try {
         const { resumeMockExamAttempt } = await import('@/lib/studentMockExamApi');
         await resumeMockExamAttempt(row.id);
+        navigate(`/student/mock-exams/${target}`);
       } catch (err) {
         console.error('[StudentMockExams] resume failed', err);
-        // Continue navigate — StudentMockExam can show retry path.
+        const msg =
+          err instanceof Error && err.message
+            ? err.message
+            : 'Не удалось возобновить пробник. Проверь подключение и попробуй ещё раз.';
+        setResumeError({ attemptId: row.id, message: msg });
+      } finally {
+        setResumingAttemptId(null);
       }
-      navigate(`/student/mock-exams/${target}`);
       return;
     }
     navigate(`/student/mock-exams/${target}`);
@@ -293,11 +314,24 @@ export default function StudentMockExams() {
                   row.mock_exam_assignments?.deadline ?? null,
                 );
 
+                const isResumingThis = resumingAttemptId === row.id;
+                const anyResuming = resumingAttemptId !== null;
+                const resumeErrForThis =
+                  resumeError?.attemptId === row.id ? resumeError.message : null;
+
                 return (
                   <Card
                     key={row.id}
-                    className="cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => void handleClick(row)}
+                    className={`transition-shadow ${
+                      anyResuming
+                        ? 'cursor-not-allowed opacity-60'
+                        : 'cursor-pointer hover:shadow-md'
+                    }`}
+                    onClick={() => {
+                      if (anyResuming) return;
+                      void handleClick(row);
+                    }}
+                    aria-busy={isResumingThis}
                   >
                     <CardContent className="p-5">
                       <div className="flex items-start justify-between gap-3 mb-2">
@@ -343,9 +377,32 @@ export default function StudentMockExams() {
                         </div>
                         <ChevronRight className="w-5 h-5 text-slate-400 flex-shrink-0" />
                       </div>
-                      <div className="text-sm text-accent font-medium mt-2">
-                        {CTA_LABEL[status]} →
+                      <div className="text-sm text-accent font-medium mt-2 flex items-center gap-2">
+                        {isResumingThis ? (
+                          <>
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                            Возобновляем…
+                          </>
+                        ) : (
+                          <>{CTA_LABEL[status]} →</>
+                        )}
                       </div>
+                      {/* AC-P10 hotfix (F8): inline error message при resume failure */}
+                      {resumeErrForThis && (
+                        <div className="mt-2 rounded-md border border-rose-200 bg-rose-50 p-2 text-xs text-rose-800">
+                          {resumeErrForThis}{' '}
+                          <button
+                            type="button"
+                            className="underline font-medium"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setResumeError(null);
+                            }}
+                          >
+                            Скрыть
+                          </button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 );
