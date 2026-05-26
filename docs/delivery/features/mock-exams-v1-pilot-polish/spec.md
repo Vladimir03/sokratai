@@ -296,7 +296,14 @@ npm run lint && npm run build && npm run smoke-check
     - Submit accepts both 'in_progress' и 'paused' prev status (ученик может сдать paused без явного resume).
     - Backward compat: existing pilot attempts получают exam_mode='training' default (миграция). Pause functionality становится доступна post-deploy.
   - **Phase 2 follow-ups** (next session): tutor create toggle (`default_exam_mode`), student start modal (mode picker с override), tutor review per-session breakdown («Solo time: 2:30 в 3 сессии: 50+30+70»), KPI «На паузе» card в TutorMockExamDetail.
-  - **Спека деталей:** CLAUDE.md §15a → секция «Pause & multi-session timer».
+  - **Hotfix** (commit `5b9fc52`, 2026-05-25 после ChatGPT-5.5 code review):
+    - **P0 #1 — Legacy attempts cannot pause:** miграция `20260525140000_attempt_sessions_backfill.sql` инициализирует sessions для existing in_progress attempts (sessions=[] + started_at IS NOT NULL → init open session). Plus defensive synthesis в handlePauseAttempt belt-and-suspenders.
+    - **P0 #2 — Timer wall-clock instead of active time:** `handleGetStudentAssignment` теперь возвращает exam_mode/sessions/total_active_ms; new `getActiveElapsedSeconds` helper в `StudentMockExam.tsx` (simulation=wall-clock, training=sum sessions + open offset); auto-submit через fire-once `onTimeExpired` callback.
+    - **P2 #1 — Resume failure silent navigate:** `StudentMockExams` resume disabled card during pending + inline rose error + multi-click protected.
+  - **Deferred (P1):**
+    - **P1 #1 (CAS guards verification):** downgraded P2, pilot scale acceptable.
+    - **P1 #2 (recheck no-ops на pilot data из-за score_source='tutor' backfill в `20260516130000`):** требует Володя UX decision — `include_tutor_edits: boolean` checkbox в existing AlertDialog (recommended) vs auto-detection vs two-buttons. Без fix кнопка «По критериям ФИПИ» бесполезна для существующих pilot attempts Егора.
+  - **Спека деталей:** CLAUDE.md §15a → секция «Pause & multi-session timer» + «Hotfix».
 
 ### Связь с pilot KPI
 
@@ -350,7 +357,7 @@ npm run lint && npm run build && npm run smoke-check
 | AC-P8a (authenticated lead) | PASS | landed TASK-7 |
 | AC-P8b (anonymous lead) | DEFERRED | TASK-12 anonymous mode, отдельная спека |
 | AC-P9 (Часть 1 partial credit ФИПИ 2026) | PASS | landed 2026-05-25 (FIPI-1..FIPI-8). 32 unit tests pass (18 новых AC-P9). См. CLAUDE.md §15a. |
-| AC-P10 (Pause & multi-session timer, Phase 1 MVP) | PARTIAL | Phase 1 landed 2026-05-25 (PAUSE-1..PAUSE-3/5/6/9): training-mode pause/resume + paused list card + tutor pause badge. Phase 2 (PAUSE-4/7/8) — start modal + tutor create toggle + per-session details — отложены до следующей сессии. См. CLAUDE.md §15a секция «Pause & multi-session». |
+| AC-P10 (Pause & multi-session timer, Phase 1 MVP) | PARTIAL → REQUEST CHANGES → APPROVED (hotfix `5b9fc52`) | Phase 1 landed 2026-05-25 commit `2e8ad41` + hotfix `5b9fc52` после ChatGPT-5.5 code review (2 P0 + 1 P2 fixed; 2 P1 deferred). Phase 2 (start modal + tutor create toggle + per-session details) отложен. См. CLAUDE.md §15a секции «Pause & multi-session timer» + «Hotfix». |
 
 **Не-AC обнаружения** (false positives, документация добавлена):
 - «solution_text leak на result page» — это **намеренный state-aware reveal**, не нарушение. Result page показывает Часть 2 разбор только после `attempt.status === 'approved'` (CLAUDE.md §15). Mock-exams anti-leak ≠ homework tutor-only invariant — это разные semantic'и (см. CLAUDE.md §10 cross-reference, добавлено 2026-05-14).
