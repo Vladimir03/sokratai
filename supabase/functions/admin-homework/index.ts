@@ -648,7 +648,7 @@ async function threadDetails(admin: SupabaseClient, threadId: string) {
     admin
       .from("homework_tutor_thread_messages")
       .select(
-        "id, role, content, created_at, message_kind, visible_to_student, image_url, task_id, task_order, author_user_id, submission_payload, message_delivery_status",
+        "id, role, content, created_at, message_kind, visible_to_student, image_url, task_id, task_order, author_user_id, submission_payload",
       )
       .eq("thread_id", threadId)
       .order("created_at", { ascending: true }),
