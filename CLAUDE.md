@@ -2218,7 +2218,74 @@ const editQuery = useQuery({
 2. Add path в `writeFormPages` array в `scripts/smoke-check.mjs:writeFormPages`.
 3. Apply manual QA checklist (mirror `.claude/rules/40-homework-system.md` секция) перед merge.
 
-**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 10 раздел.
+**Round 2 review fix (commit `d47471c`) — Signed URL race condition (P0 blocker):**
+
+ChatGPT-5.5 review коммита `2f97cd2` (Phase 10 initial fix) выявил overlooked **second root cause** в том же prefill effect (lines 555-565 до фикса):
+
+```ts
+setTasks(newTasks);                                          // sync prefill
+Promise.all(newTasks.map(async (t, i) => {                   // async signed URLs
+  const url = await getHomeworkImageSignedUrl(t.task_image_path);
+  if (url) newTasks[i] = { ...newTasks[i], task_image_preview_url: url };
+})).then(() => setTasks([...newTasks]));                     // ⚠️ overwrites local state
+```
+
+**Race mechanism:**
+1. Prefill `setTasks(newTasks)` → tasks = 3
+2. Promise.all launches N signed URL HTTP requests
+3. Browser **throttles** async work на hidden tabs до ~1/sec
+4. Tutor adds 5 tasks → tasks state = 8
+5. Promise.all finally resolves → `.then()` calls `setTasks([...newTasks])` с **closure variable** newTasks (исходный server array)
+6. User's 5 additions **уничтожены**
+
+Это объясняет репорт Elena лучше чем focus-refetch theory: `editPrefilledRef.current` guard действительно работал, но signed URL `.then()` overwrite path был independent от refetch. Background tab throttling делал window для гонки в десятки секунд.
+
+Additional bug: existing код мутировал `newTasks[i] = ...` после `setTasks(newTasks)` — **React immutability violation**.
+
+**Fix (Round 2):** functional setTasks с merge по `task_image_path`:
+
+```ts
+const previewByPath = new Map<string, string>();
+Promise.all(newTasks.map(async (t) => {
+  if (t.task_image_path) {
+    const url = await getHomeworkImageSignedUrl(t.task_image_path);
+    if (url) previewByPath.set(t.task_image_path, url);
+  }
+})).then(() => {
+  if (previewByPath.size === 0) return;
+  setTasks((current) => current.map((task) => {
+    if (!task.task_image_path) return task;
+    const resolved = previewByPath.get(task.task_image_path);
+    if (!resolved) return task;
+    if (task.task_image_preview_url) return task;
+    return { ...task, task_image_preview_url: resolved };
+  }));
+});
+```
+
+**Properties:**
+- Functional setState reads **current** state — user additions/edits/removals preserved by definition
+- Map keyed by `task_image_path` (not `localId`) — user image upload (different path) не overwritten
+- Skip if `task_image_preview_url` already set — current session blob URLs preserved
+- No mutation of `newTasks` — React immutability honored
+
+**Hard invariant — async signed URL pattern для prefill effects:**
+
+Любой async URL resolution в prefill effects ОБЯЗАН использовать functional `setTasks((current) => ...)` для merge — НЕ closure variable + `setTasks([...newTasks])`. Это применимо везде где есть pattern:
+- Sync setState с array из server
+- Async resolution дополнительных полей (signed URLs, derived data)
+- Eventual setState с обогащёнными данными
+
+Симптом нарушения: local user edits исчезают после страница простояла открытой 30+ сек или после tab switch.
+
+**Round 2 also added:**
+- `scripts/smoke-check.mjs`: strip comments before regex (line + block) — закрывает false-positive если `refetchOnWindowFocus: false` фигурирует в комментарии
+- `.claude/rules/40-homework-system.md`: QA case 1a — explicit scenario с image-based original tasks + add new + tab switch (targets signed URL race exactly)
+- Softened comment language в TutorHomeworkCreate.tsx: «refetch caused destroy» → «refetch is risk amplifier; direct cause — signed URL race»
+
+**Round 2 verdict:** APPROVED. No P0/P1 blockers remain. Both root causes (refetch race + signed URL race) closed. Deploy via `deploy-sokratai`.
+
+**Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 10 раздел + review prompt + Round 2 history в `~/.claude/plans/1-phase-10-review-prompt.md`.
 
 ## Известные хрупкие области
 
