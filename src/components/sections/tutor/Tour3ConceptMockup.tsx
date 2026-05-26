@@ -1,7 +1,7 @@
 import { Maximize2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-const MOCKUP_SRC = "/marketing/tutor-landing/tour-3-concept.png";
+const MOCKUP_SRC = "/marketing/tutor-landing/tour-3-concept.webp";
 
 export default function Tour3ConceptMockup() {
   const [zoomed, setZoomed] = useState(false);
