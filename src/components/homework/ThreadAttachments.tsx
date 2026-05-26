@@ -9,7 +9,7 @@ import {
 
 /**
  * Phase 7 (2026-05-16): graceful fallback для image load failures.
- * Chrome/Firefox/Edge на desktop НЕ имеют HEIC decoder в <img> tag —
+ * Chrome/Firefox/Edge на desktop НЕ имеют HEIC decoder в <img loading="lazy"> tag —
  * только Safari macOS/iOS умеет. Без onError handler репетитор видит
  * broken image placeholder без объяснения. После Phase 7 client-side
  * compression (compressForUpload в studentHomeworkApi.ts) новые HEIC
@@ -22,7 +22,7 @@ import {
  * ImageWithFallback **сам owned outer wrapper** — раньше outer `<a>` оборачивал
  * inner `<a>` (failed state) → invalid nested interactive markup, click мог
  * уйти в outer вместо download. Теперь:
- *   - success → outer `<a href target="_blank">` оборачивает `<img>` (open
+ *   - success → outer `<a href target="_blank">` оборачивает `<img loading="lazy">` (open
  *     image in new tab on click — expected UX).
  *   - failed → standalone `<a href download>` без `target="_blank"` (HTML5
  *     `download` attribute IGNORED для cross-origin URL когда `target` есть;

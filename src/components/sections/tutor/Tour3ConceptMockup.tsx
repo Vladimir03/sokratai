@@ -77,7 +77,7 @@ export default function Tour3ConceptMockup() {
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
-          <img
+          <img loading="lazy"
             src={MOCKUP_SRC}
             alt="Концепт-макет отчёта родителю — увеличенный вид"
             className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"

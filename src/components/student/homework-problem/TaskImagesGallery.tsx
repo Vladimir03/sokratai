@@ -45,7 +45,7 @@ interface TaskImagesGalleryProps {
  *     true zoom (мелкие формулы / детали схем).
  *
  * **Image-load resilience** (Phase 3.1 Bug #3 image-tail 2026-05-13): each
- * `<img>` имеет `onError` handler. На failure thumbnail/photo replaced с
+ * `<img loading="lazy">` имеет `onError` handler. На failure thumbnail/photo replaced с
  * dashed-rose retry button → tap → React Query cache invalidate → fresh
  * signed URLs. Logs failed URL + taskId to `console.warn` для diagnosis.
  *
@@ -295,7 +295,7 @@ export function TaskImagesGallery({
                     </button>
                   </div>
                 ) : (
-                  <img
+                  <img loading="lazy"
                     src={resolvedUrls[openIndex]}
                     alt={`Фото условия ${openIndex + 1}`}
                     onError={() => handleImageError(resolvedUrls[openIndex])}

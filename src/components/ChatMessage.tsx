@@ -217,7 +217,7 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               <X className="h-6 w-6" />
             </button>
             <div className="w-full h-full flex items-center justify-center p-4">
-              <img 
+              <img loading="lazy" 
                 src={message.image_url} 
                 alt="Увеличенное изображение"
                 className="max-w-full max-h-[90vh] object-contain"

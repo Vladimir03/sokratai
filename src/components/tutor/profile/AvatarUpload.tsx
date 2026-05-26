@@ -16,7 +16,7 @@ import { usePasteImages } from '@/hooks/usePasteImages';
  *
  * Pipeline (all client-side, no external libs):
  *   1. Reject file.size > 10 MB.
- *   2. URL.createObjectURL → <img>.onload → ctx.drawImage with centered
+ *   2. URL.createObjectURL → <img loading="lazy">.onload → ctx.drawImage with centered
  *      square crop into a 512×512 canvas.
  *   3. canvas.toBlob('image/jpeg', q) walking quality 0.9 → 0.7 → 0.5
  *      until size ≤ 2 MB. Reject if no quality fits.

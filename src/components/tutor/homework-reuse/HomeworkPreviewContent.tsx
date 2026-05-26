@@ -29,11 +29,11 @@ export interface HomeworkPreviewTask {
   /** KIM number when origin ДЗ сохранил provenance к KB (public path). Tutor path передаёт null. */
   kim_number: number | null;
   check_format: 'short_answer' | 'detailed_solution' | null;
-  /** Already resolved direct/signed URLs ready for `<img>`. */
+  /** Already resolved direct/signed URLs ready for `<img loading="lazy">`. */
   task_image_urls: string[];
   correct_answer?: string | null;
   solution_text?: string | null;
-  /** Already resolved direct/signed URLs ready for `<img>`. */
+  /** Already resolved direct/signed URLs ready for `<img loading="lazy">`. */
   solution_image_urls?: string[];
 }
 

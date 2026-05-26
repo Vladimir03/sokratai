@@ -22,7 +22,7 @@ export function SokratAvatar({ size = 32, className }: SokratAvatarProps) {
       style={{ width: size, height: size }}
       aria-label="Сократ AI"
     >
-      <img
+      <img loading="lazy"
         src={sokratChatIcon}
         alt=""
         aria-hidden="true"

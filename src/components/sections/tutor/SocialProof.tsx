@@ -373,7 +373,7 @@ function CaseEgorCard() {
           >
             <X className="h-5 w-5" aria-hidden="true" />
           </button>
-          <img
+          <img loading="lazy"
             src="/marketing/tutor-landing/egor-student-feedback.jpg"
             alt="Сообщение ученика Егору в Telegram — увеличенный вид"
             className="max-h-[90vh] max-w-[95vw] rounded-lg object-contain"

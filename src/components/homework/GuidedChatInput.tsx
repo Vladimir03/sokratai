@@ -129,7 +129,7 @@ function AttachmentPreview({
           >
             {/* Thumbnail */}
             {objectUrl ? (
-              <img
+              <img loading="lazy"
                 src={objectUrl}
                 alt={file.name}
                 className="h-12 w-12 shrink-0 rounded object-cover"

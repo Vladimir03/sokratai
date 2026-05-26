@@ -103,7 +103,7 @@ export default function Footer() {
             className="inline-flex items-center gap-2 text-white text-xl font-bold"
             aria-label="Сократ AI — на главную"
           >
-            <img src={sokratLogo} alt="" width={28} height={28} />
+            <img loading="lazy" src={sokratLogo} alt="" width={28} height={28} />
             Сократ AI
           </Link>
           <div className="flex gap-3">

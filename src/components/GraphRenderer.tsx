@@ -146,7 +146,7 @@ const GraphRenderer = memo(function GraphRenderer({
       <Dialog>
         <DialogTrigger asChild>
           <div className="cursor-zoom-in relative">
-            <img
+            <img loading="lazy"
               src={`data:image/png;base64,${imageBase64}`}
               alt="Математический график"
               className="w-full rounded-lg border shadow-sm transition-shadow hover:shadow-md"
@@ -157,7 +157,7 @@ const GraphRenderer = memo(function GraphRenderer({
           </div>
         </DialogTrigger>
         <DialogContent className="max-w-4xl p-2">
-          <img
+          <img loading="lazy"
             src={`data:image/png;base64,${imageBase64}`}
             alt="Математический график (увеличено)"
             className="w-full rounded-lg"

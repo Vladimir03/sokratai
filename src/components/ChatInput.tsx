@@ -336,7 +336,7 @@ const ChatInput = memo(({
         {previewUrl && (
           <div className="relative w-full">
             <div className="relative rounded-xl overflow-hidden border border-border shadow-lg bg-muted/50">
-              <img
+              <img loading="lazy"
                 src={previewUrl}
                 alt="Preview"
                 className="w-full max-h-[50vh] md:max-h-96 object-contain"

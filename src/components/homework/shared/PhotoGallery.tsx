@@ -19,12 +19,12 @@ const TAP_THRESHOLD_MS = 50;
  * Two modes для избежания nested interactive elements:
  *
  *   interactive=true (default, для standalone use в Dialog fullscreen):
- *     - success → `<img>` (renders inside parent context)
+ *     - success → `<img loading="lazy">` (renders inside parent context)
  *     - failed → `<a href download>` с placeholder (без `target="_blank"` —
  *       HTML5 download attribute ignored для cross-origin когда есть target).
  *
  *   interactive=false (для use внутри `<button>` — GalleryThumbnail):
- *     - success → `<img>`
+ *     - success → `<img loading="lazy">`
  *     - failed → `<span>` non-interactive placeholder (НЕ `<a>` — иначе
  *       nested `<a>` inside `<button>` = invalid markup, click ambiguous).
  *       User кликает enclosing button — open dialog с full-size attempt,

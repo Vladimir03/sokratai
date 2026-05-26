@@ -78,7 +78,7 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
                 return (
                   <div key={ref} className="relative">
                     {signedUrl ? (
-                      <img
+                      <img loading="lazy"
                         src={signedUrl}
                         alt={`Фото ${idx + 1}`}
                         className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
@@ -103,7 +103,7 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
               {/* New images (blob URLs) */}
               {previewUrls.map((url, index) => (
                 <div key={`new-${index}`} className="relative">
-                  <img
+                  <img loading="lazy"
                     src={url}
                     alt={`Фото ${existingRefs.length + index + 1}`}
                     className="h-24 w-24 rounded-lg border border-socrat-border object-cover"

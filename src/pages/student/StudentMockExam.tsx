@@ -703,7 +703,7 @@ function PhotoUploadBox({
             rel="noreferrer"
             className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50"
           >
-            <img src={previewUrl} alt={title} className="max-h-64 w-full object-contain" />
+            <img loading="lazy" src={previewUrl} alt={title} className="max-h-64 w-full object-contain" />
           </a>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm">
@@ -885,7 +885,7 @@ function Part2TaskCard({
         {imageUrls.length > 0 && (
           <div className="mt-4 grid gap-3">
             {imageUrls.map((url, index) => (
-              <img
+              <img loading="lazy"
                 key={`${task.kim_number}-${index}`}
                 src={url}
                 alt={`Иллюстрация к заданию ${task.kim_number}`}

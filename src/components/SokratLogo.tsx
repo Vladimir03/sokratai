@@ -6,7 +6,7 @@ interface SokratLogoProps {
 
 const SokratLogo = ({ className = "" }: SokratLogoProps) => {
   return (
-    <img
+    <img loading="lazy"
       src={sokratLogo}
       alt="Сократ AI"
       className={className}
