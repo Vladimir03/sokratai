@@ -1258,6 +1258,13 @@ async function processAIRequest(
     clientStudentGender === "male" || clientStudentGender === "female"
       ? clientStudentGender
       : null;
+  // Phase 8.1 (2026-05-26) — symmetric с gender: name теперь тоже server-side
+  // resolved через canonical priority chain (tutor_students.display_name →
+  // profiles.full_name → profiles.username filtered → null). До этого fix'а
+  // chat path доверял client-supplied `studentName`, что было slabое место:
+  // stale cache мог дать устаревшее имя, attacker мог spoof'ить через DevTools.
+  // DB value WINS — после успешного lookup отбрасываем client value.
+  let resolvedStudentName: string | null = null;
   if (guidedHomeworkAssignmentId && guidedHomeworkTaskId) {
     try {
       const { data: assignmentRow, error: assignmentErr } = await adminSupabase
@@ -1318,9 +1325,12 @@ async function processAIRequest(
           if (dbExamType === "ege" || dbExamType === "oge") {
             resolvedExamType = dbExamType;
           }
-          // Phase 8 (2026-05-20): server-side gender lookup. Priority:
-          // tutor_students.gender (tutor-curated) → profiles.gender (signup).
-          // DB value WINS over client-supplied (anti-tamper).
+          // Phase 8 (2026-05-20) + Phase 8.1 (2026-05-26): server-side identity
+          // lookup для name + gender. Priority chain:
+          //   tutor_students.display_name + .gender (tutor-curated) →
+          //   profiles.full_name + .gender (signup) →
+          //   profiles.username (filtered) для name → null
+          // DB value WINS over client-supplied (anti-tamper для обоих полей).
           //
           // КРИТИЧНО (CLAUDE.md §8a + §28, regression fix 2026-05-26):
           //   homework_tutor_assignments.tutor_id = auth.users.id, но
@@ -1331,44 +1341,76 @@ async function processAIRequest(
           if (typeof tutorIdFromAssn === "string" && tutorIdFromAssn.length > 0) {
             try {
               // Convert auth.users.id → public.tutors.id (PK).
-              const { data: tutorRow } = await adminSupabase
+              const { data: tutorRow, error: tutorRowErr } = await adminSupabase
                 .from("tutors")
                 .select("id")
                 .eq("user_id", tutorIdFromAssn)
                 .maybeSingle();
+              if (tutorRowErr) {
+                console.warn("guided_chat_tutor_pk_lookup_failed", {
+                  assignment_id: guidedHomeworkAssignmentId,
+                  error: tutorRowErr.message,
+                });
+              }
               const tutorPkId = (tutorRow as { id?: string } | null)?.id;
 
               const tsLookup = tutorPkId
                 ? adminSupabase
                     .from("tutor_students")
-                    .select("gender")
+                    .select("display_name, gender")
                     .eq("tutor_id", tutorPkId)
                     .eq("student_id", userId)
                     .maybeSingle()
                 : Promise.resolve({ data: null });
 
-              const [tsGenderResp, profGenderResp] = await Promise.all([
+              const [tsResp, profResp] = await Promise.all([
                 tsLookup,
                 adminSupabase
                   .from("profiles")
-                  .select("gender")
+                  .select("full_name, username, gender")
                   .eq("id", userId)
                   .maybeSingle(),
               ]);
-              const tg = (tsGenderResp.data as { gender?: unknown } | null)?.gender;
+              const tsData = tsResp.data as {
+                display_name?: unknown;
+                gender?: unknown;
+              } | null;
+              const profData = profResp.data as {
+                full_name?: unknown;
+                username?: unknown;
+                gender?: unknown;
+              } | null;
+
+              // Phase 8.1: name resolution server-side (parallel с gender).
+              const curatedRaw =
+                typeof tsData?.display_name === "string" ? tsData.display_name.trim() : "";
+              const fullNameRaw =
+                typeof profData?.full_name === "string" ? profData.full_name.trim() : "";
+              const usernameRaw =
+                typeof profData?.username === "string" ? profData.username.trim() : "";
+              if (curatedRaw) {
+                resolvedStudentName = curatedRaw;
+              } else if (fullNameRaw) {
+                resolvedStudentName = fullNameRaw;
+              } else if (usernameRaw && !/^(telegram_|user_)\d+$/i.test(usernameRaw)) {
+                resolvedStudentName = usernameRaw;
+              }
+
+              // Gender resolution (unchanged).
+              const tg = tsData?.gender;
               if (tg === "male" || tg === "female") {
                 resolvedStudentGender = tg;
               } else {
-                const pg = (profGenderResp.data as { gender?: unknown } | null)?.gender;
+                const pg = profData?.gender;
                 if (pg === "male" || pg === "female") {
                   resolvedStudentGender = pg;
                 }
               }
-            } catch (genderErr) {
-              // Non-fatal — AI falls back to neutral forms.
-              console.warn("guided_chat_gender_lookup_failed", {
+            } catch (identityErr) {
+              // Non-fatal — AI falls back to client-supplied name + neutral gender.
+              console.warn("guided_chat_identity_lookup_failed", {
                 assignment_id: guidedHomeworkAssignmentId,
-                error: genderErr instanceof Error ? genderErr.message : String(genderErr),
+                error: identityErr instanceof Error ? identityErr.message : String(identityErr),
               });
             }
           }
@@ -1626,22 +1668,29 @@ async function processAIRequest(
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${solutionBlock}`;
   }
 
-  // Phase 8 (2026-05-20): student identity guidance — name + EXPLICIT gender
-  // + praise variation + frequency cap. Mirror of guided_ai.ts
-  // buildStudentNameGuidance (Deno cannot import across edge functions).
+  // Phase 8 (2026-05-20) + Phase 8.1 (2026-05-26): student identity guidance —
+  // name + EXPLICIT gender + praise variation + frequency cap. Mirror of
+  // guided_ai.ts buildStudentNameGuidance (Deno cannot import across edge
+  // functions).
   //
-  // PLACEMENT note: chat path строит prompt linearly (base → subject →
-  // task → solution → name → telegram). Раньше name guidance был в самом
-  // конце — тонул. Сейчас он перед telegram appendix, но после solution
-  // block. Для guided_ai.ts buildCheckPrompt placement в самое начало
-  // (после rubric.role). Идеально было бы и здесь prepend, но
-  // resolvedStudentGender populates inline во время subject hydration,
-  // поэтому compromise: после solution block, перед telegram.
+  // PLACEMENT note: chat path строит prompt linearly (base → subject → task →
+  // solution → name → telegram). Append'ится после solution block, перед
+  // telegram appendix. Для guided_ai.ts buildCheckPrompt placement в самое
+  // начало (после rubric.role) — там можно prepend потому что resolveStudent*
+  // фетчатся до построения prompt. Здесь resolved* populates inline во время
+  // subject hydration (одновременно с tutor solution fetch), поэтому append
+  // — единственный способ без рефакторинга порядка.
   //
-  // GENDER source: resolvedStudentGender (server-side подтверждено через
-  // tutor_students.gender → profiles.gender, anti-tamper). Client-supplied
-  // studentGender — только hint, DB value wins.
-  const trimmedName = (studentName && typeof studentName === "string") ? studentName.trim().slice(0, 100) : "";
+  // SOURCES (Phase 8.1):
+  //   - resolvedStudentName: server-side через tutor_students.display_name →
+  //     profiles.full_name → profiles.username (filtered). DB wins over client.
+  //   - resolvedStudentGender: server-side через tutor_students.gender →
+  //     profiles.gender. DB wins over client.
+  //   Client `studentName` / `studentGender` остаются как fallback если
+  //   server lookup провалился (rolling deploy gap, RLS quirks).
+  const trimmedName = resolvedStudentName
+    ? resolvedStudentName.trim().slice(0, 100)
+    : (studentName && typeof studentName === "string") ? studentName.trim().slice(0, 100) : "";
   if (trimmedName || resolvedStudentGender) {
     const nameLines: string[] = [""];
     if (trimmedName) {
@@ -1667,7 +1716,7 @@ async function processAIRequest(
       "- При похвале ВАРЬИРУЙ фразы. Выбирай из: «Молодец», «Отлично», «Точно», «Верно», «Грамотно», «Хороший ход», «Здорово подмечено», «То, что нужно», «Класс», «Правильно мыслишь». НЕ повторяй одну и ту же похвалу в двух подряд сообщениях.",
     );
     const nameGuidance = nameLines.join("\n");
-    // PREPEND, not append.
+    // Append after solution block, before telegram appendix (see PLACEMENT note).
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${nameGuidance}`;
   }
 

@@ -366,34 +366,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
     throw new StudentHomeworkApiError(assignmentError?.message ?? 'Задание не найдено');
   }
 
-  const [{ data: tasks, error: tasksError }, { data: materials, error: materialsError }] =
-    await Promise.all([
-      supabase
-        .from('homework_tutor_tasks')
-        // task_kind added 2026-05-09 (Phase 1 student problem screen).
-        // Legacy /homework/:id route still uses this fetch + the desktop
-        // GuidedHomeworkWorkspace; without task_kind in the SELECT, any
-        // future task_kind-aware UI on that path silently sees `undefined`
-        // and defaults to `extended`. Anti-leak: solution_*/rubric_*
-        // deliberately excluded — student-facing endpoint.
-        .select(
-          'id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind',
-        )
-        .eq('assignment_id', assignmentId)
-        .order('order_num', { ascending: true }),
-      supabase
-        .from('homework_tutor_materials')
-        .select('id, assignment_id, type, title, storage_ref, url, created_at')
-        .eq('assignment_id', assignmentId)
-        .order('created_at', { ascending: true }),
-    ]);
-
-  if (tasksError) throw new StudentHomeworkApiError(tasksError.message);
-  if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
-
-  // Resolve student display name + gender for AI system prompts.
-  //
-  // Phase 8.1 (2026-05-26) — BACKEND REROUTE FIX:
+  // Phase 8.1 (2026-05-26) — BACKEND REROUTE FIX для identity:
   //   До этого фикса frontend делал direct PostgREST query на `tutor_students`
   //   с FK condition `tutor_id = assignment.tutor_id`. Это БРОКЕНО по двум
   //   причинам (CLAUDE.md §28):
@@ -412,27 +385,54 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   //   правильный tutor.user_id → tutor.id (PK) lookup + резолвит обе priority
   //   chains. Mirror backend `resolveStudentIdentity` в `homework-api`.
   //
+  // Phase 8.1 polish (ChatGPT-5.5 P2 #2): identity fetch теперь параллельно
+  // с tasks/materials через Promise.all — раньше был sequential round trip
+  // ПОСЛЕ tasks+materials, что добавляло ~150ms на legacy desktop path.
+  //
   // Priority chain (canonical, server-side):
   //   1. tutor_students.display_name + tutor_students.gender (tutor-curated)
   //   2. profiles.full_name + profiles.gender (signup data, fallback)
   //   3. profiles.username (filtered) для name only
   //   4. null (AI uses neutral form)
-  let studentDisplayName: string | null = null;
-  let studentGender: 'male' | 'female' | null = null;
-  try {
-    const identity = await requestStudentHomeworkApi<{
+  const [tasksResult, materialsResult, identityResult] = await Promise.all([
+    supabase
+      .from('homework_tutor_tasks')
+      // task_kind added 2026-05-09 (Phase 1 student problem screen).
+      // Legacy /homework/:id route still uses this fetch + the desktop
+      // GuidedHomeworkWorkspace; without task_kind in the SELECT, any
+      // future task_kind-aware UI on that path silently sees `undefined`
+      // and defaults to `extended`. Anti-leak: solution_*/rubric_*
+      // deliberately excluded — student-facing endpoint.
+      .select(
+        'id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind',
+      )
+      .eq('assignment_id', assignmentId)
+      .order('order_num', { ascending: true }),
+    supabase
+      .from('homework_tutor_materials')
+      .select('id, assignment_id, type, title, storage_ref, url, created_at')
+      .eq('assignment_id', assignmentId)
+      .order('created_at', { ascending: true }),
+    // Identity endpoint: silent fail при rolling deploy gap или RLS quirks —
+    // AI fallback на neutral. Не блокирует tasks/materials.
+    requestStudentHomeworkApi<{
       name: string | null;
       gender: 'male' | 'female' | null;
-    }>(`/assignments/${encodeURIComponent(assignmentId)}/identity`, { method: 'GET' });
-    studentDisplayName = identity.name;
-    studentGender = identity.gender;
-  } catch (err) {
-    // Non-critical — AI will use neutral forms if endpoint failed.
-    // Note: Phase 8.1 deploy gap window — frontend may temporarily call
-    // endpoint that doesn't exist yet on backend. Silent fallback prevents
-    // breaking the legacy desktop workspace until edge function is deployed.
-    console.warn('student_identity_fetch_failed', err);
-  }
+    }>(`/assignments/${encodeURIComponent(assignmentId)}/identity`, { method: 'GET' }).catch(
+      (err) => {
+        console.warn('student_identity_fetch_failed', err);
+        return { name: null, gender: null };
+      },
+    ),
+  ]);
+
+  const { data: tasks, error: tasksError } = tasksResult;
+  const { data: materials, error: materialsError } = materialsResult;
+  if (tasksError) throw new StudentHomeworkApiError(tasksError.message);
+  if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
+
+  const studentDisplayName: string | null = identityResult.name;
+  const studentGender: 'male' | 'female' | null = identityResult.gender;
 
   const assignmentRecord = assignment as Record<string, unknown>;
   const result = {

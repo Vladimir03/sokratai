@@ -71,7 +71,10 @@ function AiAddressPreviewMini({
         <span className="ml-auto opacity-50 text-[10px]">{expanded ? '−' : '+'}</span>
       </div>
       {expanded && (
-        <div className="mt-1 italic text-[12px]">«{preview.exampleSentence}»</div>
+        <div className="mt-1 text-[12px]">
+          <span className="opacity-60">AI напишет примерно так: </span>
+          <span>«{preview.exampleSentence}»</span>
+        </div>
       )}
     </button>
   );

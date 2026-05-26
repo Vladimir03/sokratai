@@ -5488,8 +5488,12 @@ async function resolveStudentDisplayName(
  *   2. profiles.gender (student selected at signup, fallback)
  *   3. null (AI uses neutral forms or guesses)
  *
- * Name + gender resolved в одном transaction'е для consistency — оба поля
- * tutor-curated, fetch'ятся вместе.
+ * Name + gender resolved параллельно — оба поля tutor-curated, fetch'ятся
+ * через серию point-lookups (Postgres не транзакционно, но consistency не
+ * критична для prompt-build path).
+ *
+ * Per-stage error logging (Phase 8.1 polish): каждая DB query логирует свой
+ * error отдельно, чтобы DB/schema проблемы не выглядели как «unset identity».
  */
 type StudentGender = "male" | "female" | null;
 
@@ -5498,20 +5502,33 @@ async function resolveStudentIdentity(
   studentAssignmentId: string,
 ): Promise<{ name: string | null; gender: StudentGender }> {
   try {
-    const { data: sa } = await db
+    const { data: sa, error: saErr } = await db
       .from("homework_tutor_student_assignments")
       .select("student_id, assignment_id")
       .eq("id", studentAssignmentId)
       .maybeSingle();
+    if (saErr) {
+      console.warn("resolve_student_identity_sa_lookup_failed", {
+        studentAssignmentId,
+        error: saErr.message,
+      });
+    }
     const studentId = sa?.student_id as string | undefined;
     const assignmentId = sa?.assignment_id as string | undefined;
     if (!studentId || !assignmentId) return { name: null, gender: null };
 
-    const { data: assn } = await db
+    const { data: assn, error: assnErr } = await db
       .from("homework_tutor_assignments")
       .select("tutor_id")
       .eq("id", assignmentId)
       .maybeSingle();
+    if (assnErr) {
+      console.warn("resolve_student_identity_assignment_lookup_failed", {
+        studentAssignmentId,
+        assignmentId,
+        error: assnErr.message,
+      });
+    }
     const tutorId = assn?.tutor_id as string | undefined;
 
     // Priority chain для name + gender:
@@ -5528,19 +5545,33 @@ async function resolveStudentIdentity(
       // `auth.users.id`, но `tutor_students.tutor_id` ссылается на `public.tutors.id`
       // (PK). Без явной конвертации lookup ВСЕГДА возвращает null → tutor-curated
       // display_name/gender игнорируются (наблюдаемый regression 2026-05-26).
-      const { data: tutorRow } = await db
+      const { data: tutorRow, error: tutorRowErr } = await db
         .from("tutors")
         .select("id")
         .eq("user_id", tutorId)
         .maybeSingle();
+      if (tutorRowErr) {
+        console.warn("resolve_student_identity_tutor_pk_lookup_failed", {
+          studentAssignmentId,
+          tutorAuthUserId: tutorId,
+          error: tutorRowErr.message,
+        });
+      }
       const tutorPkId = tutorRow?.id as string | undefined;
       if (tutorPkId) {
-        const { data: ts } = await db
+        const { data: ts, error: tsErr } = await db
           .from("tutor_students")
           .select("display_name, gender")
           .eq("tutor_id", tutorPkId)
           .eq("student_id", studentId)
           .maybeSingle();
+        if (tsErr) {
+          console.warn("resolve_student_identity_tutor_students_lookup_failed", {
+            studentAssignmentId,
+            tutorPkId,
+            error: tsErr.message,
+          });
+        }
         const curated = typeof ts?.display_name === "string" ? ts.display_name.trim() : "";
         if (curated) resolvedName = curated;
         const tg = typeof ts?.gender === "string" ? ts.gender : null;
@@ -5549,11 +5580,18 @@ async function resolveStudentIdentity(
     }
 
     // Always read profiles for fallback name + fallback gender.
-    const { data: prof } = await db
+    const { data: prof, error: profErr } = await db
       .from("profiles")
       .select("full_name, username, gender")
       .eq("id", studentId)
       .maybeSingle();
+    if (profErr) {
+      console.warn("resolve_student_identity_profiles_lookup_failed", {
+        studentAssignmentId,
+        studentId,
+        error: profErr.message,
+      });
+    }
 
     if (!resolvedName) {
       const fullName = typeof prof?.full_name === "string" ? prof.full_name.trim() : "";

@@ -51,7 +51,14 @@ export function buildAiAddressPreview(
   return { summary, exampleSentence, severity };
 }
 
-/** Цвета для chip / badge в зависимости от severity. */
+/**
+ * Цвета для chip / badge в зависимости от severity.
+ *
+ * Phase 8.1 polish: label теперь говорит «Пример тона», а не «AI обращение
+ * готово». Это снижает trust drift — example sentence ниже это иллюстрация
+ * стиля, а не дословный output AI. AI вариативен в формулировках, серверный
+ * prompt даёт guidance, а не template.
+ */
 export const AI_ADDRESS_SEVERITY_STYLES: Record<
   AiAddressPreview["severity"],
   { bg: string; text: string; border: string; label: string }
@@ -60,18 +67,18 @@ export const AI_ADDRESS_SEVERITY_STYLES: Record<
     bg: "bg-emerald-50",
     text: "text-emerald-800",
     border: "border-emerald-200",
-    label: "AI обращение готово",
+    label: "Пример тона AI",
   },
   partial: {
     bg: "bg-amber-50",
     text: "text-amber-800",
     border: "border-amber-200",
-    label: "AI частично настроен",
+    label: "Пример тона (частично настроен)",
   },
   missing: {
     bg: "bg-slate-50",
     text: "text-slate-600",
     border: "border-slate-200",
-    label: "AI нейтрально",
+    label: "Пример тона (нейтральный)",
   },
 };

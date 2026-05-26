@@ -74,13 +74,14 @@ function AiAddressPreviewChip({
     <div
       className={`rounded-lg border px-3 py-2 text-sm ${styles.bg} ${styles.border} ${styles.text}`}
       role="note"
-      aria-label="Превью обращения AI"
+      aria-label="Превью тона обращения AI"
     >
       <div className="flex items-center gap-1.5 text-xs font-medium mb-1">
         <span className="opacity-70">{styles.label}:</span>
         <span>{preview.summary}</span>
       </div>
-      <div className="text-sm italic">«{preview.exampleSentence}»</div>
+      <div className="text-[11px] opacity-70 mb-0.5">AI напишет примерно так:</div>
+      <div className="text-sm">«{preview.exampleSentence}»</div>
       {preview.severity !== 'ok' && (
         <p className="text-[11px] mt-1 opacity-80">
           {preview.severity === 'missing'

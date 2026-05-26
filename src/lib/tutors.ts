@@ -49,6 +49,7 @@ const STUDENT_PROFILE_SELECT = `
   profiles (
     id,
     username,
+    full_name,
     telegram_username,
     telegram_user_id,
     grade,

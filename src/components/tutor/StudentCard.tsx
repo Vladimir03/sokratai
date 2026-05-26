@@ -53,11 +53,26 @@ export const StudentCard = memo(function StudentCard({
   const isAiConnected = Boolean(student.profiles?.telegram_user_id);
 
   // Phase 8.1 (2026-05-26): AI настройки (имя + пол) для visibility chip.
-  // Amber-dot indicator показывается если у ученика НЕ настроен gender —
-  // тутор может видеть это сразу в списке и пройтись настроить.
+  // Amber-dot indicator показывается когда AI **реально** обратится нейтрально —
+  // т.е. нет ни tutor-curated имени, ни fallback'ов на profile.full_name или
+  // не-автогенерированный username. Mirror серверной priority chain
+  // resolveStudentIdentity (homework-api/index.ts:5517-5567), иначе tooltip
+  // будет лгать «AI без имени» когда AI на самом деле использует full_name
+  // (ChatGPT-5.5 review #2, 2026-05-26).
   const hasCuratedName = Boolean(student.display_name?.trim());
+  const fullNameFromProfile = student.profiles?.full_name?.trim() ?? '';
+  const usernameFromProfile = student.profiles?.username?.trim() ?? '';
+  const hasNonAutoUsername =
+    usernameFromProfile.length > 0 && !/^(telegram_|user_)\d+$/i.test(usernameFromProfile);
+  const hasAnyName = hasCuratedName || Boolean(fullNameFromProfile) || hasNonAutoUsername;
   const hasCuratedGender = student.gender === 'male' || student.gender === 'female';
-  const showAiSetupNudge = !hasCuratedName || !hasCuratedGender;
+  // Show nudge if AI **actually** lacks name OR gender. Если есть имя через
+  // fallback (full_name) и только gender не выставлен — это всё ещё стоит
+  // показать (нейтральный род = неточно), но tooltip даст точное объяснение.
+  const showAiSetupNudge = !hasAnyName || !hasCuratedGender;
+  // For tooltip copy: разделяем case «AI вообще не знает имя» от
+  // «tutor не закрепил персональное AI-имя, но fallback работает».
+  const aiUsesNameFallback = !hasCuratedName && hasAnyName;
 
   // Activation status
   const lastSignIn = student.last_sign_in_at ?? null;
@@ -106,12 +121,16 @@ export const StudentCard = memo(function StudentCard({
                         aria-label="AI настройки не заполнены"
                       />
                     </TooltipTrigger>
-                    <TooltipContent side="right" className="text-xs max-w-[240px]">
-                      {!hasCuratedName && !hasCuratedGender
-                        ? 'AI пишет нейтрально без имени. Открой профиль ученика и заполни «Как обращаться в AI-чате» + «Пол ученика».'
+                    <TooltipContent side="right" className="text-xs max-w-[260px]">
+                      {!hasAnyName && !hasCuratedGender
+                        ? 'AI пишет нейтрально и без имени. Открой профиль и заполни «Как обращаться в AI-чате» + «Пол ученика».'
+                        : !hasAnyName
+                        ? 'AI не знает имя ученика. Открой профиль и заполни «Как обращаться в AI-чате».'
+                        : !hasCuratedGender && aiUsesNameFallback
+                        ? 'AI использует имя из профиля, но пишет в нейтральном роде. Закрепи персональное имя + выбери «Пол ученика».'
                         : !hasCuratedGender
-                        ? 'AI пишет в нейтральном роде. Открой профиль и выбери «Пол ученика» для правильных глаголов.'
-                        : 'AI не использует имя в обращении. Открой профиль и заполни «Как обращаться в AI-чате».'}
+                        ? 'AI пишет в нейтральном роде. Выбери «Пол ученика» для правильных глаголов.'
+                        : 'Персональное AI-имя не закреплено. AI использует имя из профиля; закрепи свой вариант, если хочешь точнее.'}
                     </TooltipContent>
                   </Tooltip>
                 )}

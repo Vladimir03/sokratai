@@ -80,6 +80,12 @@ export interface TutorStudentWithProfile extends TutorStudent {
   profiles: {
     id: string;
     username: string;
+    /**
+     * Real name из signup. Используется AI как fallback когда
+     * tutor_students.display_name пуст. Источник истины для
+     * StudentCard.showAiSetupNudge (Phase 8.1 polish).
+     */
+    full_name?: string | null;
     telegram_username: string | null;
     telegram_user_id: number | null;
     grade: number | null;
