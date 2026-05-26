@@ -1882,7 +1882,41 @@ Phase 8 закрывает регрессию у репетитора-франц
 
 **Симптом нарушения:** AI обращается к Anastasiia как «он подставил». Грепнуть paths на отсутствующий `studentGender`.
 
-**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 8 section + CLAUDE.md §8 (original 3 paths name) + §27 (Phase 7 anti-leak preceding context).
+**Phase 8.1 hotfix — FK mismatch в `tutor_students` lookup (2026-05-26):**
+
+После релиза Phase 8 выяснилось, что **name + gender lookup не работал** для большинства учеников, даже когда тутор аккуратно выставил `display_name` и `gender` в `TutorStudentProfile`. Симптом — Vladimir в test pilot 2026-05-26: «Ирина, gender=female в БД, но AI пишет нейтрально без имени». 5 раундов диагностики выявили **тот же FK mismatch** что и в админ-аналитике (CLAUDE.md §8a):
+
+- `homework_tutor_assignments.tutor_id` → `auth.users.id`
+- `tutor_students.tutor_id` → `public.tutors.id` (**PK таблицы tutors**, не user_id)
+- Lookup `tutor_students.tutor_id = assignment.tutor_id` **никогда** не находил строку → tutor-curated `display_name` + `gender` молча игнорировались → fallback в `profiles.full_name` / `profiles.gender` (работало только если эти поля заполнены в signup, что редко)
+
+Три точки с одинаковым багом (все исправлены, hotfix 2026-05-26):
+
+1. **`homework-api/index.ts::resolveStudentIdentity`** — server-side resolve для check / hint / submission / handleGetStudentProblem / bootstrap. Использовался во всех 4 AI-путях, но lookup ВСЕГДА возвращал null. Fix: explicit `tutors.user_id → tutors.id` lookup перед запросом `tutor_students`.
+
+2. **`chat/index.ts` gender hydration** (line ~1327-1370) — server-side gender lookup для chat-discuss path (mobile + legacy `streamChat`). Та же ошибка. Fix: тот же pattern.
+
+3. **`src/lib/studentHomeworkApi.ts::getStudentAssignment`** — frontend direct PostgREST query на `tutor_students`. Бага было **две**: FK mismatch + RLS не разрешает student-side `SELECT` на `tutor_students` (это tutor-curated данные). Fix (выбор Vladimir UX 2026-05-26): **убрать direct query, route через backend edge function**. Новый endpoint `GET /assignments/:id/identity` (`handleGetStudentIdentity` в `homework-api`) — service_role bypass RLS + правильный FK lookup + identity priority chain → `{name, gender}` to frontend.
+
+**Hard invariant (Phase 8.1):**
+
+ЛЮБОЙ lookup на `tutor_students` или `tutor_lessons` или `tutor_payments` (любая таблица где `tutor_id` ссылается на `public.tutors.id` PK) при наличии **только** `auth.users.id` (например из `homework_tutor_assignments.tutor_id` или JWT) ОБЯЗАН делать explicit conversion через `tutors.user_id → tutors.id` map. Паттерн:
+
+```ts
+const { data: tutorRow } = await db
+  .from("tutors")
+  .select("id")
+  .eq("user_id", authUserId)
+  .maybeSingle();
+const tutorPkId = tutorRow?.id;
+if (tutorPkId) {
+  // Теперь tutorPkId совпадает с tutor_students.tutor_id и т.д.
+}
+```
+
+Грепни перед merge: `.from("tutor_students")` / `.from("tutor_lessons")` / `.from("tutor_payments")` — каждый callsite должен использовать `tutors.id`, не `auth.users.id`. Если контекст имеет только auth.users.id — нужна конвертация. См. также CLAUDE.md §8a (admin-homework::tutorExtras прошёл этот же fix 2026-05-25).
+
+**Spec link:** `~/.claude/plans/1-functional-meteor.md` Phase 8 section + CLAUDE.md §8 (original 3 paths name) + §27 (Phase 7 anti-leak preceding context) + §28 Phase 8.1 hotfix (this section).
 
 ### 29. Mock-exams Recipient Management — add students + delete + remove student (2026-05-17, TASK-17)
 

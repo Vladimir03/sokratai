@@ -1321,16 +1321,34 @@ async function processAIRequest(
           // Phase 8 (2026-05-20): server-side gender lookup. Priority:
           // tutor_students.gender (tutor-curated) → profiles.gender (signup).
           // DB value WINS over client-supplied (anti-tamper).
+          //
+          // КРИТИЧНО (CLAUDE.md §8a + §28, regression fix 2026-05-26):
+          //   homework_tutor_assignments.tutor_id = auth.users.id, но
+          //   tutor_students.tutor_id ссылается на public.tutors.id (PK).
+          //   Lookup без конвертации ВСЕГДА возвращает null. Резолвим
+          //   tutors.user_id → tutors.id первым шагом.
           const tutorIdFromAssn = (assignmentMetaResp.data as { tutor_id?: unknown }).tutor_id;
           if (typeof tutorIdFromAssn === "string" && tutorIdFromAssn.length > 0) {
             try {
+              // Convert auth.users.id → public.tutors.id (PK).
+              const { data: tutorRow } = await adminSupabase
+                .from("tutors")
+                .select("id")
+                .eq("user_id", tutorIdFromAssn)
+                .maybeSingle();
+              const tutorPkId = (tutorRow as { id?: string } | null)?.id;
+
+              const tsLookup = tutorPkId
+                ? adminSupabase
+                    .from("tutor_students")
+                    .select("gender")
+                    .eq("tutor_id", tutorPkId)
+                    .eq("student_id", userId)
+                    .maybeSingle()
+                : Promise.resolve({ data: null });
+
               const [tsGenderResp, profGenderResp] = await Promise.all([
-                adminSupabase
-                  .from("tutor_students")
-                  .select("gender")
-                  .eq("tutor_id", tutorIdFromAssn)
-                  .eq("student_id", userId)
-                  .maybeSingle(),
+                tsLookup,
                 adminSupabase
                   .from("profiles")
                   .select("gender")

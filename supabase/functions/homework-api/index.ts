@@ -5524,16 +5524,28 @@ async function resolveStudentIdentity(
     let curatedGender: StudentGender = null;
 
     if (tutorId) {
-      const { data: ts } = await db
-        .from("tutor_students")
-        .select("display_name, gender")
-        .eq("tutor_id", tutorId)
-        .eq("student_id", studentId)
+      // КРИТИЧНО (CLAUDE.md §8a + §28): homework_tutor_assignments.tutor_id хранит
+      // `auth.users.id`, но `tutor_students.tutor_id` ссылается на `public.tutors.id`
+      // (PK). Без явной конвертации lookup ВСЕГДА возвращает null → tutor-curated
+      // display_name/gender игнорируются (наблюдаемый regression 2026-05-26).
+      const { data: tutorRow } = await db
+        .from("tutors")
+        .select("id")
+        .eq("user_id", tutorId)
         .maybeSingle();
-      const curated = typeof ts?.display_name === "string" ? ts.display_name.trim() : "";
-      if (curated) resolvedName = curated;
-      const tg = typeof ts?.gender === "string" ? ts.gender : null;
-      if (tg === "male" || tg === "female") curatedGender = tg;
+      const tutorPkId = tutorRow?.id as string | undefined;
+      if (tutorPkId) {
+        const { data: ts } = await db
+          .from("tutor_students")
+          .select("display_name, gender")
+          .eq("tutor_id", tutorPkId)
+          .eq("student_id", studentId)
+          .maybeSingle();
+        const curated = typeof ts?.display_name === "string" ? ts.display_name.trim() : "";
+        if (curated) resolvedName = curated;
+        const tg = typeof ts?.gender === "string" ? ts.gender : null;
+        if (tg === "male" || tg === "female") curatedGender = tg;
+      }
     }
 
     // Always read profiles for fallback name + fallback gender.
@@ -6123,6 +6135,47 @@ async function handleGetStudentAssignment(
     updated_at: assignment.created_at,
     tasks: tasks ?? [],
     materials: materials ?? [],
+  });
+}
+
+// ─── Endpoint: GET /assignments/:id/identity (student) ──────────────────────
+//
+// Lightweight resolver для legacy frontend path (studentHomeworkApi::getStudentAssignment).
+// Возвращает имя + пол ученика для AI промпта (canonical chain: tutor_students →
+// profiles → null). Service-role обходит RLS на tutor_students, фронт получает
+// результат без direct PostgREST query (которая всё равно ломалась из-за
+// `tutor_students.tutor_id` FK mismatch + RLS).
+//
+// См. CLAUDE.md §28 + §8a (cross-table tutor_id invariant).
+async function handleGetStudentIdentity(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "VALIDATION", "Invalid assignment ID");
+  }
+
+  // Verify enrollment first — иначе можно резолвить identity любого ассигнмента.
+  const { data: sa, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+
+  if (saErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to verify student assignment");
+  }
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Assignment not found");
+  }
+
+  const identity = await resolveStudentIdentity(db, sa.id as string);
+  return jsonOk(cors, {
+    name: identity.name,
+    gender: identity.gender,
   });
 }
 
@@ -8780,6 +8833,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/student (student endpoint)
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "student" && route.method === "GET") {
       return await handleGetStudentAssignment(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/identity (student endpoint) — Phase 8 regression fix
+    if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "identity" && route.method === "GET") {
+      return await handleGetStudentIdentity(db, userId, seg[1], cors);
     }
 
     // GET /student/problem/:hwId/:taskId
