@@ -964,6 +964,16 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // AC-P10 (2026-05-25): Pause / Resume для training mode пробников.
   const [pauseOpen, setPauseOpen] = useState(false);
   const [isPausing, setIsPausing] = useState(false);
+  // AC-P10 Phase 2 (PAUSE-4, 2026-05-25): start modal с mode picker. Open при
+  // первом open пробника (sessions=[] && started_at=null). Pre-selected
+  // tutor recommendation (assignment.default_exam_mode).
+  const [startModalOpen, setStartModalOpen] = useState<boolean>(
+    () => data.attempt.started_at === null,
+  );
+  const [startModeChoice, setStartModeChoice] = useState<'simulation' | 'training'>(
+    () => data.assignment.default_exam_mode ?? 'training',
+  );
+  const [isStartingAttempt, setIsStartingAttempt] = useState(false);
   // exam_mode immutable после старта. Default 'training' для backward compat
   // (existing attempts до миграции получают DB default).
   const examMode: 'simulation' | 'training' = data.attempt.exam_mode ?? 'training';
@@ -1032,14 +1042,17 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       navigate(`/student/mock-exams/${data.assignment.id}/result`, { replace: true });
       return;
     }
-    if (!data.attempt.started_at) {
+    // AC-P10 Phase 2 (PAUSE-4): НЕ auto-start если start modal открыт.
+    // Старый flow auto-fire'ил /start с no mode → backend применял default
+    // training. Новый flow ждёт student explicit choice (или close → default).
+    if (!data.attempt.started_at && !startModalOpen) {
       const optimisticStart = new Date().toISOString();
       setStartedAt(optimisticStart);
       startMockExamAttempt(data.attempt.id).catch((err) => {
         console.warn('[mock-exam] failed to start attempt', err);
       });
     }
-  }, [data.assignment.id, data.attempt.id, data.attempt.started_at, data.attempt.status, navigate]);
+  }, [data.assignment.id, data.attempt.id, data.attempt.started_at, data.attempt.status, navigate, startModalOpen]);
 
   useEffect(() => {
     return () => {
@@ -1160,6 +1173,33 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const uploadingCount =
     (blankPhoto.status === 'uploading' ? 1 : 0) +
     (bulkUploadStatus === 'uploading' ? 1 : 0);
+
+  // AC-P10 Phase 2 (PAUSE-4): start modal submit — фиксирует mode + запускает
+  // attempt. После start backend записывает sessions = [{started_at: now,
+  // ended_at: null}] и exam_mode immutably.
+  const handleStartConfirm = async () => {
+    setIsStartingAttempt(true);
+    try {
+      const optimisticStart = new Date().toISOString();
+      setStartedAt(optimisticStart);
+      await startMockExamAttempt(data.attempt.id, { exam_mode: startModeChoice });
+      // Refresh attempt data — exam_mode/sessions/started_at теперь set.
+      void queryClient.invalidateQueries({
+        queryKey: ['student', 'mock-exam', data.assignment.id],
+      });
+      setStartModalOpen(false);
+    } catch (err) {
+      console.error('[mock-exam] start failed', err);
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Не удалось запустить пробник. Попробуй ещё раз.';
+      // Inline в start modal? Для простоты — toast через console + keep modal open.
+      // User видит «Начать» button enabled снова, может retry.
+    } finally {
+      setIsStartingAttempt(false);
+    }
+  };
 
   // AC-P10 hotfix (F6): auto-submit при истечении времени. Fires once через
   // ref в TimerBadge. Для simulation triggers wall-clock; для training —
@@ -1515,6 +1555,113 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             </div>
           </div>
         </div>
+
+        {/* AC-P10 Phase 2 (PAUSE-4, 2026-05-25): start modal с mode picker.
+            Open при первом open пробника. Pre-selected = tutor recommendation,
+            student override allowed (приоритет student wins). */}
+        <Dialog
+          open={startModalOpen}
+          onOpenChange={(open) => {
+            // Защита от close без выбора — modal модальный по дизайну.
+            if (!isStartingAttempt && open) setStartModalOpen(open);
+          }}
+        >
+          <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+            <DialogHeader>
+              <DialogTitle>Как будешь решать?</DialogTitle>
+              <DialogDescription>
+                У тебя {durationMinutes} {durationMinutes % 10 === 1 && durationMinutes % 100 !== 11
+                  ? 'минута'
+                  : durationMinutes % 10 >= 2 && durationMinutes % 10 <= 4 && (durationMinutes % 100 < 10 || durationMinutes % 100 >= 20)
+                  ? 'минуты'
+                  : 'минут'} на пробник. Выбери режим — после старта изменить нельзя.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-3">
+              <label
+                htmlFor="start-mode-training"
+                className={`flex items-start gap-3 rounded-md border-2 p-3 cursor-pointer transition-colors ${
+                  startModeChoice === 'training'
+                    ? 'border-accent bg-accent/5'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  id="start-mode-training"
+                  name="start-mode"
+                  value="training"
+                  checked={startModeChoice === 'training'}
+                  onChange={() => setStartModeChoice('training')}
+                  disabled={isStartingAttempt}
+                  className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 flex items-center gap-2 flex-wrap">
+                    📚 Тренировка
+                    {data.assignment.default_exam_mode === 'training' && (
+                      <span className="text-[10px] uppercase rounded bg-accent/10 text-accent px-1.5 py-0.5 font-semibold">
+                        Рекомендует репетитор
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    Можешь прерываться когда нужно. Таймер встанет на паузу —
+                    вернёшься и продолжишь с остатка. Подходит, если решаешь
+                    в несколько присестов.
+                  </div>
+                </div>
+              </label>
+
+              <label
+                htmlFor="start-mode-simulation"
+                className={`flex items-start gap-3 rounded-md border-2 p-3 cursor-pointer transition-colors ${
+                  startModeChoice === 'simulation'
+                    ? 'border-accent bg-accent/5'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <input
+                  type="radio"
+                  id="start-mode-simulation"
+                  name="start-mode"
+                  value="simulation"
+                  checked={startModeChoice === 'simulation'}
+                  onChange={() => setStartModeChoice('simulation')}
+                  disabled={isStartingAttempt}
+                  className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 flex items-center gap-2 flex-wrap">
+                    ⚡ Симуляция ЕГЭ
+                    {data.assignment.default_exam_mode === 'simulation' && (
+                      <span className="text-[10px] uppercase rounded bg-accent/10 text-accent px-1.5 py-0.5 font-semibold">
+                        Рекомендует репетитор
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-600 mt-1 leading-relaxed">
+                    {durationMinutes} минут wall-clock без пауз. Закрыл вкладку —
+                    таймер не остановится. Как реальный экзамен.
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                className="touch-manipulation bg-accent text-white hover:bg-accent/90 w-full"
+                onClick={() => void handleStartConfirm()}
+                disabled={isStartingAttempt}
+              >
+                {isStartingAttempt && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Начать пробник
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* AC-P10 (2026-05-25): Pause confirm dialog. */}
         <Dialog open={pauseOpen} onOpenChange={(open) => !isPausing && setPauseOpen(open)}>

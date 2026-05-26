@@ -309,7 +309,7 @@ async function handleGetStudentAssignment(
 
   const { data: assignment, error: assignmentErr } = await db
     .from("mock_exam_assignments")
-    .select("id, variant_id, variant_title, title, mode, deadline, status")
+    .select("id, variant_id, variant_title, title, mode, deadline, status, default_exam_mode")
     .eq("id", assignmentId)
     .maybeSingle();
   if (assignmentErr || !assignment) {
@@ -400,6 +400,10 @@ async function handleGetStudentAssignment(
       mode: assignment.mode,
       deadline: assignment.deadline,
       status: assignment.status,
+      // AC-P10 Phase 2 (PAUSE-7/PAUSE-4): tutor recommendation для start modal.
+      // Default 'training' для backward compat с pre-migration assignments.
+      default_exam_mode:
+        (assignment.default_exam_mode as "simulation" | "training" | null) ?? "training",
     },
     variant: variant
       ? {

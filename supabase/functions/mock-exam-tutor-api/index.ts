@@ -1338,6 +1338,17 @@ async function handleGetAttempt(
     // failure ({cells:{}, error, raw_response, ...}) — оба варианта
     // нормализуются. Already-canonical → no-op.
     ai_part1_ocr_json: normalizePart1OCRJson(attempt.ai_part1_ocr_json) ?? null,
+    // AC-P10 Phase 2 (PAUSE-8): expose pause/session fields для tutor review.
+    // - exam_mode: final mode после student override (immutable после первого start)
+    // - default_exam_mode: assignment-level tutor recommendation; UI показывает
+    //   indicator если они differ («ученик выбрал»)
+    // - sessions: per-session breakdown («Solo time: 50+30+70 мин»)
+    // - total_active_ms: cached sum для quick KPI без recomputation
+    exam_mode: (attempt.exam_mode as string | null) ?? "training",
+    default_exam_mode: (assignment.default_exam_mode as string | null) ?? "training",
+    sessions: Array.isArray(attempt.sessions) ? attempt.sessions : [],
+    total_active_ms:
+      typeof attempt.total_active_ms === "number" ? attempt.total_active_ms : 0,
   });
 }
 

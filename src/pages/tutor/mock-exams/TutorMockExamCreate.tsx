@@ -464,6 +464,11 @@ function TutorMockExamCreateContent() {
   const [title, setTitle] = useState(DEFAULT_TITLE);
   const [deadlineInput, setDeadlineInput] = useState('');
   const [createLeadLink, setCreateLeadLink] = useState(false);
+  // AC-P10 Phase 2 (PAUSE-7, 2026-05-25): default execution mode для new attempts.
+  // Tutor recommendation — ученик может override в start modal (PAUSE-4).
+  const [defaultExamMode, setDefaultExamMode] = useState<'training' | 'simulation'>(
+    'training',
+  );
 
   // Selected group ids (UI). Toggling a group expands/collapses its
   // active members in `selectedStudentIds`. Individual students can also
@@ -594,6 +599,8 @@ function TutorMockExamCreateContent() {
         mode,
         deadline: deadlineIso,
         student_ids: studentIds,
+        // AC-P10 Phase 2 (PAUSE-7): tutor recommendation для start modal.
+        default_exam_mode: defaultExamMode,
       });
 
       const assignmentId = created.assignment_id;
@@ -636,6 +643,7 @@ function TutorMockExamCreateContent() {
     }
   }, [
     isValidForSubmit,
+    defaultExamMode,
     deadlineInput,
     variantId,
     trimmedTitle,
@@ -802,6 +810,73 @@ function TutorMockExamCreateContent() {
               className="text-base sm:max-w-xs"
             />
             <p className="text-xs text-muted-foreground">{DURATION_HINT}</p>
+          </div>
+
+          {/* AC-P10 Phase 2 (PAUSE-7, 2026-05-25): default exam mode picker.
+              Tutor recommendation для start modal — ученик может override (PAUSE-4). */}
+          <div className="space-y-2">
+            <Label>Режим прохождения по умолчанию</Label>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label
+                htmlFor="exam-mode-training"
+                className={`flex items-start gap-3 rounded-md border-2 p-3 cursor-pointer transition-colors ${
+                  defaultExamMode === 'training'
+                    ? 'border-accent bg-accent/5'
+                    : 'border-slate-200 hover:border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  id="exam-mode-training"
+                  name="default-exam-mode"
+                  value="training"
+                  checked={defaultExamMode === 'training'}
+                  onChange={() => setDefaultExamMode('training')}
+                  className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                    📚 Тренировка (рекомендуется)
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    Ученик может прерывать. Таймер останавливается на паузе —
+                    можно вернуться позже и продолжить.
+                  </div>
+                </div>
+              </label>
+
+              <label
+                htmlFor="exam-mode-simulation"
+                className={`flex items-start gap-3 rounded-md border-2 p-3 cursor-pointer transition-colors ${
+                  defaultExamMode === 'simulation'
+                    ? 'border-accent bg-accent/5'
+                    : 'border-slate-200 hover:border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <input
+                  type="radio"
+                  id="exam-mode-simulation"
+                  name="default-exam-mode"
+                  value="simulation"
+                  checked={defaultExamMode === 'simulation'}
+                  onChange={() => setDefaultExamMode('simulation')}
+                  className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                    ⚡ Симуляция ЕГЭ
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                    4 часа подряд без пауз — как реальный экзамен.
+                    Для финальной подготовки.
+                  </div>
+                </div>
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Ученик увидит этот режим как рекомендованный, но сможет переключить
+              перед началом пробника.
+            </p>
           </div>
         </div>
       </StepSection>

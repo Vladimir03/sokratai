@@ -405,8 +405,14 @@ export interface MockExamAttemptDetail {
   /**
    * AC-P10 (2026-05-25): execution mode (simulation/training).
    * Tutor review shows badge based on this. Optional для backward compat.
+   * Это **final mode** после student override (immutable после первого start).
    */
   exam_mode?: MockExamExamMode | null;
+  /**
+   * AC-P10 Phase 2 (PAUSE-8, 2026-05-25): assignment-level tutor recommendation.
+   * Tutor UI показывает override indicator если exam_mode != default_exam_mode.
+   */
+  default_exam_mode?: MockExamExamMode | null;
   /**
    * AC-P10: work sessions для Tutor «Solo time + sessions detail» в review surface.
    * Latest session may have ended_at=null если status='in_progress'.

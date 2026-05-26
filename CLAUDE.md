@@ -998,6 +998,17 @@ JTBD-trigger (Володя 2026-05-25 от учеников): «не могу н
 3. При добавлении нового session-tracking field (e.g. `pause_count` для anti-abuse Phase 2) — придерживаться JSONB sessions structure, не дублировать в отдельную колонку.
 4. Phase 2 для full feature: TutorMockExamCreate toggle + start modal + per-session breakdown + paused KPI card.
 
+**Phase 2 landed (2026-05-25, PAUSE-4 + PAUSE-7 + PAUSE-8):**
+- **PAUSE-7 — TutorMockExamCreate toggle (`default_exam_mode`):** radio в L1 «Параметры пробника» — «📚 Тренировка / ⚡ Симуляция ЕГЭ». Default 'training'. Записывается в `mock_exam_assignments.default_exam_mode` через `createMockExamAssignment` payload.
+- **PAUSE-4 — Student start modal (mode picker):** Dialog при первом open пробника (`started_at === null`). Pre-selected = tutor recommendation (`assignment.default_exam_mode`), badge «Рекомендует репетитор» на pre-selected option. Student override allowed (приоритет student wins). Click «Начать пробник» → `startMockExamAttempt(id, {exam_mode: choice})`. Backend применяет override только при первом start (sessions=[] && started_at=null) — immutable после.
+- **PAUSE-8 — Tutor review mode badge + sessions detail:** новый компонент `ExamModeAndSessionsBadge` в `TutorMockExamReview.tsx`. Показывает:
+  - Mode badge: «⚡ Симуляция ЕГЭ» (rose) / «📚 Тренировка» (emerald) — это **final mode** (immutable).
+  - Override indicator: amber «Ученик выбрал» chip если `exam_mode !== default_exam_mode`. Tooltip показывает что tutor рекомендовал.
+  - «Solo time: 2ч 30мин в 3 сессии» — total active time + session count.
+  - Collapsible `<details>` с per-session breakdown («Сессия 1: 28.05 19:00 → 19:50 (50 мин)...») для tutor coaching/diagnostics.
+  - Skip render если training + 0-1 sessions без override (не информативно).
+- **Override chain UX contract (Vladimir 2026-05-25):** tutor `default_exam_mode` = recommendation (не блокирует); student `exam_mode` = final immutable choice (override allowed). Tutor видит **финальный** mode + amber «Ученик выбрал» badge если override. Это «recommend, don't enforce» pattern.
+
 **Hotfix (2026-05-25, ChatGPT-5.5 code review — P0 #1, #2 + P2 #1):**
 - **P0 #1 — Legacy attempts cannot pause** (migration `20260525140000_attempt_sessions_backfill.sql`): existing pilot attempts с `started_at IS NOT NULL` AND `sessions='[]'` (после AC-P10 migration default) → click ⏸ Pause → 409 NO_ACTIVE_SESSION. Fix: backfill migration инициализирует sessions = `[{started_at, ended_at: null}]` для всех такая legacy in_progress attempts. Plus defensive synthesis в `handlePauseAttempt` (если sessions=[] && started_at — create+close session inline). Belt-and-suspenders.
 - **P0 #2 — Timer wall-clock instead of active time:** `StudentMockExam.tsx::TimerBadge` считал elapsed от `data.attempt.started_at` (wall-clock). Для training mode после resume через неделю timer показывал «-5 дней» или auto-submit срабатывал мгновенно. Fix:

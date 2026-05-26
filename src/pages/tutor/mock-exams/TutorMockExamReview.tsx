@@ -950,6 +950,147 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   );
 }
 
+// ─── AC-P10 Phase 2 (PAUSE-8) — Mode badge + sessions detail ─────────────────
+
+/**
+ * AC-P10 Phase 2 (2026-05-25): отображает execution mode (Simulation/Training)
+ * + override indicator если ученик override'нул tutor recommendation
+ * + collapsible session breakdown («Solo time: 50+30+70 мин»).
+ *
+ * Skip render если режим training + 0-1 sessions (т.е. ученик не паузил —
+ * нет полезной информации). Simulation всегда рендерится для visibility.
+ */
+function ExamModeAndSessionsBadge({ attempt }: { attempt: MockExamAttemptDetail }) {
+  const examMode = attempt.exam_mode ?? 'training';
+  const defaultExamMode = attempt.default_exam_mode ?? 'training';
+  const studentOverrode = examMode !== defaultExamMode;
+  const sessions = Array.isArray(attempt.sessions) ? attempt.sessions : [];
+  const totalActiveMs = attempt.total_active_ms ?? 0;
+
+  // Skip если training + 0-1 sessions — нет paused sessions, ничего показывать.
+  if (examMode === 'training' && sessions.length <= 1 && !studentOverrode) {
+    return null;
+  }
+
+  // Compute per-session durations.
+  const closedSessions = sessions.filter(
+    (s) => typeof s.ended_at === 'string',
+  ) as Array<{ started_at: string; ended_at: string }>;
+  const sessionDurations = closedSessions.map((s) => {
+    const startMs = Date.parse(s.started_at);
+    const endMs = Date.parse(s.ended_at);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
+    return Math.max(0, endMs - startMs);
+  });
+  const totalActiveMin = Math.round(totalActiveMs / 60_000);
+
+  return (
+    <Card animate={false} className="border-slate-200 dark:border-slate-700">
+      <CardContent className="p-4">
+        <div className="flex items-start gap-2 flex-wrap">
+          <Badge
+            variant="outline"
+            className={`text-xs font-medium ${
+              examMode === 'simulation'
+                ? 'border-rose-300 bg-rose-50 text-rose-800 dark:bg-rose-950/30 dark:text-rose-200'
+                : 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+            }`}
+          >
+            {examMode === 'simulation' ? '⚡ Симуляция ЕГЭ' : '📚 Тренировка'}
+          </Badge>
+          {studentOverrode && (
+            <Badge
+              variant="outline"
+              className="border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-200 text-xs"
+              title={`Ты рекомендовал: ${
+                defaultExamMode === 'simulation' ? '⚡ Симуляция' : '📚 Тренировка'
+              }`}
+            >
+              Ученик выбрал
+            </Badge>
+          )}
+          {sessions.length > 0 && (
+            <span className="text-xs text-slate-600 dark:text-slate-400 tabular-nums">
+              Solo time:{' '}
+              <strong className="text-slate-900 dark:text-slate-100">
+                {Math.floor(totalActiveMin / 60)}ч {totalActiveMin % 60}мин
+              </strong>
+              {sessions.length > 1 && (
+                <> в {sessions.length}{' '}
+                  {sessions.length === 1
+                    ? 'сессию'
+                    : sessions.length >= 2 && sessions.length <= 4
+                      ? 'сессии'
+                      : 'сессий'}
+                </>
+              )}
+            </span>
+          )}
+        </div>
+
+        {/* Per-session details collapsible — only if 2+ sessions */}
+        {sessions.length > 1 && (
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer touch-manipulation text-slate-500 hover:text-slate-900 dark:hover:text-slate-200">
+              ▼ Сессии работы
+            </summary>
+            <ol className="mt-2 space-y-1 pl-4">
+              {sessions.map((s, idx) => {
+                const startMs = Date.parse(s.started_at);
+                const endMs = s.ended_at ? Date.parse(s.ended_at) : null;
+                const durationMs =
+                  endMs !== null && Number.isFinite(startMs) && Number.isFinite(endMs)
+                    ? endMs - startMs
+                    : null;
+                const durationMin =
+                  durationMs !== null ? Math.round(durationMs / 60_000) : null;
+                const formattedStart = Number.isFinite(startMs)
+                  ? new Date(startMs).toLocaleString('ru-RU', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : '?';
+                const formattedEnd = endMs && Number.isFinite(endMs)
+                  ? new Date(endMs).toLocaleTimeString('ru-RU', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : null;
+                return (
+                  <li
+                    key={`${s.started_at}-${idx}`}
+                    className="text-slate-600 dark:text-slate-400 tabular-nums"
+                  >
+                    Сессия {idx + 1}: {formattedStart}
+                    {formattedEnd ? ` → ${formattedEnd}` : ' → продолжается'}
+                    {durationMin !== null && (
+                      <span className="ml-1 text-slate-500">
+                        ({durationMin} мин)
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+            {sessionDurations.length > 1 && (
+              <p className="mt-2 text-slate-500 text-[11px] leading-relaxed">
+                Активное время:{' '}
+                {sessionDurations
+                  .map((ms) => Math.round(ms / 60_000))
+                  .filter((m) => m > 0)
+                  .join(' + ')}{' '}
+                = {totalActiveMin} мин
+              </p>
+            )}
+          </details>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Part 1 summary card ─────────────────────────────────────────────────────
 
 function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
@@ -1991,6 +2132,12 @@ function TutorMockExamReviewContent() {
           </div>
         </div>
       </div>
+
+      {/* AC-P10 Phase 2 (PAUSE-8, 2026-05-25): exam mode badge + sessions detail.
+          Показываем final mode (attempt.exam_mode) + override indicator если
+          ученик выбрал не то что рекомендовал tutor. Collapsible per-session
+          breakdown для tutor coaching. */}
+      <ExamModeAndSessionsBadge attempt={attempt} />
 
       {/* Recovery / non-blocking errors */}
       <TutorDataStatus

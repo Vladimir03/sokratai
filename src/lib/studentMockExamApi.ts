@@ -131,6 +131,12 @@ export interface StudentMockExamAssignmentView {
     mode: MockExamMode;
     deadline: string | null;
     status: MockExamAssignmentStatus;
+    /**
+     * AC-P10 Phase 2 (PAUSE-7, 2026-05-25): tutor recommendation для start
+     * modal. Pre-selected в picker; student override allowed (приоритет
+     * student wins, см. `attempt.exam_mode`).
+     */
+    default_exam_mode: MockExamExamMode;
   };
   variant: StudentMockExamVariantSummary | null;
   tasks: StudentMockExamVariantTask[];
