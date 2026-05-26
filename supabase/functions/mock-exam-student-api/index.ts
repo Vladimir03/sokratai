@@ -733,7 +733,108 @@ async function handleGetResult(
 // POST /attempts/:id/start
 // ────────────────────────────────────────────────────────────────────────────
 
+// AC-P10 helper (2026-05-25): compute total active ms from sessions array.
+// sessions: [{started_at: ISO, ended_at: ISO|null}, ...]
+// Returns sum of (ended_at - started_at) for closed sessions; open session
+// (ended_at=null) excluded — caller adds (now - started_at) when needed.
+function computeTotalActiveMs(sessions: unknown): number {
+  if (!Array.isArray(sessions)) return 0;
+  let total = 0;
+  for (const s of sessions) {
+    if (!s || typeof s !== "object") continue;
+    const session = s as Record<string, unknown>;
+    const startStr = session.started_at;
+    const endStr = session.ended_at;
+    if (typeof startStr !== "string") continue;
+    if (typeof endStr !== "string") continue; // open session — skip
+    const startMs = Date.parse(startStr);
+    const endMs = Date.parse(endStr);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue;
+    const diff = endMs - startMs;
+    if (diff > 0) total += diff;
+  }
+  return total;
+}
+
 async function handleStartAttempt(
+  db: SupabaseClient,
+  studentUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, studentUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const attempt = ownedOrErr;
+
+  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "ALREADY_FINAL", "Работа уже завершена");
+  }
+
+  // AC-P10 (2026-05-25): exam_mode picker — student override or tutor default.
+  // Mode immutable после первого start (sessions != []). При повторном /start
+  // существующего attempt — игнорируем body.exam_mode, возвращаем existing mode.
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  const requestedMode = b.exam_mode;
+  let examMode: "simulation" | "training" = (attempt.exam_mode as "simulation" | "training" | null) ?? "training";
+  if (requestedMode === "simulation" || requestedMode === "training") {
+    // Allow override only on first start (sessions empty + started_at NULL).
+    const sessions = Array.isArray(attempt.sessions) ? attempt.sessions : [];
+    if (sessions.length === 0 && !attempt.started_at) {
+      examMode = requestedMode;
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // Idempotent: only initialize on first call (started_at IS NULL && sessions=[]).
+  // Re-calling /start safe для tab reopen flow — возвращаем existing state.
+  if (!attempt.started_at) {
+    const initialSessions = [{ started_at: nowIso, ended_at: null }];
+    const { error } = await db
+      .from("mock_exam_attempts")
+      .update({
+        started_at: nowIso,
+        exam_mode: examMode,
+        sessions: initialSessions,
+        total_active_ms: 0,
+      })
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId)
+      .eq("status", "in_progress");
+    if (error) {
+      console.error("mock_exam_start_failed", { attempt_id: attemptId, error: error.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось запустить пробник");
+    }
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    exam_mode: examMode,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /attempts/:id/pause  — pause training mode attempt (AC-P10, 2026-05-25)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Останавливает active timer для training mode пробников. Idempotent: повторный
+// call не плодит сессий, возвращает paused state.
+//
+// Logic:
+//   1. Owner check (student.id === attempt.student_id)
+//   2. Status guard: in_progress only
+//   3. Mode guard: exam_mode='training' only (simulation НЕ позволяет pause)
+//   4. Latest session.ended_at = now (закрыть)
+//   5. Recompute total_active_ms
+//   6. UPDATE status='paused', sessions, total_active_ms
+//
+// Симптом отсутствия инварианта: ученик в simulation mode видит кнопку pause
+// и нажимает → 400 PAUSE_NOT_ALLOWED. Frontend обязан скрывать кнопку для
+// simulation; backend защищает as defense-in-depth.
+
+async function handlePauseAttempt(
   db: SupabaseClient,
   studentUserId: string,
   attemptId: string,
@@ -743,23 +844,142 @@ async function handleStartAttempt(
   if (ownedOrErr instanceof Response) return ownedOrErr;
   const attempt = ownedOrErr;
 
-  if (attempt.status === "approved" || attempt.status === "manually_entered") {
-    return jsonError(cors, 409, "ALREADY_FINAL", "Attempt is already finalized");
+  // Idempotent: уже paused → возвращаем current state.
+  if (attempt.status === "paused") {
+    const totalActiveMs = (attempt.total_active_ms as number | null) ?? 0;
+    return jsonOk(cors, {
+      ok: true,
+      attempt_id: attemptId,
+      status: "paused",
+      total_active_ms: totalActiveMs,
+    });
   }
 
-  // Idempotent: only set started_at if NULL. Re-calling /start is safe — used
-  // for "I just opened the exam tab again" recovery flow.
-  if (!attempt.started_at) {
-    const { error } = await db
-      .from("mock_exam_attempts")
-      .update({ started_at: new Date().toISOString() })
-      .eq("id", attemptId)
-      .eq("student_id", studentUserId)
-      .eq("status", "in_progress");
-    if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to start attempt");
+  if (attempt.status !== "in_progress") {
+    return jsonError(cors, 409, "NOT_IN_PROGRESS",
+      `Нельзя приостановить пробник со статусом «${attempt.status}»`);
   }
 
-  return jsonOk(cors, { ok: true, attempt_id: attemptId });
+  const examMode = (attempt.exam_mode as "simulation" | "training" | null) ?? "training";
+  if (examMode === "simulation") {
+    return jsonError(cors, 400, "PAUSE_NOT_ALLOWED",
+      "Пауза недоступна в режиме «Симуляция ЕГЭ». Таймер идёт wall-clock как на реальном экзамене.");
+  }
+
+  const sessions = Array.isArray(attempt.sessions) ? [...attempt.sessions] : [];
+  if (sessions.length === 0) {
+    return jsonError(cors, 409, "NO_ACTIVE_SESSION",
+      "Не найдена активная сессия для паузы. Возможно, пробник ещё не начат.");
+  }
+
+  // Close latest session if open.
+  const nowIso = new Date().toISOString();
+  const lastIdx = sessions.length - 1;
+  const last = sessions[lastIdx] as Record<string, unknown> | null;
+  if (!last || typeof last !== "object" || last.ended_at !== null) {
+    return jsonError(cors, 409, "NO_OPEN_SESSION",
+      "Активная сессия уже закрыта. Обнови страницу.");
+  }
+  sessions[lastIdx] = { ...last, ended_at: nowIso };
+
+  const totalActiveMs = computeTotalActiveMs(sessions);
+
+  const { error } = await db
+    .from("mock_exam_attempts")
+    .update({
+      status: "paused",
+      sessions,
+      total_active_ms: totalActiveMs,
+    })
+    .eq("id", attemptId)
+    .eq("student_id", studentUserId)
+    .eq("status", "in_progress"); // CAS guard against concurrent submit
+  if (error) {
+    console.error("mock_exam_pause_failed", { attempt_id: attemptId, error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось приостановить пробник. Попробуй ещё раз.");
+  }
+
+  console.info(JSON.stringify({
+    event: "mock_exam_attempt_paused",
+    attempt_id: attemptId,
+    total_active_ms: totalActiveMs,
+    sessions_count: sessions.length,
+  }));
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    status: "paused",
+    total_active_ms: totalActiveMs,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// POST /attempts/:id/resume  — resume paused attempt (AC-P10, 2026-05-25)
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Возобновляет paused training-mode пробник. Idempotent: повторный call в
+// in_progress возвращает current state без новой сессии.
+//
+// Logic:
+//   1. Owner check
+//   2. Status: paused (or in_progress for idempotency)
+//   3. Append { started_at: now, ended_at: null }
+//   4. UPDATE status='in_progress', sessions
+
+async function handleResumeAttempt(
+  db: SupabaseClient,
+  studentUserId: string,
+  attemptId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, studentUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const attempt = ownedOrErr;
+
+  // Idempotent: уже in_progress → возвращаем current state.
+  if (attempt.status === "in_progress") {
+    return jsonOk(cors, {
+      ok: true,
+      attempt_id: attemptId,
+      status: "in_progress",
+    });
+  }
+
+  if (attempt.status !== "paused") {
+    return jsonError(cors, 409, "NOT_PAUSED",
+      `Нельзя возобновить пробник со статусом «${attempt.status}»`);
+  }
+
+  const nowIso = new Date().toISOString();
+  const sessions = Array.isArray(attempt.sessions) ? [...attempt.sessions] : [];
+  sessions.push({ started_at: nowIso, ended_at: null });
+
+  const { error } = await db
+    .from("mock_exam_attempts")
+    .update({
+      status: "in_progress",
+      sessions,
+    })
+    .eq("id", attemptId)
+    .eq("student_id", studentUserId)
+    .eq("status", "paused"); // CAS guard against multi-tab race
+  if (error) {
+    console.error("mock_exam_resume_failed", { attempt_id: attemptId, error: error.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось возобновить пробник. Попробуй ещё раз.");
+  }
+
+  console.info(JSON.stringify({
+    event: "mock_exam_attempt_resumed",
+    attempt_id: attemptId,
+    sessions_count: sessions.length,
+  }));
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    status: "in_progress",
+  });
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1062,9 +1282,12 @@ async function handleSubmitAttempt(
   if (ownedOrErr instanceof Response) return ownedOrErr;
   const attempt = ownedOrErr;
 
-  if (attempt.status !== "in_progress") {
+  // AC-P10 (2026-05-25): allow submit из 'in_progress' AND 'paused'. Ученик
+  // может нажать «Сдать» прямо из list-card paused state без обязательного
+  // resume → submit. Backend закрывает session как при resume → submit chain.
+  if (attempt.status !== "in_progress" && attempt.status !== "paused") {
     return jsonError(cors, 409, "NOT_IN_PROGRESS",
-      `Cannot submit attempt with status=${attempt.status}`);
+      `Нельзя сдать пробник со статусом «${attempt.status}»`);
   }
 
   // Per-attempt answer method (TASK-10/TASK-11). Default fallback 'form' для
@@ -1208,7 +1431,23 @@ async function handleSubmitAttempt(
     }
   }
 
-  // Compute total_time_minutes from started_at.
+  // AC-P10 (2026-05-25): close last open session if status was in_progress.
+  // Compute final total_active_ms (sum of session durations).
+  // For simulation mode — total_time_minutes остаётся wall-clock (как раньше),
+  // т.к. simulation mode не использует pause: time spent == time on exam.
+  const finalSessions = Array.isArray(attempt.sessions) ? [...attempt.sessions] : [];
+  if (finalSessions.length > 0) {
+    const lastIdx = finalSessions.length - 1;
+    const last = finalSessions[lastIdx] as Record<string, unknown> | null;
+    if (last && typeof last === "object" && last.ended_at === null) {
+      finalSessions[lastIdx] = { ...last, ended_at: now };
+    }
+  }
+  const finalTotalActiveMs = computeTotalActiveMs(finalSessions);
+
+  // total_time_minutes — wall-clock от started_at (для backward compat + tutor
+  // analytics). Для AC-P10: tutor дополнительно видит total_active_ms +
+  // sessions detail в TutorMockExamReview.
   let totalTimeMinutes: number | null = null;
   if (attempt.started_at) {
     const startedMs = Date.parse(attempt.started_at as string);
@@ -1233,6 +1472,8 @@ async function handleSubmitAttempt(
   // free hand-off and removes the race.
   //
   // See: docs/delivery/features/mock-exams-v1-pilot-polish/ocr-grading-recovery-spec.md
+  // AC-P10: include sessions + total_active_ms в UPDATE. CAS guard теперь
+  // принимает оба ('in_progress' OR 'paused') — submit allowed from either state.
   const { error: updateErr } = await db
     .from("mock_exam_attempts")
     .update({
@@ -1240,12 +1481,15 @@ async function handleSubmitAttempt(
       submitted_at: now,
       total_time_minutes: totalTimeMinutes,
       total_part1_score: totalPart1,
+      sessions: finalSessions,
+      total_active_ms: finalTotalActiveMs,
     })
     .eq("id", attemptId)
-    .eq("student_id", studentUserId);
+    .eq("student_id", studentUserId)
+    .in("status", ["in_progress", "paused"]); // CAS: prev status
   if (updateErr) {
     console.error("mock_exam_submit_status_update_failed", { error: updateErr.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to finalize submission");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось завершить отправку. Попробуй ещё раз.");
   }
 
   // Fire-and-forget AI grading job (TASK-5 — edge function `mock-exam-grade`).
@@ -1378,7 +1622,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg.length === 3 && seg[0] === "attempts" &&
       seg[2] === "start" && route.method === "POST"
     ) {
-      return await handleStartAttempt(db, userId, seg[1], cors);
+      const body = await parseJsonBody(req);
+      return await handleStartAttempt(db, userId, seg[1], body, cors);
+    }
+
+    // POST /attempts/:id/pause  (AC-P10, 2026-05-25 — Training mode multi-session)
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "pause" && route.method === "POST"
+    ) {
+      return await handlePauseAttempt(db, userId, seg[1], cors);
+    }
+
+    // POST /attempts/:id/resume  (AC-P10)
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "resume" && route.method === "POST"
+    ) {
+      return await handleResumeAttempt(db, userId, seg[1], cors);
     }
 
     // PATCH /attempts/:id/answer

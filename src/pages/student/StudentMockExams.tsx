@@ -17,7 +17,7 @@
 
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ClipboardCheck, Clock, CheckCircle2, AlertCircle, ChevronRight } from 'lucide-react';
+import { ClipboardCheck, Clock, CheckCircle2, AlertCircle, ChevronRight, Pause } from 'lucide-react';
 import AuthGuard from '@/components/AuthGuard';
 import Navigation from '@/components/Navigation';
 import { PageContent } from '@/components/PageContent';
@@ -32,6 +32,10 @@ interface AttemptRow {
   submitted_at: string | null;
   total_score: number | null;
   assignment_id: string;
+  // AC-P10 (2026-05-25): pause/multi-session fields. Optional для backward
+  // compat с pre-migration rows (default 0 / [] applied на server side).
+  total_active_ms: number | null;
+  exam_mode: string | null;
   mock_exam_assignments: {
     id: string;
     title: string;
@@ -46,7 +50,7 @@ interface AttemptRow {
   } | null;
 }
 
-type DisplayStatus = 'not_started' | 'in_progress' | 'pending_review' | 'approved';
+type DisplayStatus = 'not_started' | 'in_progress' | 'paused' | 'pending_review' | 'approved';
 
 function deriveStatus(row: AttemptRow): DisplayStatus {
   if (row.status === 'approved' || row.status === 'manually_entered') return 'approved';
@@ -57,8 +61,29 @@ function deriveStatus(row: AttemptRow): DisplayStatus {
   ) {
     return 'pending_review';
   }
+  // AC-P10: paused — отдельный display state с amber «На паузе» badge.
+  if (row.status === 'paused') return 'paused';
   if (row.status === 'in_progress' && row.started_at !== null) return 'in_progress';
   return 'not_started';
+}
+
+/**
+ * AC-P10 (2026-05-25): Форматирование остатка времени для paused attempt.
+ * Возвращает «осталось 02:34:15» или null если данные incomplete.
+ */
+function formatRemainingTime(
+  totalActiveMs: number | null,
+  durationMinutes: number | null,
+): string | null {
+  if (totalActiveMs === null || durationMinutes === null) return null;
+  const totalMs = durationMinutes * 60_000;
+  const remainingMs = Math.max(0, totalMs - totalActiveMs);
+  if (remainingMs === 0) return 'время вышло';
+  const totalSec = Math.floor(remainingMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  if (h === 0) return `осталось ${m} мин`;
+  return `осталось ${h} ч ${m.toString().padStart(2, '0')} мин`;
 }
 
 const STATUS_BADGE: Record<DisplayStatus, { label: string; className: string; icon: typeof Clock }> = {
@@ -71,6 +96,12 @@ const STATUS_BADGE: Record<DisplayStatus, { label: string; className: string; ic
     label: 'В процессе',
     className: 'bg-amber-100 text-amber-900',
     icon: Clock,
+  },
+  // AC-P10: paused — amber pause icon, similar urgency как in_progress.
+  paused: {
+    label: 'На паузе',
+    className: 'bg-amber-100 text-amber-900',
+    icon: Pause,
   },
   pending_review: {
     label: 'На проверке у репетитора',
@@ -87,6 +118,7 @@ const STATUS_BADGE: Record<DisplayStatus, { label: string; className: string; ic
 const CTA_LABEL: Record<DisplayStatus, string> = {
   not_started: 'Начать пробник',
   in_progress: 'Продолжить',
+  paused: 'Продолжить', // AC-P10: same CTA, sub-label покажет remaining time
   pending_review: 'Подробнее',
   approved: 'Открыть результат',
 };
@@ -131,6 +163,8 @@ export default function StudentMockExams() {
           submitted_at,
           total_score,
           assignment_id,
+          total_active_ms,
+          exam_mode,
           mock_exam_assignments (
             id,
             title,
@@ -163,7 +197,7 @@ export default function StudentMockExams() {
     };
   }, []);
 
-  const handleClick = (row: AttemptRow) => {
+  const handleClick = async (row: AttemptRow) => {
     // Routes /student/mock-exams/:id and /:id/result expect ASSIGNMENT id,
     // not attempt id (StudentMockExam.tsx → getStudentMockExam(assignmentId)
     // calls /student/:assignmentId on the edge function). Backend имеет
@@ -181,9 +215,23 @@ export default function StudentMockExams() {
     const status = deriveStatus(row);
     if (status === 'approved') {
       navigate(`/student/mock-exams/${target}/result`);
-    } else {
-      navigate(`/student/mock-exams/${target}`);
+      return;
     }
+    // AC-P10 (2026-05-25): для paused — explicit resume call before navigate.
+    // Без этого StudentMockExam useEffect видит status='paused' и redirect'нёт
+    // обратно на list → infinite loop.
+    if (status === 'paused') {
+      try {
+        const { resumeMockExamAttempt } = await import('@/lib/studentMockExamApi');
+        await resumeMockExamAttempt(row.id);
+      } catch (err) {
+        console.error('[StudentMockExams] resume failed', err);
+        // Continue navigate — StudentMockExam can show retry path.
+      }
+      navigate(`/student/mock-exams/${target}`);
+      return;
+    }
+    navigate(`/student/mock-exams/${target}`);
   };
 
   return (
@@ -249,7 +297,7 @@ export default function StudentMockExams() {
                   <Card
                     key={row.id}
                     className="cursor-pointer hover:shadow-md transition-shadow"
-                    onClick={() => handleClick(row)}
+                    onClick={() => void handleClick(row)}
                   >
                     <CardContent className="p-5">
                       <div className="flex items-start justify-between gap-3 mb-2">
@@ -275,6 +323,15 @@ export default function StudentMockExams() {
                           {deadlineLabel && status !== 'approved' && (
                             <p className="text-xs text-slate-500 mt-0.5">
                               Дедлайн: {deadlineLabel}
+                            </p>
+                          )}
+                          {/* AC-P10 (2026-05-25): для paused показываем оставшееся время */}
+                          {status === 'paused' && (
+                            <p className="text-xs text-amber-700 mt-0.5 font-medium">
+                              {formatRemainingTime(
+                                row.total_active_ms,
+                                variant?.duration_minutes ?? null,
+                              ) ?? 'таймер на паузе'}
                             </p>
                           )}
                           {status === 'approved' && row.total_score !== null && (

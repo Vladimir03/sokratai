@@ -267,6 +267,37 @@ npm run lint && npm run build && npm run smoke-check
   - **Остальные режимы** (strict, unordered, task20, pair, manual) — **остаются binary** (0 или maxScore). ФИПИ 2026 partial credit определён ТОЛЬКО для multi_choice + ordered.
   - **Спека деталей:** CLAUDE.md §15a → секция «Часть 1 partial credit ФИПИ 2026».
 
+- **AC-P10 (Pause & multi-session timer):** ✅ Phase 1 MVP landed 2026-05-25. JTBD-trigger (Володя 2026-05-25 от учеников): «не могу найти 4 часа подряд для пробника». Pilot adoption blocker — ученики 16-18 имеют фрагментированный график и не садятся на 4ч сразу. Решение: 2 режима + pause/resume + per-session timing.
+  - **Два режима** в `mock_exam_attempts.exam_mode`:
+    - **`'simulation'`** — wall-clock timer 4ч без pause (реальный ЕГЭ). Закрыл tab → таймер идёт.
+    - **`'training'` (default)** — active time only + pause/resume. Multi-session: ученик может прервать, вернуться через неделю, продолжить с остатка.
+  - **Schema** (migration `20260525130000_attempt_pause_and_sessions.sql`):
+    - `mock_exam_attempts.exam_mode TEXT CHECK IN ('simulation','training')` DEFAULT 'training'
+    - `mock_exam_attempts.sessions JSONB` array of `{started_at, ended_at|null}`
+    - `mock_exam_attempts.total_active_ms BIGINT` cached sum
+    - `mock_exam_attempts.status` enum extended: + `'paused'`
+    - `mock_exam_assignments.default_exam_mode TEXT` DEFAULT 'training' (tutor recommendation)
+  - **Endpoints** (`mock-exam-student-api`):
+    - `POST /attempts/:id/pause` — close latest session, status → 'paused'. Mode guard: только training. Idempotent.
+    - `POST /attempts/:id/resume` — append new active session, status → 'in_progress'. Idempotent.
+    - `POST /attempts/:id/start` — расширен `{exam_mode?}` body, init first session, applies override only при первом start.
+    - `POST /attempts/:id/submit` — расширен на close last open session + write final `total_active_ms`. Accepts prev status `in_progress|paused`.
+  - **Student UX** (Phase 1):
+    - `StudentMockExam` шапка: amber Pause button (только training mode) + confirm dialog с explanation. После confirm → redirect на /student/mock-exams.
+    - `StudentMockExams` list card: «⏸ На паузе» badge + «осталось 2ч 34 мин» (compute из `total_active_ms` + `duration_minutes`). Click card → resume API → navigate на taking page.
+    - paused attempts всегда redirect'ятся на list (никогда не render'ятся в taking surface без resume).
+  - **Tutor UX** (Phase 1 minimal):
+    - `MockExamHeatmap` status badge для paused student: «⏸ На паузе» (amber).
+    - Phase 2 (deferred): start modal с tutor recommendation, TutorMockExamCreate toggle, Tutor review per-session details.
+  - **Hard invariants:**
+    - `exam_mode` immutable после первого start. Backend rejects override если sessions != [] OR started_at != null.
+    - Pause only в `training` mode. Simulation rejects → 400 PAUSE_NOT_ALLOWED.
+    - CAS guards: pause требует status='in_progress'; resume требует 'paused'. Multi-tab safety.
+    - Submit accepts both 'in_progress' и 'paused' prev status (ученик может сдать paused без явного resume).
+    - Backward compat: existing pilot attempts получают exam_mode='training' default (миграция). Pause functionality становится доступна post-deploy.
+  - **Phase 2 follow-ups** (next session): tutor create toggle (`default_exam_mode`), student start modal (mode picker с override), tutor review per-session breakdown («Solo time: 2:30 в 3 сессии: 50+30+70»), KPI «На паузе» card в TutorMockExamDetail.
+  - **Спека деталей:** CLAUDE.md §15a → секция «Pause & multi-session timer».
+
 ### Связь с pilot KPI
 
 Из `docs/discovery/product/tutor-ai-agents/18-pilot-execution-playbook-sokrat.md`:
@@ -319,6 +350,7 @@ npm run lint && npm run build && npm run smoke-check
 | AC-P8a (authenticated lead) | PASS | landed TASK-7 |
 | AC-P8b (anonymous lead) | DEFERRED | TASK-12 anonymous mode, отдельная спека |
 | AC-P9 (Часть 1 partial credit ФИПИ 2026) | PASS | landed 2026-05-25 (FIPI-1..FIPI-8). 32 unit tests pass (18 новых AC-P9). См. CLAUDE.md §15a. |
+| AC-P10 (Pause & multi-session timer, Phase 1 MVP) | PARTIAL | Phase 1 landed 2026-05-25 (PAUSE-1..PAUSE-3/5/6/9): training-mode pause/resume + paused list card + tutor pause badge. Phase 2 (PAUSE-4/7/8) — start modal + tutor create toggle + per-session details — отложены до следующей сессии. См. CLAUDE.md §15a секция «Pause & multi-session». |
 
 **Не-AC обнаружения** (false positives, документация добавлена):
 - «solution_text leak на result page» — это **намеренный state-aware reveal**, не нарушение. Result page показывает Часть 2 разбор только после `attempt.status === 'approved'` (CLAUDE.md §15). Mock-exams anti-leak ≠ homework tutor-only invariant — это разные semantic'и (см. CLAUDE.md §10 cross-reference, добавлено 2026-05-14).

@@ -11,6 +11,7 @@ import {
   FileText,
   Image as ImageIcon,
   Loader2,
+  Pause,
   Pencil,
   RotateCcw,
   Save,
@@ -33,6 +34,7 @@ import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabaseClient';
 import {
   getStudentMockExam,
+  pauseMockExamAttempt,
   setMockExamAnswerMethod,
   startMockExamAttempt,
   submitMockExamAttempt,
@@ -880,6 +882,13 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // AC-P10 (2026-05-25): Pause / Resume для training mode пробников.
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
+  // exam_mode immutable после старта. Default 'training' для backward compat
+  // (existing attempts до миграции получают DB default).
+  const examMode: 'simulation' | 'training' = data.attempt.exam_mode ?? 'training';
+  const canPause = examMode === 'training' && data.attempt.status === 'in_progress';
   const [blankPhoto, setBlankPhoto] = useState<PhotoState>(() =>
     createEmptyPhoto(data.attempt.blank_photo_url),
   );
@@ -934,6 +943,12 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   });
 
   useEffect(() => {
+    // AC-P10 (2026-05-25): paused attempt → redirect на list, не на result.
+    // List card покажет «Продолжить» CTA с remaining_ms из total_active_ms.
+    if (data.attempt.status === 'paused') {
+      navigate('/student/mock-exams', { replace: true });
+      return;
+    }
     if (data.attempt.status !== 'in_progress') {
       navigate(`/student/mock-exams/${data.assignment.id}/result`, { replace: true });
       return;
@@ -1066,6 +1081,31 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const uploadingCount =
     (blankPhoto.status === 'uploading' ? 1 : 0) +
     (bulkUploadStatus === 'uploading' ? 1 : 0);
+
+  // AC-P10: Pause handler. Flush autosave → server pause → navigate to list.
+  // List card покажет «Продолжить» CTA для возврата.
+  const handlePause = async () => {
+    setIsPausing(true);
+    try {
+      // Flush any pending autosaves before pause чтобы черновики не потерялись.
+      await autosave.flush().catch(() => {
+        // Non-fatal: pause всё равно works, autosave can re-flush at resume.
+      });
+      await pauseMockExamAttempt(data.attempt.id);
+      // Invalidate list query — paused card нужно показать там.
+      void queryClient.invalidateQueries({ queryKey: ['student', 'mock-exams', 'list'] });
+      navigate('/student/mock-exams');
+    } catch (err) {
+      console.error('[mock-exam] pause failed', err);
+      const msg = err instanceof Error ? err.message : 'Не удалось приостановить пробник. Попробуй ещё раз.';
+      // Show inline error via setSubmitError? Pause has its own dialog, but
+      // mirror submit error pattern for simplicity. For pilot scale OK.
+      setSubmitError(msg);
+      setPauseOpen(false);
+    } finally {
+      setIsPausing(false);
+    }
+  };
 
   const handleSubmit = async () => {
     setSubmitError(null);
@@ -1347,16 +1387,74 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               {uploadingCount > 0 && <span className="ml-2 text-amber-700">идёт загрузка</span>}
               {failedUploadCount > 0 && <span className="ml-2 text-rose-700">есть фото с ошибкой</span>}
             </div>
-            <Button
-              type="button"
-              className="min-h-[52px] touch-manipulation bg-accent px-6 text-base text-white hover:bg-accent/90"
-              onClick={() => setSubmitOpen(true)}
-              disabled={isSubmitting || uploadingCount > 0}
-            >
-              Сдать работу
-            </Button>
+            <div className="flex flex-row items-center gap-2 sm:gap-3">
+              {/* AC-P10: Pause button (только для training mode) */}
+              {canPause && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-h-[52px] touch-manipulation gap-1.5 border-amber-300 px-4 text-base text-amber-800 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200"
+                  onClick={() => setPauseOpen(true)}
+                  disabled={isSubmitting || isPausing}
+                  aria-label="Приостановить пробник — таймер остановится"
+                  title="Приостановить пробник"
+                >
+                  <Pause className="h-4 w-4" aria-hidden="true" />
+                  <span className="hidden sm:inline">Пауза</span>
+                </Button>
+              )}
+              <Button
+                type="button"
+                className="min-h-[52px] touch-manipulation bg-accent px-6 text-base text-white hover:bg-accent/90"
+                onClick={() => setSubmitOpen(true)}
+                disabled={isSubmitting || uploadingCount > 0}
+              >
+                Сдать работу
+              </Button>
+            </div>
           </div>
         </div>
+
+        {/* AC-P10 (2026-05-25): Pause confirm dialog. */}
+        <Dialog open={pauseOpen} onOpenChange={(open) => !isPausing && setPauseOpen(open)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Приостановить пробник?</DialogTitle>
+              <DialogDescription>
+                Таймер остановится, прогресс сохранится. Вернёшься когда захочешь —
+                продолжишь с того же места и с тем же остатком времени.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <p className="font-medium">Что произойдёт:</p>
+              <ul className="mt-1 list-disc list-inside text-xs leading-relaxed">
+                <li>Таймер встанет — оставшееся время сохранится</li>
+                <li>Все введённые ответы и фото уже сохранены</li>
+                <li>Вернуться можно на странице «Пробники» через карточку</li>
+              </ul>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                className="touch-manipulation"
+                onClick={() => setPauseOpen(false)}
+                disabled={isPausing}
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                className="touch-manipulation bg-amber-600 text-white hover:bg-amber-700"
+                onClick={() => void handlePause()}
+                disabled={isPausing}
+              >
+                {isPausing && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}
+                Да, приостановить
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={submitOpen} onOpenChange={(open) => !isSubmitting && setSubmitOpen(open)}>
           <DialogContent className="max-w-md">

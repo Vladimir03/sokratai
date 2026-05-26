@@ -27,11 +27,36 @@ export type MockExamAnswerMethod = 'blank' | 'form';
 export type MockExamAssignmentStatus = 'draft' | 'active' | 'closed';
 export type MockExamAttemptStatus =
   | 'in_progress'
+  | 'paused' // AC-P10 (2026-05-25): training-mode multi-session pause
   | 'submitted'
   | 'ai_checking'
   | 'awaiting_review'
   | 'approved'
   | 'manually_entered';
+
+/**
+ * AC-P10 (2026-05-25): Режим прохождения пробника (execution mode).
+ * - 'simulation': wall-clock timer 4ч, без pause (как реальный ЕГЭ)
+ * - 'training': active time only + pause/resume (default)
+ *
+ * Tutor задаёт default в TutorMockExamCreate; ученик может override в start modal.
+ * Immutable после первого start (первая session создана).
+ *
+ * **Не путать** с `MockExamMode` (line 12, assignment-level: blank|form|manual_entry).
+ * Это разные concepts: `MockExamMode` = data collection method (фото бланка vs цифровой
+ * ввод), `MockExamExamMode` = timer behavior (wall-clock vs pause/resume).
+ */
+export type MockExamExamMode = 'simulation' | 'training';
+
+/**
+ * AC-P10: Одна сессия работы над пробником. Latest session.ended_at === null
+ * ⟺ status === 'in_progress'. При pause закрываем session (ended_at = now);
+ * при resume append новую с ended_at=null.
+ */
+export interface MockExamAttemptSession {
+  started_at: string; // ISO timestamp
+  ended_at: string | null; // null = open session (in_progress)
+}
 
 export type MockExamPart2SolutionStatus =
   | 'awaiting_review'
@@ -187,6 +212,12 @@ export interface MockExamAssignment {
   deadline: string | null;
   status: MockExamAssignmentStatus;
   created_at: string;
+  /**
+   * AC-P10 (2026-05-25): tutor-suggested default execution mode (применяется
+   * к новым attempts при первом open). Ученик может override в start modal.
+   * Default 'training' для adoption flexibility.
+   */
+  default_exam_mode?: MockExamExamMode | null;
 }
 
 /** List item — assignment + roll-up over assigned attempts. */
@@ -285,6 +316,21 @@ export interface MockExamAttemptListItem {
     tutor_score: number | null;
     status: string;
   }>;
+  /**
+   * AC-P10 (2026-05-25): immutable execution mode. 'simulation' = wall-clock
+   * 4ч без pause; 'training' = active time only + pause/resume. Default training.
+   */
+  exam_mode?: MockExamExamMode | null;
+  /**
+   * AC-P10: array of work sessions. Latest.ended_at === null ⟺ status='in_progress'.
+   * Tutor использует для «Solo time: X мин в N сессии».
+   */
+  sessions?: MockExamAttemptSession[] | null;
+  /**
+   * AC-P10: cached SUM(session.duration_ms) для KPI / sort. Frontend should
+   * adjust в running attempts: total_active_ms + (now - latest.started_at).
+   */
+  total_active_ms?: number | null;
 }
 
 // ─── Single-attempt detail (review surface) ──────────────────────────────────
@@ -356,6 +402,21 @@ export interface MockExamAttemptDetail {
   manual_comment: string | null;
   part1_answers: MockExamAttemptPart1Answer[];
   part2_solutions: MockExamAttemptPart2Solution[];
+  /**
+   * AC-P10 (2026-05-25): execution mode (simulation/training).
+   * Tutor review shows badge based on this. Optional для backward compat.
+   */
+  exam_mode?: MockExamExamMode | null;
+  /**
+   * AC-P10: work sessions для Tutor «Solo time + sessions detail» в review surface.
+   * Latest session may have ended_at=null если status='in_progress'.
+   */
+  sessions?: MockExamAttemptSession[] | null;
+  /**
+   * AC-P10: cached SUM of session durations. Frontend для running attempts
+   * добавляет (now - latest_session.started_at) для real-time display.
+   */
+  total_active_ms?: number | null;
 }
 
 // ─── Create / approve / invite-link payloads + responses ─────────────────────
@@ -373,6 +434,11 @@ export interface CreateMockExamAssignmentPayload {
   student_ids?: string[];
   /** For mode='manual_entry' only: single student_id + the prefilled result. */
   manual_entry?: MockExamManualEntryPayload | null;
+  /**
+   * AC-P10 (2026-05-25): default execution mode для new attempts (студент видит
+   * pre-selected в start modal + может override). Default 'training'.
+   */
+  default_exam_mode?: MockExamExamMode | null;
 }
 
 export interface MockExamManualEntryPayload {

@@ -941,6 +941,65 @@ Defense-in-depth: даже если кто-то добавит новое sensit
 
 **Спека AC-P4:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` (раздел добавляется отдельной PR).
 
+**Pause & multi-session timer (mock-exams-v1-pilot-polish AC-P10, Phase 1 MVP, 2026-05-25):**
+
+JTBD-trigger (Володя 2026-05-25 от учеников): «не могу найти 4 часа подряд для пробника. У меня час после школы, потом репетитор по русскому, потом тренировка». Pilot adoption blocker — ученики 16-18 имеют фрагментированный график → пробник не делается вообще.
+
+**Два режима:**
+- **`exam_mode='simulation'`** — wall-clock timer 235 мин без pause (как реальный ЕГЭ). Закрыл tab → таймер идёт. Для финального assessment.
+- **`exam_mode='training'` (default)** — active time only + pause/resume. Multi-session: ученик может прервать, вернуться через неделю, продолжить с остатка.
+
+**Schema (migration `20260525130000_attempt_pause_and_sessions.sql`):**
+- `mock_exam_attempts.exam_mode TEXT NOT NULL DEFAULT 'training' CHECK IN ('simulation','training')` — immutable после первого start
+- `mock_exam_attempts.sessions JSONB NOT NULL DEFAULT '[]'` — array of `{started_at: ISO, ended_at: ISO | null}`. Latest session.ended_at === null ⟺ status='in_progress'
+- `mock_exam_attempts.total_active_ms BIGINT NOT NULL DEFAULT 0` — cached SUM(session.duration). Recompute при pause/resume/submit
+- `mock_exam_attempts.status` CHECK расширен: + `'paused'`
+- `mock_exam_assignments.default_exam_mode TEXT NOT NULL DEFAULT 'training'` — tutor recommendation (Phase 2 wire)
+
+**Endpoints (`mock-exam-student-api`):**
+- `POST /attempts/:id/pause` (NEW) — close latest session.ended_at, status='in_progress' → 'paused'. Mode guard: rejects simulation → 400 PAUSE_NOT_ALLOWED. CAS guard: prev status='in_progress'. Idempotent (повторный call возвращает paused state).
+- `POST /attempts/:id/resume` (NEW) — append `{started_at: now, ended_at: null}`, status='paused' → 'in_progress'. CAS guard защищает multi-tab race.
+- `POST /attempts/:id/start` (MODIFIED) — теперь принимает `{exam_mode?}` body. Apply override **только при первом start** (sessions=[] && started_at=null). Re-call возвращает existing mode.
+- `POST /attempts/:id/submit` (MODIFIED) — закрывает last open session (если есть), write final `total_active_ms`. Accepts prev status `'in_progress' | 'paused'` — ученик может сдать paused без explicit resume.
+
+**Hard invariants:**
+1. **`exam_mode` immutable после первого start.** Backend rejects override если sessions != [] OR started_at != null. Не давать UI «переключить режим» после старта без restart attempt (out of scope).
+2. **Pause только в `training` mode.** Frontend hides pause button для simulation; backend rejects as defense-in-depth.
+3. **Active time** = `SUM(closed sessions duration) + (now - latest.started_at)` если status='in_progress'. Helper `computeTotalActiveMs(sessions)` в `mock-exam-student-api`.
+4. **CAS guards для multi-tab safety.** Pause требует prev=`in_progress`; resume требует prev=`paused`. Если другой tab уже сменил status — UPDATE 0 rows → error → frontend re-fetches.
+5. **Backward compat:** existing pre-migration attempts получают `exam_mode='training'` (DB DEFAULT). Pause functionality становится доступна post-deploy для всех. sessions=[] для них не блокирует submit (computeTotalActiveMs returns 0 → total_time_minutes остаётся wall-clock).
+6. **Auto-submit logic:** server-side cron not implemented (pilot scale). Frontend tick checks `total_active_ms + (now - latest.started_at) >= duration_ms` → triggers submit. Server guard: при resume если active time exceeded — frontend сразу submit.
+
+**Student UX (Phase 1 MVP):**
+- `StudentMockExam.tsx` шапка: amber Pause button (только когда `canPause = exam_mode==='training' && status==='in_progress'`) рядом с «Сдать работу». Click → confirm dialog с explanation «таймер встанет, прогресс сохранён». Confirm → POST /pause → navigate('/student/mock-exams').
+- `StudentMockExams.tsx` list card: новый display status `'paused'` с label «⏸ На паузе» (amber). Sub-line «осталось 02:34 мин» (compute из `total_active_ms` + `variant.duration_minutes`). Click card → resumeMockExamAttempt(id) → navigate на taking page. CTA label «Продолжить» (same as in_progress).
+- **paused redirect invariant:** `StudentMockExam.tsx` useEffect видит status='paused' → redirect на `/student/mock-exams` (list). Это защита от direct URL access — paused attempts never render в taking surface без explicit resume.
+
+**Tutor UX (Phase 1 minimal):**
+- `MockExamHeatmap.tsx` STATUS_CHIP добавлен `paused: { label: '⏸ На паузе', className: 'bg-amber-100 text-amber-900' }`. `deriveDisplayStatus` принимает `'paused'` через explicit branch.
+- Phase 2 (deferred): TutorMockExamCreate toggle для `default_exam_mode`, StudentMockExam start modal с tutor recommendation + override, TutorMockExamReview per-session details («Solo time: 2:30 в 3 сессии: 50+30+70»), TutorMockExamDetail «На паузе» KPI card.
+
+**Frontend API client (`src/lib/studentMockExamApi.ts`):**
+- `pauseMockExamAttempt(attemptId)` → `PauseAttemptResponse`. Throws `StudentMockExamApiError(400, 'PAUSE_NOT_ALLOWED')` если simulation mode.
+- `resumeMockExamAttempt(attemptId)` → `ResumeAttemptResponse`.
+- `startMockExamAttempt(attemptId, {exam_mode?})` — optional `exam_mode` parameter в options.
+
+**Types (`src/types/mockExam.ts`):**
+- `MockExamExamMode = 'simulation' | 'training'` (новый). **НЕ путать** с existing `MockExamMode = 'blank' | 'form' | 'manual_entry'` (assignment-level data collection method). Это разные concepts: execution mode (pause/timer behavior) vs data collection.
+- `MockExamAttemptSession = { started_at: string; ended_at: string | null }` — session object.
+- `MockExamAttemptStatus` union расширен: + `'paused'`.
+- `MockExamAttemptListItem` / `MockExamAttemptDetail` получили `exam_mode?`, `sessions?`, `total_active_ms?` (все optional для backward compat).
+- `MockExamAssignment` получил `default_exam_mode?` (Phase 2 wire).
+- `CreateMockExamAssignmentPayload` получил `default_exam_mode?` (Phase 2 wire).
+
+**При расширении на новые AI-paths / endpoints:**
+1. Любой endpoint, который modify'ит attempt в training mode, ОБЯЗАН учесть pause state. Чтение `attempt.status === 'in_progress'` теперь возможно ложно (paused attempts существуют).
+2. Auto-submit timer logic должен использовать `total_active_ms + (now - latest.started_at)` для running attempts, **НЕ** `now - started_at` (wall-clock).
+3. При добавлении нового session-tracking field (e.g. `pause_count` для anti-abuse Phase 2) — придерживаться JSONB sessions structure, не дублировать в отдельную колонку.
+4. Phase 2 для full feature: TutorMockExamCreate toggle + start modal + per-session breakdown + paused KPI card.
+
+**Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` AC-P10.
+
 ### 16. Student Homework Problem Screen — single-task surface + submission contract (Phase 1, 2026-05-09; Phase 3 landed 2026-05-12; Phase 3.1 hotfixes 2026-05-13)
 
 Phase 1 mobile-first student-side homework problem screen. Mobile (`viewport ≤768px`) на route `/student/homework/:hwId/problem/:taskId`. **Phase 3 (2026-05-12, ✅ landed)** расширил screen на tablet (769–1279) + desktop (≥1280) split layout — `StudentHomeworkDetail` стал redirect-only для **всех** viewport'ов (`useIsMobile()` gate удалён), legacy `GuidedHomeworkWorkspace` рендеринг отключён со student-side (физическое удаление файла отложено на Phase 4 cleanup spec). **Без feature flag** — раскатка сразу всем юзерам. Полный контракт (handlers / migrations / anti-leak / shared helper / viewport routing / Phase 3 split layouts) в `.claude/rules/40-homework-system.md` → секции «Student Homework Problem Screen — single-task surface + submission contract» + «Student Homework Problem Screen — Phase 3 split layouts (2026-05-12)».

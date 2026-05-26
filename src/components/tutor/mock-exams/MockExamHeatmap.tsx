@@ -75,6 +75,7 @@ const KIM_MAX_SCORE: Record<number, number> = {
 type AttemptDisplayStatus =
   | 'not_started'
   | 'in_progress'
+  | 'paused' // AC-P10 (2026-05-25): multi-session pause
   | 'submitted'
   | 'awaiting_review'
   | 'approved'
@@ -90,6 +91,8 @@ function deriveDisplayStatus(
   if (status === 'in_progress') {
     return startedAt === null ? 'not_started' : 'in_progress';
   }
+  // AC-P10: paused ученик — отдельный chip с pause icon.
+  if (status === 'paused') return 'paused';
   if (status === 'submitted' || status === 'ai_checking') return 'submitted';
   if (status === 'awaiting_review') return 'awaiting_review';
   if (status === 'approved') return 'approved';
@@ -107,6 +110,12 @@ const STATUS_CHIP: Record<
   },
   in_progress: {
     label: 'В процессе',
+    className: 'bg-amber-100 text-amber-900',
+  },
+  paused: {
+    // AC-P10: visual differentiation от «В процессе» через icon в label.
+    // Tutor видит ⏸ → понимает что ученик активно прервался.
+    label: '⏸ На паузе',
     className: 'bg-amber-100 text-amber-900',
   },
   submitted: {

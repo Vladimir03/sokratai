@@ -16,6 +16,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { extractApiErrorCode, extractApiErrorMessage } from '@/lib/apiErrorMessage';
 import type {
   MockExamMode,
+  MockExamExamMode,
   MockExamAnswerMethod,
   MockExamAssignmentStatus,
   MockExamAttemptStatus,
@@ -157,6 +158,28 @@ export interface StudentMockExamAssignmentView {
 export interface StartAttemptResponse {
   ok: true;
   attempt_id: string;
+  /** AC-P10 (2026-05-25): server-confirmed mode (may differ if student overrode). */
+  exam_mode?: MockExamExamMode;
+}
+
+/**
+ * AC-P10 (2026-05-25): Pause endpoint response. Returns updated attempt
+ * state — frontend invalidates query / redirects to list.
+ */
+export interface PauseAttemptResponse {
+  ok: true;
+  attempt_id: string;
+  status: 'paused';
+  total_active_ms: number;
+}
+
+/**
+ * AC-P10: Resume endpoint response.
+ */
+export interface ResumeAttemptResponse {
+  ok: true;
+  attempt_id: string;
+  status: 'in_progress';
 }
 
 export interface AutosaveAnswerResponse {
@@ -276,8 +299,45 @@ export async function getStudentMockExam(
 
 export async function startMockExamAttempt(
   attemptId: string,
+  options?: { exam_mode?: MockExamExamMode },
 ): Promise<StartAttemptResponse> {
+  // AC-P10: exam_mode picker. Server applies override only on first start
+  // (sessions=[] && started_at=null). Re-call returns existing mode.
+  const body = options?.exam_mode
+    ? JSON.stringify({ exam_mode: options.exam_mode })
+    : undefined;
   return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/start`, {
+    method: 'POST',
+    body,
+  });
+}
+
+/**
+ * AC-P10 (2026-05-25): Pause attempt в режиме Тренировка. Останавливает timer,
+ * закрывает последнюю активную сессию. Idempotent (повторный call возвращает
+ * paused state). Frontend should redirect to /student/mock-exams после success.
+ *
+ * Throws StudentMockExamApiError(400, 'PAUSE_NOT_ALLOWED') если exam_mode='simulation'.
+ */
+export async function pauseMockExamAttempt(
+  attemptId: string,
+): Promise<PauseAttemptResponse> {
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/pause`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * AC-P10: Resume paused attempt. Append новую active session, status →
+ * in_progress. Idempotent.
+ *
+ * Frontend: после success navigate на /student/mock-exams/:assignmentId
+ * (taking page).
+ */
+export async function resumeMockExamAttempt(
+  attemptId: string,
+): Promise<ResumeAttemptResponse> {
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/resume`, {
     method: 'POST',
   });
 }
