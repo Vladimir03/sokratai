@@ -1007,9 +1007,11 @@ JTBD-trigger (Володя 2026-05-25 от учеников): «не могу н
   4. `TimerBadge` receives new props (`examMode`, `sessions`, `totalActiveMs`, `onTimeExpired`). Auto-submit triggers через `onTimeExpired` callback (fire-once via ref) → opens submit dialog.
 - **P2 #1 — Resume failure silent navigate:** `StudentMockExams.tsx::handleClick` catch'ал resume errors и navigate'ил все равно → `StudentMockExam` useEffect redirect'ил обратно на list = invisible loop. Fix: `resumingAttemptId` state + disable card during pending + inline rose error message + «Скрыть» dismiss button. Multi-click protected.
 
-**Hotfix NOT applied** (deferred):
-- P1 #1 (CAS guards не verified): для pilot scale acceptable, downgraded to P2. Можно добавить `.select().maybeSingle()` post-update verification later.
-- P1 #2 (recheck endpoint no-ops на pilot data из-за `score_source='tutor'` backfill в `20260516130000`): требует UX decision Володи (Phase 2 — add `include_tutor_edits: bool` flag + checkbox в AlertDialog).
+**Deferred / closed by design:**
+- **P1 #1** (CAS guards не verified): для pilot scale acceptable, downgraded to P2. Можно добавить `.select().maybeSingle()` post-update verification later.
+- **P1 #2** (recheck no-ops на pilot data из-за `score_source='tutor'` backfill в `20260516130000`): ❌ **NOT A BUG — closed by design.** Согласно Vladimir UX choice 2026-05-25 (Q2 «Tutor ручной re-grade button») existing pilot data Егора **намеренно preserved** с binary scoring. Кнопка «По критериям ФИПИ» работает только для **новых** attempts после 25 мая. Backfill safety на старых rows ('tutor' provenance) — фича, не баг. **Никаких UX/code changes не требуется.**
+
+**Важный nuance для будущих агентов:** AC-P9 (partial credit) **НЕ** имеет своей миграции данных. Все два migration файла для текущего sprint'а (`20260525130000_attempt_pause_and_sessions.sql` + `20260525140000_attempt_sessions_backfill.sql`) — для AC-P10 (pause feature, structural + sessions JSONB init). Они **не трогают earned_score / total_part1_score / score_source / любые другие scoring поля**. Pilot data Егора с binary 0/2 scoring сохранится навсегда (по дизайну).
 
 **Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` AC-P10.
 

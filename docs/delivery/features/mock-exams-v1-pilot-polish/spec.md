@@ -300,9 +300,9 @@ npm run lint && npm run build && npm run smoke-check
     - **P0 #1 — Legacy attempts cannot pause:** miграция `20260525140000_attempt_sessions_backfill.sql` инициализирует sessions для existing in_progress attempts (sessions=[] + started_at IS NOT NULL → init open session). Plus defensive synthesis в handlePauseAttempt belt-and-suspenders.
     - **P0 #2 — Timer wall-clock instead of active time:** `handleGetStudentAssignment` теперь возвращает exam_mode/sessions/total_active_ms; new `getActiveElapsedSeconds` helper в `StudentMockExam.tsx` (simulation=wall-clock, training=sum sessions + open offset); auto-submit через fire-once `onTimeExpired` callback.
     - **P2 #1 — Resume failure silent navigate:** `StudentMockExams` resume disabled card during pending + inline rose error + multi-click protected.
-  - **Deferred (P1):**
-    - **P1 #1 (CAS guards verification):** downgraded P2, pilot scale acceptable.
-    - **P1 #2 (recheck no-ops на pilot data из-за score_source='tutor' backfill в `20260516130000`):** требует Володя UX decision — `include_tutor_edits: boolean` checkbox в existing AlertDialog (recommended) vs auto-detection vs two-buttons. Без fix кнопка «По критериям ФИПИ» бесполезна для существующих pilot attempts Егора.
+  - **Deferred / closed by design:**
+    - **P1 #1 (CAS guards verification):** downgraded P2, pilot scale acceptable. Можно добавить `.select().maybeSingle()` post-update verification later.
+    - **P1 #2 (recheck no-ops на pilot data):** ❌ **NOT A BUG — closed by design** согласно Vladimir UX choice Q2 ранее в сессии («Tutor ручной re-grade button» = preserve existing pilot data). ChatGPT review корректно идентифицировал что `score_source='tutor'` backfill из `20260516130000` блокирует recheck для existing rows, но это **намеренное поведение**: pilot data Егора остаётся с binary scoring, кнопка «По критериям ФИПИ» работает только для **новых** attempts (после 25 мая). Никакого `include_tutor_edits` checkbox не нужно.
   - **Спека деталей:** CLAUDE.md §15a → секция «Pause & multi-session timer» + «Hotfix».
 
 ### Связь с pilot KPI
