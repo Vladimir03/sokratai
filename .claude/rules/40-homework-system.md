@@ -1675,6 +1675,16 @@ Bug #2:
    - **Expected:** все ранее добавленные задачи на месте, list unchanged
    - Click «Сохранить изменения» → toast success → verify на `/tutor/homework/:id` все задачи в БД
 
+1a. **Image-original-task signed URL race (P0 — Phase 10 review P0 fix test):**
+   - Открыть **существующее** ДЗ с **картинкой в условии задачи** (важно: storage:// ref → signed URL resolution involved)
+   - Сразу после загрузки страницы (signed URL promise ещё pending) — добавить **новые задачи** через «+ Добавить задачу» или KB picker
+   - **БЫСТРО** переключиться на другую вкладку браузера (signed URL pending → throttled в background)
+   - Подождать 30-60 секунд
+   - Вернуться на вкладку SokratAI
+   - **Expected:** все добавленные задачи на месте; задачи с картинкой имеют preview (signed URL resolved); user additions НЕ overwritten signed URL `.then()` callback'ом
+   - Repeat вариант: добавить задачи быстро **до tab switch**, переключиться, вернуться — тоже all preserved
+   - **Регрессия if fails:** signed URL race condition вернулась (см. ChatGPT-5.5 review 2026-05-26 P0 finding)
+
 2. **Edit-mode save button readiness (P0 — против `387e0f4` регрессии):**
    - Открыть существующее ДЗ через `/tutor/homework/:id/edit`
    - Verify кнопка «Сохранить изменения» становится active **в течение ~1 секунды** (не зависает на «Подготавливаем...»)

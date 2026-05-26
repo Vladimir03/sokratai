@@ -387,13 +387,18 @@ function TutorHomeworkCreateContent() {
 
   // ── Edit mode: fetch existing assignment ──
   //
-  // Phase 10 (2026-05-26) — critical hotfix для production регрессии:
+  // Phase 10 (2026-05-26) — defense-in-depth для production регрессии (см.
+  // ChatGPT-5.5 review для дополнительного P0 fix signed URL race ниже):
   //
   // ❌ DO NOT enable `refetchOnWindowFocus` (default `true`). Это write-form
   //    query — local `tasks` state редактируется юзером и source of truth до
-  //    нажатия «Сохранить». Auto-refetch на focus вызывал race condition с
-  //    prefill effect (line 497) и **уничтожал** unsaved tasks при tab switch
-  //    (репорт Elena Ivanova 2026-05-26 в Telegram чате репетиторов).
+  //    нажатия «Сохранить». Background refetch — **risk amplifier**: даже если
+  //    prefill `editPrefilledRef.current` guard правильно блокирует re-prefill,
+  //    refetch создаёт новый `existingAssignment` object reference, что fires
+  //    лишние effects и увеличивает window для других race conditions
+  //    (см. signed URL race fix в prefill effect ниже). Direct cause репорта
+  //    Elena Ivanova 2026-05-26 — signed URL `.then()` overwrite, но refetch
+  //    делал window для гонки в разы шире.
   //
   // ❌ DO NOT decrease `staleTime` below 10 минут. Edit session обычно
   //    укладывается в 10 минут; если tutor сидит дольше — explicit refresh
@@ -401,8 +406,8 @@ function TutorHomeworkCreateContent() {
   //    aggressive refetch behavior.
   //
   // Pattern для всех write-form queries: `{ refetchOnWindowFocus: false,
-  // staleTime: 10 * 60 * 1000 }`. Mock-exam parity в TutorMockExamCreate.tsx.
-  // Assertion в scripts/smoke-check.mjs section 8 enforces invariant.
+  // staleTime: 10 * 60 * 1000 }`. Assertion в scripts/smoke-check.mjs section 8
+  // enforces invariant.
   //
   // См. CLAUDE.md §34 + .claude/rules/40-homework-system.md «Homework
   // constructor QA checklist».
@@ -554,15 +559,55 @@ function TutorHomeworkCreateContent() {
 
     setTasks(newTasks);
 
-    // Resolve storage:// refs to signed preview URLs
+    // Resolve storage:// refs to signed preview URLs.
+    //
+    // Phase 10 (2026-05-26, ChatGPT-5.5 review P0 fix):
+    //
+    // Раньше код мутировал `newTasks` array после первого `setTasks(newTasks)`,
+    // а потом делал второй `setTasks([...newTasks])` через `.then(...)`. Это
+    // содержало **race condition** — между первым и вторым setTasks tutor мог
+    // добавить новые задачи через HWTasksSection (`setTasks([...prev, newTask])`).
+    // Когда signed URL promise finally resolved (задерживался background-tab
+    // throttling до десятков секунд!), `.then()` callback вызывал
+    // `setTasks([...newTasks])` где `newTasks` — closure variable с исходным
+    // server array → user-added tasks ПОТЕРЯНЫ. Это объясняет репорт Elena
+    // лучше чем focus-refetch theory (которая всё равно требует guarded
+    // prefill effect re-run; editPrefilledRef.current должен блокировать).
+    //
+    // Fix: functional setTasks с merge по task_image_path:
+    //   1. Async resolve signed URLs в Map<storage path, signed URL>
+    //   2. setTasks((current) => current.map(merge)) — на основе CURRENT state,
+    //      не closure newTasks. User additions / edits / removals preserved
+    //      по definition (functional setState reads latest state).
+    //   3. Merge только если task ещё имеет тот же task_image_path и нет
+    //      уже-resolved preview (user не upload'нул новое фото).
+    //
+    // Также убрана мутация `newTasks[i] = ...` после setTasks — React
+    // immutability principle.
+    const previewByPath = new Map<string, string>();
     Promise.all(
-      newTasks.map(async (t, i) => {
+      newTasks.map(async (t) => {
         if (t.task_image_path) {
           const url = await getHomeworkImageSignedUrl(t.task_image_path);
-          if (url) newTasks[i] = { ...newTasks[i], task_image_preview_url: url };
+          if (url) previewByPath.set(t.task_image_path, url);
         }
       }),
-    ).then(() => setTasks([...newTasks]));
+    ).then(() => {
+      if (previewByPath.size === 0) return;
+      setTasks((current) =>
+        current.map((task) => {
+          if (!task.task_image_path) return task;
+          // Skip if task_image_path изменился (user upload'нул новое фото) — у нас
+          // нет signed URL для нового path; новый upload сам поставит preview.
+          const resolved = previewByPath.get(task.task_image_path);
+          if (!resolved) return task;
+          // Skip если уже есть preview URL (blob: от текущей session upload, или
+          // другой signed URL). Не перезаписываем — UX не должен мерцать.
+          if (task.task_image_preview_url) return task;
+          return { ...task, task_image_preview_url: resolved };
+        }),
+      );
+    });
 
     setMaterials(
       existingAssignment.materials.map((m) => ({

@@ -470,6 +470,19 @@ const useQueryRe = /useQuery\s*\(\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\)/g;
 const hasRefetchOffRe = /refetchOnWindowFocus\s*:\s*false/;
 const hasQueryKeyRe = /queryKey\s*:/;
 
+// Phase 10 (2026-05-26, ChatGPT-5.5 review P1 fix): strip comments перед regex
+// чтобы избежать false-positive когда `refetchOnWindowFocus: false` фигурирует
+// в комментарии (e.g. документация в JSDoc). Простая strip: line `//...` +
+// block `/* ... */`. Не идеально (не парсит JSX, strings), но adequate как
+// tripwire — для proper validation использовать AST parser в Phase 11+.
+function stripComments(source) {
+  // Remove block comments /* ... */ (non-greedy, multiline).
+  let stripped = source.replace(/\/\*[\s\S]*?\*\//g, "");
+  // Remove line comments // ... (до конца строки).
+  stripped = stripped.replace(/\/\/[^\n]*/g, "");
+  return stripped;
+}
+
 let writeFormViolations = 0;
 for (const relativePath of writeFormPages) {
   const fullPath = path.resolve(rootDir, relativePath);
@@ -477,7 +490,7 @@ for (const relativePath of writeFormPages) {
     warn(`${relativePath} not found — write-form invariant skipped for this path`);
     continue;
   }
-  const content = fs.readFileSync(fullPath, "utf8");
+  const content = stripComments(fs.readFileSync(fullPath, "utf8"));
 
   // Find ВСЕ useQuery calls (могут быть несколько на странице — read lists +
   // edit query). Match только тех у которых есть queryKey (real useQuery, не
