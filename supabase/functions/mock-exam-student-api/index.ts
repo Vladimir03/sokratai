@@ -597,11 +597,14 @@ async function handleGetResult(
   }
 
   // Part 1 — reveal post-submit. Manual_entered не имеет per-task records.
+  // AC-P11 (2026-05-26): + tutor_comment в SELECT + response payload. Visible
+  // post-submit (когда part1 уже scored). Ученик видит «Комментарий репетитора»
+  // в Part1Card row под balance.
   let part1Answers: unknown[] = [];
   if (isPostSubmit) {
     const { data: part1Rows } = await db
       .from("mock_exam_attempt_part1_answers")
-      .select("kim_number, student_answer, earned_score")
+      .select("kim_number, student_answer, earned_score, tutor_comment")
       .eq("attempt_id", attempt.id)
       .order("kim_number", { ascending: true });
 
@@ -611,6 +614,7 @@ async function handleGetResult(
         kim_number: row.kim_number,
         student_answer: row.student_answer,
         earned_score: row.earned_score,
+        tutor_comment: row.tutor_comment,
         correct_answer: (v?.correct_answer as string | null) ?? null,
         max_score: (v?.max_score as number | undefined) ?? 0,
         check_mode: (v?.check_mode as string | null) ?? null,

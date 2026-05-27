@@ -343,6 +343,23 @@ export interface MockExamAttemptPart1Answer {
   correct_answer: string | null;
   max_score: number;
   check_mode: MockExamCheckMode | null;
+  /**
+   * AC-P11 (2026-05-26): optional tutor comment to KIM. Tutor пишет в
+   * Part1TaskDrillDownDialog → ученик видит после approval в Part1Card row.
+   * Max 600 chars (backend validation). null = нет комментария.
+   */
+  tutor_comment?: string | null;
+  /**
+   * AC-P11 (2026-05-26): task condition text для drill-down modal. Tutor видит
+   * для context при review (можно collapse «Показать условие»). Optional —
+   * backward compat с pre-AC-P11 payload.
+   */
+  task_text?: string | null;
+  /**
+   * AC-P11 (2026-05-26): task image (storage:// ref) для drill-down modal.
+   * Frontend resolves через signed URL helper при render.
+   */
+  task_image_url?: string | null;
 }
 
 export interface MockExamAttemptPart2Solution {

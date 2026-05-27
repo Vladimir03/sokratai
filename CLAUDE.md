@@ -901,6 +901,59 @@ Defense-in-depth: даже если кто-то добавит новое sensit
 
 **Спека:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` AC-P3 + `docs/delivery/features/mock-exams-v1-pilot-polish/tasks.md` TASK-3.
 
+**Часть 1 drill-down + tutor_comment + AC-P9 auto-migration (mock-exams-v1-pilot-polish AC-P11, 2026-05-26):**
+
+Trigger: репетитор (через Володю 2026-05-26): «Сделайте, чтоб первая часть пробника была по принципу домашки: ткнул в ячейку, провалился в задачу, видишь условие, ответ ученика, правильный ответ. И можешь оставить там свой комментарий, который виден ученику». Плюс жалоба: AC-P9 partial credit не применяется для form-mode pilot attempts Егора (binary 0/2 вместо ожидаемого 1/2).
+
+**Schema (миграция `20260526110000_part1_answers_tutor_comment.sql`):**
+- `mock_exam_attempt_part1_answers.tutor_comment TEXT NULL` — optional tutor comment к конкретной задаче Часть 1, видим ученику после approval. Max 600 chars (backend validation).
+
+**AC-P9 auto-migration (миграция `20260526120000_ac_p9_partial_credit_backfill.sql`):**
+- PL/pgSQL функции `_ac_p11_grade_multi_choice` + `_ac_p11_grade_ordered` mirror TS-логики из `src/lib/mockExamPart1Checker.ts::gradeMultiChoice` / `gradeOrdered`.
+- One-time re-grade SELECT-then-UPDATE: only `score_source IN ('student_form', 'ocr', 'finalize_default')` AND `check_mode IN ('multi_choice', 'ordered')` AND `attempts.status <> 'manually_entered'`. Preserves `score_source='tutor'` rows.
+- Recompute `total_part1_score` для всех затронутых attempts.
+- Helper functions DROP'аются в конце migration.
+- **Idempotent** — re-apply на already-recomputed rows даёт identical result.
+- **Hard invariant:** этот script разрабатан только для one-time post-AC-P9 backfill. Если ФИПИ 2027 обновит критерии — нужен новый migration с другим именем.
+
+**Backend extensions (`mock-exam-tutor-api/index.ts`):**
+- `handlePart1ManualScore` принимает optional `comment` body (≤ 600 chars). Preserve existing `student_answer` (не overwrite на null для form mode). Если comment='undefined' — не обновляем; если null — clear.
+- `handleGetAttempt` SELECT расширен на `tutor_comment` + `task_text` + `task_image_url` в `part1_answers[*]`.
+
+**Backend extensions (`mock-exam-student-api/index.ts`):**
+- `handleGetResult` SELECT расширен на `tutor_comment`. Visible post-submit (когда part1 уже scored).
+
+**Frontend Component (`src/components/tutor/mock-exams/Part1TaskDrillDownDialog.tsx`):**
+- Mirror EditScoreDialog (homework) UX pattern для mock-exam Часть 1.
+- Header: «KIM N · max_score балла» + status badge (Верно / Частично / Неверно / Без ответа).
+- Two-column row: ответ ученика (slate) + правильный ответ (emerald).
+- Score input (0..max_score validated).
+- Comment textarea (≤ 600 chars).
+- Collapsible `<details>` «Показать условие» → task_text (MathText) + task_image_url.
+- Footer: Отмена + Сохранить.
+
+**Frontend wire-up (`TutorMockExamReview.tsx`):**
+- `Part1SummaryCard` (form mode): расширено collapsible rows list + click → drill-down dialog + universal recheck button «По критериям ФИПИ» в header + read-only badge для manually_entered.
+- `Part1BlankReviewPanel` (blank mode): inline grid input сохраняется (variant A); добавляется 🔍 icon next to каждой cell → opens drill-down dialog. Sync inline draft с modal save через `setDrafts`. Universal recheck button уже был (no change).
+- Comment indicator: 💬 sky icon в row/cell если `tutor_comment.trim().length > 0`.
+
+**Student UI (`StudentMockExamResult.tsx`):**
+- В Part1Card отдельные comment rows (sky-50/40 bg) под основными score rows. Filter+map по KIM с непустым `tutor_comment`. Render `«💬 KIM N — комментарий репетитора: «...»»` colspan=4.
+- Visible когда `tutor_comment !== null && trim().length > 0`. Никаких tooltip — full text visible inline.
+
+**Hard invariants:**
+1. **`tutor_comment` max 600 chars** — backend validation `400 VALIDATION` на overflow.
+2. **`student_answer` preservation** — `handlePart1ManualScore` теперь читает existing row перед upsert, не перетирает.
+3. **`score_source='tutor'` для tutor edits** — same as раньше (handleRecheckPart1 skip'ит).
+4. **Comment visibility post-submit only** — `handleGetResult` SELECT'ит для всех `isPostSubmit` rows, anonymous lead reveal flow не затронут (anti-leak preserved).
+5. **Migration `20260526120000` идемпотентна** — `WHERE earned_score IS DISTINCT FROM eligible.new_score` гарантирует no-op для уже-recomputed rows.
+
+**При расширении на новый check_mode** (например `numeric_range` для научной нотации в будущем): обновить PL/pgSQL функции в **новом** migration файле — не модифицировать existing 20260526120000 (history preservation).
+
+**Спека AC-P11:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` (раздел добавляется отдельной PR).
+
+---
+
 **Часть 1 partial credit ФИПИ 2026 (mock-exams-v1-pilot-polish AC-P9, 2026-05-25):**
 
 После Round 7 Егор-pilot QA выявил что текущий checker — **pure binary** (0 или max_score), но ФИПИ 2026 официальные критерии требуют partial credit 1 балл для одной ошибки в multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17) задачах. Симптом: KIM 5 (correct=123, student=12) → 0/2 вместо 1/2; KIM 6 (correct=32, student=33) → 0/2 вместо 1/2.

@@ -1214,16 +1214,22 @@ async function handleGetAttempt(
   // ЕГЭ физики), даже если ученик не ответил — frontend (review surface)
   // нуждается в полном списке для manual scoring inputs blank-mode (TASK-11).
   // Existing answers переопределяют placeholders.
+  // AC-P11 (2026-05-26): + tutor_comment в SELECT для drill-down dialog.
   const { data: part1Rows } = await db
     .from("mock_exam_attempt_part1_answers")
-    .select("kim_number, student_answer, earned_score")
+    .select("kim_number, student_answer, earned_score, tutor_comment")
     .eq("attempt_id", attemptId)
     .order("kim_number", { ascending: true });
-  const answersByKim = new Map<number, { student_answer: string | null; earned_score: number | null }>();
+  const answersByKim = new Map<number, {
+    student_answer: string | null;
+    earned_score: number | null;
+    tutor_comment: string | null;
+  }>();
   for (const row of part1Rows ?? []) {
     answersByKim.set(row.kim_number as number, {
       student_answer: row.student_answer as string | null,
       earned_score: row.earned_score as number | null,
+      tutor_comment: row.tutor_comment as string | null,
     });
   }
   const part1VariantTasks = Object.entries(variantTasks)
@@ -1236,9 +1242,13 @@ async function handleGetAttempt(
       kim_number: kim,
       student_answer: ans?.student_answer ?? null,
       earned_score: ans?.earned_score ?? null,
+      tutor_comment: ans?.tutor_comment ?? null,
       correct_answer: variant.correct_answer,
       max_score: variant.max_score,
       check_mode: variant.check_mode,
+      // AC-P11: include task_text + task_image_url для drill-down dialog
+      task_text: variant.task_text,
+      task_image_url: variant.task_image_url,
     };
   });
 
@@ -1801,6 +1811,26 @@ async function handlePart1ManualScore(
   if (!isNonNegativeInt(b.earned_score)) {
     return jsonError(cors, 400, "VALIDATION", "earned_score must be a non-negative integer");
   }
+  // AC-P11 (2026-05-26): optional `comment` field — tutor comment к KIM,
+  // видим ученику после approval. Max 600 chars defensive.
+  let comment: string | null | undefined = undefined; // undefined = не обновлять, null = clear
+  if (b.comment !== undefined) {
+    if (b.comment === null) {
+      comment = null;
+    } else if (typeof b.comment === "string") {
+      const trimmed = b.comment.trim();
+      if (trimmed.length === 0) {
+        comment = null;
+      } else if (trimmed.length > 600) {
+        return jsonError(cors, 400, "VALIDATION",
+          "Комментарий слишком длинный (максимум 600 символов)");
+      } else {
+        comment = trimmed;
+      }
+    } else {
+      return jsonError(cors, 400, "VALIDATION", "comment must be string or null");
+    }
+  }
 
   if (!assignment.variant_id) {
     return jsonError(cors, 400, "INVALID_STATE", "Assignment has no variant");
@@ -1823,21 +1853,38 @@ async function handlePart1ManualScore(
       `earned_score exceeds max_score (${variantTask.max_score})`);
   }
 
+  // AC-P11: preserve existing student_answer (form mode уже имеет ответ).
+  // Раньше handler хардкодил `student_answer: null` — это работало для blank mode
+  // где answer всегда null. Для form mode (drill-down editing) — student_answer
+  // уже set от auto-check, не должен теряться при tutor override.
+  const { data: existingRow } = await db
+    .from("mock_exam_attempt_part1_answers")
+    .select("student_answer")
+    .eq("attempt_id", attemptId)
+    .eq("kim_number", b.kim_number as number)
+    .maybeSingle();
+  const preservedStudentAnswer =
+    (existingRow?.student_answer as string | null) ?? null;
+
+  const upsertPayload: Record<string, unknown> = {
+    attempt_id: attemptId,
+    kim_number: b.kim_number,
+    student_answer: preservedStudentAnswer,
+    earned_score: b.earned_score,
+    // TASK-16-R2 fix #1: explicit provenance — runPart1OCR retry preserves
+    // только rows со score_source='tutor' (см. CLAUDE.md §22 R2 invariants).
+    score_source: "tutor",
+    updated_at: new Date().toISOString(),
+  };
+  // Only include `tutor_comment` in payload если client передал field
+  // (undefined = не обновлять; null = explicit clear).
+  if (comment !== undefined) {
+    upsertPayload.tutor_comment = comment;
+  }
+
   const { error: upsertErr } = await db
     .from("mock_exam_attempt_part1_answers")
-    .upsert(
-      {
-        attempt_id: attemptId,
-        kim_number: b.kim_number,
-        student_answer: null, // student didn't enter digital answer (blank mode)
-        earned_score: b.earned_score,
-        // TASK-16-R2 fix #1: explicit provenance — runPart1OCR retry preserves
-        // только rows со score_source='tutor' (см. CLAUDE.md §22 R2 invariants).
-        score_source: "tutor",
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "attempt_id,kim_number" },
-    );
+    .upsert(upsertPayload, { onConflict: "attempt_id,kim_number" });
   if (upsertErr) {
     console.error("mock_exam_part1_manual_score_failed", { error: upsertErr.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to persist manual score");
@@ -1848,6 +1895,7 @@ async function handlePart1ManualScore(
     attempt_id: attemptId,
     kim_number: b.kim_number,
     earned_score: b.earned_score,
+    tutor_comment: comment === undefined ? null : comment,
   });
 }
 

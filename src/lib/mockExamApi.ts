@@ -259,8 +259,22 @@ export async function regradeMockExamPart2(
  */
 export async function setMockExamPart1ManualScore(
   attemptId: string,
-  payload: { kim_number: number; earned_score: number },
-): Promise<{ ok: true; attempt_id: string; kim_number: number; earned_score: number }> {
+  payload: {
+    kim_number: number;
+    earned_score: number;
+    /**
+     * AC-P11 (2026-05-26): optional tutor comment. null = clear, undefined =
+     * не обновлять (preserve existing). Max 600 chars (backend enforces).
+     */
+    comment?: string | null;
+  },
+): Promise<{
+  ok: true;
+  attempt_id: string;
+  kim_number: number;
+  earned_score: number;
+  tutor_comment: string | null;
+}> {
   return requestTutorMockExamApi(
     `/attempts/${encodeURIComponent(attemptId)}/part1-manual-score`,
     { method: 'POST', body: JSON.stringify(payload) },

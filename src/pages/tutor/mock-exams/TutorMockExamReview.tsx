@@ -25,12 +25,14 @@ import {
   AlertCircle,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock,
   Info,
   Lock,
   Pencil,
   RotateCcw,
+  Search,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -59,6 +61,7 @@ import {
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { MockExamGradingProgressBanner } from '@/components/tutor/mock-exams/MockExamGradingProgressBanner';
+import { Part1TaskDrillDownDialog } from '@/components/tutor/mock-exams/Part1TaskDrillDownDialog';
 import { useMockExamAssignment } from '@/hooks/useMockExamAssignment';
 import { useMockExamAttempt } from '@/hooks/useMockExamAttempt';
 import { MOCK_EXAM_ATTEMPT_QUERY_KEY } from '@/hooks/useMockExamAttempt';
@@ -352,6 +355,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   const [isRetryingOCR, setIsRetryingOCR] = useState(false);
   const [isRechecking, setIsRechecking] = useState(false);
   const [confirmRecheckOpen, setConfirmRecheckOpen] = useState(false);
+  // AC-P11 (2026-05-26): drill-down state для click 🔍 на cell.
+  const [drillDownKim, setDrillDownKim] = useState<number | null>(null);
 
   const isReadOnly =
     attempt.status === 'approved' || attempt.status === 'manually_entered';
@@ -716,6 +721,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
             const lowConfTitle = isLowConf
               ? 'AI не уверен в распознавании — сверь по фото бланка'
               : statusConfig[status].title;
+            // AC-P11: comment indicator + 🔍 icon → open drill-down.
+            const hasComment = (answerRow?.tutor_comment ?? '').trim().length > 0;
             return (
               <label
                 key={t.kim_number}
@@ -730,9 +737,31 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                     className={cn('h-3.5 w-3.5 flex-shrink-0', statusConfig[status].classes)}
                     aria-hidden="true"
                   />
-                  <span>
+                  <span className="flex-1">
                     KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
                   </span>
+                  {/* AC-P11: 💬 indicator если есть comment */}
+                  {hasComment && (
+                    <span
+                      className="text-sky-600 dark:text-sky-400 text-[10px]"
+                      title={`Комментарий: «${answerRow?.tutor_comment ?? ''}»`}
+                    >
+                      💬
+                    </span>
+                  )}
+                  {/* AC-P11: 🔍 icon → open Part1TaskDrillDownDialog */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setDrillDownKim(t.kim_number);
+                    }}
+                    className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 touch-manipulation flex-shrink-0"
+                    aria-label={`Открыть детали KIM ${t.kim_number}`}
+                    title="Условие задачи + комментарий"
+                  >
+                    <Search className="h-3 w-3 text-slate-500" aria-hidden="true" />
+                  </button>
                 </span>
                 {/* AI recognized + correct_answer row. Только если что-то есть. */}
                 {(hasRecognition || correctAnswer) && (
@@ -946,6 +975,50 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* AC-P11 (2026-05-26): drill-down dialog для blank mode panel. */}
+      {drillDownKim !== null && (() => {
+        const ans = attempt.part1_answers.find((a) => a.kim_number === drillDownKim);
+        if (!ans) return null;
+        return (
+          <Part1TaskDrillDownDialog
+            open={drillDownKim !== null}
+            onOpenChange={(open) => {
+              if (!open) setDrillDownKim(null);
+            }}
+            kimNumber={ans.kim_number}
+            maxScore={ans.max_score}
+            studentAnswer={ans.student_answer}
+            correctAnswer={ans.correct_answer}
+            currentScore={ans.earned_score}
+            currentComment={ans.tutor_comment ?? null}
+            taskText={ans.task_text ?? null}
+            taskImageUrl={ans.task_image_url ?? null}
+            isReadOnly={isReadOnly}
+            onSave={async (payload) => {
+              await setMockExamPart1ManualScore(attempt.id, {
+                kim_number: ans.kim_number,
+                earned_score: payload.score,
+                comment: payload.comment,
+              });
+              // Sync inline grid draft со score из dialog
+              setDrafts((d) => ({
+                ...d,
+                [ans.kim_number]: String(payload.score),
+              }));
+              // Recompute totals lazily — non-fatal
+              try {
+                await finalizeMockExamPart1(attempt.id);
+              } catch {
+                // Non-fatal — totals lag until next finalize
+              }
+              void queryClient.invalidateQueries({
+                queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+              });
+            }}
+          />
+        );
+      })()}
     </Card>
   );
 }
@@ -1093,7 +1166,17 @@ function ExamModeAndSessionsBadge({ attempt }: { attempt: MockExamAttemptDetail 
 
 // ─── Part 1 summary card ─────────────────────────────────────────────────────
 
+// AC-P11 (2026-05-26): расширено — теперь карточка для form mode имеет:
+// - Universal recheck button «По критериям ФИПИ» (mirror Part1BlankReviewPanel)
+// - Collapsible per-KIM rows list с click → drill-down dialog
+// - Score override + tutor_comment через Part1TaskDrillDownDialog
+
 function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
+  const queryClient = useQueryClient();
+  const [isRechecking, setIsRechecking] = useState(false);
+  const [confirmRecheckOpen, setConfirmRecheckOpen] = useState(false);
+  const [drillDownKim, setDrillDownKim] = useState<number | null>(null);
+
   const part1Max = attempt.part1_answers.reduce(
     (acc, a) => acc + (a.max_score ?? 0),
     0,
@@ -1114,33 +1197,278 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
       a.max_score > 0,
   ).length;
 
+  const isReadOnly =
+    attempt.status === 'manually_entered';
+
+  // AC-P11: universal recheck handler — mirror Part1BlankReviewPanel.
+  const handleRecheckPart1 = async () => {
+    setIsRechecking(true);
+    try {
+      const res = await recheckMockExamPart1(attempt.id);
+      const parts: string[] = [];
+      parts.push(`обновлено ${res.updated_count} ${res.updated_count === 1 ? 'балл' : 'баллов'}`);
+      if (res.skipped_tutor_count > 0) {
+        parts.push(`сохранено ${res.skipped_tutor_count} ручных правок`);
+      }
+      if (res.updated_count === 0 && res.skipped_no_change_count > 0) {
+        toast.info('Все ответы уже соответствуют новым критериям ФИПИ');
+      } else if (res.updated_count === 0) {
+        toast.info('Нет ответов для пересчёта');
+      } else {
+        toast.success(`Пересчёт завершён: ${parts.join(', ')}`);
+      }
+      setConfirmRecheckOpen(false);
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+      });
+    } catch (err) {
+      const msg = err instanceof MockExamApiError
+        ? err.message
+        : 'Не удалось пересчитать Часть 1';
+      toast.error(msg);
+    } finally {
+      setIsRechecking(false);
+    }
+  };
+
+  // AC-P11: drill-down save handler — invokes setMockExamPart1ManualScore с
+  // score + optional comment. Backend preserves student_answer (existing form
+  // mode value не теряется).
+  const handleDrillDownSave = async (
+    kim: number,
+    payload: { score: number; comment: string | null },
+  ) => {
+    await setMockExamPart1ManualScore(attempt.id, {
+      kim_number: kim,
+      earned_score: payload.score,
+      comment: payload.comment,
+    });
+    // Recompute total_part1_score через finalize endpoint (idempotent SUM).
+    try {
+      await finalizeMockExamPart1(attempt.id);
+    } catch {
+      // Non-fatal — totals can lag until next finalize
+    }
+    void queryClient.invalidateQueries({
+      queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
+    });
+  };
+
+  const drillDownAnswer = drillDownKim !== null
+    ? attempt.part1_answers.find((a) => a.kim_number === drillDownKim) ?? null
+    : null;
+
   return (
-    <Card animate={false} className="bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900">
-      <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-        <div className="flex items-start gap-3">
-          <div
-            className="h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300 flex items-center justify-center flex-shrink-0"
-            aria-hidden="true"
-          >
-            <Lock className="h-4 w-4" />
+    <>
+      <Card animate={false} className="bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900">
+        <CardContent className="p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
+            <div className="flex items-start gap-3">
+              <div
+                className="h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300 flex items-center justify-center flex-shrink-0"
+                aria-hidden="true"
+              >
+                <Lock className="h-4 w-4" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
+                  Часть 1: {formatMockScore(part1Score)} из {formatMockScore(part1Max)} баллов
+                </p>
+                <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
+                  Auto-проверено. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}.
+                </p>
+              </div>
+            </div>
+            {/* AC-P11: universal recheck button + read-only badge для manually_entered */}
+            {isReadOnly ? (
+              <Badge
+                variant="outline"
+                className="border-emerald-300 text-emerald-800 bg-white/60 self-start sm:self-center"
+              >
+                Не редактируется
+              </Badge>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmRecheckOpen(true)}
+                disabled={isRechecking}
+                className="touch-manipulation text-xs gap-1.5 min-h-9 self-start sm:self-center"
+                title="Пересчитать Часть 1 по новым критериям ФИПИ (partial credit)"
+              >
+                <RotateCcw
+                  className={cn('h-3.5 w-3.5', isRechecking && 'animate-spin')}
+                  aria-hidden="true"
+                />
+                {isRechecking ? 'Пересчёт…' : 'По критериям ФИПИ'}
+              </Button>
+            )}
           </div>
-          <div>
-            <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-              Часть 1: {formatMockScore(part1Score)} из {formatMockScore(part1Max)} баллов
-            </p>
-            <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
-              Auto-проверено по бланку. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}.
-            </p>
-          </div>
-        </div>
-        <Badge
-          variant="outline"
-          className="border-emerald-300 text-emerald-800 bg-white/60 self-start sm:self-center"
-        >
-          Не редактируется
-        </Badge>
-      </CardContent>
-    </Card>
+
+          {/* AC-P11: collapsible rows list — click row → drill-down dialog */}
+          <details className="rounded-md border border-emerald-200 dark:border-emerald-900 bg-white/60 dark:bg-emerald-950/10">
+            <summary className="cursor-pointer touch-manipulation px-3 py-2 text-xs font-medium text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 flex items-center gap-1.5">
+              <ChevronDown className="h-3.5 w-3.5 transition-transform" aria-hidden="true" />
+              Показать ответы по задачам ({attempt.part1_answers.length})
+            </summary>
+            <div className="border-t border-emerald-200 dark:border-emerald-900 max-h-[400px] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-emerald-50 dark:bg-emerald-950/30 text-xs uppercase text-emerald-800 dark:text-emerald-300 sticky top-0">
+                  <tr>
+                    <th className="px-2 py-1.5 text-left font-medium">№</th>
+                    <th className="px-2 py-1.5 text-left font-medium">Ответ</th>
+                    <th className="px-2 py-1.5 text-left font-medium">Правильный</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Балл</th>
+                    <th className="px-2 py-1.5 text-right font-medium">Коммент</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attempt.part1_answers.map((row) => {
+                    const earned = row.earned_score ?? 0;
+                    const hasScore = row.earned_score !== null;
+                    const isCorrect = hasScore && earned > 0 && earned === row.max_score;
+                    const isPartial = hasScore && earned > 0 && earned < row.max_score;
+                    const isWrong = hasScore && earned === 0 && row.student_answer !== null;
+                    const hasComment = (row.tutor_comment ?? '').trim().length > 0;
+                    return (
+                      <tr
+                        key={row.kim_number}
+                        className="border-t border-emerald-100 dark:border-emerald-900/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer touch-manipulation"
+                        onClick={() => setDrillDownKim(row.kim_number)}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Открыть детали KIM ${row.kim_number}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setDrillDownKim(row.kim_number);
+                          }
+                        }}
+                      >
+                        <td className="px-2 py-1.5 font-medium tabular-nums text-slate-800 dark:text-slate-200">
+                          №{row.kim_number}
+                        </td>
+                        <td className="px-2 py-1.5 break-words max-w-[120px]">
+                          {row.student_answer ? (
+                            <span
+                              className={cn(
+                                'inline-flex items-center gap-1',
+                                isCorrect && 'text-emerald-700 dark:text-emerald-300',
+                                isPartial && 'text-amber-700 dark:text-amber-300',
+                                isWrong && 'text-rose-700 dark:text-rose-300',
+                              )}
+                            >
+                              {isCorrect && <CheckCircle2 className="h-3 w-3" />}
+                              {isPartial && <Check className="h-3 w-3" />}
+                              {isWrong && <X className="h-3 w-3" />}
+                              {row.student_answer}
+                            </span>
+                          ) : (
+                            <span className="italic text-slate-400">без ответа</span>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 break-words max-w-[120px] text-slate-700 dark:text-slate-300">
+                          {row.correct_answer ?? '—'}
+                        </td>
+                        <td
+                          className={cn(
+                            'px-2 py-1.5 text-right tabular-nums font-semibold',
+                            isCorrect && 'text-emerald-700 dark:text-emerald-300',
+                            isPartial && 'text-amber-700 dark:text-amber-300',
+                            isWrong && 'text-rose-700 dark:text-rose-300',
+                            !hasScore && 'text-slate-400',
+                          )}
+                        >
+                          {hasScore ? `${earned}/${row.max_score}` : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          {hasComment ? (
+                            <span
+                              className="inline-flex items-center text-sky-700 dark:text-sky-300"
+                              title="Комментарий есть"
+                            >
+                              💬
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-400 px-3 py-2 bg-emerald-50/50 dark:bg-emerald-950/30 border-t border-emerald-200 dark:border-emerald-900">
+                💡 Click на строку → откроется детальная карточка с условием и редактированием
+              </p>
+            </div>
+          </details>
+        </CardContent>
+      </Card>
+
+      {/* AC-P11: drill-down dialog */}
+      {drillDownAnswer && (
+        <Part1TaskDrillDownDialog
+          open={drillDownKim !== null}
+          onOpenChange={(open) => {
+            if (!open) setDrillDownKim(null);
+          }}
+          kimNumber={drillDownAnswer.kim_number}
+          maxScore={drillDownAnswer.max_score}
+          studentAnswer={drillDownAnswer.student_answer}
+          correctAnswer={drillDownAnswer.correct_answer}
+          currentScore={drillDownAnswer.earned_score}
+          currentComment={drillDownAnswer.tutor_comment ?? null}
+          taskText={drillDownAnswer.task_text ?? null}
+          taskImageUrl={drillDownAnswer.task_image_url ?? null}
+          isReadOnly={isReadOnly}
+          onSave={(payload) => handleDrillDownSave(drillDownAnswer.kim_number, payload)}
+        />
+      )}
+
+      {/* AC-P11: recheck confirm dialog (mirror Part1BlankReviewPanel) */}
+      <AlertDialog open={confirmRecheckOpen} onOpenChange={setConfirmRecheckOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Пересчитать Часть 1 по критериям ФИПИ?</AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 text-sm">
+              <span className="block">
+                Все баллы Часть 1 будут пересчитаны по обновлённой логике{' '}
+                <strong>partial credit ФИПИ 2026</strong>:
+              </span>
+              <ul className="list-disc list-inside text-xs space-y-1 leading-relaxed pl-2">
+                <li>
+                  <strong>KIM 5, 9, 14, 18</strong> — 1 балл, если одна цифра
+                  лишняя / отсутствует / неверная.
+                </li>
+                <li>
+                  <strong>KIM 6, 10, 15, 17</strong> — 1 балл, если на одной
+                  позиции неверная цифра.
+                </li>
+              </ul>
+              <span className="block pt-1">
+                <strong>Твои ручные правки сохранятся</strong> — пересчитываются
+                только AI/auto-check баллы.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isRechecking}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleRecheckPart1();
+              }}
+              disabled={isRechecking}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              {isRechecking ? 'Пересчитываем…' : 'Пересчитать'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 

@@ -243,6 +243,12 @@ export interface StudentMockExamResultPart1Answer {
   correct_answer: string | null;
   max_score: number;
   check_mode: MockExamCheckMode | null;
+  /**
+   * AC-P11 (2026-05-26): tutor comment к конкретной задаче Часть 1. Если
+   * присутствует — ученик видит в Part1Card row под balance. null = нет
+   * комментария от tutor'а к этому KIM.
+   */
+  tutor_comment?: string | null;
 }
 
 /**

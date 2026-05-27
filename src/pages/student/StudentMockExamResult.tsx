@@ -321,6 +321,19 @@ function Part1Card({
                     </tr>
                   );
                 })}
+                {/* AC-P11 (2026-05-26): отдельные comment rows под основными rows.
+                    Render'им вторую passing над answers чтобы соответствовать
+                    React keys without nesting. */}
+                {answers
+                  .filter((row) => (row.tutor_comment ?? '').trim().length > 0)
+                  .map((row) => (
+                    <tr key={`comment-${row.kim_number}`} className="text-sky-800 bg-sky-50/40">
+                      <td className="px-3 pb-2 pt-0 text-xs font-medium text-sky-700" colSpan={4}>
+                        <span className="font-semibold">💬 KIM {row.kim_number} — комментарий репетитора:</span>{' '}
+                        <span className="font-normal italic">«{row.tutor_comment}»</span>
+                      </td>
+                    </tr>
+                  ))}
               </tbody>
             </table>
           </div>
