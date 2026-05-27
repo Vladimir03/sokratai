@@ -1,56 +1,35 @@
-# Диагноз
+# Hotfix deploy — AC-P11 H1-H7 + AC-P9 backfill
 
-**Данные в БД целы.** Полный аудит:
+## Контекст
 
-| Таблица | Записей |
-|---|---|
-| `tutor_students` | 129 |
-| `tutors` | 41 |
-| `profiles` | 413 |
-| `homework_tutor_assignments` | 153 |
-| `homework_tutor_student_assignments` | 343 |
-| `tutor_lessons` | 356 |
-| `tutor_payments` | 31 |
-| `mock_exam_attempts` | 28 |
+Три коммита (`cd1257b`, `809d836`, `a09b13e`) уже в локальном main. Нужно:
 
-Конкретно у Владимира_реп в БД **3 ученика** — UI показывает 0.
+1. Закрыть migration drift
+2. Переразвернуть две edge functions
 
-## Причина: колонка `profiles.full_name` не существует
+## Шаги
 
-Код (frontend + edge functions) SELECT'ит `profiles.full_name`, но колонки в БД нет. PostgREST возвращает ошибку → `getTutorStudents()` ловит её, логирует и возвращает `[]` → UI «У вас пока нет учеников».
+### 1. Apply migration drift
 
-Подтверждение в логах edge function `homework-api`:
-```
-resolve_student_identity_profiles_lookup_failed
-  error: "column profiles.full_name does not exist"
-```
+В БД отсутствует `20260526120000_ac_p9_partial_credit_backfill.sql` (одноразовый PL/pgSQL backfill multi_choice + ordered partial credit для KIM 5/9/14/18 и 6/10/15/17, идемпотентен через `WHERE earned_score IS DISTINCT FROM new_score`, preserves `score_source='tutor'`).
 
-Затронуто:
-- `src/lib/tutors.ts:52` — `STUDENT_PROFILE_SELECT` включает `full_name` → ломает **весь список учеников** у каждого репетитора
-- `supabase/functions/homework-api/index.ts` (5 точек) — `resolveStudentIdentity`, `tutorExtras` lookup
-- Phase 8 / Phase 8.1 (CLAUDE.md §28) предполагали что колонка существует, но миграция её добавления отсутствует (последние миграции на `profiles`: `last_sign_in_at`, `trial_started_at` — `full_name` нигде нет).
+Применю содержимое файла через `supabase--migration` (новой timestamped миграцией, т.к. legacy файл с этим timestamp уже считается «зарегистрированным», но не выполнен — драфт-state на стороне Lovable).
 
-## План фикса
+### 2. Redeploy edge functions
 
-**Одна миграция** — добавить недостающую колонку:
+- `mock-exam-tutor-api` (H3 read-only drill-down, H4 signed URL resolve, H5 server-side total recompute, H7 touch target — хотя H7 frontend, edge function тоже задет в commit)
+- `mock-exam-student-api` (H1 paused status block в `handleGetResult`)
 
-```sql
-ALTER TABLE public.profiles
-  ADD COLUMN IF NOT EXISTS full_name text;
-```
+Через `supabase--deploy_edge_functions`.
 
-Безопасно и additive:
-- Existing rows получают `NULL` (для всех 413 profiles).
-- Priority chain `tutor_students.display_name → profiles.full_name → profiles.username` уже корректно фолбэчит на `username` при NULL (см. CLAUDE.md §8 + §28).
-- PostgREST сразу начнёт принимать SELECT с `full_name` → списки учеников вернутся, edge function warnings исчезнут.
-- Никаких backfill — `full_name` опционально, заполняется когда юзер сам введёт real-name (signup `full_name` метаданные / future tutor edit).
+### 3. Verification
 
-## Validation после deploy
+- `SELECT version FROM supabase_migrations.schema_migrations WHERE version = '20260526120000'` → должна быть.
+- Frontend сам пересоберётся (preview).
 
-1. Открыть `/tutor/students` под Владимиром — должно показать 3 учеников.
-2. Edge function logs `homework-api` — warning `resolve_student_identity_profiles_lookup_failed` должен исчезнуть.
-3. `psql -c "SELECT COUNT(*) FROM profiles WHERE full_name IS NOT NULL"` → 0 (ок, поле новое).
+После apply сообщу готовность — Vladimir попросит preview URL для прод-релиза.
 
-## Frontend/backend изменения
+## Что НЕ трогаю
 
-**Никаких.** Код уже корректно использует поле — он опередил schema на 1 миграцию. Фикс полностью на стороне БД.
+- Никаких code edits (всё уже в main).
+- Frontend bundle деплоится автоматически на preview; production `deploy-sokratai` — отдельный шаг по запросу Vladimir.
