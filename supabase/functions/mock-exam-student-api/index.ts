@@ -518,14 +518,20 @@ async function handleGetResult(
   }
   const assignmentId = attempt.assignment_id as string;
 
-  // Block in_progress — result page is post-submit only.
-  if (attempt.status === "in_progress") {
+  // H1 hotfix [P0] (ChatGPT-5.5 review, 2026-05-26): block in_progress AND paused.
+  // AC-P10 ввёл новый pre-submit статус `paused`. Без этого guard ученик может:
+  // 1. Pause attempt (в середине решения)
+  // 2. Открыть /student/mock-exams/:id/result URL напрямую
+  // 3. Получить correct_answers для всех Часть 1 KIM
+  // 4. Resume → ввести правильные ответы
+  // → Exam integrity полностью сломана.
+  if (attempt.status === "in_progress" || attempt.status === "paused") {
     return jsonError(
       cors,
       409,
       "NOT_SUBMITTED",
       "Attempt is still in progress",
-      { status: "in_progress" },
+      { status: attempt.status as string },
     );
   }
 
@@ -558,7 +564,15 @@ async function handleGetResult(
 
   const isApproved = attempt.status === "approved";
   const isManualEntered = attempt.status === "manually_entered";
-  const isPostSubmit = !isManualEntered; // submitted | ai_checking | awaiting_review | approved
+  // H1 hotfix [P0] (ChatGPT-5.5 review, 2026-05-26): explicit allowlist вместо
+  // `!isManualEntered`. Защита defense-in-depth от новых статусов (как `paused`
+  // после AC-P10) которые могли бы fall-through в isPostSubmit. Если добавится
+  // новый pre-submit status в будущем — здесь он автоматически НЕ попадёт.
+  const isPostSubmit =
+    attempt.status === "submitted" ||
+    attempt.status === "ai_checking" ||
+    attempt.status === "awaiting_review" ||
+    attempt.status === "approved";
 
   let variant: Record<string, unknown> | null = null;
   const variantTasksByKim: Record<number, Record<string, unknown>> = {};
