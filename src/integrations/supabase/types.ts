@@ -2280,6 +2280,7 @@ export type Database = {
           current_streak: number | null
           diagnostic_completed: boolean | null
           difficult_subject: string | null
+          full_name: string | null
           gender: string | null
           grade: number | null
           id: string
@@ -2308,6 +2309,7 @@ export type Database = {
           current_streak?: number | null
           diagnostic_completed?: boolean | null
           difficult_subject?: string | null
+          full_name?: string | null
           gender?: string | null
           grade?: number | null
           id: string
@@ -2336,6 +2338,7 @@ export type Database = {
           current_streak?: number | null
           diagnostic_completed?: boolean | null
           difficult_subject?: string | null
+          full_name?: string | null
           gender?: string | null
           grade?: number | null
           id?: string
