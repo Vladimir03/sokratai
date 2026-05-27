@@ -952,6 +952,47 @@ Trigger: репетитор (через Володю 2026-05-26): «Сделай
 
 **Спека AC-P11:** `docs/delivery/features/mock-exams-v1-pilot-polish/spec.md` (раздел добавляется отдельной PR).
 
+**AC-P11 hotfixes (ChatGPT-5.5 review 2026-05-26, commits `cd1257b` + `809d836`):**
+
+После релиза AC-P10 Phase 2 + AC-P11 ChatGPT-5.5 prompt-review нашёл 7 issues (P0×1 + P1×5 + P2×1). Все закрыты в двух commits.
+
+**H1 [P0] — paused status leaks correct_answer** (commit `cd1257b` separate):
+- `mock-exam-student-api::handleGetResult` блокировал только `status='in_progress'`. AC-P10 ввёл новый pre-submit `paused` статус, который проходил guard.
+- Exploit: ученик нажимает Pause → открывает `/student/mock-exams/:id/result` URL → endpoint возвращает `correct_answer` для всех KIM 1-20 → Resume → вводит правильные ответы.
+- Fix: early reject теперь покрывает `in_progress` OR `paused`. `isPostSubmit` заменён на explicit allowlist (`submitted` / `ai_checking` / `awaiting_review` / `approved`) — defense-in-depth для будущих pre-submit статусов.
+
+**H2 [P1] — `default_exam_mode` не персистится** (commit `809d836`):
+- `TutorMockExamCreate` шлёт `default_exam_mode` в payload, но `handleCreateAssignment` ignore'ил → DB default `'training'` stuck → toggle «Симуляция ЕГЭ» silently сбрасывался → AC-P10 Phase 2 override indicator никогда не triggered.
+- Fix: validation + INSERT `default_exam_mode: defaultExamMode` в `handleCreateAssignment`.
+
+**H3 [P1] — Drill-down editable на approved attempts** (commit `809d836`):
+- `Part1SummaryCard` (form mode) проверял только `'manually_entered'`. На approved attempts dialog был editable, save вызывал `handlePart1ManualScore` → backend 409 `ALREADY_FINALIZED` → tutor видел silent failure.
+- Fix: `isReadOnly = status === 'approved' || status === 'manually_entered'`. Mirror `Part1BlankReviewPanel` который уже корректно блокирует оба.
+
+**H4 [P1] — `task_image_url` raw storage:// ref** (commit `809d836`):
+- `handleGetAttempt` SELECT'ил `variant.task_image_url` (raw `storage://mock-exam-variant-tasks/...`) и передавал клиенту. Frontend `Part1TaskDrillDownDialog` рендерит `<img src={taskImageUrl}>` → broken image.
+- Fix: `Promise.all` через `resolveSignedUrl(db, variant.task_image_url)` для каждой part1_answer row. Mirror student-api pattern (lines 657-668). Single ref (не dual-format JSON) — variant tasks канонически single ref per §11 seed generator.
+
+**H5 [P1] — `total_part1_score` recompute best-effort на клиенте** (commit `809d836`):
+- Клиент после save в drill-down dialog вызывал `finalizeMockExamPart1` через try/catch best-effort. На network drop / page reload totals оставались stale (silent failure).
+- Fix: `handlePart1ManualScore` теперь SUM'ит `earned_score` для всех part1_answers + UPDATE `attempt.total_part1_score` в той же DB сессии. Response расширен с `total_part1_score` для клиента (invalidate cache + показ свежих «X/28»). Non-fatal: если recompute fails — manual save уже succeeded, totals дойдут на следующем save или через `/part1-finalize`.
+
+**H6 [P2 downgraded] — PL/pgSQL parity doc-comment** (commit `809d836`):
+- Initial ChatGPT-5.5 flag: SQL `regexp_split_to_array(text, '')` char-splits ВСЁ, TS `gradeMultiChoice` сохраняет non-digit tokens opaquely (e.g. `"АБВ"` SQL→3 tokens / TS→1 opaque token).
+- Vladimir audit query 2026-05-26 показал 0 rows pilot data с non-digit characters → divergence theoretical, не actual.
+- Fix: inline PARITY NOTE в migration `20260526120000` документирует ограничение для future input parser changes.
+
+**H7 [P2] — 🔍 touch target too small** (commit `809d836`):
+- `Part1BlankReviewPanel` 🔍 button был `h-5 w-5` (20×20px) → нарушает iOS Safari touch target invariant (`.claude/rules/80-cross-browser.md`).
+- Fix: `h-9 w-9` (36px) — WCAG 2.2 large target (24px+) + finger-friendly без поломки grid density. Полные 44px iOS HIG ломают компактность шапки. Icon `h-3 w-3` → `h-3.5 w-3.5` для визуального баланса.
+
+**Hard invariants (новые, не нарушать):**
+
+1. **State-aware reveal в mock-exam-student-api**: любой новый pre-submit status (когда добавятся) **обязан** попасть в `handleGetResult` early reject + НЕ попасть в `isPostSubmit` allowlist. Иначе exploit pattern H1 повторится.
+2. **`default_exam_mode` write-path**: при добавлении новых fields в `handleCreateAssignment` body — обязательно validate + persist, не полагаться на DB default. Frontend без backend validation = silent broken toggle.
+3. **`task_image_url` resolution**: любой новый endpoint в `mock-exam-tutor-api`, возвращающий task_image_url клиенту, **обязан** проходить через `resolveSignedUrl()`. Raw `storage://` refs не работают для browser `<img src>`.
+4. **Server-side aggregation после tutor edit**: при добавлении новых `handle*ManualScore` или `handle*Override` handlers — recompute related aggregates (`total_*_score`) server-side в той же сессии. Client best-effort try/catch стало canonical anti-pattern (см. H5).
+
 ---
 
 **Часть 1 partial credit ФИПИ 2026 (mock-exams-v1-pilot-polish AC-P9, 2026-05-25):**
