@@ -749,18 +749,22 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                       💬
                     </span>
                   )}
-                  {/* AC-P11: 🔍 icon → open Part1TaskDrillDownDialog */}
+                  {/* AC-P11 hotfix H7: 🔍 touch target h-5 w-5 → h-9 w-9 для
+                       соблюдения min touch target (см. .claude/rules/80-cross-browser.md).
+                       h-9 w-9 = 36px (WCAG 2.2 large target 24px+ + закрывает обычные
+                       finger taps). Полные 44px iOS HIG ломают grid density. Icon
+                       остаётся h-3.5 w-3.5 для визуального баланса в плотной шапке. */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.preventDefault();
                       setDrillDownKim(t.kim_number);
                     }}
-                    className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 touch-manipulation flex-shrink-0"
+                    className="inline-flex items-center justify-center h-9 w-9 rounded hover:bg-slate-100 dark:hover:bg-slate-800 touch-manipulation flex-shrink-0"
                     aria-label={`Открыть детали KIM ${t.kim_number}`}
                     title="Условие задачи + комментарий"
                   >
-                    <Search className="h-3 w-3 text-slate-500" aria-hidden="true" />
+                    <Search className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                   </button>
                 </span>
                 {/* AI recognized + correct_answer row. Только если что-то есть. */}
@@ -1197,8 +1201,10 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
       a.max_score > 0,
   ).length;
 
+  // AC-P11 hotfix H3: approved тоже read-only — backend rejects manual_score
+  // на approved + tutor-comment edit не имеет смысла после tutor-approval (final state).
   const isReadOnly =
-    attempt.status === 'manually_entered';
+    attempt.status === 'approved' || attempt.status === 'manually_entered';
 
   // AC-P11: universal recheck handler — mirror Part1BlankReviewPanel.
   const handleRecheckPart1 = async () => {

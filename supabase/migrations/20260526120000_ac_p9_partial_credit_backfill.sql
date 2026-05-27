@@ -23,6 +23,21 @@
 
 -- ─── Temp helper functions (will be dropped at end) ─────────────────────────
 
+-- PARITY NOTE (ChatGPT-5.5 review 2026-05-26, P1 #2):
+-- Эти PL/pgSQL функции — one-time backfill mirror TS `gradeMultiChoice` /
+-- `gradeOrdered` (src/lib/mockExamPart1Checker.ts). Известное расхождение:
+-- SQL `regexp_split_to_array(text, '')` char-splits ВСЁ, TS-функция работает
+-- через `toMultiChoiceSet()` который сохраняет non-digit tokens opaquely
+-- (e.g. "1-3" SQL→Set{'1','-','3'}, TS→Set{'1','-','3'} тоже после strip,
+-- но edge cases типа "АБВ" SQL→3 char-tokens, TS→1 opaque token).
+--
+-- Vladimir audit query 2026-05-26 показал 0 rows pilot data с non-digit
+-- characters в `mock_exam_attempt_part1_answers.student_answer` —
+-- divergence theoretical, не actual для production. Future input parser
+-- changes (multi-char tokens, latin letters) могут exposed gap → если такое
+-- появится, пересмотреть этот migration или сделать новый backfill через
+-- TS-side бэкенд код (edge function).
+
 CREATE OR REPLACE FUNCTION public._ac_p11_grade_multi_choice(
   p_correct TEXT,
   p_student TEXT,

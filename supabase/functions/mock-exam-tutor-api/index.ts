@@ -731,6 +731,21 @@ async function handleCreateAssignment(
     return jsonError(cors, 400, "VALIDATION", "student_ids must be UUIDs", { invalid_student_ids: invalidIds });
   }
 
+  // H2 hotfix [P1] (ChatGPT-5.5 review, 2026-05-26): validate + persist
+  // default_exam_mode (AC-P10 Phase 2). Раньше field принимался во frontend
+  // payload но не валидировался / не писался в DB — toggle "Симуляция ЕГЭ"
+  // silently сбрасывался к DB default 'training'. Override indicator
+  // никогда не triggers'ил.
+  let defaultExamMode: "training" | "simulation" = "training";
+  if (b.default_exam_mode !== undefined && b.default_exam_mode !== null) {
+    if (b.default_exam_mode === "training" || b.default_exam_mode === "simulation") {
+      defaultExamMode = b.default_exam_mode;
+    } else {
+      return jsonError(cors, 400, "VALIDATION",
+        "default_exam_mode must be 'training' or 'simulation'");
+    }
+  }
+
   // Insert assignment.
   const { data: assignment, error: insertErr } = await db
     .from("mock_exam_assignments")
@@ -742,6 +757,8 @@ async function handleCreateAssignment(
       mode,
       deadline: (b.deadline as string | null | undefined) ?? null,
       status: "active",
+      // H2 hotfix [P1]: tutor recommendation для start modal pre-selection.
+      default_exam_mode: defaultExamMode,
     })
     .select("id")
     .single();
@@ -1236,21 +1253,32 @@ async function handleGetAttempt(
     .filter(([, t]) => t.part === 1)
     .map(([kimStr, t]) => ({ kim: Number(kimStr), variant: t }))
     .sort((a, b) => a.kim - b.kim);
-  const part1Answers = part1VariantTasks.map(({ kim, variant }) => {
-    const ans = answersByKim.get(kim);
-    return {
-      kim_number: kim,
-      student_answer: ans?.student_answer ?? null,
-      earned_score: ans?.earned_score ?? null,
-      tutor_comment: ans?.tutor_comment ?? null,
-      correct_answer: variant.correct_answer,
-      max_score: variant.max_score,
-      check_mode: variant.check_mode,
-      // AC-P11: include task_text + task_image_url для drill-down dialog
-      task_text: variant.task_text,
-      task_image_url: variant.task_image_url,
-    };
-  });
+  // AC-P11 hotfix H4: resolve task_image_url to signed URL для drill-down dialog.
+  // variant.task_image_url хранится как `storage://mock-exam-variant-tasks/...` ref;
+  // frontend `<img src={taskImageUrl}>` ожидает direct URL. Mirror student-api
+  // pattern (lines 657-668). Variant tasks канонически single ref (см. §11 seed
+  // generator), не dual-format JSON-array — поэтому inline single resolve.
+  const part1Answers = await Promise.all(
+    part1VariantTasks.map(async ({ kim, variant }) => {
+      const ans = answersByKim.get(kim);
+      const taskImageSigned = await resolveSignedUrl(
+        db,
+        (variant.task_image_url as string | null) ?? null,
+      );
+      return {
+        kim_number: kim,
+        student_answer: ans?.student_answer ?? null,
+        earned_score: ans?.earned_score ?? null,
+        tutor_comment: ans?.tutor_comment ?? null,
+        correct_answer: variant.correct_answer,
+        max_score: variant.max_score,
+        check_mode: variant.check_mode,
+        // AC-P11: include task_text + task_image_url для drill-down dialog
+        task_text: variant.task_text,
+        task_image_url: taskImageSigned,
+      };
+    }),
+  );
 
   // Part 2 solutions + signed photo URLs.
   const { data: part2Rows } = await db
@@ -1890,12 +1918,51 @@ async function handlePart1ManualScore(
     return jsonError(cors, 500, "DB_ERROR", "Failed to persist manual score");
   }
 
+  // AC-P11 hotfix H5: recompute total_part1_score server-side. Раньше клиент
+  // звал /part1-finalize отдельным best-effort try/catch — на network drop /
+  // page reload totals оставались stale (silent failure). Теперь каждый
+  // manual_score call атомарно обновляет totals в той же DB сессии. Mirror
+  // handlePart1Finalize aggregation pattern (line 2019-2032). Non-fatal:
+  // если recompute fails — manual save уже succeeded, totals дойдут на
+  // следующем save или через /part1-finalize.
+  const { data: allRows, error: selectErr } = await db
+    .from("mock_exam_attempt_part1_answers")
+    .select("earned_score")
+    .eq("attempt_id", attemptId);
+  let totalPart1: number | null = null;
+  if (selectErr) {
+    console.warn("mock_exam_part1_manual_score_totals_select_failed", {
+      attempt_id: attemptId,
+      error: selectErr.message,
+    });
+  } else {
+    totalPart1 = (allRows ?? []).reduce(
+      (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
+      0,
+    );
+    const { error: totalsErr } = await db
+      .from("mock_exam_attempts")
+      .update({ total_part1_score: totalPart1 })
+      .eq("id", attemptId);
+    if (totalsErr) {
+      console.warn("mock_exam_part1_manual_score_totals_update_failed", {
+        attempt_id: attemptId,
+        total: totalPart1,
+        error: totalsErr.message,
+      });
+      // Не fail'им весь handler — manual save уже succeeded.
+    }
+  }
+
   return jsonOk(cors, {
     ok: true,
     attempt_id: attemptId,
     kim_number: b.kim_number,
     earned_score: b.earned_score,
     tutor_comment: comment === undefined ? null : comment,
+    // AC-P11 hotfix H5: expose updated totals → frontend invalidates cache and
+    // shows fresh «X/28» immediately. null если recompute fail'нул (non-fatal).
+    total_part1_score: totalPart1,
   });
 }
 
