@@ -24,6 +24,7 @@ import {
   isHumanitiesSubject,
   resolveSubjectRubric,
   type ExamType,
+  type SubjectCriterionTemplate,
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
@@ -174,6 +175,33 @@ interface GuidedConversationHistoryMessage {
   message_kind?: string | null;
 }
 
+/**
+ * Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion grading breakdown
+ * for language subjects (DELF / ЕГЭ EN / IELTS / ОГЭ — written + monologue).
+ * Mirror pattern of mock-exam `ai_draft_json.elements_check` (CLAUDE.md §12)
+ * but with named criteria + max scores from `languages-ege.ts` templates.
+ *
+ * Sum of `score` MUST equal `GuidedCheckResult.ai_score` (validated and
+ * normalized in `sanitizeCheckResult`). NULL for non-language subjects.
+ *
+ * Persisted into `homework_tutor_task_states.ai_criteria_json` by
+ * `runStudentAnswerGrading` (homework-api/index.ts). Visible to student
+ * post-submit (rendered as a 1-page criteria table).
+ */
+export interface GuidedCriteriaItem {
+  label: string;
+  score: number;
+  max: number;
+  comment: string;
+  /**
+   * Marker for criteria the AI deliberately does NOT grade (phonétique /
+   * произношение). Surfaced as a muted hint in the UI; backend forces
+   * `score = max` for these (no penalty). Absent for normal AI-graded
+   * criteria.
+   */
+  kind?: "ai" | "tutor_only";
+}
+
 export interface GuidedCheckResult {
   verdict: GuidedVerdict;
   feedback: string;
@@ -181,6 +209,12 @@ export interface GuidedCheckResult {
   error_type: HomeworkAiErrorType;
   ai_score: number | null;
   ai_score_comment: string | null;
+  /**
+   * Per-criterion breakdown for language subjects only. NULL for
+   * physics / maths / chemistry / other (no per-criterion rubric).
+   * See `GuidedCriteriaItem` for shape + invariant.
+   */
+  criteria_breakdown?: GuidedCriteriaItem[] | null;
   failure_reason?: GuidedCheckFailureReason;
 }
 
@@ -606,6 +640,262 @@ function sanitizeAiScoreComment(rawComment: unknown, correctAnswer: string | nul
   return comment || null;
 }
 
+// ─── Criteria breakdown sanitizer (voice-speaking-mvp TASK-3) ──────────────
+
+const MAX_CRITERION_LABEL_LENGTH = 120;
+const MAX_CRITERION_COMMENT_LENGTH = 600;
+const CRITERIA_SUM_TOLERANCE = 0.05;
+
+function sanitizeCriterionLabel(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const cleaned = normalizeText(value).replace(/[\r\n]+/g, " ").trim();
+  if (!cleaned) return "";
+  return softTruncate(cleaned, MAX_CRITERION_LABEL_LENGTH);
+}
+
+function sanitizeCriterionComment(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const cleaned = normalizeText(stripMarkdownWrappers(value)).trim();
+  if (!cleaned) return "";
+  return softTruncate(cleaned, MAX_CRITERION_COMMENT_LENGTH);
+}
+
+/** Round to nearest 0.1 (matches `ai_score` step, CLAUDE.md §6). */
+function roundToTenth(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 10) / 10;
+}
+
+function matchTemplateEntry(
+  template: SubjectCriterionTemplate[],
+  rawLabel: string,
+  usedIndices: Set<number>,
+): { index: number; entry: SubjectCriterionTemplate } | null {
+  const normalized = rawLabel.toLowerCase();
+  for (let i = 0; i < template.length; i += 1) {
+    if (usedIndices.has(i)) continue;
+    if (template[i].label.toLowerCase() === normalized) {
+      return { index: i, entry: template[i] };
+    }
+  }
+  for (let i = 0; i < template.length; i += 1) {
+    if (usedIndices.has(i)) continue;
+    const templateLower = template[i].label.toLowerCase();
+    if (templateLower.includes(normalized) || normalized.includes(templateLower)) {
+      return { index: i, entry: template[i] };
+    }
+  }
+  for (let i = 0; i < template.length; i += 1) {
+    if (!usedIndices.has(i)) return { index: i, entry: template[i] };
+  }
+  return null;
+}
+
+/** Σ of `max` over AI-graded criteria (excludes `tutor_only`). */
+function sumAiGradableMax(items: { max: number; kind?: "ai" | "tutor_only" }[]): number {
+  return items
+    .filter((c) => c.kind !== "tutor_only")
+    .reduce((sum, c) => sum + (Number.isFinite(c.max) ? c.max : 0), 0);
+}
+
+/**
+ * Map `ai_score` (on the TASK scale [0, maxScore]) onto the breakdown's
+ * AI-gradable template scale [0, aiGradableMax]. When the tutor sets
+ * `max_score == aiGradableMax` (the recommended config — see CLAUDE.md /
+ * spec §5), the ratio is 1 and this is a no-op. When it diverges
+ * (misconfig), proportional remap keeps the footer coherent.
+ */
+function mapAiScoreToTemplateScale(
+  aiScore: number,
+  maxScore: number,
+  aiGradableMax: number,
+): number {
+  const safeScore = Math.max(0, aiScore);
+  if (aiGradableMax <= 0) return 0;
+  if (maxScore > 0) {
+    const scaled = safeScore * (aiGradableMax / maxScore);
+    return Math.min(aiGradableMax, Math.max(0, scaled));
+  }
+  return Math.min(aiGradableMax, safeScore);
+}
+
+/**
+ * Normalize AI-graded criteria scores so their Σ equals `targetScore`
+ * (already on the template scale). `tutor_only` criteria are untouched
+ * (pinned at `max`, excluded from the sum). Drift from rounding is
+ * absorbed into the largest-max AI-graded criterion. Pure — returns a
+ * new array.
+ *
+ * Voice-Speaking MVP TASK-3 (2026-05-27). Extracted so the grading
+ * pipeline can RE-normalize after a verdict downgrade changes the
+ * effective score (P1 #3, review of 2026-05-27).
+ */
+function normalizeAiGradableScores(
+  items: GuidedCriteriaItem[],
+  targetScore: number,
+): GuidedCriteriaItem[] {
+  const out = items.map((it) => ({ ...it }));
+  const aiIdx = out
+    .map((it, idx) => ({ it, idx }))
+    .filter(({ it }) => it.kind !== "tutor_only");
+  if (aiIdx.length === 0) return out;
+
+  const target = Math.max(0, targetScore);
+  const aiSum = aiIdx.reduce((sum, { it }) => sum + it.score, 0);
+
+  if (Math.abs(aiSum - target) > CRITERIA_SUM_TOLERANCE) {
+    if (aiSum > 0) {
+      const factor = target / aiSum;
+      for (const { it, idx } of aiIdx) {
+        out[idx] = { ...it, score: Math.min(it.max, roundToTenth(it.score * factor)) };
+      }
+    } else if (target > 0) {
+      const totalMax = aiIdx.reduce((sum, { it }) => sum + it.max, 0);
+      if (totalMax > 0) {
+        for (const { it, idx } of aiIdx) {
+          out[idx] = {
+            ...it,
+            score: Math.min(it.max, roundToTenth((it.max / totalMax) * target)),
+          };
+        }
+      }
+    }
+
+    // Absorb rounding drift into the largest-max AI-graded criterion.
+    const newSum = aiIdx.reduce((sum, { idx }) => sum + out[idx].score, 0);
+    const drift = roundToTenth(target - newSum);
+    if (Math.abs(drift) >= 0.1) {
+      let largestIdx = -1;
+      let largestMax = -Infinity;
+      for (const { idx } of aiIdx) {
+        if (out[idx].max > largestMax) {
+          largestMax = out[idx].max;
+          largestIdx = idx;
+        }
+      }
+      if (largestIdx >= 0) {
+        const next = out[largestIdx].score + drift;
+        out[largestIdx] = {
+          ...out[largestIdx],
+          score: Math.max(0, Math.min(out[largestIdx].max, roundToTenth(next))),
+        };
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * RE-normalize an already-built breakdown to a NEW effective score (task
+ * scale). Used by `runStudentAnswerGrading` after a CORRECT→ON_TRACK
+ * downgrade reduces the persisted score below `result.ai_score` — without
+ * this, Σ criteria would drift from the stored `ai_score` (P1 #3).
+ *
+ * Voice-Speaking MVP TASK-3 (2026-05-27, review fix).
+ */
+export function renormalizeCriteriaToScore(
+  items: GuidedCriteriaItem[] | null | undefined,
+  effectiveAiScoreTaskScale: number | null,
+  maxScore: number,
+): GuidedCriteriaItem[] | null {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (effectiveAiScoreTaskScale == null || !Number.isFinite(effectiveAiScoreTaskScale)) {
+    return items;
+  }
+  const aiGradableMax = sumAiGradableMax(items);
+  const target = mapAiScoreToTemplateScale(effectiveAiScoreTaskScale, maxScore, aiGradableMax);
+  return normalizeAiGradableScores(items, target);
+}
+
+/**
+ * Voice-Speaking MVP TASK-3 (2026-05-27): validate + normalize AI's
+ * per-criterion breakdown.
+ *
+ * Aggregation model (review fix 2026-05-27, P1 #2):
+ *   - ONLY additive (sum) rubrics reach here. The resolver returns a
+ *     non-null `criteria_breakdown_template` ONLY for sum-aggregated
+ *     formats (DELF écrite/orale, ЕГЭ / ОГЭ letter+essay+monologue).
+ *     IELTS (band AVERAGE, not sum) returns a null template → no breakdown,
+ *     graceful degradation to overall `ai_score`. See languages-ege.ts.
+ *   - The breakdown lives on the TEMPLATE scale (real exam criterion maxes).
+ *     `ai_score` (task scale, bounded by `maxScore`) is remapped to the
+ *     AI-gradable template scale via `mapAiScoreToTemplateScale` before
+ *     normalization, so the footer (Σ AI-graded score / Σ AI-graded max)
+ *     is always internally consistent regardless of `max_score`.
+ *
+ * Contract:
+ *   - Each item: {label, score (0..max), max, comment, kind}.
+ *   - Labels fuzzy-matched against `template`; ordinal fallback so a
+ *     mislabeled criterion isn't dropped. Missing criteria filled at 0.
+ *   - `tutor_only` criteria (phonétique) pinned at `max`, EXCLUDED from
+ *     the sum (rendered as informational «оценивает репетитор» rows).
+ *   - Σ AI-graded score == remapped ai_score (± CRITERIA_SUM_TOLERANCE),
+ *     else proportional rescale + drift absorption.
+ *   - All scores rounded to 0.1 (CLAUDE.md §6).
+ *   - Returns null when template is empty/null (subject without rubric).
+ */
+function sanitizeCriteriaBreakdown(
+  parsed: unknown,
+  template: SubjectCriterionTemplate[] | null | undefined,
+  aiScore: number | null,
+  maxScore: number,
+): GuidedCriteriaItem[] | null {
+  if (!template || template.length === 0) return null;
+
+  const rawItems = Array.isArray(parsed) ? parsed : [];
+  const used = new Set<number>();
+  const slots: Array<GuidedCriteriaItem | null> = new Array(template.length).fill(null);
+
+  for (const raw of rawItems) {
+    if (!raw || typeof raw !== "object") continue;
+    const obj = raw as Record<string, unknown>;
+    const label = sanitizeCriterionLabel(obj.label);
+    if (!label) continue;
+    const match = matchTemplateEntry(template, label, used);
+    if (!match) continue;
+    used.add(match.index);
+
+    const isTutorOnly = match.entry.kind === "tutor_only";
+    const maxValue = match.entry.max;
+    let scoreValue = toNumber(obj.score) ?? 0;
+    if (scoreValue < 0) scoreValue = 0;
+    if (scoreValue > maxValue) scoreValue = maxValue;
+    if (isTutorOnly) scoreValue = maxValue; // AI must not penalize tutor_only.
+
+    slots[match.index] = {
+      label: match.entry.label,
+      max: maxValue,
+      score: roundToTenth(scoreValue),
+      comment: sanitizeCriterionComment(obj.comment),
+      kind: isTutorOnly ? "tutor_only" : "ai",
+    };
+  }
+
+  // Fill missing slots (AI omitted a criterion) — score 0 with empty comment.
+  // For tutor_only criteria with no AI output, set score=max (no penalty).
+  for (let i = 0; i < template.length; i += 1) {
+    if (slots[i]) continue;
+    const entry = template[i];
+    slots[i] = {
+      label: entry.label,
+      max: entry.max,
+      score: entry.kind === "tutor_only" ? entry.max : 0,
+      comment: "",
+      kind: entry.kind === "tutor_only" ? "tutor_only" : "ai",
+    };
+  }
+
+  const items = slots.filter((s): s is GuidedCriteriaItem => s !== null);
+
+  if (aiScore == null || !Number.isFinite(aiScore)) return items;
+
+  // Remap ai_score (task scale) → AI-gradable template scale, then normalize.
+  const aiGradableMax = sumAiGradableMax(items);
+  const target = mapAiScoreToTemplateScale(aiScore, maxScore, aiGradableMax);
+  return normalizeAiGradableScores(items, target);
+}
+
 function buildFallbackAiScoreComment(
   verdict: Exclude<GuidedVerdict, "CHECK_FAILED">,
   aiScore: number,
@@ -947,10 +1237,22 @@ const CHECK_FALLBACK: GuidedCheckResult = {
   failure_reason: "unknown",
 };
 
+interface SanitizeCheckScoring {
+  checkFormat?: EvaluateStudentAnswerParams["checkFormat"];
+  maxScore: number;
+  /**
+   * Voice-Speaking MVP TASK-3 (2026-05-27): if non-null/non-empty, parse
+   * `parsed.criteria_breakdown` against this template (validate labels,
+   * clamp scores, normalize sum to `ai_score`). NULL for non-language /
+   * numeric subjects → `criteria_breakdown` stays null.
+   */
+  criteriaTemplate?: SubjectCriterionTemplate[] | null;
+}
+
 function sanitizeCheckResult(
   parsed: Record<string, unknown>,
   correctAnswer: string | null,
-  scoring: Pick<EvaluateStudentAnswerParams, "checkFormat" | "maxScore">,
+  scoring: SanitizeCheckScoring,
 ): GuidedCheckResult {
   // Extract verdict
   const rawVerdict = typeof parsed.verdict === "string"
@@ -978,13 +1280,20 @@ function sanitizeCheckResult(
   const maxScore = Math.max(0, scoring.maxScore);
 
   if (scoring.checkFormat !== "detailed_solution") {
+    const aiScoreShort = verdict === "CORRECT" ? maxScore : 0;
     return {
       verdict,
       feedback,
       confidence,
       error_type,
-      ai_score: verdict === "CORRECT" ? maxScore : 0,
+      ai_score: aiScoreShort,
       ai_score_comment: null,
+      criteria_breakdown: sanitizeCriteriaBreakdown(
+        parsed.criteria_breakdown,
+        scoring.criteriaTemplate,
+        aiScoreShort,
+        maxScore,
+      ),
     };
   }
 
@@ -1007,6 +1316,12 @@ function sanitizeCheckResult(
     error_type,
     ai_score,
     ai_score_comment,
+    criteria_breakdown: sanitizeCriteriaBreakdown(
+      parsed.criteria_breakdown,
+      scoring.criteriaTemplate,
+      ai_score,
+      maxScore,
+    ),
   };
 }
 
@@ -1230,6 +1545,37 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     tutor_rubric: params.rubricText,
   });
 
+  // Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion breakdown for
+  // language subjects (DELF / ЕГЭ EN / IELTS / ОГЭ). When the resolver
+  // returns a template, the prompt asks AI to populate `criteria_breakdown`
+  // alongside `ai_score`. NULL/empty → no breakdown block, JSON schema
+  // stays Phase 2 (физика / математика / others — output без criteria).
+  const criteriaTemplate = rubric.criteria_breakdown_template ?? null;
+  const hasCriteriaTemplate = Array.isArray(criteriaTemplate) && criteriaTemplate.length > 0;
+  const criteriaPromptBlock = hasCriteriaTemplate
+    ? [
+        "",
+        "ПОКРИТЕРИАЛЬНЫЙ РАЗБОР (ОБЯЗАТЕЛЬНО для этой задачи):",
+        "Помимо ai_score разложи балл по перечисленным критериям. Используй ТОЧНО эти label'ы и max-значения:",
+        ...criteriaTemplate!.map((c) =>
+          c.kind === "tutor_only"
+            ? `- "${c.label}" — max ${c.max} (ОЦЕНИВАЕТ РЕПЕТИТОР НА СЛУХ; для тебя score = max, comment = "Оценивает репетитор на слух").`
+            : `- "${c.label}" — max ${c.max}.`,
+        ),
+        "Правила:",
+        "- Включи ВСЕ перечисленные критерии (даже если score = 0).",
+        "- label должен совпадать с указанным дословно (включая регистр и знаки препинания).",
+        "- score — число от 0 до max с шагом 0.1.",
+        "- max — указанный максимум (повтори его в каждом объекте).",
+        "- comment — 1 короткое предложение по-русски, почему такой балл (без LaTeX, без цитирования эталона дословно).",
+        "- Σ score (без tutor_only) = ai_score. Если разойдётся — сервер нормализует.",
+      ]
+    : [];
+
+  const criteriaJsonSchema = hasCriteriaTemplate
+    ? '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"...","ai_score":0,"ai_score_comment":null,"criteria_breakdown":[{"label":"...","score":0,"max":0,"comment":"..."}]}'
+    : '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"...","ai_score":0,"ai_score_comment":null}';
+
   const systemContent = [
     rubric.role,
     `Предмет: ${rubric.subject_label}.`,
@@ -1269,13 +1615,14 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     "Статистика попыток дана только как контекст диалога и НЕ влияет на verdict или ai_score.",
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста.",
-    '{"verdict":"CORRECT"|"ON_TRACK"|"INCORRECT","feedback":"...","confidence":0.0-1.0,"error_type":"...","ai_score":0,"ai_score_comment":null}',
+    criteriaJsonSchema,
     "",
     "МЕТОДОЛОГИЯ ОЦЕНКИ ПО ПРЕДМЕТУ (используй ПРИ выставлении ai_score и распределении баллов по элементам):",
     rubric.methodology,
     rubric.tutor_rubric_active
       ? "ВЫШЕ — критерии от репетитора имеют ПРИОРИТЕТ. Если они конфликтуют со стандартной методологией, следуй tutor."
       : "",
+    ...criteriaPromptBlock,
     "",
     "ПРАВИЛА ОЦЕНКИ:",
     "",
@@ -1615,6 +1962,22 @@ export async function evaluateStudentAnswer(
     maxScore: params.maxScore,
   });
 
+  // Voice-Speaking MVP TASK-3 (2026-05-27): resolve subject-rubric once here
+  // so `sanitizeCheckResult` validates `criteria_breakdown` against the same
+  // template that `buildCheckPrompt` ships to the model. Resolver is pure /
+  // synchronous, no I/O — double call (buildCheckPrompt also resolves) is
+  // cheap and keeps the prompt builder signature unchanged.
+  const checkRubric = resolveSubjectRubric({
+    subject: params.subject,
+    exam_type: params.examType,
+    kim_number: params.kimNumber,
+    task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
+    task_text: params.taskText,
+    tutor_rubric: params.rubricText,
+  });
+  const criteriaTemplate: SubjectCriterionTemplate[] | null =
+    checkRubric.criteria_breakdown_template ?? null;
+
   // Skip deterministic fast path for detailed_solution — AI must enforce format
   if (params.checkFormat !== "detailed_solution") {
     const deterministicMatch = tryDeterministicShortAnswerMatch(
@@ -1697,6 +2060,7 @@ export async function evaluateStudentAnswer(
     let result = sanitizeCheckResult(parsed, params.correctAnswer, {
       checkFormat: params.checkFormat,
       maxScore: params.maxScore,
+      criteriaTemplate,
     });
 
     if (result.verdict === "CHECK_FAILED") {
@@ -1790,6 +2154,7 @@ export async function evaluateStudentAnswer(
           const retryResult = sanitizeCheckResult(retryParsed, params.correctAnswer, {
             checkFormat: params.checkFormat,
             maxScore: params.maxScore,
+            criteriaTemplate,
           });
           // Same subject-aware detection on retry output.
           const retryFeedbackLeaks = detectLeak(retryResult.feedback ?? "");
@@ -1848,6 +2213,32 @@ export async function evaluateStudentAnswer(
               : result.feedback,
             ai_score_comment: commentLeaks ? null : result.ai_score_comment,
           };
+        }
+      }
+
+      // Review fix 2026-05-27 (P1 #1): criteria_breakdown comments are
+      // student-facing too, but the feedback/ai_score_comment retry above
+      // does NOT cover them. Scrub (blank) any criterion comment that leaks
+      // the tutor solution — keep label/score/max so the breakdown table
+      // stays intact, just without the leaking rationale. Independent of
+      // the feedback retry (scores never change). Same subject-aware
+      // detector (humanities verbatim span / non-humanities token overlap).
+      if (Array.isArray(result.criteria_breakdown) && result.criteria_breakdown.length > 0) {
+        let scrubbedCount = 0;
+        const scrubbed = result.criteria_breakdown.map((item) => {
+          if (item.comment && detectLeak(item.comment)) {
+            scrubbedCount += 1;
+            return { ...item, comment: "" };
+          }
+          return item;
+        });
+        if (scrubbedCount > 0) {
+          console.warn(JSON.stringify({
+            event: "check_criteria_comment_leak_scrubbed",
+            subject: params.subject,
+            scrubbed_count: scrubbedCount,
+          }));
+          result = { ...result, criteria_breakdown: scrubbed };
         }
       }
     }

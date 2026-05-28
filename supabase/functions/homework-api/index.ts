@@ -3,6 +3,7 @@ import {
   computeAvailableScore,
   evaluateStudentAnswer,
   generateHint,
+  renormalizeCriteriaToScore,
 } from "./guided_ai.ts";
 import { sendPushNotification, type PushSubscriptionData, type PushPayload } from "../_shared/push-sender.ts";
 import {
@@ -6748,7 +6749,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, ai_criteria_json)
 `;
 
 /**
@@ -7241,6 +7242,25 @@ async function runStudentAnswerGrading(args: {
         "Решение пока не дотягивает до полного зачёта по критериям, поэтому балл не максимальный."
       : null;
 
+  // Voice-Speaking MVP TASK-3 (2026-05-27): persist per-criterion breakdown
+  // for language subjects (DELF / ЕГЭ EN / ОГЭ). NULL for non-language /
+  // numeric / IELTS tasks (resolver returns no template). Stored as JSONB
+  // array — visible to student post-submit (feedback layer).
+  //
+  // Review fix 2026-05-27 (P1 #3): `evaluateStudentAnswer` normalized the
+  // breakdown to `result.ai_score`, but the low-confidence CORRECT→ON_TRACK
+  // downgrade above may reduce the persisted score to `effectiveAiScore`.
+  // Re-normalize so Σ criteria stays consistent with what we store/show.
+  // No-op when `effectiveAiScore === result.ai_score`.
+  const rawCriteriaBreakdown =
+    Array.isArray(result.criteria_breakdown) && result.criteria_breakdown.length > 0
+      ? result.criteria_breakdown
+      : null;
+  const criteriaBreakdown =
+    rawCriteriaBreakdown && effectiveAiScore !== result.ai_score
+      ? renormalizeCriteriaToScore(rawCriteriaBreakdown, effectiveAiScore, maxScore)
+      : rawCriteriaBreakdown;
+
   // Save AI feedback message (caller-controlled kind: ai_reply for chat,
   // check_result for explicit submission so the submission flow gets a
   // semantically distinct verdict bubble).
@@ -7267,6 +7287,7 @@ async function runStudentAnswerGrading(args: {
       available_score: currentAvailableScore,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      ai_criteria_json: criteriaBreakdown,
       best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
@@ -7281,6 +7302,7 @@ async function runStudentAnswerGrading(args: {
       feedback: result.feedback,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      criteria_breakdown: criteriaBreakdown,
       earned_score: earnedScore,
       available_score: currentAvailableScore,
       max_score: maxScore,
@@ -7337,6 +7359,7 @@ async function runStudentAnswerGrading(args: {
       available_score: onTrackAvailableScore,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      ai_criteria_json: criteriaBreakdown,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -7346,6 +7369,7 @@ async function runStudentAnswerGrading(args: {
       feedback: result.feedback,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      criteria_breakdown: criteriaBreakdown,
       earned_score: null,
       available_score: onTrackAvailableScore,
       max_score: maxScore,
@@ -7371,6 +7395,7 @@ async function runStudentAnswerGrading(args: {
       available_score: newAvailableScore,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      ai_criteria_json: criteriaBreakdown,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -7380,6 +7405,7 @@ async function runStudentAnswerGrading(args: {
       feedback: result.feedback,
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
+      criteria_breakdown: criteriaBreakdown,
       earned_score: null,
       available_score: newAvailableScore,
       max_score: maxScore,

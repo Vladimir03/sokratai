@@ -28,6 +28,9 @@ import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
 import { SubmitCtaBar } from '@/components/student/homework-problem/SubmitCtaBar';
 import { MathQuickPicker } from '@/components/student/homework-problem/MathQuickPicker';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
+import CriteriaBreakdownTable, {
+  type CriteriaBreakdownItem,
+} from '@/components/homework/CriteriaBreakdownTable';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
@@ -1309,6 +1312,18 @@ export default function HomeworkProblem() {
             ) : null}
           </>
         )}
+        {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion breakdown
+            for language subjects. Rendered when `ai_criteria_json` is
+            populated server-side (DELF / ЕГЭ EN / IELTS / ОГЭ; письмо +
+            монолог). Lives inside the chat scroll container so it follows
+            the conversation flow — last bubble → разбор → итог. NULL/empty
+            on physics/maths/chemistry/other (renders nothing). */}
+        {Array.isArray(currentTaskState?.ai_criteria_json) &&
+        currentTaskState!.ai_criteria_json!.length > 0 ? (
+          <CriteriaBreakdownTable
+            criteria={currentTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
+          />
+        ) : null}
       </div>
 
       {/* Hidden file input для discussion attachment.

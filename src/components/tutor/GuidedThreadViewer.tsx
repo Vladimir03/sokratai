@@ -26,6 +26,9 @@ import {
 } from '@/hooks/tutorQueryOptions';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
 import GuidedChatMessage from '@/components/homework/GuidedChatMessage';
+import CriteriaBreakdownTable, {
+  type CriteriaBreakdownItem,
+} from '@/components/homework/CriteriaBreakdownTable';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
@@ -619,6 +622,19 @@ export function GuidedThreadViewer({
                       </Button>
                     </div>
                   )}
+
+                  {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion
+                      breakdown next to the task score. Rendered when the
+                      backend computed `ai_criteria_json` (language subjects
+                      only: DELF / ЕГЭ EN / IELTS / ОГЭ — письмо + монолог).
+                      Stays on the same surface as «Изменить балл» so the
+                      tutor sees AI's per-criterion rationale before override. */}
+                  {Array.isArray(selectedTaskState?.ai_criteria_json) &&
+                  selectedTaskState!.ai_criteria_json!.length > 0 ? (
+                    <CriteriaBreakdownTable
+                      criteria={selectedTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
+                    />
+                  ) : null}
 
                   {isTaskContextExpanded && (
                     <div className="max-h-[200px] overflow-y-auto space-y-2">

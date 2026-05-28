@@ -23,8 +23,13 @@ const DELF_RE = /\bDELF\s*(A2|B1|B2)\b/i;
 const DELE_RE = /\bDELE\s*(A2|B1|B2|C1)\b/i;
 const IELTS_RE = /\bIELTS\s*([4-9](?:\.5)?)\b/i;
 const TOEFL_RE = /\bTOEFL\s*(?:iBT)?\s*([0-9]{2,3})\b/i;
-const EGE_RE = /\b(?:ЕГЭ|EGE|USE)\b/i;
-const OGE_RE = /\b(?:ОГЭ|OGE)\b/i;
+// JS `\b` treats only ASCII [A-Za-z0-9_] as word chars, so /\bЕГЭ\b/ NEVER
+// matches the Cyrillic token (review fix 2026-05-27). Use \p{L}/\p{N}
+// lookarounds (Unicode-aware boundary) — server-side / Deno only, lookbehind
+// is safe (not subject to the Safari cross-browser rule). This also keeps
+// the Latin "USE"/"EGE"/"OGE" guard against substrings like "because".
+const EGE_RE = /(?<![\p{L}\p{N}])(?:ЕГЭ|EGE|USE)(?![\p{L}\p{N}])/iu;
+const OGE_RE = /(?<![\p{L}\p{N}])(?:ОГЭ|OGE)(?![\p{L}\p{N}])/iu;
 
 /**
  * Map IELTS overall band to approximate CEFR.

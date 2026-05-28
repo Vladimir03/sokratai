@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const rootDir = process.cwd();
 const distAssetsDir = path.join(rootDir, "dist", "assets");
@@ -530,6 +531,30 @@ for (const relativePath of writeFormPages) {
 if (writeFormViolations === 0 && writeFormPages.length > 0) {
   ok(`Write-form query invariant: all ${writeFormPages.length} page(s) compliant`);
 }
+
+console.log("");
+
+// ─── 9. Criteria-breakdown template invariants (voice-speaking-mvp TASK-2/3) ─
+// Sum-aggregation contract: language formats exposing a criteria template
+// must be additive (Σ max = exam total); IELTS (average) must NOT expose one.
+// Bundles the Deno subject-rubric graph via esbuild — runs as a subprocess
+// because that test is async + needs the bundler. Catches the «methodology
+// says N, template sums to M» regression class (review fix 2026-05-27, P1 #2).
+console.log("9. Criteria-breakdown template invariants (voice-speaking-mvp)...");
+const criteriaTestPath = path.join(rootDir, "scripts", "test-criteria-templates.mjs");
+if (!fs.existsSync(criteriaTestPath)) {
+  fail("scripts/test-criteria-templates.mjs missing — criteria template invariants unguarded");
+}
+const criteriaResult = spawnSync(process.execPath, [criteriaTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (criteriaResult.status !== 0) {
+  console.error(criteriaResult.stdout ?? "");
+  console.error(criteriaResult.stderr ?? "");
+  fail("criteria template invariants FAILED — see node:test output above");
+}
+ok("criteria template invariants pass (sum totals + IELTS disabled + non-language null)");
 
 console.log("");
 console.log("=== Smoke Check Complete ===");

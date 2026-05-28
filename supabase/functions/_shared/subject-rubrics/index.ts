@@ -309,6 +309,13 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     };
   }
 
+  // Voice-Speaking MVP TASK-2 (2026-05-27): numeric (краткий ответ) для
+  // language задач тоже не получает per-criterion breakdown — нечего
+  // декомпозировать. Breakdown применяется только к развёрнутым языковым
+  // заданиям (письмо / эссе / монолог).
+  const criteriaTemplate =
+    isNumeric ? null : (core.criteria_breakdown_template ?? null);
+
   // Merge tutor_rubric (priority) with default methodology.
   let methodology = core.methodology;
   if (hasTutorRubric) {
@@ -329,8 +336,15 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     subject_label: getSubjectLabel(subjectId),
     cefr_level: core.cefr_level ?? null,
     tutor_rubric_active: hasTutorRubric,
+    criteria_breakdown_template: criteriaTemplate,
   };
 }
 
 // Re-exports for callers that need types or label directly.
-export type { CefrLevel, ExamType, SubjectRubric, SubjectRubricInput } from "./types.ts";
+export type {
+  CefrLevel,
+  ExamType,
+  SubjectCriterionTemplate,
+  SubjectRubric,
+  SubjectRubricInput,
+} from "./types.ts";

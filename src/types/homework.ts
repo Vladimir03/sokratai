@@ -277,6 +277,41 @@ export interface HomeworkTaskState {
    * бэке через `stripStudentSensitiveTaskStateFields`, на клиенте отсутствует.
    */
   tutor_force_completed_at?: string | null;
+  /**
+   * Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion AI grading
+   * breakdown for language subjects (DELF / ЕГЭ EN / IELTS / ОГЭ — written
+   * and oral). NULL for physics / maths / chemistry / other.
+   * Sum of `score` items = `ai_score` (validated server-side in
+   * `evaluateStudentAnswer`). Visible to student post-submit.
+   */
+  ai_criteria_json?: HomeworkAiCriteriaItem[] | null;
+}
+
+/**
+ * Voice-Speaking MVP TASK-3 (2026-05-27): single criterion in the AI
+ * per-criterion breakdown table. Persisted in
+ * `homework_tutor_task_states.ai_criteria_json` and rendered as a
+ * «критерий → балл/макс → комментарий» row.
+ *
+ * - `label` matches one of the names from `languages-ege.ts` templates
+ *   (e.g. «Respect de la consigne», «К1: Решение коммуникативной задачи»).
+ * - `score` is 0..max with step 0.1.
+ * - `comment` is 1 short sentence in Russian (≤ 600 chars).
+ * - Phonétique / произношение criteria carry `score = max` (AI must not
+ *   penalize — surfaced with a «оценивает репетитор» hint in the UI).
+ */
+export interface HomeworkAiCriteriaItem {
+  label: string;
+  score: number;
+  max: number;
+  comment: string;
+  /**
+   * Marker for criteria the AI deliberately does NOT grade (phonétique /
+   * произношение — DELF B1/B2 orale, ЕГЭ EN monologue). UI surfaces a
+   * muted «оценивает репетитор» hint. Backend forces `score = max` for
+   * these — AI never penalizes (spec §3, voice-speaking-mvp).
+   */
+  kind?: 'ai' | 'tutor_only';
 }
 
 // Phase 3: API response types
@@ -295,6 +330,12 @@ export interface CheckAnswerResponse {
   thread_completed: boolean;
   total_tasks: number;
   thread: HomeworkThread;
+  /**
+   * Voice-Speaking MVP TASK-3 (2026-05-27): inline per-criterion breakdown
+   * for languages. Mirror of `HomeworkTaskState.ai_criteria_json` after the
+   * grading call. NULL for non-language / numeric tasks.
+   */
+  criteria_breakdown?: HomeworkAiCriteriaItem[] | null;
 }
 
 export interface RequestHintResponse {

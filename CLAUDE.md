@@ -2500,6 +2500,36 @@ Promise.all(newTasks.map(async (t) => {
 
 **Спека:** `~/.claude/plans/1-functional-meteor.md` Phase 10 раздел + review prompt + Round 2 history в `~/.claude/plans/1-phase-10-review-prompt.md`.
 
+### 35. Покритериальный грейдинг языков — criteria_breakdown (voice-speaking-mvp Этап 1, 2026-05-27)
+
+Языковые ДЗ (DELF / ЕГЭ EN / ОГЭ — письмо и устный монолог) получают **покритериальный разбор**: AI раскладывает `ai_score` по именованным критериям экзамена (таблица «критерий → балл/макс → комментарий» на 1 странице, по-русски). Mirror паттерна mock-exam `elements_check {I,II,III,IV}` (§12), но с именованными критериями + per-criterion комментариями. Это «вау» Эмилии (на письменной части ученики/репетиторы раньше видели один балл + прозу). **Этап 2 (голос/Whisper/`task_kind='speaking'`) — отдельный PR, не реализован.** Спека: `docs/delivery/features/voice-speaking-mvp/spec.md` v0.2.
+
+**Migration** `20260527180000_add_ai_criteria_json_to_task_states.sql`: `homework_tutor_task_states.ai_criteria_json JSONB NULL` (формат `[{label, score, max, comment, kind?}]`) + column-GRANT для authenticated (mirror §23). **НЕ** в `stripStudentSensitiveTaskStateFields` — это feedback, видимый ученику post-submit. NULL для физики/математики/химии/прочих (нет рубрики).
+
+**Архитектура (3 слоя):**
+- `_shared/subject-rubrics/languages-ege.ts` — структурированные `SubjectCriterionTemplate[]` per формат (DELF B1/B2 écrite=25 + orale=25, ЕГЭ EN letter=6/essay=14/monologue=8, ОГЭ EN letter=8/monologue=6). `SubjectRubric.criteria_breakdown_template` пропагируется через `resolveSubjectRubric`.
+- `homework-api/guided_ai.ts` — `GuidedCheckResult.criteria_breakdown` + `sanitizeCriteriaBreakdown` (fuzzy label match + clamp + normalize) + prompt-блок в `buildCheckPrompt` когда template непуст.
+- `src/components/homework/CriteriaBreakdownTable.tsx` — один shared компонент, mount у ученика (`HomeworkProblem.tsx`, после чата) и репетитора (`GuidedThreadViewer.tsx`, после score-row).
+
+**Hard invariants (НЕ нарушать):**
+
+1. **Sum-агрегация ONLY.** Санитайзер additive: Σ AI-graded score == `ai_score`. Average-агрегированные форматы (**IELTS** — overall band = среднее) **отдают `criteria = null`** → breakdown не рендерится, остаётся overall `ai_score`. НЕ возвращать IELTS-template без average-aware санитайзера.
+2. **Scale remap.** `ai_score` (task scale [0, max_score]) ремапится на AI-gradable template scale через `mapAiScoreToTemplateScale` (no-op когда `max_score == Σ AI-gradable max`). Контракт: репетитор ставит `max_score` = экзаменационный AI-gradable total (DELF écrite=25, ЕГЭ essay=14, ОГЭ monologue content=5). Footer всегда на template-шкале (реальные ФИПИ/DELF максимумы).
+3. **`tutor_only` (phonétique/произношение)** — `score = max` (AI не штрафует), **исключён из суммы**, рендерится как `—/max` + «оценивает репетитор на слух». Финальную оценку произношения ставит репетитор.
+4. **Re-normalize при downgrade.** `runStudentAnswerGrading`: при low-confidence CORRECT→ON_TRACK (`effectiveAiScore !== result.ai_score`) breakdown ре-нормализуется через `renormalizeCriteriaToScore(items, effectiveAiScore, maxScore)`. Иначе Σ криериев расходится с persisted `ai_score`.
+5. **Anti-leak на comments (§9/§27).** `criteria_breakdown[*].comment` student-facing → прогоняется через тот же subject-aware `detectLeak` (humanities verbatim-span / token). При утечке — comment обнуляется (label/score/max сохраняются), telemetry `check_criteria_comment_leak_scrubbed`.
+6. **Numeric → нет breakdown.** `task_kind='numeric'` (краткий ответ) → `criteria_breakdown_template = null` даже для языков (нечего декомпозировать).
+
+**КРИТИЧНЫЙ regex-инвариант (Cyrillic `\b`):** JS `\b` ASCII-only — `/\bЕГЭ\b/`, `/\bэссе\b/`, `/\bустн/`, `/\bмонолог/` **НИКОГДА не матчат кириллицу**. Это был pre-existing Phase 2 баг (ЕГЭ-эссе молча уходили в letter-шаблон 6 вместо 14, cefr всегда B1). В Deno subject-rubric regexes (`cefr-detector.ts` EGE_RE/OGE_RE, `languages-ege.ts` detection) использовать Unicode-lookaround `(?<![\p{L}\p{N}])…(?![\p{L}\p{N}])` с флагом `u` (helper `hasWord`). Lookbehind безопасен — это server/Deno, **не** Safari cross-browser путь. **При добавлении нового кириллического токена детекции** — никогда `\b`, только `hasWord` / `\p{L}`-граница.
+
+**Smoke-guard:** `scripts/test-criteria-templates.mjs` (esbuild bundle + node:test, 18 кейсов) проверяет: sum-тоталы каждого формата == экзаменационный total, IELTS → null, non-language → null, numeric → null. Подключён в `smoke-check.mjs` секция 9 (spawn + exit code). Ловит регрессию «methodology говорит N, template суммируется в M» + случайное re-enable IELTS breakdown.
+
+**Tech debt (осознанно отложено):** IELTS average-aware breakdown; точные ФИПИ-числа ОГЭ/ЕГЭ устной части (methodology↔template сделаны внутренне согласованными + пометка `⚠ ВЕРИФИКАЦИЯ ФИПИ`, реальные числа подтвердит TASK-5 / источник).
+
+**Code review:** 2 раунда ChatGPT-5.5. R1 → 3 P1 (comment leak / IELTS+template totals / downgrade renorm) — все закрыты. Bonus: Cyrillic `\b` баг пойман новым smoke-тестом.
+
+**Спека / план:** `docs/delivery/features/voice-speaking-mvp/{spec.md,tasks.md}` + `.claude/rules/40-homework-system.md` секция «Покритериальный грейдинг языков».
+
 ## Известные хрупкие области
 
 1. **Chat.tsx** (2000+ строк) — очень сложный компонент

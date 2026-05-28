@@ -51,6 +51,36 @@ export interface SubjectRubricInput {
 }
 
 /**
+ * Per-criterion grading template for language subjects (DELF / ЕГЭ EN /
+ * IELTS / ОГЭ — written and oral). Drives the structured AI output
+ * `criteria_breakdown` (`evaluateStudentAnswer.GuidedCheckResult`), which
+ * is persisted into `homework_tutor_task_states.ai_criteria_json` and
+ * rendered as a 1-page «критерий → балл/макс → комментарий» table.
+ *
+ * Voice-Speaking MVP TASK-2 (2026-05-27).
+ *
+ * Contract:
+ *   - Labels are stable identifiers in Russian (e.g. «Соответствие заданию»).
+ *     AI must echo them verbatim so the renderer / validator can match.
+ *   - `max` is the maximum points for the criterion (Σ max = exam total).
+ *   - `kind = 'ai'` (default) — AI grades from the transcript / written
+ *     text. `kind = 'tutor_only'` — surface as «оценивает репетитор на
+ *     слух» (phonétique / произношение); AI never penalizes this criterion.
+ */
+export interface SubjectCriterionTemplate {
+  /** Russian label, surfaced 1:1 in the breakdown table. */
+  label: string;
+  /** Maximum points for this criterion. */
+  max: number;
+  /**
+   * Defaults to 'ai'. 'tutor_only' = phonétique / произношение / другие
+   * аспекты, которые AI не оценивает (например, audio cannot reach AI for
+   * pronunciation comparison). UI помечает их как «оценивает репетитор».
+   */
+  kind?: "ai" | "tutor_only";
+}
+
+/**
  * Resolver output. All consumers (check / hint / chat) pick the fields they need.
  */
 export interface SubjectRubric {
@@ -75,4 +105,13 @@ export interface SubjectRubric {
   cefr_level: CefrLevel | null;
   /** Telemetry: was tutor_rubric prepended to methodology? */
   tutor_rubric_active: boolean;
+  /**
+   * Per-criterion template for `criteria_breakdown` AI output. NULL for
+   * subjects without a per-criterion rubric (physics / maths / chemistry /
+   * informatics / russian / literature / history / social / biology /
+   * geography / other). Populated only for language formats (DELF / ЕГЭ EN /
+   * IELTS / ОГЭ writing + monologue + production orale). See
+   * `SubjectCriterionTemplate` for shape.
+   */
+  criteria_breakdown_template?: SubjectCriterionTemplate[] | null;
 }
