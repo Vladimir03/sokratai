@@ -6151,7 +6151,10 @@ async function handleGetStudentAssignment(
 
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, assignment_id, order_num, task_text, task_image_url, max_score, check_format")
+    // task_kind added 2026-05-28 for parity with the (now-removed) direct
+    // PostgREST select in studentHomeworkApi::getStudentAssignment, which
+    // routes through this endpoint. Anti-leak: solution_*/rubric_* excluded.
+    .select("id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 

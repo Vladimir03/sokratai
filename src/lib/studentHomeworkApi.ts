@@ -344,77 +344,33 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
 }
 
 export async function getStudentAssignment(assignmentId: string): Promise<StudentHomeworkAssignmentDetails> {
-  const studentId = await getCurrentUserId();
-
-  const { data: assigned, error: assignedError } = await supabase
-    .from('homework_tutor_student_assignments')
-    .select('assignment_id')
-    .eq('assignment_id', assignmentId)
-    .eq('student_id', studentId)
-    .maybeSingle();
-
-  if (assignedError) throw new StudentHomeworkApiError(assignedError.message);
-  if (!assigned) throw new StudentHomeworkApiError('Задание не найдено');
-
-  const { data: assignment, error: assignmentError } = await supabase
-    .from('homework_tutor_assignments')
-    .select('id, title, subject, exam_type, topic, description, deadline, status, disable_ai_bootstrap, created_at, tutor_id')
-    .eq('id', assignmentId)
-    .single();
-
-  if (assignmentError || !assignment) {
-    throw new StudentHomeworkApiError(assignmentError?.message ?? 'Задание не найдено');
-  }
-
-  // Phase 8.1 (2026-05-26) — BACKEND REROUTE FIX для identity:
-  //   До этого фикса frontend делал direct PostgREST query на `tutor_students`
-  //   с FK condition `tutor_id = assignment.tutor_id`. Это БРОКЕНО по двум
-  //   причинам (CLAUDE.md §28):
-  //     1. `tutor_students.tutor_id` ссылается на `public.tutors.id` (PK), а
-  //        `homework_tutor_assignments.tutor_id` хранит `auth.users.id` —
-  //        FK mismatch, lookup ВСЕГДА возвращал null.
-  //     2. RLS на `tutor_students` не разрешает student-side SELECT — даже
-  //        с правильным FK student не имеет права читать tutor-curated данные.
-  //   Симптом: tutor выставил display_name="Ирина" + gender="female" → AI
-  //   игнорировал обе настройки, использовал нейтральный род. Pre-fix работало
-  //   только когда у ученика был заполнен `profiles.full_name` / `gender`
-  //   (signup data, не tutor-curated).
+  // ROOT FIX (2026-05-28) — Telegram «Открыть ДЗ» → «Не удалось загрузить задание».
   //
-  //   Fix: убираем direct PostgREST query, вызываем edge function endpoint
-  //   `GET /assignments/:id/identity` который через service_role делает
-  //   правильный tutor.user_id → tutor.id (PK) lookup + резолвит обе priority
-  //   chains. Mirror backend `resolveStudentIdentity` в `homework-api`.
+  //   Раньше тут был DIRECT PostgREST на `homework_tutor_assignments`, который
+  //   упирался в RLS policy «HW students select assigned assignments»
+  //   (`status IN ('active','closed')`, миграция 20260215100000). Для ДЗ в
+  //   `status='draft'` (или любого RLS edge) `.single()` возвращал 0 строк →
+  //   throw → ученик на `/homework/:id` (StudentHomeworkDetail) видел «Не удалось
+  //   загрузить задание» ДО редиректа на рабочий problem-screen.
   //
-  // Phase 8.1 polish (ChatGPT-5.5 P2 #2): identity fetch теперь параллельно
-  // с tasks/materials через Promise.all — раньше был sequential round trip
-  // ПОСЛЕ tasks+materials, что добавляло ~150ms на legacy desktop path.
+  //   Архитектурная нестыковка: новый problem-screen (`handleGetStudentProblem`)
+  //   грузит ВСЁ через service_role edge function (ownership по
+  //   homework_tutor_student_assignments link, БЕЗ status-фильтра) → работал и
+  //   для draft. А этот legacy redirect-entry ходил через RLS-bound клиент →
+  //   падал на draft. Симптом видела Эмилия (DELF A2 PO) при тесте «как ученик».
   //
-  // Priority chain (canonical, server-side):
-  //   1. tutor_students.display_name + tutor_students.gender (tutor-curated)
-  //   2. profiles.full_name + profiles.gender (signup data, fallback)
-  //   3. profiles.username (filtered) для name only
-  //   4. null (AI uses neutral form)
-  const [tasksResult, materialsResult, identityResult] = await Promise.all([
-    supabase
-      .from('homework_tutor_tasks')
-      // task_kind added 2026-05-09 (Phase 1 student problem screen).
-      // Legacy /homework/:id route still uses this fetch + the desktop
-      // GuidedHomeworkWorkspace; without task_kind in the SELECT, any
-      // future task_kind-aware UI on that path silently sees `undefined`
-      // and defaults to `extended`. Anti-leak: solution_*/rubric_*
-      // deliberately excluded — student-facing endpoint.
-      .select(
-        'id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind',
-      )
-      .eq('assignment_id', assignmentId)
-      .order('order_num', { ascending: true }),
-    supabase
-      .from('homework_tutor_materials')
-      .select('id, assignment_id, type, title, storage_ref, url, created_at')
-      .eq('assignment_id', assignmentId)
-      .order('created_at', { ascending: true }),
-    // Identity endpoint: silent fail при rolling deploy gap или RLS quirks —
-    // AI fallback на neutral. Не блокирует tasks/materials.
+  //   Fix: ходим в существующий service_role endpoint
+  //   `GET /assignments/:id/student` (handleGetStudentAssignment) — ownership по
+  //   link, draft-tolerant, тот же anti-leak whitelist что и новый screen. 404
+  //   только когда ученик реально не привязан (genuine «не найдено»).
+  //   См. .claude/rules/40-homework-system.md «Student assignment load».
+  //
+  //   identity (name/gender) — отдельный service_role endpoint `/identity`
+  //   (Phase 8.1, CLAUDE.md §28), параллельно. Silent fail → neutral fallback.
+  const [assignment, identityResult] = await Promise.all([
+    requestStudentHomeworkApi<
+      Omit<StudentHomeworkAssignmentDetails, 'studentDisplayName' | 'studentGender'>
+    >(`/assignments/${encodeURIComponent(assignmentId)}/student`, { method: 'GET' }),
     requestStudentHomeworkApi<{
       name: string | null;
       gender: 'male' | 'female' | null;
@@ -426,24 +382,11 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
     ),
   ]);
 
-  const { data: tasks, error: tasksError } = tasksResult;
-  const { data: materials, error: materialsError } = materialsResult;
-  if (tasksError) throw new StudentHomeworkApiError(tasksError.message);
-  if (materialsError) throw new StudentHomeworkApiError(materialsError.message);
-
-  const studentDisplayName: string | null = identityResult.name;
-  const studentGender: 'male' | 'female' | null = identityResult.gender;
-
-  const assignmentRecord = assignment as Record<string, unknown>;
-  const result = {
-    ...assignmentRecord,
-    updated_at: assignmentRecord.created_at,
-    tasks: (tasks ?? []) as StudentHomeworkAssignmentDetails['tasks'],
-    materials: (materials ?? []) as StudentHomeworkAssignmentDetails['materials'],
-    studentDisplayName,
-    studentGender,
-  } as unknown as StudentHomeworkAssignmentDetails;
-  return result;
+  return {
+    ...assignment,
+    studentDisplayName: identityResult.name,
+    studentGender: identityResult.gender,
+  };
 }
 
 export async function getStudentTaskImageSignedUrl(taskImageRef: string): Promise<string | null> {
