@@ -136,8 +136,19 @@ export async function requestStudentHomeworkApi<T>(
     } catch {
       // ignore parse errors
     }
+    // Status-based stable code so callers can branch without depending on the
+    // (inconsistent across endpoints) body shape. 404 from edge endpoints like
+    // GET /assignments/:id/student means "not assigned to you OR assignment
+    // missing" — StudentHomeworkDetail uses NOT_FOUND to show an account-mismatch
+    // hint instead of the generic "Не удалось загрузить задание" (2026-05-28).
+    const code = response.status === 404
+      ? 'NOT_FOUND'
+      : response.status === 403
+        ? 'FORBIDDEN'
+        : undefined;
     throw new StudentHomeworkApiError(
       extractApiErrorMessage(body, `HTTP ${response.status}`),
+      code ? { code } : undefined,
     );
   }
 

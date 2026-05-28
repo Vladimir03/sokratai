@@ -1,8 +1,10 @@
 import { useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { UserX } from 'lucide-react';
 import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { useStudentAssignment, useStudentThread } from '@/hooks/useStudentHomework';
+import { StudentHomeworkApiError } from '@/lib/studentHomeworkApi';
 
 /**
  * Student homework assignment detail — redirect-only route.
@@ -107,12 +109,45 @@ export default function StudentHomeworkDetail() {
     isThreadFetching,
   ]);
 
+  // NOT_FOUND from GET /assignments/:id/student means the logged-in account
+  // isn't linked to this assignment (or it was deleted). Most common cause
+  // when a tutor tests: signed in under a different student account than the
+  // one the ДЗ was assigned to (the Telegram link is account-agnostic). Show
+  // an actionable hint instead of the generic «Не удалось загрузить задание»
+  // (2026-05-28). Other errors (network / 500 / session) keep the generic copy.
+  const isNotFound =
+    error instanceof StudentHomeworkApiError && error.code === 'NOT_FOUND';
+
   return (
     <AuthGuard>
       <PageContent>
         <main className="container mx-auto px-4 pb-8">
           {isLoading && <p className="text-muted-foreground">Загрузка...</p>}
-          {error && <p className="text-destructive">Не удалось загрузить задание</p>}
+          {error && isNotFound && (
+            <div className="mx-auto mt-6 w-full max-w-md rounded-2xl border border-socrat-border-light bg-white p-6 text-center shadow-sm">
+              <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-50">
+                <UserX className="h-6 w-6 text-amber-600" aria-hidden="true" />
+              </div>
+              <h2 className="m-0 text-base font-bold text-slate-900">
+                Задание недоступно на этом аккаунте
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-slate-600">
+                Похоже, это ДЗ назначено на другой аккаунт — или было удалено
+                репетитором. Проверьте, что вы вошли под тем аккаунтом (email
+                или Telegram), на который репетитор отправил задание.
+              </p>
+              <button
+                type="button"
+                onClick={() => navigate('/homework', { replace: true })}
+                className="mt-4 inline-flex h-11 items-center justify-center rounded-[12px] bg-socrat-primary px-4 text-sm font-bold text-white transition-colors hover:bg-socrat-primary-dark touch-manipulation"
+              >
+                К моим заданиям
+              </button>
+            </div>
+          )}
+          {error && !isNotFound && (
+            <p className="text-destructive">Не удалось загрузить задание</p>
+          )}
           {!isLoading && !error && data && (
             <p className="text-muted-foreground">Открываем задачу...</p>
           )}
