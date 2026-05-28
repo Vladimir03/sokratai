@@ -984,6 +984,7 @@ export type Database = {
       }
       homework_tutor_task_states: {
         Row: {
+          ai_criteria_json: Json | null
           ai_score: number | null
           ai_score_comment: string | null
           attempts: number
@@ -1009,6 +1010,7 @@ export type Database = {
           wrong_answer_count: number
         }
         Insert: {
+          ai_criteria_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
@@ -1034,6 +1036,7 @@ export type Database = {
           wrong_answer_count?: number
         }
         Update: {
+          ai_criteria_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
