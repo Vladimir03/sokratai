@@ -81,6 +81,7 @@ function buildTaskSignature(tasks: Array<{
   max_score?: number | null;
   check_format?: string | null;
   task_kind?: string | null;
+  cefr_level?: string | null;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -101,6 +102,9 @@ function buildTaskSignature(tasks: Array<{
       // check_format (already in this signature) → normalize to null to avoid a
       // spurious dirty from 'extended'↔undefined noise.
       task_kind: task.task_kind === 'speaking' ? 'speaking' : null,
+      // CEFR-level fix (2026-05-29): explicit level в подписи → смена «Уровня»
+      // помечает tasksDirty (иначе правка только уровня не сохранится на edit).
+      cefr_level: task.cefr_level ?? null,
     })),
   );
 }
@@ -228,6 +232,7 @@ function buildEditDiffState(params: {
       max_score: task.max_score,
       check_format: task.check_format,
       task_kind: task.task_kind,
+      cefr_level: task.cefr_level,
     })),
   ) !== snapshot.taskSignature;
 
@@ -560,6 +565,8 @@ function TutorHomeworkCreateContent() {
         check_format: t.check_format ?? 'short_answer',
         // voice-speaking-mvp: preserve 'speaking' on edit (round-trips via detail SELECT).
         task_kind: t.task_kind,
+        // CEFR-level fix: preserve explicit «Уровень» on edit.
+        cefr_level: t.cefr_level,
         kb_task_id: t.kb_task_id ?? undefined,
         kb_snapshot_text: t.kb_snapshot_text ?? undefined,
         kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
@@ -940,6 +947,8 @@ function TutorHomeworkCreateContent() {
           check_format: t.check_format,
           // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
           task_kind: t.task_kind,
+          // CEFR-level fix: explicit «Уровень» (null → авто-детект).
+          cefr_level: t.cefr_level,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -1206,6 +1215,8 @@ function TutorHomeworkCreateContent() {
             check_format: t.check_format,
             // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
             task_kind: t.task_kind,
+            // CEFR-level fix: explicit «Уровень» (null → авто-детект).
+            cefr_level: t.cefr_level,
           }));
         }
 
@@ -1596,6 +1607,7 @@ function TutorHomeworkCreateContent() {
             confirmOnRemove={isEditMode && existingAssignment?.assignment.status === 'active'}
             assignmentId={isEditMode ? editId : null}
             voiceSpeakingEnabled={voiceSpeakingEnabled}
+            cefrLevelEnabled={['french', 'english', 'spanish'].includes(meta.subject)}
           />
         </section>
 

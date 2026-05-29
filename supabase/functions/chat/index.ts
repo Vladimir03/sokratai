@@ -1252,6 +1252,8 @@ async function processAIRequest(
   let resolvedKimNumber: number | null = null;
   let resolvedTaskKind: "numeric" | "extended" | "proof" | null = null;
   let resolvedRubricText: string | null = null;
+  // CEFR-level fix (2026-05-29): explicit tutor level for language rubric.
+  let resolvedCefr: "A2" | "B1" | "B2" | "C1" | null = null;
   // Phase 8 (2026-05-20): start с client-supplied gender (UI consistency)
   // если есть; server-side lookup ниже WINS (anti-tamper).
   let resolvedStudentGender: "male" | "female" | null =
@@ -1298,7 +1300,7 @@ async function processAIRequest(
         const [taskRowResp, assignmentMetaResp] = await Promise.all([
           adminSupabase
             .from("homework_tutor_tasks")
-            .select("id, solution_text, solution_image_urls, kim_number, task_kind, check_format, rubric_text")
+            .select("id, solution_text, solution_image_urls, kim_number, task_kind, check_format, rubric_text, cefr_level")
             .eq("id", guidedHomeworkTaskId)
             .eq("assignment_id", guidedHomeworkAssignmentId)
             .maybeSingle(),
@@ -1432,6 +1434,10 @@ async function processAIRequest(
           const rubric = (taskRow as { rubric_text?: unknown }).rubric_text;
           if (typeof rubric === "string" && rubric.trim().length > 0) {
             resolvedRubricText = rubric;
+          }
+          const cl = (taskRow as { cefr_level?: unknown }).cefr_level;
+          if (cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") {
+            resolvedCefr = cl;
           }
         }
         if (taskErr) {
@@ -1628,6 +1634,7 @@ async function processAIRequest(
       task_kind: resolvedTaskKind ?? "extended",
       task_text: taskContext ?? null,
       tutor_rubric: resolvedRubricText,
+      cefr_level: resolvedCefr,
     });
     const subjectBlock = [
       "",

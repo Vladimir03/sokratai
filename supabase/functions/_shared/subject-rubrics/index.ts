@@ -292,7 +292,7 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
   } else if (subjectId === "chemistry") {
     core = { ...buildChemistryEgeRubric(kimNumber), cefr_level: null };
   } else if (LANGUAGE_SUBJECTS.has(subjectId)) {
-    core = buildLanguagesRubric(subjectId, input.task_text, input.task_kind === "speaking");
+    core = buildLanguagesRubric(subjectId, input.task_text, input.task_kind === "speaking", input.cefr_level ?? null);
   } else {
     core = { ...buildGenericRubric(subjectId), cefr_level: null };
   }

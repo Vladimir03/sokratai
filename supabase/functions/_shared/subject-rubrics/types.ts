@@ -43,6 +43,12 @@ export interface SubjectRubricInput {
   /** Used for CEFR auto-detection in language subjects. */
   task_text?: string | null;
   /**
+   * Explicit CEFR level from the tutor («Уровень» selector → `homework_tutor_tasks.cefr_level`).
+   * CEFR-level fix (2026-05-29): when set, it FORCES the language rubric level
+   * (overrides task_text heuristics + the B1 default). `null`/undefined → auto-detect.
+   */
+  cefr_level?: CefrLevel | null;
+  /**
    * Optional tutor-defined `homework_tutor_tasks.rubric_text`. When non-empty,
    * resolver merges it FIRST (tutor priority), then ФИПИ / DELF defaults.
    * AI sees both blocks: «Tutor сказал X. Дополнительно стандартные критерии: Y».
