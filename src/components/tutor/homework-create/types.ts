@@ -109,6 +109,13 @@ export interface DraftTask {
    * через write-path (§0); остальные значения backend derive'ит из check_format.
    */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
+  /**
+   * Явный уровень CEFR (A2/B1/B2/C1) для языковых задач (CEFR-level fix 2026-05-29).
+   * undefined / null → авто-детект из текста (как раньше). Когда задан — форсит
+   * уровень рубрики на бэкенде (resolveSubjectRubric). Селектор «Уровень»
+   * показывается только для foreign-language subjects.
+   */
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────

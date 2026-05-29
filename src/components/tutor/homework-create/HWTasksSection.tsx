@@ -132,6 +132,11 @@ export interface HWTasksSectionProps {
    * «Устный ответ (монолог)» task-type option. Off by default (pilot tutors only).
    */
   voiceSpeakingEnabled?: boolean;
+  /**
+   * CEFR-level fix: passes through to each HWTaskCard to surface the «Уровень»
+   * (CEFR) selector. On for foreign-language subjects (french/english/spanish).
+   */
+  cefrLevelEnabled?: boolean;
 }
 
 export function HWTasksSection({
@@ -145,6 +150,7 @@ export function HWTasksSection({
   confirmOnRemove,
   assignmentId,
   voiceSpeakingEnabled = false,
+  cefrLevelEnabled = false,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
   const [saveToKbTask, setSaveToKbTask] = useState<DraftTask | null>(null);
@@ -274,6 +280,7 @@ export function HWTasksSection({
           isLast={i === tasks.length - 1}
           onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
           voiceSpeakingEnabled={voiceSpeakingEnabled}
+          cefrLevelEnabled={cefrLevelEnabled}
         />
       ))}
       {disableTaskAdd && (

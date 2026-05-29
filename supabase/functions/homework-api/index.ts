@@ -49,6 +49,19 @@ const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
 const VALID_EXAM_TYPES = ["ege", "oge"] as const;
+const VALID_CEFR_LEVELS = ["A2", "B1", "B2", "C1"] as const;
+
+/**
+ * Normalize a client-supplied CEFR level for `homework_tutor_tasks.cefr_level`
+ * (CEFR-level fix 2026-05-29). Returns one of A2/B1/B2/C1 or null (= auto-detect).
+ * `null` preserves the previous text-heuristic behaviour; an explicit value
+ * forces the language rubric level in `resolveSubjectRubric`.
+ */
+function normalizeCefrLevel(v: unknown): "A2" | "B1" | "B2" | "C1" | null {
+  return typeof v === "string" && (VALID_CEFR_LEVELS as readonly string[]).includes(v)
+    ? (v as "A2" | "B1" | "B2" | "C1")
+    : null;
+}
 
 /**
  * Derive `task_kind` (Phase 1 student-screen enum) from `check_format`.
@@ -695,6 +708,8 @@ async function handleCreateAssignment(
       // at every write. voice-speaking-mvp (2026-05-29): explicit 'speaking' wins
       // over derive (§0 dual-derive — устный монолог не выводится из check_format).
       task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
+      // CEFR-level fix (2026-05-29): persist explicit «Уровень» (A2/B1/B2/C1) or null.
+      cefr_level: normalizeCefrLevel(t.cefr_level),
     };
   });
 
@@ -1033,7 +1048,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, cefr_level")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1505,6 +1520,10 @@ async function handleUpdateAssignment(
           // Speaking-задача может прислать task_kind без check_format — фиксируем явно (§0).
           updateFields.task_kind = "speaking";
         }
+        if (t.cefr_level !== undefined) {
+          // CEFR-level fix (2026-05-29): partial-update path persists explicit level.
+          updateFields.cefr_level = normalizeCefrLevel(t.cefr_level);
+        }
 
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -1555,6 +1574,7 @@ async function handleUpdateAssignment(
               // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
               // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
               task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
+              cefr_level: normalizeCefrLevel(t.cefr_level),
             })
             .select("id")
             .single();
@@ -1644,6 +1664,7 @@ async function handleUpdateAssignment(
           // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
           // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
           task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
+          cefr_level: normalizeCefrLevel(t.cefr_level),
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -7185,6 +7206,8 @@ async function runStudentAnswerGrading(args: {
     kim_number?: number | null;
     /** Phase 2 (2026-05-15): for subject-rubric resolver task_kind context. */
     task_kind?: string | null;
+    /** CEFR-level fix (2026-05-29): explicit tutor level → forces language rubric level. */
+    cefr_level?: string | null;
   };
   assignment: {
     subject: string | null;
@@ -7265,6 +7288,11 @@ async function runStudentAnswerGrading(args: {
     kimNumber: typeof task.kim_number === "number" ? task.kim_number : null,
     taskKind: (task.task_kind === "numeric" || task.task_kind === "extended" || task.task_kind === "proof" || task.task_kind === "speaking")
       ? task.task_kind
+      : null,
+    // CEFR-level fix (2026-05-29): explicit tutor level forces the language rubric
+    // level (A2/B1/B2/C1) — иначе детект из task_text + дефолт B1 (баг Эмилии).
+    cefrLevel: (task.cefr_level === "A2" || task.cefr_level === "B1" || task.cefr_level === "B2" || task.cefr_level === "C1")
+      ? task.cefr_level
       : null,
     conversationHistory: (recentMessages ?? []).map((m) => ({
       role: typeof m.role === "string" ? m.role : "",
@@ -7543,7 +7571,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level")
     .eq("id", currentState.task_id)
     .single();
 
@@ -7763,7 +7791,7 @@ async function handleStudentSubmission(
   // 5. Load target task (full SELECT — grading needs solution/rubric).
   const { data: task, error: taskError } = await db
     .from("homework_tutor_tasks")
-    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind")
+    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, cefr_level")
     .eq("id", taskId)
     .maybeSingle();
   if (taskError) {
@@ -8165,7 +8193,7 @@ async function handleRequestHint(
   // generic hints that ignored tutor logic. See plan: wild-swinging-nova.md.
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level")
     .eq("id", activeState.task_id)
     .single();
 
@@ -8253,6 +8281,11 @@ async function handleRequestHint(
     taskKind: (() => {
       const tk = (task as { task_kind?: unknown }).task_kind;
       return (tk === "numeric" || tk === "extended" || tk === "proof") ? tk : null;
+    })(),
+    // CEFR-level fix (2026-05-29): forward explicit tutor level to the hint rubric.
+    cefrLevel: (() => {
+      const cl = (task as { cefr_level?: unknown }).cefr_level;
+      return (cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") ? cl : null;
     })(),
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,

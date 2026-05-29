@@ -39,8 +39,10 @@ type LanguageFormat =
   | "ege-en-monologue" // Task 3 устной части ЕГЭ (voice-speaking-mvp)
   | "oge-en-letter" // ОГЭ письмо (voice-speaking-mvp)
   | "oge-en-monologue" // ОГЭ устная часть Task 3 (voice-speaking-mvp)
+  | "delf-a2-ecrite" // DELF A2 production écrite (CEFR-level fix 2026-05-29)
   | "delf-b1-ecrite" // DELF B1 production écrite
   | "delf-b2-ecrite" // DELF B2 production écrite
+  | "delf-a2-orale" // DELF A2 production orale (CEFR-level fix 2026-05-29)
   | "delf-b1-orale" // DELF B1 production orale (voice-speaking-mvp)
   | "delf-b2-orale" // DELF B2 production orale (voice-speaking-mvp)
   | "ielts-task1" // IELTS Writing Task 1 (graph / data description)
@@ -95,9 +97,13 @@ function detectLanguageFormat(
   subject: string,
   taskText: string | null | undefined,
   forceOral = false,
+  forcedCefr?: CefrLevel | null,
 ): FormatDetection {
   const text = (taskText ?? "").trim();
-  const cefr = detectCefrLevel(text).level;
+  // CEFR-level fix (2026-05-29): explicit tutor level (`forcedCefr`, из селектора
+  // «Уровень») ПОБЕЖДАЕТ текст-эвристику. Раньше уровень угадывался только из
+  // task_text → дефолт B1 → A2/B2-задачи грейдились по B1 (баг Эмилии).
+  const cefr: CefrLevel = forcedCefr ?? detectCefrLevel(text).level;
   // voice-speaking-mvp fix #2: explicit task_kind='speaking' forces oral format —
   // не полагаемся только на текст-эвристику isOralFormat (sujet может не содержать
   // ключевых слов «монолог»/«orale», но запись голоса — однозначно устная).
@@ -112,9 +118,19 @@ function detectLanguageFormat(
     return { format: "ielts-task2", cefr };
   }
 
-  // DELF (французский)
+  // DELF (французский). CEFR-level fix: `cefr` (forcedCefr или из текста)
+  // маршрутизирует прямо в рубрику уровня. A2 теперь имеет собственную рубрику —
+  // раньше проваливался в B1.
   if (subject === "french") {
-    if (/\bDELF\s*B2\b/i.test(text) || cefr === "B2") {
+    if (cefr === "A2") {
+      return {
+        format: oralIntent ? "delf-a2-orale" : "delf-a2-ecrite",
+        cefr: "A2",
+      };
+    }
+    // C1 пока без выделенной DELF-рубрики → ближайшая существующая B2 (вне
+    // пилотного scope; селектор предлагает A2/B1/B2).
+    if (/\bDELF\s*B2\b/i.test(text) || cefr === "B2" || cefr === "C1") {
       return {
         format: oralIntent ? "delf-b2-orale" : "delf-b2-ecrite",
         cefr: "B2",
@@ -237,6 +253,22 @@ const METHODOLOGY_DELF_B2_ECRITE = [
   "Минимум 250 слов.",
 ].join("\n");
 
+// CEFR-level fix (2026-05-29). DRAFT — валидирует Эмилия на первых работах.
+// Уровень A2: простые связные тексты о повседневных темах; НЕ требуй
+// аргументации/нюансов/subjonctif уровня B1+ (это завышение планки = баг Эмилии).
+const METHODOLOGY_DELF_A2_ECRITE = [
+  "DELF A2 — Production écrite (60-80 mots, 25 баллов). Уровень A2: простые связные тексты о повседневных ситуациях (décrire, raconter, inviter, remercier, s'excuser).",
+  "1. Respect de la consigne (2 балла): тип текста (carte postale / message / courriel court), тема и объём соблюдены.",
+  "2. Capacité à décrire / raconter (4 балла): простое изложение событий, опыта, планов в логичном порядке.",
+  "3. Capacité à interagir (4 балла): уместные речевые формулы (inviter, remercier, s'excuser, proposer), социальная адекватность.",
+  "4. Cohérence et cohésion (3 балла): простые связки (et, mais, parce que, puis, alors), деление на предложения.",
+  "5. Lexique étendue (2 балла): достаточный элементарный словарь для темы A2.",
+  "6. Lexique maîtrise (2 балла): орфография частотных слов, ошибки не искажают смысл.",
+  "7. Morphosyntaxe étendue (4 балла): présent, passé composé, futur proche, impératif; простые предлоги и артикли.",
+  "8. Morphosyntaxe maîtrise (4 балла): спряжение частотных глаголов, простые согласования рода/числа.",
+  "ВАЖНО: на A2 НЕ требуй сложной аргументации, subjonctif, нюансов B1/B2.",
+].join("\n");
+
 // ⚠ IELTS использует AVERAGE-агрегацию (overall band = среднее 4 критериев,
 // НЕ сумма). Текущий sanitizer (`sanitizeCriteriaBreakdown`) поддерживает
 // только additive (sum) рубрики. Поэтому IELTS отдаёт `criteria = null` —
@@ -298,6 +330,18 @@ const METHODOLOGY_DELF_B2_ORALE = [
   "4. Morphosyntaxe étendue + maîtrise (3+3 = 6 баллов): subjonctif présent/passé, conditionnel passé, plus-que-parfait; согласование времён.",
   "5. Maîtrise du système phonologique (2 балла) — оценивает РЕПЕТИТОР, AI пропускает.",
   "Длительность: 6-8 минут. Поверхностная аргументация без nuance → потери по критерию 1.",
+].join("\n");
+
+// CEFR-level fix (2026-05-29). DRAFT — валидирует Эмилия.
+const METHODOLOGY_DELF_A2_ORALE = [
+  "DELF A2 — Production orale, monologue suivi (простая презентация знакомой темы, 25 баллов).",
+  "AI оценивает по транскрипту (23 балла), произношение оценивает репетитор на слух.",
+  "1. Capacité à présenter / décrire un sujet familier (5 баллов): простое связное высказывание о себе / повседневной теме.",
+  "2. Capacité à interagir / répondre (4 балла): понятные ответы на простые вопросы.",
+  "3. Lexique étendue + maîtrise (4+2 = 6 баллов): элементарный словарь повседневных тем + базовая точность.",
+  "4. Morphosyntaxe étendue + maîtrise (4+4 = 8 баллов): présent, passé composé, futur proche; простые согласования и спряжения.",
+  "5. Système phonologique (2 балла) — оценивает РЕПЕТИТОР, AI пропускает.",
+  "ВАЖНО: на A2 НЕ требуй развёрнутой аргументации / дебатов — достаточно простого связного монолога.",
 ].join("\n");
 
 const METHODOLOGY_EGE_EN_MONOLOGUE = [
@@ -424,6 +468,29 @@ const CRITERIA_DELF_B2_ORALE: SubjectCriterionTemplate[] = [
   { label: "Système phonologique", max: 2, kind: "tutor_only" },
 ];
 
+// CEFR-level fix (2026-05-29). DRAFT — валидирует Эмилия. Σ = 25 (écrite),
+// Σ AI-gradable = 23 + phonétique 2 tutor_only (orale) — как B1/B2.
+const CRITERIA_DELF_A2_ECRITE: SubjectCriterionTemplate[] = [
+  { label: "Respect de la consigne", max: 2 },
+  { label: "Capacité à décrire / raconter", max: 4 },
+  { label: "Capacité à interagir", max: 4 },
+  { label: "Cohérence et cohésion", max: 3 },
+  { label: "Lexique étendue", max: 2 },
+  { label: "Lexique maîtrise", max: 2 },
+  { label: "Morphosyntaxe étendue", max: 4 },
+  { label: "Morphosyntaxe maîtrise", max: 4 },
+];
+
+const CRITERIA_DELF_A2_ORALE: SubjectCriterionTemplate[] = [
+  { label: "Présenter / décrire un sujet familier", max: 5 },
+  { label: "Interagir / répondre", max: 4 },
+  { label: "Lexique étendue", max: 4 },
+  { label: "Lexique maîtrise", max: 2 },
+  { label: "Morphosyntaxe étendue", max: 4 },
+  { label: "Morphosyntaxe maîtrise", max: 4 },
+  { label: "Système phonologique", max: 2, kind: "tutor_only" },
+];
+
 // ⚠ IELTS criteria templates intentionally NOT defined as additive arrays.
 // IELTS overall band = AVERAGE of 4 band-1-9 criteria, incompatible with the
 // sum-aggregating sanitizer (`sanitizeCriteriaBreakdown`). `getLanguagesMethodology`
@@ -437,8 +504,9 @@ export function getLanguagesMethodology(
   subject: string,
   taskText: string | null | undefined,
   forceOral = false,
+  forcedCefr?: CefrLevel | null,
 ): { methodology: string; cefr: CefrLevel; criteria: SubjectCriterionTemplate[] | null } {
-  const detection = detectLanguageFormat(subject, taskText, forceOral);
+  const detection = detectLanguageFormat(subject, taskText, forceOral, forcedCefr);
 
   let methodology: string;
   let criteria: SubjectCriterionTemplate[] | null;
@@ -463,6 +531,10 @@ export function getLanguagesMethodology(
       methodology = METHODOLOGY_OGE_EN_MONOLOGUE;
       criteria = CRITERIA_OGE_EN_MONOLOGUE;
       break;
+    case "delf-a2-ecrite":
+      methodology = METHODOLOGY_DELF_A2_ECRITE;
+      criteria = CRITERIA_DELF_A2_ECRITE;
+      break;
     case "delf-b1-ecrite":
       methodology = METHODOLOGY_DELF_B1_ECRITE;
       criteria = CRITERIA_DELF_B1_ECRITE;
@@ -470,6 +542,10 @@ export function getLanguagesMethodology(
     case "delf-b2-ecrite":
       methodology = METHODOLOGY_DELF_B2_ECRITE;
       criteria = CRITERIA_DELF_B2_ECRITE;
+      break;
+    case "delf-a2-orale":
+      methodology = METHODOLOGY_DELF_A2_ORALE;
+      criteria = CRITERIA_DELF_A2_ORALE;
       break;
     case "delf-b1-orale":
       methodology = METHODOLOGY_DELF_B1_ORALE;
@@ -503,8 +579,9 @@ export function buildLanguagesRubric(
   subject: string,
   taskText: string | null | undefined,
   forceOral = false,
+  forcedCefr?: CefrLevel | null,
 ): Omit<SubjectRubric, "tutor_rubric_active" | "subject_label"> {
-  const { methodology, cefr, criteria } = getLanguagesMethodology(subject, taskText, forceOral);
+  const { methodology, cefr, criteria } = getLanguagesMethodology(subject, taskText, forceOral, forcedCefr);
   return {
     role: ROLE_BY_SUBJECT[subject] ?? DEFAULT_ROLE,
     methodology,

@@ -87,6 +87,8 @@ export interface CreateAssignmentTask {
    * marks the task oral.
    */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
+  /** CEFR-level fix (2026-05-29): явный уровень для языковых задач; null → авто-детект. */
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
 }
 
 export interface CreateAssignmentPayload {
@@ -580,6 +582,8 @@ export interface TutorHomeworkAssignmentDetails {
     check_format?: 'short_answer' | 'detailed_solution';
     /** voice-speaking-mvp: 'speaking' для устных задач (round-trips on edit). */
     task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
+    /** CEFR-level fix: round-trips on edit so the «Уровень» selector preserves value. */
+    cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
     kb_task_id?: string | null;
     kb_snapshot_text?: string | null;
     kb_snapshot_answer?: string | null;
@@ -1268,6 +1272,8 @@ export interface UpdateAssignmentTask {
   check_format?: 'short_answer' | 'detailed_solution';
   /** voice-speaking-mvp: explicit 'speaking' persists as-is; else backend derives. */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
+  /** CEFR-level fix: явный уровень для языковых задач; null → авто-детект. */
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
 }
 
 export async function updateTutorHomeworkAssignment(

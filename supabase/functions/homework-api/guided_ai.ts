@@ -248,6 +248,12 @@ export interface EvaluateStudentAnswerParams {
   kimNumber?: number | null;
   /** Optional `homework_tutor_tasks.task_kind` (informational for now). */
   taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
+  /**
+   * Explicit CEFR level («Уровень» selector → `homework_tutor_tasks.cefr_level`).
+   * CEFR-level fix (2026-05-29): forces the language rubric level (A2/B1/B2),
+   * overriding task_text heuristics. null → auto-detect.
+   */
+  cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -306,6 +312,8 @@ export interface GenerateHintParams {
    * pick compact vs full methodology block.
    */
   taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
+  /** Explicit CEFR level («Уровень» selector); forces language rubric level. CEFR-level fix. */
+  cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -1541,6 +1549,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     exam_type: params.examType,
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
+    cefr_level: params.cefrLevel ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -1780,6 +1789,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     exam_type: params.examType,
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? "extended",
+    cefr_level: params.cefrLevel ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -1972,6 +1982,7 @@ export async function evaluateStudentAnswer(
     exam_type: params.examType,
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
+    cefr_level: params.cefrLevel ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -2374,6 +2385,7 @@ export async function generateHint(
         exam_type: params.examType ?? null,
         kim_number: params.kimNumber ?? null,
         task_kind: params.taskKind ?? "extended",
+        cefr_level: params.cefrLevel ?? null,
         task_text: params.taskText ?? null,
         tutor_rubric: null,
       });

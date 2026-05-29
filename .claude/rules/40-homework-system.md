@@ -225,6 +225,24 @@ Spec: `~/.claude/plans/1-functional-meteor.md` Phase 2.
 
 Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 
+### Уровень CEFR языковых ДЗ — `cefr_level` (явный, форсит рубрику)
+
+Баг (репортер — Эмилия, FR/DELF, 2026-05-29): письменные работы ВСЕХ уровней проверялись по критериям **B1**. Причина: уровень определялся ТОЛЬКО эвристикой `cefr-detector.ts::detectCefrLevel` из `task_text` с **дефолтом B1**, поле «Критерии» не читалось, а во французской ветке вообще **не было A2-рубрики** (A2 проваливался в B1). Тот же класс, что speaking→oral: heuristic вместо explicit signal.
+
+**Fix — явный `homework_tutor_tasks.cefr_level`** (миграция `20260529180000`, nullable + CHECK `A2/B1/B2/C1`). Селектор «Уровень (CEFR)» в `HWTaskCard` (gated `cefrLevelEnabled` = subject ∈ {french, english, spanish}). `null` = авто-детект (прежнее поведение).
+
+**Контракт (КРИТИЧНО — explicit wins over heuristic):**
+- `resolveSubjectRubric({ ..., cefr_level })` → `buildLanguagesRubric(..., forcedCefr)` → `getLanguagesMethodology(..., forcedCefr)` → `detectLanguageFormat(..., forcedCefr)`: `const cefr = forcedCefr ?? detectCefrLevel(text).level;`. Явный уровень ПОБЕЖДАЕТ текст-эвристику.
+- Французская ветка: `A2 → delf-a2-*`, `B2/C1 → delf-b2-*`, `B1/else → delf-b1-*`. **A2-рубрика добавлена** (`METHODOLOGY/CRITERIA_DELF_A2_ECRITE/ORALE`; Σ écrite=25, Σ orale AI-gradable=23 + phonétique tutor_only). **A2-критерии = DRAFT, валидирует Эмилия.** C1 пока маппится на B2 (селектор offers A2/B1/B2).
+- **Write-path:** `cefr_level` персистится во всех 4 backend write-path (`normalizeCefrLevel`) + edit round-trip (`handleGetAssignment` SELECT + detail-тип + prefill + **`buildTaskSignature`/`tasksDirty`** — иначе правка ТОЛЬКО уровня = no-op).
+- **Grading paths:** `runStudentAnswerGrading` (check + submission) + `generateHint` + `chat/index.ts` (discussion) читают `task.cefr_level` → `EvaluateStudentAnswerParams.cefrLevel` / `SubjectRubricInput.cefr_level`. Grading SELECTs включают `cefr_level`; student-display SELECT (`handleGetStudentProblem`) — НЕ включает (ученику не нужно).
+- **Гейтинг** — foreign-language subjects, default «Авто» (null) → не ломает существующие/не-языковые ДЗ. Не за feature-флагом (фикс грейдинга для всех языковых туторов).
+- **Smoke-guard:** `scripts/test-criteria-templates.mjs` — «cefr_level forces the rubric level» (A2→A2, B2→B2, null→B1) + A2 sum-templates.
+
+**При расширении:** новый язык с уровнями → добавь рубрику уровня (mirror `delf-a2-*`); новый grading-путь → читай `cefr_level` и прокидывай в `resolveSubjectRubric`; уровень — explicit-signal-first, эвристика только fallback.
+
+Spec: `docs/delivery/features/voice-speaking-mvp/spec.md` (CEFR-level fix 2026-05-29).
+
 ### Голосовые задания (`task_kind='speaking'`) — voice-speaking-mvp Этап 2
 
 Устный монолог: ученик записывает голос → Whisper транскрибирует → транскрипт идёт в **тот же** `runStudentAnswerGrading` + criteria_breakdown (Этап 1). Аудио сохраняется; репетитор переслушивает в `GuidedThreadViewer`. За feature-флагом тутора (Эмилия). **Статус:** TASK-6..10 ✅; TASK-11 (включить флаг Эмилии + тест на реальной FR-записи) — pending.
