@@ -249,7 +249,7 @@ function Part1Card({
                   // AC-P4 (ФИПИ partial credit, 2026-05-25): 0 < earned < max
                   // → амбер-Check + tooltip. KIM 5/9/14/18 (multi_choice) и
                   // 6/10/15/17 (ordered) могут получить 1 из 2 баллов за
-                  // одну ошибку — см. CLAUDE.md §15a.
+                  // одну ошибку — см. .claude/rules/45-mock-exams.md.
                   const isPartial = hasScore && earned > 0 && earned < row.max_score;
                   return (
                     <tr key={row.kim_number} className="text-slate-700">

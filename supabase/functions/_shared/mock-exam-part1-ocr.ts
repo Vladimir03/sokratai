@@ -19,7 +19,7 @@
  *      earned_score` (только если tutor ещё не выставил manual)
  *
  * Anti-leak invariant: `ai_part1_ocr_json` — tutor-only до approval.
- * Ученик видит только `earned_score` post-approval (CLAUDE.md §15).
+ * Ученик видит только `earned_score` post-approval (.claude/rules/45-mock-exams.md).
  *
  * Tutor UX: `Part1BlankReviewPanel` pre-fill'ит input cells из
  * `ai_part1_ocr_json[kim].value`. Low confidence cells — amber border

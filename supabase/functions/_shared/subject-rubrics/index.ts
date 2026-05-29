@@ -36,7 +36,7 @@ import { buildPhysicsEgeRubric } from "./physics-ege.ts";
 import type { SubjectRubric, SubjectRubricInput } from "./types.ts";
 
 // ─── Subject labels (mirror src/types/homework.ts SUBJECTS) ──────────────
-// Keep in sync — Deno cannot import TS from src/. See CLAUDE.md §18.
+// Keep in sync — Deno cannot import TS from src/. See .claude/rules/40-homework-system.md.
 
 const SUBJECT_LABELS: Record<string, string> = {
   maths: "Математика",
@@ -68,7 +68,7 @@ const LANGUAGE_SUBJECTS = new Set<string>(["english", "french", "spanish"]);
 // «не цитировать»). Используется для skip anti-leak detector в check / chat
 // paths, иначе false positive переводит правильный гуманитарный feedback в
 // hardcoded физический fallback. См. plan `~/.claude/plans/1-functional-meteor.md`
-// Phase 7 section + CLAUDE.md §22 / §40-homework-system.md.
+// Phase 7 section + .claude/rules/45-mock-exams.md / .claude/rules/40-homework-system.md.
 //
 // **Mirror** of `src/lib/subjectHelpers.ts::isHumanitiesWritingSubject` —
 // Deno cannot import TS from src/, keep in sync.

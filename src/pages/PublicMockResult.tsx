@@ -8,7 +8,7 @@
 // 403 not_ready, 404 not_found, 410 expired. Frontend renders matching state
 // for each branch (UX-spelled-out errors instead of raw HTTP codes).
 //
-// Anti-leak (CLAUDE.md §10):
+// Anti-leak (.claude/rules/45-mock-exams.md):
 //   - tutor card whitelist (name, avatar_url, bio, subjects) — no
 //     telegram_id / booking_link.
 //   - rubric_text / rubric_image_urls NEVER render.

@@ -22,7 +22,7 @@
 //     never exposes telegram_id / telegram_username / booking_link / email
 //     через public read. Variant tasks для invite read'а никогда не
 //     включают correct_answer / solution_text.
-//   - Signed URLs обёрнуты в rewriteToProxy() — RU bypass (CLAUDE.md §Network).
+//   - Signed URLs обёрнуты в rewriteToProxy() — RU bypass (AGENTS.md (Network & RU bypass)).
 //   - Telemetry: console.warn JSON server-side, без PII (только slug + event).
 
 import { createClient } from "npm:@supabase/supabase-js@2";

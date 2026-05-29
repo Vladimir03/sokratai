@@ -491,7 +491,7 @@ async function notifyStudentApproved(
  * TASK-17 (2026-05-17, sprint «Recipient Management»): notify student when
  * tutor добавляет их в existing пробник через `/assignments/:id/assign-students`.
  * Mirror `notifyStudentApproved` cascade: push → telegram fallback. Email
- * отложено (см. CLAUDE.md §25 + tutor-improvements-spec.md §9).
+ * отложено (см. .claude/rules/45-mock-exams.md + tutor-improvements-spec.md §9).
  *
  * Deep-link идёт на `/student/mock-exams/:assignmentId` (taking surface).
  */
@@ -1591,7 +1591,7 @@ async function handleApproveAll(
   // показать toast «Часть 1: KIM №X, Y без баллов → 0».
   //
   // Background: handleFinalize endpoint УЖЕ делает INSERT-on-missing для form
-  // mode (CLAUDE.md §25 R2) — но для blank-mode tutor может не нажать
+  // mode (.claude/rules/45-mock-exams.md R2) — но для blank-mode tutor может не нажать
   // «Часть 1 проверена» а сразу approve-all. Backend защищает.
   const autoZeroedPart1Kims: number[] = [];
   if (attempt.answer_method === "blank") {
@@ -1900,7 +1900,7 @@ async function handlePart1ManualScore(
     student_answer: preservedStudentAnswer,
     earned_score: b.earned_score,
     // TASK-16-R2 fix #1: explicit provenance — runPart1OCR retry preserves
-    // только rows со score_source='tutor' (см. CLAUDE.md §22 R2 invariants).
+    // только rows со score_source='tutor' (см. .claude/rules/45-mock-exams.md R2 invariants).
     score_source: "tutor",
     updated_at: new Date().toISOString(),
   };
@@ -2766,7 +2766,7 @@ async function handleCreateInviteLink(
 //   • Column whitelist: slug, expires_at, created_at, scope. tutor_id уже
 //     проверен через ownership (ниже), не возвращаем. attempt_id опускаем —
 //     для scope='invite' он null, для parent_result понадобится отдельный
-//     producer (см. CLAUDE.md §10).
+//     producer (см. .claude/rules/45-mock-exams.md).
 //   • URL builds server-side через getAppBaseUrl() — клиент не склеивает.
 //   • Filter `tutor_id = tutorUserId` дублирует ownership-check (defense in
 //     depth — shared mock_exam_id с другим tutor'ом теоретически невозможен
@@ -3022,7 +3022,7 @@ async function handleAssignStudents(
 //   - mock_exam_anonymous_leads (если есть, FK через public_link)
 //
 // Storage cleanup (best-effort, non-fatal): blank_photo_url, part2_bulk_photo_urls.
-// CLAUDE.md §25: tutor выбрал «никогда не блокировать — strong confirmation
+// .claude/rules/45-mock-exams.md: tutor выбрал «никогда не блокировать — strong confirmation
 // на frontend». Backend не делает status guard; полагается на UI confirmation.
 
 async function handleDeleteAssignment(

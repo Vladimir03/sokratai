@@ -8,12 +8,12 @@
  * чтобы переиспользовать в `mock-exam-grade/index.ts` для OCR result
  * grading (blank-mode attempts).
  *
- * Deno-mirror invariant (CLAUDE.md §15a): этот файл — single source of
+ * Deno-mirror invariant (.claude/rules/45-mock-exams.md): этот файл — single source of
  * truth для Часть 1 checker'а на стороне edge functions. ОБА consumer'а
  * (`mock-exam-student-api` + `mock-exam-grade`) импортируют отсюда.
  * Логика идентична `src/lib/mockExamPart1Checker.ts` (frontend canonical).
  * Любое изменение логики ОБЯЗАНО синхронно править frontend canonical +
- * этот mirror (см. инструкции в CLAUDE.md §15a).
+ * этот mirror (см. инструкции в .claude/rules/45-mock-exams.md).
  *
  * F3 invariant (mock-exams-v1-pilot-polish AC-P3, 2026-05-14):
  * `numericRoundingMatch` fallback применяется ТОЛЬКО в `check_mode='strict'`
@@ -111,7 +111,7 @@ export function checkMultiChoice(c: string, s: string): boolean {
  * Partial credit для multi_choice (KIM 5/9/14/18). ФИПИ 2026 AC-P4.
  * Mirror `gradeMultiChoice` из frontend canonical. См. JSDoc там.
  *
- * Hard invariant (CLAUDE.md §15a): любое изменение этой функции ОБЯЗАНО
+ * Hard invariant (.claude/rules/45-mock-exams.md): любое изменение этой функции ОБЯЗАНО
  * синхронно править `src/lib/mockExamPart1Checker.ts::gradeMultiChoice`.
  */
 export function gradeMultiChoice(
@@ -137,7 +137,7 @@ export function gradeMultiChoice(
  * Partial credit для ordered (KIM 6/10/15/17). ФИПИ 2026 AC-P4.
  * Hamming distance после нормализации разделителей. См. JSDoc frontend.
  *
- * Hard invariant (CLAUDE.md §15a): mirror frontend `gradeOrdered`.
+ * Hard invariant (.claude/rules/45-mock-exams.md): mirror frontend `gradeOrdered`.
  */
 export function gradeOrdered(
   correct: string,

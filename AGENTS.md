@@ -1,276 +1,154 @@
 # AGENTS.md
 
-Repository guidance for AI coding agents (Codex, Claude Code, Cursor).
+Canonical guidance for AI coding agents (Claude Code, Codex, Cursor). **Single source of truth — read this first.** Claude Code imports it via `@AGENTS.md` in `CLAUDE.md` and adds only Claude-Code-specific notes there.
 
-## Purpose
+Deep domain detail lives in `.claude/rules/*` (index at the bottom). Feature history, round-by-round fix logs, and commit archaeology live in `docs/delivery/features/<feature>/` and `~/.claude/plans/` — read on demand, **not** duplicated here.
 
-This repository is designed for AI-assisted development.
-
-Agents are responsible for:
-- implementing tasks
-- debugging
-- running validation
-
-Humans are responsible for:
-- architecture
-- feature design
-- reviewing output
+**Cross-references:** link to a rule file by path/name (`.claude/rules/45-mock-exams.md`, `rule 45`) or a section title — **never** by `CLAUDE.md §N`. Section numbers don't survive a CLAUDE.md edit; a path or title does.
 
 ---
 
-# Development Model
+## Roles
 
-This project follows **Spec-Driven Development**.
+- **Claude Code** — primary implementer.
+- **Codex / review agent** — independent reviewer (architecture, regressions, spec drift).
+- **Cowork** — research, synthesis, GTM, pilot analysis.
+- **Human** — only decision maker for wedge, pricing, segment, major scope.
 
-Workflow:
-
-Problem
-→ requirements.md
-→ design.md
-→ tasks.md
-→ implementation
-
-Agents must implement **tasks.md only**.
+Agents implement, debug, validate. Humans own architecture, feature design, review. Do not change architecture, add dependencies, or modify security/auth logic without explicit human approval.
 
 ---
 
-# Agent Workflow
+## Project
 
-Before writing code:
+**SokratAI** — AI platform for tutoring + homework automation. Domains: Student platform, Tutor platform, AI homework checking, Telegram bot.
 
-1. Read `AGENTS.md`
-2. Read `CLAUDE.md`
-3. Read architecture docs
-4. Read feature spec (if exists)
+**Stack:** React + TypeScript + Vite + React Query (frontend) · Supabase + Edge Functions (backend) · Gemini via Lovable AI Gateway (AI).
 
-Then:
+**Module isolation (hard boundary):** never import tutor modules into student components or vice-versa. Keep `src/components/ui/*` lightweight (no heavy runtime deps).
 
-1. Propose implementation plan
-2. Implement minimal solution
-3. Run validation commands
-
-
----
-
-# Tutor AI Agents — Canonical Product Rules
-
-For tutor product tasks, agents must treat AJTBD and pilot docs as source of truth before proposing features or writing code.
-
-## Canonical read order for tutor tasks
-
-Read in this order:
-
-1. `docs/discovery/research/08-wedge-decision-memo-sokrat.md`
-2. `docs/discovery/product/tutor-ai-agents/14-ajtbd-product-prd-sokrat.md`
-3. `docs/discovery/product/tutor-ai-agents/15-backlog-of-jtbd-scenarios-sokrat.md`
-4. `docs/discovery/product/tutor-ai-agents/16-ux-principles-for-tutor-product-sokrat.md`
-5. `docs/discovery/product/tutor-ai-agents/17-ui-patterns-and-component-rules-sokrat.md`
-6. `docs/discovery/product/tutor-ai-agents/18-pilot-execution-playbook-sokrat.md`
-7. relevant file in `docs/delivery/features/`
-
-## Tutor product guardrails
-
-For tutor features:
-- start from Jobs / wedge, not from UI taste or generic AI ideas
-- do not turn Tutor Assistant into a generic chat product
-- prioritize flows that end in action: `В ДЗ`, `В мою базу`, `Экспорт` / `Отправить`
-- flag any idea that does not strengthen the paid pilot
-- do not expand scope beyond current wedge unless explicitly requested by a human owner
-
-## Agent role split
-
-- **Claude Code** — primary implementer
-- **Codex / review agent** — independent reviewer for architecture, regressions, and spec drift
-- **Cowork** — research, synthesis, GTM, pilot analysis
-- **Human** — only decision maker for wedge, pricing, segment, and major scope changes
-
-## Tutor feature review checklist
-
-Before accepting a tutor feature, review agents should verify:
-
-```text
-□ Which Job does this feature strengthen?
-□ Does it strengthen the current wedge?
-□ Is there a clear primary CTA?
-□ Does AI output lead to an action?
-□ Are result statuses visible?
-□ Does the screen avoid generic chat UX?
-□ Does it match docs 16 and 17?
-□ Does it avoid unnecessary scope creep?
-```
+### Map
+- `src/` frontend · `src/App.tsx` routes · `src/main.tsx` entry
+- Student: `src/pages/{Chat,Practice,Diagnostic,StudentHomework,StudentHomeworkDetail}.tsx`, `src/pages/student/*`, `src/components/homework/*`
+- Tutor: `src/pages/tutor/*`, `src/components/tutor/*`
+- Shared: `src/components/ui`, `src/types`
+- Backend: `supabase/functions/` (edge) · `supabase/migrations/` (DB)
+- Architecture: `docs/delivery/engineering/architecture/README.md` (human) + `modules.json` (machine) + `high-risk-zones.md`
 
 ---
 
-# Project Overview
+## Workflow — Spec → Plan → Code → Test
 
-SokratAI is an AI-powered education platform for:
+1. Read the feature spec (`docs/delivery/features/<feature>/spec.md`) + relevant `.claude/rules/*`.
+2. Propose a minimal plan.
+3. Implement `tasks.md` only. Prefer additive iterations over refactors.
+4. Run validation commands.
 
-1️⃣ Students  
-2️⃣ Tutors
+DB-backed features: **migration → backend deploy → frontend deploy** (order matters).
 
-Domains are strictly isolated.
-
-Student:
-
-`src/pages/Chat.tsx`
-`src/pages/Practice.tsx`
-`src/pages/Diagnostic.tsx`
-`src/pages/StudentHomework.tsx`
-`src/pages/StudentHomeworkDetail.tsx`
-`src/components/homework/*`
-
-Tutor:
-
-`src/pages/tutor/*`
-`src/components/tutor/*`
-
-Shared:
-
-`src/components/ui`
-`src/types`
-
-## Project Map
-
-Frontend app:
-`src/`
-
-Routes and app composition:
-`src/App.tsx`
-
-React entrypoint:
-`src/main.tsx`
-
-Supabase edge functions:
-`supabase/functions/`
-
-Database migrations:
-`supabase/migrations/`
-
-Engineering docs:
-`docs/delivery/engineering/`
-
-Architecture map (human):
-`docs/delivery/engineering/architecture/README.md`
-
-Architecture map (machine):
-`docs/delivery/engineering/architecture/modules.json`
-
-High-risk zones:
-`docs/delivery/engineering/architecture/high-risk-zones.md`
+Tutor tasks: read the AJTBD canon first (order below) — start from Jobs/wedge, not UI taste.
 
 ---
 
-## Working Commands
-
-Run commands sequentially on Windows (avoid concurrent writes to `dist/`):
+## Commands (Windows — run sequentially, avoid concurrent `dist/` writes)
 
 ```sh
-npm run dev
-npm run lint
-npm run build
-npm run test
-npm run smoke-test
-npm run smoke-check
+npm run dev | lint | build | test | smoke-check
 ```
-
-Notes:
-- `test` runs `smoke-check`
-- `smoke-test` is legacy bash smoke test
-- `smoke-check` runs Node smoke tests (`scripts/smoke-check.mjs`)
-- CI uses `smoke-check` as the main quality gate
-- `lint` is currently informational in CI
-- if lint fails still run `build` and `smoke-check`
-- `package.json` + CI workflows are source of truth for commands
+- `test` == `smoke-check` (`scripts/smoke-check.mjs`) — the CI quality gate.
+- `lint` is informational; if it fails, still run `build` + `smoke-check`.
+- `package.json` + CI workflows are the source of truth for commands.
 
 ---
 
-# Development Rules
+## CRITICAL — Network & RU bypass
 
-Agents must:
+Prod (`sokratai.ru` + `api.sokratai.ru`) is served from a **Selectel Moscow VPS** (`185.161.65.182`). Lovable Cloud = preview only (`sokratai.lovable.app`). `*.supabase.co` is blocked in RU. Full detail: **rule 95**.
 
-- make minimal changes
-- avoid refactoring unrelated files
-- preserve public APIs
-- follow architecture constraints
+Hard rules for any Supabase HTTP call:
+- **Client:** use `supabase` from `@/lib/supabaseClient` (hardcodes `https://api.sokratai.ru`). **Never** import `@/integrations/supabase/client`.
+- **Never** hardcode `vrsseotrfmsxpbciyqzc.supabase.co`, build `${PROJECT_ID}.supabase.co`, use `VITE_SUPABASE_PROJECT_ID`, or rely on `import.meta.env.VITE_SUPABASE_URL` (Lovable forces it to the blocked direct domain).
+- **Edge functions:** signed URLs returned to a browser → wrap in `rewriteToProxy()`; server-side `fetch()` of a signed URL → `rewriteToDirect()`; validators reading signed URLs from DB → accept **both** hosts (dual-host, rule 40). Import `SUPABASE_PROXY_URL`/`SUPABASE_PROXY_HOST` from `_shared/proxy-url.ts` — never hardcode the proxy host.
+- **Pre-merge:** `git diff --staged | grep -E "supabase\.co"` — any non-comment hit that isn't `api.sokratai.ru` is a merge blocker.
 
-For DB-backed features:
-
-1 apply Supabase migration  
-2 deploy backend  
-3 deploy frontend
+**Deploy:** a frontend change does **not** reach prod automatically. After touching `src/**`, `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.ts`, or `public/**`, end your final message with a **"🚀 Deploy needed"** block (rule 95): `ssh … 185.161.65.182 && deploy-sokratai`. Migrations + edge functions auto-deploy via Lovable on push.
 
 ---
 
-## Supabase Drift Guardrails
+## CRITICAL — cross-cutting invariants
 
-- Before changing `verify_jwt` in `supabase/config.toml` or using `--no-verify-jwt` in workflow deploy commands, run a drift-check between config and workflow and request explicit owner decision for policy changes.
-- Before changing `supabase/config.toml`, verify bidirectional consistency: every `[functions.*]` entry should map to `supabase/functions/*`, and every `supabase/functions/*` directory should have an explicit policy decision in config.
-
----
-
-## Critical Boundaries
-
-- Keep **Student** and **Tutor** modules isolated.
-- Keep `src/components/ui/*` lightweight (no heavy runtime dependencies).
-- Treat these files as high-risk and change only when required:
-  - `src/components/AuthGuard.tsx`
-  - `src/components/TutorGuard.tsx`
-  - `src/pages/Chat.tsx`
-  - `src/pages/tutor/TutorSchedule.tsx`
-  - `supabase/functions/telegram-bot/index.ts`
+- **Dual write-path discipline:** before claiming "done" on a new column / payload field, grep **all** write-sites. `homework_tutor_tasks` has 4 backend paths (`homework-api` handleCreate/handleUpdate) + 1 client path (`HWDrawer.tsx`); `check_format` and `task_kind` are written together. (rule 40)
+- **FK `tutor_id` mismatch:** `homework_tutor_assignments.tutor_id` & `mock_exam_assignments.tutor_id` → `auth.users.id`. `tutor_students.tutor_id`, `tutor_lessons.tutor_id`, `tutor_payments.tutor_id` → `public.tutors.id` (PK). Any lookup joining these MUST convert via a `tutors.user_id ↔ tutors.id` map. Symptom: "0/N" analytics, missing student name/gender in AI prompt. (rule 40, rule 45)
+- **`profiles` has no `email` column** — email lives only in `auth.users` (`auth.admin.getUserById`). (rule 70)
+- **Anti-leak:** homework `solution_text` / `rubric_*` are **tutor-only forever**; mock-exam reveal is **state-aware** (Часть 2 only post-approval). Student endpoints must never SELECT tutor-only fields. (rule 40, rule 45)
+- **Edge-function errors:** every non-2xx is JSON `{ error, code? }` with a Russian phrase; clients parse via `extractEdgeFunctionError`; email lookup via `find_auth_user_id_by_email` RPC, never `listUsers`. (rule 97)
 
 ---
 
-# AI Image Handling Rules
+## High-risk files (change only when the task requires)
 
-When passing images to AI (Lovable/Gemini API):
-
-1. **NEVER** insert `storage://` refs or raw Supabase paths as text in prompts. AI cannot access them.
-2. **ALWAYS** resolve `storage://` → signed HTTP URL via `db.storage.createSignedUrl()` (service_role key) before sending to AI.
-3. **ALWAYS** use multimodal `{ type: "image_url", image_url: { url } }` format in message content arrays. Plain text URLs in system prompts do NOT make AI "see" the image.
-4. When adding a new AI code path that involves images, audit ALL callers (check, hint, question, bootstrap, etc.) — not just the primary one. Each path to AI must independently handle image resolution.
-5. The correct pattern exists in `homework-api/vision_checker.ts` (`recognizeHomeworkPhoto`, line ~486) and `homework-api/guided_ai.ts` (`buildCheckPrompt`, `buildHintPrompt`).
+`src/components/AuthGuard.tsx` · `src/components/TutorGuard.tsx` (module-level role cache — **do not delete**) · `src/pages/Chat.tsx` · `src/pages/tutor/TutorSchedule.tsx` · `supabase/functions/telegram-bot/index.ts`
 
 ---
 
-# Database Rules
+## Database rules
 
-Allowed:
-
-- new tables
-- additive migrations
-- new indexes
-
-Forbidden:
-
-- modifying existing migrations
-- dropping columns
-- renaming columns
+Additive only: new tables / columns / indexes OK. **Forbidden:** modifying existing migrations, dropping or renaming columns. Adding a subject to `SUBJECTS` (`src/types/homework.ts`) → add a CHECK-constraint migration for **both** `homework_tutor_assignments` and `homework_tutor_templates` (rule 40). Run the `config.toml` drift-check before changing `verify_jwt` / `--no-verify-jwt`.
 
 ---
 
-# Tutor Payments Rules
+## Hard rules for new code
 
-Mini-group payments use participant-level idempotency: (lesson_id, tutor_student_id)
-
-Never assume one payment row per lesson.
-
-Status presentation must remain:
-- pending
-- paid
-
-Do NOT reintroduce `overdue` without product decision.
-
-Lesson date source: tutor_lessons.start_at
-
-fallback: tutor_payments.due_date
+- **Dates / money:** `date-fns` `parseISO` (never `new Date("…")` — breaks Safari); money in kopecks (int), `/100` only on display — `src/lib/formatters.ts`. (rule 80)
+- **AI + images:** resolve `storage://` → signed URL, send multimodal `{ type:"image_url", image_url:{ url } }`, and audit **all** AI paths (check / hint / question / bootstrap) — pattern in `homework-api/guided_ai.ts` (`buildCheckPrompt`, `buildHintPrompt`). (rule 40)
+- **AI quota:** any new homework AI path must call `checkAiQuota(userId, db, { context:'homework', incrementUsage:true })` before the AI call (`_shared/subscription-limits.ts`). (rule 40)
+- **Subject-aware prompts:** all 3 guided AI paths (check / hint / chat) take `subject`; never hardcode "физик-наставник". (rule 40)
+- **Tutor payments:** participant-level idempotency `(lesson_id, tutor_student_id)`; statuses `pending`/`paid` only (no `overdue`); lesson date = `tutor_lessons.start_at`. (rule 60)
+- **Image upload UX:** reuse `usePasteImages` + `useDragDropFiles` + `compressForUpload`; route broken image URLs through a fallback, never a raw `<img>`. (rule 40, rule 90)
 
 ---
 
-## Output Expectations
+## Tutor product — canonical read order + guardrails
 
-When completing a task include:
-1️⃣ summary of changed files
-2️⃣ commands used for validation
-3️⃣ list of files intentionally NOT modified
+Before any tutor feature, read in order:
+1. `docs/discovery/research/08-wedge-decision-memo-sokrat.md`
+2–6. `docs/discovery/product/tutor-ai-agents/14…18-*.md`
+7. the relevant `docs/delivery/features/` file
 
+Guardrails: start from Jobs/wedge, not UI taste · don't turn the Assistant into a generic chat · every AI output ends in an action (`В ДЗ`, `В мою базу`, `Отправить`) · flag anything that doesn't strengthen the paid pilot · no new wedge/pricing/segment decisions in code.
+
+Review checklist: which Job? · strengthens the wedge? · clear primary CTA? · AI output → action? · statuses visible? · avoids generic chat? · matches docs 16 + 17? · no scope creep?
+
+---
+
+## Docs structure
+
+Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<feature>/`; every spec includes "Section 0: Job Context". Never use legacy paths (`docs/product/`, `docs/features/`). (rule 30)
+
+---
+
+## Rules index — `.claude/rules/` (domain depth, read on demand)
+
+| File | Domain |
+|---|---|
+| `00-read-first.md` | Read order before changes |
+| `10-safe-change-policy.md` | Minimal-change policy, high-risk files |
+| `20-commands-and-validation.md` | Validation command sequence |
+| `30-docs-structure.md` | Discovery/Delivery doc layout |
+| `40-homework-system.md` | Homework: guided chat, write-paths, anti-leak, scoring, subject prompts, constructor QA |
+| `45-mock-exams.md` | Mock exams: state-aware anti-leak, AI grader, Part 1 OCR/checker, pause mode, seed |
+| `50-kb-module.md` | Knowledge base, moderation, Source→Copy, fingerprint dedup, storage protection |
+| `60-telegram-bot.md` | Telegram bot, /pay, invite flow, reliability |
+| `70-notifications.md` | Push/email/cascade delivery, VAPID, profiles.email |
+| `80-cross-browser.md` | Safari/iOS rules, forbidden patterns, build targets |
+| `90-design-system.md` | Palette, typography, spacing, components, anti-patterns |
+| `95-production-deploy.md` | When `deploy-sokratai` is required (Selectel VPS) |
+| `96-auth-ru-bypass.md` | 11 hard rules for auth flows in RU |
+| `97-edge-function-error-contract.md` | Non-2xx JSON error contract |
+| `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser |
+
+---
+
+## Output expectations
+
+When completing a task, include: (1) changed files, (2) validation commands run, (3) files intentionally **not** modified.

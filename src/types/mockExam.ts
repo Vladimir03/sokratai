@@ -406,7 +406,7 @@ export interface MockExamAttemptDetail {
   part2_bulk_photo_urls?: string[];
   /**
    * Phase 6 (2026-05-15) — AI OCR Часть 1 result для blank-mode attempts.
-   * Tutor-only до approval (CLAUDE.md §15 anti-leak). После approval ученик
+   * Tutor-only до approval (.claude/rules/45-mock-exams.md anti-leak). После approval ученик
    * видит только `mock_exam_attempt_part1_answers.earned_score`. NULL для
    * form mode и legacy pre-Phase 6 attempts.
    */

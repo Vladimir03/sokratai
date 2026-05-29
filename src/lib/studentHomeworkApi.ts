@@ -377,7 +377,7 @@ export async function getStudentAssignment(assignmentId: string): Promise<Studen
   //   См. .claude/rules/40-homework-system.md «Student assignment load».
   //
   //   identity (name/gender) — отдельный service_role endpoint `/identity`
-  //   (Phase 8.1, CLAUDE.md §28), параллельно. Silent fail → neutral fallback.
+  //   (Phase 8.1, .claude/rules/40-homework-system.md), параллельно. Silent fail → neutral fallback.
   const [assignment, identityResult] = await Promise.all([
     requestStudentHomeworkApi<
       Omit<StudentHomeworkAssignmentDetails, 'studentDisplayName' | 'studentGender'>

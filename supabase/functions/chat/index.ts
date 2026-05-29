@@ -1332,7 +1332,7 @@ async function processAIRequest(
           //   profiles.username (filtered) для name → null
           // DB value WINS over client-supplied (anti-tamper для обоих полей).
           //
-          // КРИТИЧНО (CLAUDE.md §8a + §28, regression fix 2026-05-26):
+          // КРИТИЧНО (AGENTS.md FK tutor_id + .claude/rules/40-homework-system.md Phase 8, regression fix 2026-05-26):
           //   homework_tutor_assignments.tutor_id = auth.users.id, но
           //   tutor_students.tutor_id ссылается на public.tutors.id (PK).
           //   Lookup без конвертации ВСЕГДА возвращает null. Резолвим

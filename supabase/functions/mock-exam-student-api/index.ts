@@ -202,7 +202,7 @@ function inferExtension(mimeType: string, fallback = "jpg"): string {
 // Phase 6 (2026-05-15): inline mirror был вынесен в
 // `../_shared/mock-exam-part1-checker.ts` чтобы переиспользовать в
 // `mock-exam-grade` (для AI OCR result grading в blank mode). Деление-
-// mirror invariant (CLAUDE.md §15a): _shared/mock-exam-part1-checker.ts
+// mirror invariant (.claude/rules/45-mock-exams.md): _shared/mock-exam-part1-checker.ts
 // — single Deno source of truth. Frontend canonical:
 // `src/lib/mockExamPart1Checker.ts`.
 

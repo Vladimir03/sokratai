@@ -487,7 +487,7 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
 
   // AC-P4 (2026-05-25): tutor пересчитывает Часть 1 по обновлённым ФИПИ 2026
   // partial credit критериям. Сохраняет manual tutor edits (score_source='tutor').
-  // См. CLAUDE.md §15a «Часть 1 partial credit ФИПИ».
+  // См. .claude/rules/45-mock-exams.md «Часть 1 partial credit ФИПИ».
   const handleRecheckPart1 = async () => {
     setIsRechecking(true);
     try {

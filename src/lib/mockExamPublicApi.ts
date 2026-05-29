@@ -229,7 +229,7 @@ export async function startPublicMockInvite(
 // `'manually_entered'`; 403 `not_ready` при `awaiting_review` / других
 // non-terminal статусах; 410 `expired`; 404 `not_found`.
 //
-// Anti-leak (per CLAUDE.md §10 + edge function):
+// Anti-leak (per .claude/rules/45-mock-exams.md + edge function):
 //   - tutor card whitelist: name, avatar_url, bio, subjects (НЕ telegram_id /
 //     booking_link / email).
 //   - solution_text + correct_answer открываются только для approved

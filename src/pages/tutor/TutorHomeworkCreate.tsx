@@ -409,7 +409,7 @@ function TutorHomeworkCreateContent() {
   // staleTime: 10 * 60 * 1000 }`. Assertion в scripts/smoke-check.mjs section 8
   // enforces invariant.
   //
-  // См. CLAUDE.md §34 + .claude/rules/40-homework-system.md «Homework
+  // См. .claude/rules/40-homework-system.md «Homework
   // constructor QA checklist».
   const editQuery = useQuery({
     queryKey: ['tutor', 'homework', 'detail', editId],

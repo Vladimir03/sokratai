@@ -34,7 +34,7 @@ interface FormulaRoundScreenProps {
  *
  * Dispatches to real card components per question.type:
  * TrueOrFalseCard (L3), BuildFormulaCard (L2), SituationCard (L1).
- * Correctness is determined here (CLAUDE.md §11), not inside cards.
+ * Correctness is determined here (docs/delivery/features/formula-round-phase-1/spec.md), not inside cards.
  *
  * Phase 1 standalone trainer: no lives, no game-over — round always plays
  * until all questions answered. Timing via performance.now() (monotonic).

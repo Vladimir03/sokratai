@@ -455,7 +455,7 @@ console.log("8. Homework constructor write-form query invariant (Phase 10, 2026-
 // React Query setting `true` вызывает race condition с prefill effect —
 // добавленные tutor'ом задачи теряются при tab switch (репорт Elena Ivanova
 // 2026-05-26). Hard rule: пока user editing local form state, server data
-// background-refetch'иться не должна. См. CLAUDE.md §34 + Phase 10 в
+// background-refetch'иться не должна. См. .claude/rules/40-homework-system.md + Phase 10 в
 // ~/.claude/plans/1-functional-meteor.md.
 //
 // Pattern: ищем `useQuery({` в write-form pages и assert'им что в config
@@ -515,7 +515,7 @@ for (const relativePath of writeFormPages) {
         `${relativePath}: useQuery with queryKey [${keyHint}] missing 'refetchOnWindowFocus: false'.\n` +
           `  Write-form queries MUST disable focus refetch — иначе race condition с prefill effect\n` +
           `  уничтожит unsaved user edits при tab switch (Phase 10 hotfix invariant).\n` +
-          `  См. CLAUDE.md §34 + .claude/rules/40-homework-system.md «Homework constructor QA».`,
+          `  См. .claude/rules/40-homework-system.md «Homework constructor QA».`,
       );
       pageViolations += 1;
     }

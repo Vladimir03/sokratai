@@ -110,7 +110,7 @@ const displayName = (p: ProfileLite | undefined | null, tutorName?: string | nul
  *   - `homework_tutor_assignments.tutor_id` и `mock_exam_assignments.tutor_id` ссылаются на `auth.users.id`
  *   - `tutor_lessons.tutor_id` и `tutor_students.tutor_id` ссылаются на `public.tutors.id` (PK)
  * Фронт лукапит extras по `auth.users.id` (это и есть `TutorOverview.tutorId`), поэтому здесь конвертируем
- * `tutors.id → tutors.user_id` через explicit lookup map. См. CLAUDE.md §8a.
+ * `tutors.id → tutors.user_id` через explicit lookup map. См. AGENTS.md FK tutor_id invariant.
  */
 async function tutorExtras(admin: SupabaseClient, start: string, end: string) {
   // start/end are ISO strings; end is exclusive upper bound (we use < end).

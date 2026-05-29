@@ -58,7 +58,7 @@ export const RoundResultScreen = memo(function RoundResultScreen({
   const formulaMap = useMemo(() => {
     const map = new Map<string, { latex: string; title: string }>();
     // v2 catalog + v1 (egorFormulas) — weak formula ID может иметь `_e` суффикс,
-    // его формула живёт в параллельной ветке (см. CLAUDE.md §13a).
+    // его формула живёт в параллельной ветке (см. docs/delivery/features/formula-round-phase-1/spec.md).
     for (const f of [...mechanicsFormulas, ...egorFormulas]) {
       map.set(f.id, {
         latex: f.formula,

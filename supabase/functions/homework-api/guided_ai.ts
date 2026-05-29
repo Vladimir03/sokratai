@@ -111,7 +111,7 @@ const FALLBACK_STOPWORDS = new Set([
 // This file keeps **thin wrappers** for backward-compat with callsite shapes
 // (buildFallbackHint signature, buildValidatedFallbackHint flow), but role +
 // methodology + hint_examples + fallback_hint now all come from
-// `resolveSubjectRubric()`. See CLAUDE.md §19 «Subject-rubric layer».
+// `resolveSubjectRubric()`. See .claude/rules/40-homework-system.md «Subject-rubric layer».
 
 function getSubjectLabelDeno(subjectId: string | null | undefined): string {
   return getSubjectLabelShared(subjectId);
@@ -178,7 +178,7 @@ interface GuidedConversationHistoryMessage {
 /**
  * Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion grading breakdown
  * for language subjects (DELF / ЕГЭ EN / IELTS / ОГЭ — written + monologue).
- * Mirror pattern of mock-exam `ai_draft_json.elements_check` (CLAUDE.md §12)
+ * Mirror pattern of mock-exam `ai_draft_json.elements_check` (.claude/rules/45-mock-exams.md)
  * but with named criteria + max scores from `languages-ege.ts` templates.
  *
  * Sum of `score` MUST equal `GuidedCheckResult.ai_score` (validated and
@@ -660,7 +660,7 @@ function sanitizeCriterionComment(value: unknown): string {
   return softTruncate(cleaned, MAX_CRITERION_COMMENT_LENGTH);
 }
 
-/** Round to nearest 0.1 (matches `ai_score` step, CLAUDE.md §6). */
+/** Round to nearest 0.1 (matches `ai_score` step, .claude/rules/40-homework-system.md). */
 function roundToTenth(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 10) / 10;
@@ -832,7 +832,7 @@ export function renormalizeCriteriaToScore(
  *     the sum (rendered as informational «оценивает репетитор» rows).
  *   - Σ AI-graded score == remapped ai_score (± CRITERIA_SUM_TOLERANCE),
  *     else proportional rescale + drift absorption.
- *   - All scores rounded to 0.1 (CLAUDE.md §6).
+ *   - All scores rounded to 0.1 (.claude/rules/40-homework-system.md).
  *   - Returns null when template is empty/null (subject without rubric).
  */
 function sanitizeCriteriaBreakdown(
@@ -1582,7 +1582,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
     // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
     // (выше priority AI attention). Раньше был в конце — тонул в 100+ строках
-    // ФИПИ methodology / anti-spoiler / etc. См. CLAUDE.md §28.
+    // ФИПИ methodology / anti-spoiler / etc. См. .claude/rules/40-homework-system.md.
     studentNameGuidance,
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     ...graphGroundingGuidance,
@@ -1790,7 +1790,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
     // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
     // (после role/subject/CEFR, перед task content). Раньше был в конце —
-    // тонул в 80+ строках hint level rules + ФИПИ methodology. См. CLAUDE.md §28.
+    // тонул в 80+ строках hint level rules + ФИПИ methodology. См. .claude/rules/40-homework-system.md.
     buildStudentNameGuidance(params.studentName, params.studentGender ?? null),
     "",
     "УРОВЕНЬ ПОДСКАЗКИ: 1/3",

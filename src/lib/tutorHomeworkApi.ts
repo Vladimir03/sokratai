@@ -319,7 +319,7 @@ export async function assignTutorHomeworkStudents(
  *  - Идемпотентен: уже-assigned студенты тихо пропускаются, отдаются
  *    в `skipped_existing` для toast
  *
- * Контракт mirror mock-exam-tutor-api::handleAssignStudents (CLAUDE.md §29).
+ * Контракт mirror mock-exam-tutor-api::handleAssignStudents (.claude/rules/40-homework-system.md).
  */
 export interface QuickAssignHomeworkStudentsResponse {
   added: number;

@@ -50,7 +50,7 @@ export const getTutorInviteWebLink = (inviteCode: string): string => {
  * копировал URL и открывал в браузере для теста (или вставлял не в Telegram
  * chat), браузер либо моментально редиректил на `sokratai.ru/invite/{code}`
  * (meta-refresh + JS replace), либо показывал raw HTML с broken encoding
- * (см. CLAUDE.md §33 — Phase 9 issue 2).
+ * (см. .claude/rules/40-homework-system.md — Phase 9 issue 2).
  *
  * Endpoint **не удалён** — backward compat с Telegram preview-картинками,
  * которые могут лежать в Telegram cache недели после старого share.
@@ -59,7 +59,7 @@ export const getTutorInviteWebLink = (inviteCode: string): string => {
  * Для нового share UI используй `getTutorInviteWebLink(code)` — canonical
  * `sokratai.ru/invite/{code}` (всегда корректно рендерится в любом браузере).
  *
- * Hardcoded `https://api.sokratai.ru` per CLAUDE.md §«Network & Infrastructure»
+ * Hardcoded `https://api.sokratai.ru` per AGENTS.md (Network & RU bypass)
  * (RU bypass).
  */
 export const getTutorInvitePreviewLink = (inviteCode: string): string => {

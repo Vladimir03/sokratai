@@ -191,7 +191,7 @@ function isPositiveInt(v: unknown): v is number {
 }
 
 // max_score теперь допускает шаг 0.5 (см. миграцию
-// 20260523120000_homework_tutor_tasks_max_score_halfstep.sql + CLAUDE.md §40
+// 20260523120000_homework_tutor_tasks_max_score_halfstep.sql + .claude/rules/40-homework-system.md
 // "Score step invariant 0.5 для max_score"). Tolerance 1e-9 защищает от
 // floating-point junk (12.5 * 2 = 25.000000...01 в некоторых браузерах).
 function isPositiveHalfStepNumber(v: unknown): v is number {
@@ -1805,7 +1805,7 @@ async function handleAssignStudents(
 // ─── Endpoint: POST /assignments/:id/assign-students (quick add + notify) ────
 //
 // Single-shot add для UX «+ Добавить учеников» в шапке TutorHomeworkDetail.
-// Mirror mock-exam-tutor-api::handleAssignStudents (см. CLAUDE.md §29):
+// Mirror mock-exam-tutor-api::handleAssignStudents (см. .claude/rules/40-homework-system.md):
 //  - Ownership через getOwnedAssignmentOrThrow
 //  - Idempotent skip уже-assigned (newStudentIds = requested - existing)
 //  - Eager guided thread provisioning для новых
@@ -5542,7 +5542,7 @@ async function resolveStudentIdentity(
     let curatedGender: StudentGender = null;
 
     if (tutorId) {
-      // КРИТИЧНО (CLAUDE.md §8a + §28): homework_tutor_assignments.tutor_id хранит
+      // КРИТИЧНО (AGENTS.md FK tutor_id + .claude/rules/40-homework-system.md Phase 8): homework_tutor_assignments.tutor_id хранит
       // `auth.users.id`, но `tutor_students.tutor_id` ссылается на `public.tutors.id`
       // (PK). Без явной конвертации lookup ВСЕГДА возвращает null → tutor-curated
       // display_name/gender игнорируются (наблюдаемый regression 2026-05-26).
@@ -6188,7 +6188,7 @@ async function handleGetStudentAssignment(
 // результат без direct PostgREST query (которая всё равно ломалась из-за
 // `tutor_students.tutor_id` FK mismatch + RLS).
 //
-// См. CLAUDE.md §28 + §8a (cross-table tutor_id invariant).
+// См. .claude/rules/40-homework-system.md Phase 8 + AGENTS.md FK tutor_id (cross-table tutor_id invariant).
 async function handleGetStudentIdentity(
   db: SupabaseClient,
   userId: string,
@@ -8210,7 +8210,7 @@ async function handleGetTutorStudentThread(
   // Resolve tutor identity (avatar + name + gender) and student identity
   // (name + gender) in parallel. Phase 8.1: returns both fields so the tutor
   // viewer can display AI-address preview chip showing exactly how AI talks
-  // to this student (CLAUDE.md §28 Phase 8.1).
+  // to this student (.claude/rules/40-homework-system.md Phase 8.1).
   const [tutorProfile, studentIdentity] = await Promise.all([
     resolveTutorProfileForAssignment(db, assignmentId),
     resolveStudentIdentity(db, studentAssignment.id),

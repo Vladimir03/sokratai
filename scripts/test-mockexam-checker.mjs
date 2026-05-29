@@ -240,7 +240,7 @@ test("checkPart1Answer: max_score=2 binary semantics", () => {
 
 // ────────────────────────────────────────────────────────────────────────────
 // AC-P4 (mock-exams-v1-pilot-polish 2026-05-25) — ФИПИ 2026 partial credit
-// для multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17). См. CLAUDE.md §15a.
+// для multi_choice (KIM 5/9/14/18) и ordered (KIM 6/10/15/17). См. .claude/rules/45-mock-exams.md.
 // ────────────────────────────────────────────────────────────────────────────
 
 test("AC-P4: gradeMultiChoice — full credit для exact set match", () => {
