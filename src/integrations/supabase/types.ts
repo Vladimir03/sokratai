@@ -3269,6 +3269,7 @@ export type Database = {
           booking_link: string | null
           created_at: string | null
           feature_mock_exams_enabled: boolean
+          feature_voice_speaking_enabled: boolean
           gender: string | null
           id: string
           invite_code: string | null
@@ -3286,6 +3287,7 @@ export type Database = {
           booking_link?: string | null
           created_at?: string | null
           feature_mock_exams_enabled?: boolean
+          feature_voice_speaking_enabled?: boolean
           gender?: string | null
           id?: string
           invite_code?: string | null
@@ -3303,6 +3305,7 @@ export type Database = {
           booking_link?: string | null
           created_at?: string | null
           feature_mock_exams_enabled?: boolean
+          feature_voice_speaking_enabled?: boolean
           gender?: string | null
           id?: string
           invite_code?: string | null
