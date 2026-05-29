@@ -330,7 +330,7 @@ export function GuidedThreadViewer({
                 // speaking submission's voice_ref survives the realtime merge
                 // — иначе плеер не появляется до полного refetch.
                 submission_payload:
-                  (newMessage.submission_payload as import('@/types/homework').HomeworkSubmissionPayload | null) ?? null,
+                  (newMessage.submission_payload as unknown as import('@/types/homework').HomeworkSubmissionPayload | null) ?? null,
               }),
           );
           if (wasAtBottom) {
