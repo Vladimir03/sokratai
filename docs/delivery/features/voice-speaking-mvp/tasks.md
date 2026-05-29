@@ -79,50 +79,92 @@ Pipeline: **Spec → Plan → Code → Test**. Code review каждой зада
 
 ---
 
-## Этап 2 — Голос поверх готового грейдинга · ~3.5 часа
+## Этап 2 — Голос поверх готового грейдинга · ~4 часа
 
-### TASK-6 — Миграции `task_kind='speaking'` + флаг + bucket
+> **Старт этапа 2 = ГЕЙТ:** только после того, как TASK-5 показала, что покритериальный
+> разбор на письме точен (override ≤ 30%). Голос наследует тот же грейдинг — на плохом
+> грейдинге его не запускаем (Spec §7, pipeline шаг 6 «feedback перед след. фазой»).
+>
+> **AC-нотация:** spec.md v0.2 не имеет нумерованных AC (это draft) — каждая задача ниже
+> несёт inline Given/When/Then. При следующей правке спеки промотировать их в `## Acceptance
+> Criteria` (pipeline шаг 4). Job по всем задачам этапа: **R1 — проверка работ по критериям
+> экзамена** (расширение на устную часть) + student-job «подготовка к устной части с
+> обратной связью здесь и сейчас» (Spec Section 0).
+>
+> **Newly-surfaced scope (важно — не было в v0.1 нарезке):** Spec §3 шаг 1 требует, чтобы
+> репетитор **помечал задачу как устную**. Значит нужен tutor-side способ выставить
+> `task_kind='speaking'` (UI-селектор + accept в create/update write-paths). Без этого flow
+> не тестируется end-to-end. Backend-часть — в TASK-8, tutor-UI — в TASK-9 (Часть A).
+> Это применение anti-scope-creep правила pipeline: requirement выведен из спеки, не добавлен
+> «на ходу» — он был неявно в §3 с самого начала.
 
-- **Spec §5.** **Agent:** Claude Code.
-- **Files:** 2–3 миграции (`<ts>_add_speaking_task_kind.sql`, `<ts>_add_feature_voice_speaking_flag.sql`, опц. bucket).
-- **Что делаем:** CHECK `task_kind IN (...,'speaking')`; `tutors.feature_voice_speaking_enabled boolean default false` (mirror `feature_mock_exams_enabled`); bucket-решение (рекомендация — переиспользовать `homework-submissions` подпапкой `voice/`).
-- **Guardrails:** additive. Флаг default false.
-- **Validation:** insert speaking-задачи не падает; флаг включается per-tutor.
+### TASK-6 — Миграции: `task_kind='speaking'` + feature flag + bucket-решение
+
+- **Job:** R1. **Agent:** Claude Code. **Spec §5 (Миграции).**
+- **Files:** `supabase/migrations/<ts>_add_speaking_task_kind.sql`, `supabase/migrations/<ts>_add_feature_voice_speaking_flag.sql` (+ опц. bucket-миграция).
+- **AC (Given/When/Then):**
+  - *Given* существующая задача `task_kind IN ('numeric','extended','proof')`, *When* применили миграцию, *Then* `INSERT ... task_kind='speaking'` проходит, старые строки не тронуты.
+  - *Given* нового тутора, *When* `SELECT feature_voice_speaking_enabled`, *Then* `false` (default).
+- **Что делаем:**
+  1. **CHECK не аддитивен в Postgres** — нельзя «дополнить» список. Паттерн (идемпотентно): `ALTER TABLE homework_tutor_tasks DROP CONSTRAINT IF EXISTS <имя>; ALTER TABLE ... ADD CONSTRAINT ... CHECK (task_kind IN ('numeric','extended','proof','speaking'))`. Точное имя констрейнта — из миграции `20260509120000` (не угадывать, прочитать). НЕ менять DEFAULT (`'extended'`).
+  2. `tutors.feature_voice_speaking_enabled boolean NOT NULL DEFAULT false` — mirror `feature_mock_exams_enabled` (канонический образец: миграция `20260508120000_mock_exams_v1_schema.sql` + клиентский флаг `src/hooks/useTutorMockExamsFeatureFlag.ts`): тот же тип, тот же default, тот же GRANT/RLS-контекст.
+  3. **Bucket-решение (зафиксировать в PR):** переиспользовать `homework-submissions` (он уже в `THREAD_ATTACHMENT_BUCKETS`). Рекомендация — **тот же namespace `{userId}/{assignmentId}/threads/...`**, что и фото, чтобы `extractStudentThreadAttachmentRefs` (SSRF / per-student / bucket whitelist) прошёл **без изменений**. Подпапка `voice/` — только если готовы расширять namespace-валидатор (тогда — отдельная строка в guardrails ревью).
+- **Guardrails:** additive, idempotent. Флаг default false. НЕ дропать/переименовывать колонки (AGENTS.md DB rules). Если выбрали отдельный bucket — обязательно private + RLS как у `homework-submissions`.
 
 ### TASK-7 — Shared helper транскрипции (Groq Whisper)
 
-- **Spec §3, §5.** **Agent:** Claude Code.
-- **Files:** `supabase/functions/_shared/voice-transcribe.ts` (новый).
-- **Что делаем:** `transcribeAudio(buf, { language, mimeType })` → Groq `whisper-large-v3-turbo`, multipart FormData, `language`. Subject→lang map. Таймаут + 1 retry на 5xx. PII-free логи. Не рефакторить вызовы бота/чата в этом PR.
-- **Validation:** тестовое FR-аудио → читаемый транскрипт.
+- **Job:** R1. **Agent:** Claude Code. **Spec §3, §5 (Subject → language map).**
+- **Files:** `supabase/functions/_shared/voice-transcribe.ts` (новый). Reference: `chat/index.ts:899-958`, `telegram-bot/index.ts:6173-6243`.
+- **AC (Given/When/Then):**
+  - *Given* FR-аудио (m4a/webm) ≤ лимита, *When* `transcribeAudio(buf, { language:'fr', mimeType })`, *Then* возвращает непустой читаемый транскрипт.
+  - *Given* Groq отдал 5xx, *When* вызов, *Then* 1 retry, при повторном fail — throw типизированной ошибки (не «успех с пустым текстом»).
+  - *Given* тишина / нераспознаваемое, *When* Whisper вернул пустой `text`, *Then* helper отдаёт `{ text: '' }` (caller решает, что делать — НЕ throw).
+- **Что делаем:** `transcribeAudio(audioBuffer: ArrayBuffer, { language, mimeType })` → multipart FormData → `POST https://api.groq.com/openai/v1/audio/transcriptions`, `model: whisper-large-v3-turbo`, параметрический `language`. Экспортировать `subjectToWhisperLang(subject)` map (`french→fr`, `english→en`, `spanish→es`, `russian→ru`, иначе `undefined` = auto). `GROQ_API_KEY` из env (503 если нет). Таймаут (`AbortController`, не `AbortSignal.timeout` — Safari, но это Deno-сервер, всё равно ручной для единообразия). 1 retry на 5xx/network.
+- **Guardrails:** **PII-free логи** — никогда не логировать `text`/транскрипт, только `{ status, size, mimeType, lang, durationMs }`. **НЕ рефакторить** существующие вызовы бота/чата в этом PR (они hardcode `language='ru'` — отдельная задача). `MAX_VOICE_BYTES` — вынести константу, согласовать с TASK-9 cap (см. ниже).
 
-### TASK-8 — `handleStudentSubmission`: ветка `speaking`
+### TASK-8 — Backend: speaking write-path accept + `handleStudentSubmission` ветка
 
-- **Spec §3, §5.** **Agent:** Claude Code.
+- **Job:** R1. **Agent:** Claude Code. **Spec §3, §5 (API).** Depends on TASK-3 (тот же grading), TASK-7.
 - **Files:** `supabase/functions/homework-api/index.ts`.
-- **Что делаем:** detect `task_kind='speaking'` → **AI-квота гейт ДО AI** (`checkAiQuota`, §17) → валидация `voice_ref` → signed URL `rewriteToDirect()` → fetch → `transcribeAudio` (TASK-7) → `answerText=transcript` → `runStudentAnswerGrading` (тот же покритериальный грейдинг этапа 1). `voice_ref` обязателен (400 иначе).
-- **Guardrails:** `task_kind='speaking'` ставится явно, `deriveTaskKind` не перетирает (§0, 4 write-path + HWDrawer). solution/rubric не утекают (§9). Не дублировать grading.
-- **Validation:** `npm run build && smoke-check`. Manual: speaking-submit → транскрипт + покритериальный разбор + балл.
+- **AC (Given/When/Then):**
+  - *Given* tutor создаёт/правит задачу с `task_kind='speaking'`, *When* create/update write-path, *Then* в БД сохраняется `'speaking'` (НЕ перетёрто `deriveTaskKind`).
+  - *Given* speaking-задача + валидный `voice_ref`, *When* submit, *Then* квота списана **до** Whisper, аудио транскрибировано, транскрипт прошёл `runStudentAnswerGrading`, в ответе есть `criteria_breakdown` + балл.
+  - *Given* submit без `voice_ref` для speaking, *When* запрос, *Then* `400 VALIDATION`.
+  - *Given* Whisper вернул пустой транскрипт, *When* submit, *Then* **НЕ** зовём Gemini, задача НЕ закрывается, ученику дружелюбное «не удалось распознать речь — перезапиши» (квота списана 1 раз — приемлемо, либо не инкрементить при пустом STT — решить и задокументировать).
+- **Что делаем:**
+  1. **Write-path accept (§0 dual-derive trap):** `'speaking'` НЕ выводится из `check_format`. В create/update (4 backend write-path + проверить HWDrawer client-path) — если клиент прислал явный `task_kind='speaking'`, персистить как есть, иначе `deriveTaskKind(check_format)`. Грепни `deriveTaskKind` — все сайты должны пропускать explicit speaking.
+  2. **Submission branch:** detect `task_kind==='speaking'` → `checkAiQuota(userId, db, { context:'homework', incrementUsage:true })` **ДО** любого AI (§17) → валидация `voice_ref` через `extractStudentThreadAttachmentRefs` (а не вручную) → signed URL → `rewriteToDirect()` (server-to-server, §95) → `fetch` → `transcribeAudio` (TASK-7, `language` из `subject`) → `answerText = transcript` → `runStudentAnswerGrading({ feedbackKind:'check_result', ... })` (тот же helper этапа 1, НЕ дублировать grading).
+  3. `submission_payload = { numeric:'', photos:[], text:'', voice_ref }` (поле `voice_ref` зарезервировано §16). Транскрипт идёт в `content`/answerText, аудио-ref — в payload.
+- **Guardrails:** solution/rubric не утекают (§9 — те же поля идут только в grading, не в ответ). Не возрождать `homework_tutor_submissions` (§16). Quota-gate строго ДО Whisper И Gemini (две AI-операции, одна единица квоты). НЕ дублировать `runStudentAnswerGrading`.
 
-### TASK-9 — UI записи монолога (ученик) · ⚠️ deploy
+### TASK-9 — Frontend: tutor speaking-mark (A) + student monologue recorder (B) · ⚠️ deploy
 
-- **Spec §6.** **Agent:** Claude Code.
-- **Files:** `src/components/student/homework-problem/SubmitSheet.tsx`, `src/types/homework.ts` (`task_kind` + `'speaking'`).
-- **Что делаем:** для speaking — рекордер на `useVoiceRecorder` (iOS Safari m4a/webm уже решён — не вводить новый recorder, `.claude/rules/80-cross-browser.md`). Upload → `voice_ref` → submission. Скрыть numeric-row (как humanities, §18). Один primary CTA. Лимит длительности под монолог (~5–7 мин).
-- **Validation:** `npm run build`. Manual iPhone Safari + Android Chrome.
+- **Job:** R1 (A) + student-job (B). **Agent:** Claude Code. **Spec §3 шаг 1-2, §6.**
+- **Files (A):** `src/components/tutor/homework-create/HWTaskCard.tsx`, draft-типы (`DraftTask`/`HWDraftTask`), `src/lib/tutorHomeworkApi.ts`. **Files (B):** `src/pages/student/HomeworkProblem.tsx` (composer branch), `src/components/student/homework-problem/SubmitSheet.tsx`, `src/types/homework.ts` (`task_kind` union + `'speaking'`).
+- **AC (Given/When/Then):**
+  - *(A)* *Given* tutor в конструкторе ДЗ, *When* выбирает тип «Устный ответ (монолог)», *Then* `task_kind='speaking'` уходит в обе write-path (конструктор + HWDrawer, §0).
+  - *(B)* *Given* ученик открыл speaking-задачу на iPhone Safari, *When* экран загрузился, *Then* виден рекордер (не numeric-input, не photo-only), один primary CTA, numeric-row скрыт.
+  - *(B)* *Given* запись завершена, *When* «Отправить», *Then* аудио залито → `voice_ref` → submission endpoint → разбор по критериям.
+- **Что делаем:**
+  - **(A)** В `HWTaskCard` добавить `task_kind='speaking'` в существующий селектор типа задачи (рядом с `check_format`). Прокинуть в оба write-path (см. TASK-8 §0). Минимально — за feature-флагом тутора (не показывать всем).
+  - **(B)** В `HomeworkProblem` composer добавить ветку `task_kind==='speaking'`: рекордер на **существующем** `useVoiceRecorder` (iOS Safari m4a/webm уже решён — НЕ вводить новый, `.claude/rules/80-cross-browser.md`). Upload через voice-helper (новый `uploadStudentThreadVoice` или generalize `uploadStudentThreadImage`) → `voice_ref` → submission. Скрыть numeric-row (как humanities §18). **Cap длительности ~7 мин** + size cap (согласовать с `MAX_VOICE_BYTES` TASK-7) — DELF B1 монолог 5-7 мин. Re-record до отправки разрешён.
+- **Guardrails:** только `useVoiceRecorder`, никаких новых MediaRecorder-обёрток. `touch-action: manipulation` на контролах рекордера. `task_kind` union в `homework.ts` — additive optional (не сломать существующие 'numeric'|'extended'|'proof').
 
-### TASK-10 — Плеер + транскрипт (репетитор) · ⚠️ deploy
+### TASK-10 — Frontend: плеер + транскрипт у репетитора · ⚠️ deploy
 
-- **Spec §6.** **Agent:** Claude Code.
-- **Files:** `src/components/tutor/GuidedThreadViewer.tsx` (+ `src/components/homework/`).
-- **Что делаем:** для speaking-submission — плеер (play/pause) + транскрипт + таблица критериев (TASK-4) + override итога (§6). Аудио signed URL через `rewriteToProxy()`. Всё на 1 странице. Тайм-коды / голос-коммент — НЕ здесь (out of scope).
-- **Validation:** `npm run build`. Manual: репетитор слышит аудио, видит транскрипт + критерии + правит балл.
+- **Job:** R1. **Agent:** Claude Code. **Spec §6.**
+- **Files:** `src/components/tutor/GuidedThreadViewer.tsx` (+ `src/components/homework/` для shared плеера, если нужен).
+- **AC (Given/When/Then):**
+  - *Given* ученик сдал speaking-задачу, *When* репетитор открывает тред, *Then* на 1 странице: плеер (play/pause) + транскрипт + таблица критериев (компонент TASK-4) + «Изменить балл».
+  - *Given* RU-юзер, *When* плеер грузит аудио, *Then* URL через `rewriteToProxy()` (browser-facing), аудио играет (не `*.supabase.co`).
+- **Что делаем:** для speaking-submission рендерить `<audio>` плеер (play/pause), транскрипт под ним, переиспользовать `CriteriaBreakdownTable` (TASK-4) + existing override (§6). Аудио signed URL → `rewriteToProxy()`. Всё на 1 странице.
+- **Guardrails:** тайм-коды «клик на момент» / голос-коммент репетитора — **OUT** (Spec §3). `loading="lazy"`, `touch-action: manipulation`. Не дублировать `CriteriaBreakdownTable`.
 
-### TASK-11 — Включить флаг Эмилии + тест голоса
+### TASK-11 — Включить флаг Эмилии + тест голоса (FEEDBACK gate)
 
-- **Spec §7.** **Agent:** Vladimir + Claude Code (smoke).
-- **Что делаем:** `lint && build && smoke-check` → deploy (Lovable auto + `deploy-sokratai`) → `UPDATE tutors SET feature_voice_speaking_enabled=true WHERE user_id='<emilia>'` → тестовое speaking-ДЗ FR.
-- **Критерий успеха (Spec §7):** покритериальный разбор принимается без правок в большинстве случаев; транскрипт FR читаемый; «беру / готова платить».
+- **Job:** R1. **Agent:** Vladimir (manual) + Claude Code (smoke).
+- **AC / критерий успеха (Spec §7):** покритериальный разбор принимается без правок в большинстве случаев; транскрипт FR читаемый на реальной записи ученика; явное «беру / готова платить».
+- **Что делаем:** `lint && build && smoke-check` → deploy (Lovable: миграции+functions, `deploy-sokratai`: frontend) → `UPDATE tutors SET feature_voice_speaking_enabled=true WHERE user_id='<emilia uuid>'` → тестовое speaking-ДЗ на FR → собрать signal (pipeline шаг 7, файл `docs/discovery/signals/`).
 
 ---
 
@@ -130,9 +172,12 @@ Pipeline: **Spec → Plan → Code → Test**. Code review каждой зада
 
 ```
 TASK-0 → всё
-Этап 1: TASK-1, TASK-2 → TASK-3 → TASK-4 → TASK-5 (валидация — ГЕЙТ для этапа 2)
+Этап 1: TASK-1, TASK-2 → TASK-3 → TASK-4 → TASK-5 (валидация — ГЕЙТ для этапа 2)  ✅ done
 Этап 2: TASK-6, TASK-7 → TASK-8 → (TASK-9, TASK-10) → TASK-11
-TASK-8 зависит от TASK-3 (тот же грейдинг)
+  TASK-8 зависит от TASK-3 (тот же grading) и TASK-7 (транскрипция)
+  TASK-9 Часть B зависит от TASK-8 (submission endpoint принимает voice_ref)
+  TASK-9 Часть A (tutor mark) можно делать параллельно с TASK-6/7
+  TASK-10 зависит от TASK-4 (CriteriaBreakdownTable) + TASK-8 (submission_payload.voice_ref)
 ```
 
 ---
@@ -207,56 +252,141 @@ Vladimir (manual): Эмилия проверяет реальные письме
 override итога ≤30%, перестала декомпозировать вручную. ГЕЙТ: если точность низкая — итерируем prompt (TASK-2/3) ДО этапа 2.
 ```
 
+> **Преамбула (наследуется ВСЕМИ промптами ниже — doc 20, элементы 1-2).**
+> Каждый промпт копируется в чистую сессию агента. В начало любого из них подставляется:
+>
+> ```
+> Твоя роль: senior product-minded full-stack engineer проекта SokratAI.
+> Контекст: B2B-сегмент — репетиторы иностранных языков (power-user Эмилия, DELF/ЕГЭ/ОГЭ).
+> Wedge: проверка работ по критериям экзамена без рутины. Инвариант продукта: AI = ЧЕРНОВИК + действие
+> (любой AI-вывод заканчивается действием тутора; финальный балл подтверждает репетитор).
+> Перед кодом прочитай: docs/delivery/features/voice-speaking-mvp/spec.md v0.2 + соответствующий
+> раздел tasks.md + перечисленные ниже CLAUDE.md §§ и .claude/rules/*.
+> ```
+>
+> **Mandatory end block (элемент 7 — добавляй в КОНЕЦ ответа любой задачи):**
+>
+> ```
+> В конце верни: (1) изменённые файлы; (2) краткое summary; (3) выполненные validation-команды
+> с результатом; (4) docs-to-update (CLAUDE.md §§ / .claude/rules/* / spec / MEMORY); (5) self-check
+> против .claude/rules/90-design-system.md (нет emoji в chrome, Golos Text, MathText для LaTeX,
+> один primary CTA, разбор на 1 странице); (6) для frontend — блок «🚀 Deploy needed» (deploy-sokratai).
+> ```
+
 ### TASK-6 (миграции speaking + флаг + bucket) — Claude Code
 
 ```
-Прочитай spec.md v0.2 (§5) + tasks.md TASK-6 + CLAUDE.md §11 (feature_mock_exams_enabled как образец).
-Миграции: (1) CHECK task_kind IN (...,'speaking') на homework_tutor_tasks (mirror 20260509120000);
-(2) tutors.feature_voice_speaking_enabled boolean NOT NULL DEFAULT false;
-(3) опц. bucket — рекомендация переиспользовать homework-submissions подпапкой voice/ (новый bucket только если упрёмся).
-Additive, флаг default false. Проверь: insert speaking-задачи не падает на CHECK.
+[+ Преамбула + Mandatory end block]
+Прочитай: spec.md v0.2 §5 (Миграции) + tasks.md TASK-6 + образец feature-флага (миграция
+20260508120000_mock_exams_v1_schema.sql + src/hooks/useTutorMockExamsFeatureFlag.ts) +
+AGENTS.md «Database rules» (additive only, forbidden: drop/rename/modify existing).
+
+Сделай 2 миграции (idempotent, следующие по таймстемпу):
+1) <ts>_add_speaking_task_kind.sql — расширить CHECK на homework_tutor_tasks.task_kind.
+   ВАЖНО: CHECK в Postgres НЕ аддитивен. Сначала прочитай точное имя констрейнта в миграции
+   20260509120000, затем: ALTER TABLE ... DROP CONSTRAINT IF EXISTS <имя>;
+   ALTER TABLE ... ADD CONSTRAINT <имя> CHECK (task_kind IN ('numeric','extended','proof','speaking'));
+   НЕ менять DEFAULT 'extended'.
+2) <ts>_add_feature_voice_speaking_flag.sql — tutors.feature_voice_speaking_enabled boolean
+   NOT NULL DEFAULT false. Грепни как сделан feature_mock_exams_enabled и повтори 1:1 (тип, default,
+   GRANT/RLS если есть).
+
+Bucket-решение зафиксируй в PR-описании: переиспользуем homework-submissions + namespace
+{userId}/{assignmentId}/threads/... (тот же, что фото) → extractStudentThreadAttachmentRefs проходит
+без правок. Новый bucket / подпапку voice/ НЕ заводи в этой задаче (потребует менять namespace-валидатор).
+
+AC: INSERT task_kind='speaking' проходит; старые строки целы; новый тутор → флаг false.
+Guardrails: additive, idempotent, без drop/rename существующих колонок.
 ```
 
 ### TASK-7 (Whisper helper) — Claude Code
 
 ```
-Прочитай spec.md v0.2 (§3,§5) + tasks.md TASK-7.
-Изучи Groq Whisper в supabase/functions/telegram-bot/index.ts (handleVoiceMessage) и chat voice path.
-Создай supabase/functions/_shared/voice-transcribe.ts: transcribeAudio(audioBuffer, { language, mimeType }) →
-multipart FormData → POST api.groq.com/openai/v1/audio/transcriptions, model whisper-large-v3-turbo, language.
-Subject→lang map (french→fr и т.д.). Таймаут + 1 retry на 5xx. PII-free логи. GROQ_API_KEY из env.
-Не рефактори вызовы бота/чата в этом PR.
+[+ Преамбула + Mandatory end block]
+Прочитай: spec.md v0.2 §3,§5 (Subject→language map) + tasks.md TASK-7. Изучи существующий Groq Whisper:
+chat/index.ts:899-958 (transcribe path) + telegram-bot/index.ts:6173-6243 (handleVoiceMessage) — оба
+hardcode language='ru'.
+
+Создай supabase/functions/_shared/voice-transcribe.ts:
+- transcribeAudio(audioBuffer: ArrayBuffer, { language?: string, mimeType: string }): Promise<{ text: string }>
+  → multipart FormData → POST https://api.groq.com/openai/v1/audio/transcriptions,
+    model whisper-large-v3-turbo, параметрический language.
+- export subjectToWhisperLang(subject): french→'fr', english→'en', spanish→'es', russian→'ru', иначе undefined.
+- export MAX_VOICE_BYTES (согласуй с TASK-9 cap, ~7 мин монолога).
+- GROQ_API_KEY из env (бросай типизированную ошибку если нет). Таймаут через AbortController + 1 retry на 5xx/network.
+
+AC: FR-аудио → непустой транскрипт; 5xx → 1 retry → throw (не «успех с пустым»); тишина → { text:'' } (НЕ throw).
+Guardrails: PII-free логи (НИКОГДА не логируй text/транскрипт — только status/size/mime/lang/durationMs).
+НЕ рефактори вызовы бота/чата в этом PR.
 ```
 
-### TASK-8 (speaking branch) — Claude Code
+### TASK-8 (backend: speaking write-path + submission branch) — Claude Code
 
 ```
-Прочитай spec.md v0.2 (§3,§5) + tasks.md TASK-8 + CLAUDE.md §16 (voice_ref), §17 (AI-квота), §0 (derive task_kind), §9 (anti-leak).
-В supabase/functions/homework-api/index.ts расширь handleStudentSubmission веткой task_kind='speaking':
-квота-гейт checkAiQuota(context:'homework') ДО AI → валидация voice_ref → signed URL rewriteToDirect() → fetch →
-transcribeAudio (TASK-7, language из subject) → answerText=transcript → runStudentAnswerGrading (тот же покритериальный
-грейдинг этапа 1). voice_ref обязателен. task_kind='speaking' не перетирается deriveTaskKind.
+[+ Преамбула + Mandatory end block]
+Прочитай: spec.md v0.2 §3,§5 (API) + tasks.md TASK-8 + CLAUDE.md §0 (двойной derive task_kind — 4 backend
+write-path + HWDrawer), §16 (runStudentAnswerGrading — единый источник grading, voice_ref в submission_payload),
+§17 (AI-квота ДО AI), §9 (anti-leak solution/rubric), §35 (criteria_breakdown — тот же grading этапа 1) +
+.claude/rules/95-production-deploy.md (rewriteToDirect для server-side fetch).
+
+В supabase/functions/homework-api/index.ts:
+A) Write-path accept (§0): 'speaking' НЕ выводится из check_format. Грепни deriveTaskKind — в create/update
+   (4 backend write-path) если клиент прислал явный task_kind='speaking' → персистить как есть, иначе derive.
+   Проверь client HWDrawer path тоже.
+B) handleStudentSubmission: detect task_kind==='speaking' →
+   checkAiQuota(userId, db, { context:'homework', incrementUsage:true }) ДО Whisper И Gemini →
+   валидация voice_ref ТОЛЬКО через extractStudentThreadAttachmentRefs (не вручную) →
+   signed URL → rewriteToDirect() → fetch → transcribeAudio (TASK-7, language из subject) →
+   answerText=transcript → runStudentAnswerGrading({ feedbackKind:'check_result' }) (НЕ дублируй grading).
+   submission_payload = { numeric:'', photos:[], text:'', voice_ref }.
+   Пустой транскрипт → НЕ зови Gemini, задачу НЕ закрывай, дружелюбное «не удалось распознать речь».
+
+AC: tutor mark 'speaking' персистится (не перетёрт derive); submit без voice_ref → 400; валидный submit →
+квота списана до AI + транскрипт + criteria_breakdown + балл; пустой STT → задача не закрыта.
+Guardrails: solution/rubric только в grading, не в ответ (§9). Не возрождать homework_tutor_submissions.
+Quota строго ДО обеих AI-операций. Не дублировать runStudentAnswerGrading.
 ```
 
-### TASK-9 (рекордер ученика) — Claude Code · ⚠️ deploy
+### TASK-9 (frontend: tutor mark + student recorder) — Claude Code · ⚠️ deploy
 
 ```
-Прочитай spec.md v0.2 (§6) + tasks.md TASK-9 + .claude/rules/80-cross-browser.md + CLAUDE.md §18 (humanities UX).
-В src/components/student/homework-problem/SubmitSheet.tsx для task_kind='speaking' показывай рекордер
-на базе useVoiceRecorder (НЕ вводи новый recorder — iOS Safari m4a/webm уже решён). После записи →
-upload аудио в bucket (TASK-6) → voice_ref → submission endpoint. Скрой numeric-row (как humanities, §18).
-Один primary CTA. Лимит длительности под монолог (~5–7 мин). src/types/homework.ts: task_kind union + 'speaking'.
-После merge — Deploy needed (deploy-sokratai). Manual: iPhone Safari + Android Chrome.
+[+ Преамбула + Mandatory end block]
+Прочитай: spec.md v0.2 §3 шаг 1-2, §6 + tasks.md TASK-9 + .claude/rules/80-cross-browser.md (useVoiceRecorder,
+iOS Safari m4a/webm) + CLAUDE.md §18 (humanities UX — скрытие numeric) + §0 (двойной write-path).
+
+Часть A — tutor mark:
+- HWTaskCard.tsx: добавить опцию типа задачи «Устный ответ (монолог)» = task_kind='speaking' рядом с
+  существующим check_format-селектором. Прокинуть в DraftTask/HWDraftTask + tutorHomeworkApi → ОБА write-path (§0).
+- Показывать опцию за feature-флагом тутора (feature_voice_speaking_enabled), не всем.
+
+Часть B — student recorder:
+- src/types/homework.ts: task_kind union + 'speaking' (additive optional, не сломать numeric/extended/proof).
+- HomeworkProblem.tsx composer: ветка task_kind==='speaking' → рекордер на СУЩЕСТВУЮЩЕМ useVoiceRecorder
+  (НЕ вводи новый MediaRecorder-wrapper). Скрыть numeric-row + photo (как humanities §18). Один primary CTA.
+- Upload аудио (новый uploadStudentThreadVoice или generalize uploadStudentThreadImage) → voice_ref → submission.
+- Cap длительности ~7 мин + size cap (= MAX_VOICE_BYTES из TASK-7). Re-record до отправки разрешён.
+
+AC: tutor выбирает «устный» → 'speaking' в обе write-path; ученик на iPhone Safari видит рекордер (не numeric),
+один CTA; запись → отправка → разбор по критериям.
+Guardrails: только useVoiceRecorder. touch-action: manipulation на контролах. После merge — 🚀 Deploy needed.
+Manual: iPhone Safari + Android Chrome.
 ```
 
 ### TASK-10 (плеер + транскрипт у репетитора) — Claude Code · ⚠️ deploy
 
 ```
-Прочитай spec.md v0.2 (§6) + tasks.md TASK-10 + CLAUDE.md (RU-bypass: rewriteToProxy для browser-facing signed URL).
-В src/components/tutor/GuidedThreadViewer.tsx (+ src/components/homework/) для speaking-submission рендери:
-плеер (play/pause) + транскрипт под ним + таблицу критериев (компонент из TASK-4) + кнопку «Изменить балл» (override §6).
-Аудио signed URL через rewriteToProxy(). Всё на 1 странице. Тайм-коды / голос-коммент репетитора — НЕ здесь (out of scope).
-loading="lazy", touch-action: manipulation на контролах. После merge — Deploy needed (deploy-sokratai).
+[+ Преамбула + Mandatory end block]
+Прочитай: spec.md v0.2 §6 + tasks.md TASK-10 + CLAUDE.md §35 (CriteriaBreakdownTable) + RU-bypass
+(.claude/rules/95: rewriteToProxy для browser-facing signed URL).
+
+В src/components/tutor/GuidedThreadViewer.tsx для speaking-submission рендери на 1 странице:
+<audio> плеер (play/pause) + транскрипт под ним + CriteriaBreakdownTable (компонент TASK-4, НЕ дублируй) +
+кнопку «Изменить балл» (override §6). Аудио signed URL через rewriteToProxy() (browser-facing).
+
+AC: репетитор открывает тред speaking-задачи → слышит аудио, видит транскрипт + таблицу критериев + правит балл;
+RU-юзер → аудио играет (URL не *.supabase.co).
+Guardrails: тайм-коды «клик на момент» / голос-коммент репетитора — OUT (Spec §3). loading="lazy",
+touch-action: manipulation. Не дублировать CriteriaBreakdownTable. После merge — 🚀 Deploy needed.
 ```
 
 ### TASK-11 (включить флаг + тест голоса) — Claude Code (smoke) + Vladimir (manual)
@@ -266,15 +396,43 @@ Claude: npm run lint && npm run build && npm run smoke-check.
 Vladimir (manual): deploy (Lovable auto applies миграции+functions) → deploy-sokratai (frontend) →
 UPDATE tutors SET feature_voice_speaking_enabled=true WHERE user_id='<emilia uuid>' → дать Эмилии speaking-ДЗ на FR.
 Критерий успеха (Spec §7): покритериальный разбор принимается без правок в большинстве случаев,
-транскрипт FR читаемый, «беру / готова платить».
+транскрипт FR читаемый, «беру / готова платить». Собрать signal в docs/discovery/signals/ (pipeline шаг 7).
 ```
 
-### Code review (каждая задача) — Codex
+### Code review (каждая задача) — Codex / ChatGPT-5.5
+
+> Pipeline шаг 6: независимый ревьюер, контекст автора недоступен. Verdict-формат **PASS /
+> CONDITIONAL PASS / FAIL** + список находок (P0/P1/P2). Сначала product-альignment (read-order),
+> затем технические hot-zones. Подставляй scope конкретной задачи в начало.
 
 ```
-Независимое ревью без контекста автора против spec.md v0.2 и CLAUDE.md: §12 (паттерн elements_check),
-§16 (единый grading, voice_ref), §17 (квота ДО AI), §0 (task_kind derive), §6 (override/шаг 0.1),
-§9/§27 (anti-leak: solution/rubric tutor-only, humanities verbatim skip), §23 (GRANT-whitelist на task_states),
-cross-browser (только useVoiceRecorder), RU-bypass (rewriteToProxy browser / rewriteToDirect server),
-разбор на 1 странице, сумма критериев = ai_score. Верни P0/P1/P2.
+Ты — независимый ревьюер SokratAI. Контекст первого агента недоступен.
+
+ПОРЯДОК ЧТЕНИЯ (строго):
+1. docs/discovery/product/tutor-ai-agents/14-ajtbd-product-prd-sokrat.md
+2. docs 16 (UX principles) + 17 (UI patterns)
+3. docs/delivery/features/voice-speaking-mvp/spec.md v0.2 + tasks.md (ревьюируемая задача)
+4. CLAUDE.md §§: 0 (task_kind derive), 9/27 (anti-leak), 12 (elements_check паттерн),
+   16 (единый grading + voice_ref), 17 (квота ДО AI), 23 (GRANT task_states), 35 (criteria_breakdown)
+5. git diff
+
+PRODUCT-АЛИГНМЕНТ (pipeline questions): Job R1 alignment? UX drift vs 16/17? Scope creep
+(тайм-коды/голос-коммент/IELTS-breakdown НЕ должны появиться)? AC выполнены? AI = черновик + действие?
+
+ТЕХНИЧЕСКИЕ HOT-ZONES (этап 2):
+- §0 dual-derive: task_kind='speaking' персистится во ВСЕХ write-path, НЕ перетёрт deriveTaskKind?
+- Квота (§17): checkAiQuota ДО Whisper И Gemini (две AI-операции)? Двойного списания нет?
+- voice_ref: валидируется через extractStudentThreadAttachmentRefs (SSRF/per-student/bucket whitelist),
+  не вручную? Namespace {userId}/{assignmentId}/...?
+- RU-bypass: server-side fetch аудио → rewriteToDirect()? browser-facing плеер → rewriteToProxy()?
+- Anti-leak (§9): solution_text/rubric_* идут только в grading, НЕ в ответ ученику?
+- Whisper robustness: 5xx → retry; пустой транскрипт → НЕ зовём Gemini, задача не закрыта; PII-free логи?
+- Grading: НЕ продублирован runStudentAnswerGrading? criteria_breakdown Σ = ai_score (этап 1 инвариант)?
+- Cross-browser: только useVoiceRecorder, без новых MediaRecorder-обёрток? touch-action на контролах?
+- Миграция: CHECK через DROP+ADD (не аддитивно)? idempotent? без drop/rename колонок?
+- Разбор / плеер / транскрипт — на 1 странице (жёсткий инвариант Эмилии)?
+
+ФОРМАТ: PASS / CONDITIONAL PASS / FAIL. Для каждой находки — Severity (P0 correctness/security /
+P1 broken edge / P2 polish) + File:line + repro/code-path + suggested fix. Если нет блокеров — PASS + P2 observations.
+Сверься с Definition of Done (doc 19): Job linkage / spec / no UX-canon breakage / success signal defined.
 ```
