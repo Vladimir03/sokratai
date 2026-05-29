@@ -1081,6 +1081,7 @@ export type Database = {
       homework_tutor_tasks: {
         Row: {
           assignment_id: string
+          cefr_level: string | null
           check_format: string
           correct_answer: string | null
           id: string
@@ -1099,6 +1100,7 @@ export type Database = {
         }
         Insert: {
           assignment_id: string
+          cefr_level?: string | null
           check_format?: string
           correct_answer?: string | null
           id?: string
@@ -1117,6 +1119,7 @@ export type Database = {
         }
         Update: {
           assignment_id?: string
+          cefr_level?: string | null
           check_format?: string
           correct_answer?: string | null
           id?: string

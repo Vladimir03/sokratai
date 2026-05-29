@@ -58,7 +58,7 @@ export interface ProblemContextTask {
    */
   hint_count?: number;
   /** Drives the warn-banner copy at the bottom of expanded view. */
-  task_kind: 'numeric' | 'extended' | 'proof';
+  task_kind: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** Plain task text (may contain inline `$…$` KaTeX). */
   body: string;
   /**
