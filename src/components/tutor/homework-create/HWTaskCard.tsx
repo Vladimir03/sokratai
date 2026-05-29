@@ -419,6 +419,12 @@ export interface HWTaskCardProps {
    * ещё не сохранён в БД — backend handler требует реальный UUID).
    */
   onRequestSaveToKB?: (task: DraftTask) => void;
+  /**
+   * voice-speaking-mvp: when true (tutor has `feature_voice_speaking_enabled`),
+   * show the «Устный ответ (монолог)» task-type option. Off by default — gated
+   * to pilot tutors only.
+   */
+  voiceSpeakingEnabled?: boolean;
 }
 
 export function HWTaskCard({
@@ -433,6 +439,7 @@ export function HWTaskCard({
   isFirst,
   isLast,
   onRequestSaveToKB,
+  voiceSpeakingEnabled = false,
 }: HWTaskCardProps) {
   const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
   const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
@@ -1060,6 +1067,36 @@ export function HWTaskCard({
             </div>
           </div>
 
+          {/* voice-speaking-mvp: «Тип ответа» selector — gated to pilot tutors.
+              'speaking' → устный монолог (рекордер у ученика). When speaking,
+              the «Формат проверки» selector below is hidden (не применимо). */}
+          {voiceSpeakingEnabled ? (
+            <div className="space-y-1">
+              <Label htmlFor={`task-kind-${task.localId}`}>Тип ответа</Label>
+              <select
+                id={`task-kind-${task.localId}`}
+                value={task.task_kind === 'speaking' ? 'speaking' : 'written'}
+                onChange={(e) =>
+                  onUpdate({
+                    ...task,
+                    task_kind: e.target.value === 'speaking' ? 'speaking' : undefined,
+                  })
+                }
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                style={{ fontSize: '16px', touchAction: 'manipulation' }}
+              >
+                <option value="written">Письменный / числовой</option>
+                <option value="speaking">Устный ответ (монолог)</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {task.task_kind === 'speaking'
+                  ? 'Ученик запишет устный монолог; AI распознает речь и оценит по критериям'
+                  : 'Ученик отвечает текстом, числом или фото решения'}
+              </p>
+            </div>
+          ) : null}
+
+          {task.task_kind !== 'speaking' ? (
           <div className="space-y-1">
             <Label htmlFor={`check-format-${task.localId}`}>Формат проверки</Label>
             <select
@@ -1080,6 +1117,7 @@ export function HWTaskCard({
                 : 'Число, слово или формула'}
             </p>
           </div>
+          ) : null}
         </div>
 
         {/* SOLUTION SECTION — paste via lastFocusedSection, drag-drop per-wrapper. */}

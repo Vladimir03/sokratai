@@ -94,10 +94,14 @@ function isOralFormat(text: string): boolean {
 function detectLanguageFormat(
   subject: string,
   taskText: string | null | undefined,
+  forceOral = false,
 ): FormatDetection {
   const text = (taskText ?? "").trim();
   const cefr = detectCefrLevel(text).level;
-  const oralIntent = isOralFormat(text);
+  // voice-speaking-mvp fix #2: explicit task_kind='speaking' forces oral format —
+  // не полагаемся только на текст-эвристику isOralFormat (sujet может не содержать
+  // ключевых слов «монолог»/«orale», но запись голоса — однозначно устная).
+  const oralIntent = forceOral || isOralFormat(text);
 
   // IELTS — самый специфичный (явно упомянут в тексте). IELTS speaking
   // намеренно не покрыт в P0 — fallback на generic.
@@ -432,8 +436,9 @@ const CRITERIA_DELF_B2_ORALE: SubjectCriterionTemplate[] = [
 export function getLanguagesMethodology(
   subject: string,
   taskText: string | null | undefined,
+  forceOral = false,
 ): { methodology: string; cefr: CefrLevel; criteria: SubjectCriterionTemplate[] | null } {
-  const detection = detectLanguageFormat(subject, taskText);
+  const detection = detectLanguageFormat(subject, taskText, forceOral);
 
   let methodology: string;
   let criteria: SubjectCriterionTemplate[] | null;
@@ -497,8 +502,9 @@ export function getLanguagesMethodology(
 export function buildLanguagesRubric(
   subject: string,
   taskText: string | null | undefined,
+  forceOral = false,
 ): Omit<SubjectRubric, "tutor_rubric_active" | "subject_label"> {
-  const { methodology, cefr, criteria } = getLanguagesMethodology(subject, taskText);
+  const { methodology, cefr, criteria } = getLanguagesMethodology(subject, taskText, forceOral);
   return {
     role: ROLE_BY_SUBJECT[subject] ?? DEFAULT_ROLE,
     methodology,

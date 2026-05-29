@@ -247,7 +247,7 @@ export interface EvaluateStudentAnswerParams {
   /** Optional `homework_tutor_tasks.kim_number` for per-KIM rubric selection. */
   kimNumber?: number | null;
   /** Optional `homework_tutor_tasks.task_kind` (informational for now). */
-  taskKind?: "numeric" | "extended" | "proof" | null;
+  taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -305,7 +305,7 @@ export interface GenerateHintParams {
    * Currently informational only — resolver may use it in the future to
    * pick compact vs full methodology block.
    */
-  taskKind?: "numeric" | "extended" | "proof" | null;
+  taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;

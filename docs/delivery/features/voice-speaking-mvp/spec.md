@@ -242,13 +242,15 @@ npm run lint && npm run build && npm run smoke-check
 > **Code review (ChatGPT-5.5, 2026-05-27):** 2 раунда. R1 → 3 P1 закрыты: (1) leak-check на criteria comments; (2) IELTS отключён (average ≠ sum) + фикс methodology↔template рассогласований; (3) re-normalize breakdown при CORRECT→ON_TRACK downgrade. Bonus: pre-existing Cyrillic `\b` баг детекции (ЕГЭ-эссе → letter-шаблон) пойман новым smoke-тестом `scripts/test-criteria-templates.mjs`. Детали: CLAUDE.md §35.
 
 **Этап 2 — голос поверх готового грейдинга** (нарезка: `tasks.md` TASK-6..11; старт = ГЕЙТ после TASK-5):
-- [ ] **[P0]** Миграция `task_kind='speaking'` (CHECK через DROP+ADD) + `feature_voice_speaking_enabled` + bucket-решение (reuse `homework-submissions`/`threads/`). — TASK-6
-- [ ] **[P0]** Shared helper транскрипции Whisper (`language`-параметр, `subjectToWhisperLang`, `MAX_VOICE_BYTES`). — TASK-7
-- [ ] **[P0]** Backend: write-path accept `task_kind='speaking'` (§0) + `handleStudentSubmission` ветка speaking → квота → транскрипция → тот же грейдинг; пустой транскрипт → не зовём Gemini. — TASK-8
-- [ ] **[P0]** Tutor-mark «устный» в `HWTaskCard` + student-рекордер в `HomeworkProblem` (`useVoiceRecorder`) + **playback-before-submit** + **транскрипт ученику** («Распознанная речь»). — TASK-9
-- [ ] **[P1]** Двухфазный прогресс STT→grading + warning на ~6:00 / хард-кап 7 мин (ученик). — TASK-9
-- [ ] **[P0]** Репетитор: нативный `<audio controls>` (scrub + speed) + транскрипт + таблица критериев, один экран. — TASK-10
+- [x] **[P0]** Миграция `task_kind='speaking'` (CHECK через DROP+ADD) + `feature_voice_speaking_enabled` + bucket-решение (reuse `homework-submissions`/`threads/`). ✅ TASK-6 (`20260529120000` + `20260529120100`).
+- [x] **[P0]** Shared helper транскрипции Whisper (`language`-параметр, `subjectToWhisperLang`, `MAX_VOICE_BYTES`). ✅ TASK-7 (`_shared/voice-transcribe.ts`).
+- [x] **[P0]** Backend: write-path accept `task_kind='speaking'` (§0) + `handleStudentSubmission` ветка speaking → квота → транскрипция → тот же грейдинг; пустой транскрипт → не зовём Gemini. ✅ TASK-8 (`homework-api/index.ts`).
+- [x] **[P0]** Tutor-mark «устный» в `HWTaskCard` + student-рекордер в `HomeworkProblem` (`useVoiceRecorder`) + **playback-before-submit** + **транскрипт ученику** («Распознанная речь»). ✅ TASK-9 (`SpeakingComposer.tsx` + flag-gated `HWTaskCard`).
+- [x] **[P1]** Двухфазный прогресс STT→grading + warning на ~6:00 / хард-кап 7 мин (ученик). ✅ TASK-9
+- [x] **[P0]** Репетитор: нативный `<audio controls>` (scrub + speed) + транскрипт + таблица критериев, один экран. ✅ TASK-10 (`GuidedThreadViewer.tsx` → `SpeakingSubmissionPlayer`).
 - [ ] **[P0]** Feature-флаг, включить Эмилии. Smoke + ручной тест на реальной записи FR. — TASK-11
+
+> **Code review Этап 2 (Codex, 2026-05-29):** FAIL → 4 находки закрыты. **P0 #1** — `buildTaskSignature`/`tasksDirty` не включали `task_kind` → смена только типа ответа на edit была no-op (speaking не сохранялся). **P0 #2** — `runStudentAnswerGrading` зануляла `taskKind` для speaking → `resolveSubjectRubric` падал на текст-эвристику → DELF oral мог грейдиться по écrite; фикс: speaking форсит oral через `languages-ege.ts::forceOral` (+ smoke-guard в `test-criteria-templates.mjs`). **P1 #3** — quota-gate перенесён после валидации (невалидный submit без `voice_ref` больше не списывает квоту). **P1 #4** — realtime merge теперь несёт `submission_payload` (live аудио-плеер у тутора). Детали: rule 40 «Голосовые задания».
 
 ---
 

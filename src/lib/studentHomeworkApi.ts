@@ -607,6 +607,79 @@ export async function uploadStudentThreadImage(
 }
 
 /**
+ * Max audio upload size for voice-speaking submissions (voice-speaking-mvp).
+ * Mirrors the server-side `MAX_VOICE_BYTES` in `_shared/voice-transcribe.ts`
+ * (20 МБ) — covers a 7-min monologue worst-case (iOS AAC 256kbps ≈ 13 МБ) and
+ * stays under Groq's 25 МБ hard limit.
+ */
+export const MAX_STUDENT_VOICE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Upload a recorded voice monologue (task_kind='speaking') to the SAME bucket +
+ * namespace as photo attachments (`homework-submissions/{studentId}/{assignmentId}/threads/{taskOrder}/...`)
+ * so the backend `extractStudentThreadAttachmentRefs` validator accepts it
+ * without changes (voice-speaking-mvp TASK-6 bucket decision).
+ *
+ * Unlike `uploadStudentThreadImage`, NO compression — `compressForUpload` is
+ * image-only and would corrupt audio. Returns a `storage://...` ref.
+ */
+export async function uploadStudentThreadVoice(
+  blob: Blob,
+  assignmentId: string,
+  taskOrder: number,
+  fileName = 'voice.webm',
+): Promise<string> {
+  if (blob.size === 0) {
+    throw new StudentHomeworkApiError('Пустая запись. Запиши ответ ещё раз.');
+  }
+  if (blob.size > MAX_STUDENT_VOICE_BYTES) {
+    throw new StudentHomeworkApiError('Запись слишком длинная. Сократи ответ и запиши ещё раз.');
+  }
+
+  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  if (sessionError) {
+    throw new StudentHomeworkApiError(sessionError.message);
+  }
+
+  const studentId = ensureUserId(sessionData.session?.user?.id);
+  const ext = fileName.split('.').pop()?.toLowerCase() || 'webm';
+  const fileId = generateStorageObjectId();
+  const objectPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
+  const contentType = blob.type || 'audio/webm';
+
+  const { error: primaryError } = await supabase.storage
+    .from(HOMEWORK_SUBMISSIONS_BUCKET)
+    .upload(objectPath, blob, { upsert: false, contentType });
+
+  if (!primaryError) {
+    return toStorageRef(HOMEWORK_SUBMISSIONS_BUCKET, objectPath);
+  }
+
+  const isBucketMissing =
+    primaryError.message?.toLowerCase().includes('bucket not found') ||
+    (primaryError as unknown as { statusCode?: number }).statusCode === 404;
+
+  if (!isBucketMissing) {
+    throw new StudentHomeworkApiError(
+      `Ошибка загрузки записи: ${translateSupabaseError(primaryError.message)}`,
+    );
+  }
+
+  const fallbackPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
+  const { error: fallbackError } = await supabase.storage
+    .from(HOMEWORK_IMAGES_BUCKET)
+    .upload(fallbackPath, blob, { upsert: false, contentType });
+
+  if (fallbackError) {
+    throw new StudentHomeworkApiError(
+      `Ошибка загрузки записи: ${translateSupabaseError(fallbackError.message)}`,
+    );
+  }
+
+  return toStorageRef(HOMEWORK_IMAGES_BUCKET, fallbackPath);
+}
+
+/**
  * Save a message to a thread via the homework-api edge function.
  */
 export async function saveThreadMessage(

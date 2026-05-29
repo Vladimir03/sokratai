@@ -127,6 +127,11 @@ export interface HWTasksSectionProps {
    * task BookmarkPlus icon скрывается — dialog требует реальный assignmentId.
    */
   assignmentId?: string | null;
+  /**
+   * voice-speaking-mvp: passes through to each HWTaskCard to surface the
+   * «Устный ответ (монолог)» task-type option. Off by default (pilot tutors only).
+   */
+  voiceSpeakingEnabled?: boolean;
 }
 
 export function HWTasksSection({
@@ -139,6 +144,7 @@ export function HWTasksSection({
   onDeferImageDelete,
   confirmOnRemove,
   assignmentId,
+  voiceSpeakingEnabled = false,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
   const [saveToKbTask, setSaveToKbTask] = useState<DraftTask | null>(null);
@@ -267,6 +273,7 @@ export function HWTasksSection({
           isFirst={i === 0}
           isLast={i === tasks.length - 1}
           onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
+          voiceSpeakingEnabled={voiceSpeakingEnabled}
         />
       ))}
       {disableTaskAdd && (

@@ -80,10 +80,12 @@ export interface StudentHomeworkTask {
    *   - `numeric`   — numeric input only (photos ignored)
    *   - `extended`  — numeric + photo[]≥1 required (default if undefined)
    *   - `proof`     — photo[]≥1 only (numeric ignored)
+   *   - `speaking`  — устный монолог (voice-speaking-mvp): запись голоса,
+   *                   STT + покритериальный грейдинг (numeric/photo скрыты)
    * Optional for backward compatibility with code that doesn't read this field.
    * Spec: docs/delivery/features/student-homework-problem-screen/spec.md §5.
    */
-  task_kind?: 'numeric' | 'extended' | 'proof';
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
 }
 
 export interface StudentHomeworkMaterial {

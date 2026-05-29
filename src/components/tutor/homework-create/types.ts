@@ -101,6 +101,14 @@ export interface DraftTask {
   /** Original KB attachment URL (storage:// or https://). Not usable as task_image_path directly. */
   kb_attachment_url?: string | null;
   check_format: 'short_answer' | 'detailed_solution';
+  /**
+   * Тип задания. undefined / numeric / extended / proof — «письменный» режим
+   * (бэк выводит task_kind из check_format). 'speaking' — устный монолог
+   * (voice-speaking-mvp, за feature-флагом тутора): ученик записывает голос,
+   * AI распознаёт речь и оценивает по критериям. Только 'speaking' гоняем явно
+   * через write-path (§0); остальные значения backend derive'ит из check_format.
+   */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────
