@@ -50,6 +50,7 @@ import {
 import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplatePicker';
 import { HWExpandedParams } from '@/components/tutor/homework-create/HWExpandedParams';
 import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSection';
+import { useTutorVoiceSpeakingFeatureFlag } from '@/hooks/useTutorVoiceSpeakingFeatureFlag';
 import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
@@ -79,6 +80,7 @@ function buildTaskSignature(tasks: Array<{
   solution_image_paths?: string | null;
   max_score?: number | null;
   check_format?: string | null;
+  task_kind?: string | null;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -94,6 +96,11 @@ function buildTaskSignature(tasks: Array<{
       solution_image_urls: task.solution_image_urls ?? task.solution_image_paths ?? null,
       max_score: task.max_score ?? 1,
       check_format: task.check_format ?? 'short_answer',
+      // voice-speaking-mvp fix #1: track the speaking-bit so written↔speaking is a
+      // detectable change (tasksDirty). Non-speaking task_kind is derived from
+      // check_format (already in this signature) → normalize to null to avoid a
+      // spurious dirty from 'extended'↔undefined noise.
+      task_kind: task.task_kind === 'speaking' ? 'speaking' : null,
     })),
   );
 }
@@ -220,6 +227,7 @@ function buildEditDiffState(params: {
       solution_image_paths: task.solution_image_paths,
       max_score: task.max_score,
       check_format: task.check_format,
+      task_kind: task.task_kind,
     })),
   ) !== snapshot.taskSignature;
 
@@ -325,6 +333,8 @@ function TutorHomeworkCreateContent() {
   const { id: editId } = useParams<{ id?: string }>();
   const isEditMode = !!editId;
   const { tutor, loading: tutorLoading } = useTutor();
+  // voice-speaking-mvp: gate the «Устный ответ (монолог)» task-type option.
+  const { data: voiceSpeakingEnabled = false } = useTutorVoiceSpeakingFeatureFlag();
   const { students: tutorStudents, loading: tutorStudentsLoading } = useTutorStudents();
   const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
   const {
@@ -548,6 +558,8 @@ function TutorHomeworkCreateContent() {
         solution_image_paths: t.solution_image_urls ?? null,
         max_score: t.max_score,
         check_format: t.check_format ?? 'short_answer',
+        // voice-speaking-mvp: preserve 'speaking' on edit (round-trips via detail SELECT).
+        task_kind: t.task_kind,
         kb_task_id: t.kb_task_id ?? undefined,
         kb_snapshot_text: t.kb_snapshot_text ?? undefined,
         kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
@@ -926,6 +938,8 @@ function TutorHomeworkCreateContent() {
           solution_image_urls: t.solution_image_paths ?? null,
           max_score: t.max_score,
           check_format: t.check_format,
+          // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
+          task_kind: t.task_kind,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -1190,6 +1204,8 @@ function TutorHomeworkCreateContent() {
             solution_image_urls: t.solution_image_paths ?? null,
             max_score: t.max_score,
             check_format: t.check_format,
+            // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
+            task_kind: t.task_kind,
           }));
         }
 
@@ -1579,6 +1595,7 @@ function TutorHomeworkCreateContent() {
             onDeferImageDelete={isEditMode ? handleDeferImageDelete : undefined}
             confirmOnRemove={isEditMode && existingAssignment?.assignment.status === 'active'}
             assignmentId={isEditMode ? editId : null}
+            voiceSpeakingEnabled={voiceSpeakingEnabled}
           />
         </section>
 

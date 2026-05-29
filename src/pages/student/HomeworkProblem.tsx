@@ -37,7 +37,8 @@ import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
 import { useStudentAssignment } from '@/hooks/useStudentHomework';
 import { useSubmitSolution } from '@/hooks/useSubmitSolution';
 import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight';
-import { useVoiceRecorder } from '@/hooks/useVoiceRecorder';
+import { useVoiceRecorder, type VoiceRecordingResult } from '@/hooks/useVoiceRecorder';
+import { SpeakingComposer } from '@/components/student/homework-problem/SpeakingComposer';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { getSubjectLabel } from '@/types/homework';
@@ -50,6 +51,7 @@ import { streamChat, StreamChatError } from '@/lib/streamChat';
 import {
   saveThreadMessage,
   uploadStudentThreadImage,
+  uploadStudentThreadVoice,
   transcribeThreadVoice,
   requestHint as requestHintApi,
   checkAnswer as checkAnswerApi,
@@ -134,6 +136,9 @@ export default function HomeworkProblem() {
   const isTabletPlus = !isMobile;
 
   const threadId = data?.thread?.id ?? null;
+  // voice-speaking-mvp: устный монолог. Driver для рекордера + suppression
+  // chat/numeric composers + transcript «Распознанная речь» label.
+  const isSpeaking = data?.task.task_kind === 'speaking';
 
   // Lock html/body overflow while the problem screen is mounted —
   // prevents an outer page-level scrollbar on mobile when
@@ -176,6 +181,13 @@ export default function HomeworkProblem() {
   const [optimisticMessages, setOptimisticMessages] = useState<GuidedMessageData[]>([]);
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  // voice-speaking-mvp [P1]: two-phase progress after a voice submit
+  // (STT → grading) instead of a frozen spinner. Mirror TypingDots.
+  const [speakingPhase, setSpeakingPhase] = useState<null | 'transcribing' | 'grading'>(null);
+  const speakingPhaseTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (speakingPhaseTimerRef.current) window.clearTimeout(speakingPhaseTimerRef.current);
+  }, []);
 
   /** Combined view: persisted thread + optimistic local + streaming preview. */
   const messages = useMemo<GuidedMessageData[]>(() => {
@@ -867,6 +879,62 @@ export default function HomeworkProblem() {
     [data, submitMutation, taskId],
   );
 
+  // ─── Speaking submission flow (voice-speaking-mvp, 2026-05-29) ───────────
+  // Upload recorded monologue → voice_ref → submitSolution (backend Whisper →
+  // grades transcript). Two-phase progress (STT → grading) shown optimistically.
+  // No optimistic user bubble — the transcript only exists after the backend
+  // returns; refetch then renders it under «Распознанная речь».
+  const handleSpeakingSubmit = useCallback(
+    async (result: VoiceRecordingResult) => {
+      if (!data) return;
+      const effectiveHwId = hwId ?? data.assignment.id;
+
+      // Phase 1 «Распознаю речь…» immediately; optimistically flip to
+      // «Проверяю по критериям…» after ~4s (single request, optimistic UX).
+      setSpeakingPhase('transcribing');
+      if (speakingPhaseTimerRef.current) window.clearTimeout(speakingPhaseTimerRef.current);
+      speakingPhaseTimerRef.current = window.setTimeout(() => setSpeakingPhase('grading'), 4000);
+
+      trackGuidedHomeworkEvent('student_submission_sent', {
+        assignmentId: data.assignment.id,
+        taskId: data.task.id,
+        hasPhotos: false,
+        photoCount: 0,
+        hasText: false,
+        numericLength: 0,
+      });
+
+      try {
+        const voiceRef = await uploadStudentThreadVoice(
+          result.blob,
+          effectiveHwId,
+          data.task.order_num,
+          result.fileName,
+        );
+        const response = await submitMutation.mutateAsync({
+          numeric: '',
+          photos: [],
+          text: '',
+          voice_ref: voiceRef,
+        });
+        trackGuidedHomeworkEvent('student_submission_verdict', {
+          assignmentId: data.assignment.id,
+          taskId: data.task.id,
+          verdict: response.verdict,
+          aiScore: response.earned_score ?? 0,
+          maxScore: response.max_score,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Не удалось отправить запись';
+        toast.error(msg);
+      } finally {
+        if (speakingPhaseTimerRef.current) window.clearTimeout(speakingPhaseTimerRef.current);
+        setSpeakingPhase(null);
+      }
+    },
+    [data, hwId, submitMutation],
+  );
+
   // ─── Inline numeric answer flow (Phase 1.3, preview-QA #8 2026-05-11) ────
   // Для `task_kind='numeric'` ученик пишет ответ в small inline green field
   // (см. `NumericAnswerComposer`). Submit триггерит `checkAnswer` API (тот
@@ -1142,7 +1210,7 @@ export default function HomeworkProblem() {
             answer field in the right column, not SubmitSheet). One primary
             CTA per screen — chip-row above the composer does NOT duplicate
             this button (Round 2 walkthrough invariant). */}
-        {data.task.task_kind !== 'numeric' ? (
+        {data.task.task_kind !== 'numeric' && !isSpeaking ? (
           <SubmitCtaBar
             onOpen={() => {
               // Preview-QA #10 (2026-05-11) codex review #7 fix: real
@@ -1261,6 +1329,21 @@ export default function HomeworkProblem() {
                   </div>
                 );
               }
+              // voice-speaking-mvp [P0]: render a speaking submission's content
+              // as the transcript under a «Распознанная речь» label (мост
+              // доверия — что AI услышал), NOT as a raw user bubble.
+              if (isSpeaking && m.role === 'user' && m.message_kind === 'submission') {
+                return (
+                  <div key={m.id ?? `speaking-${m.created_at}`} className="flex flex-col gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-muted">
+                      Распознанная речь
+                    </span>
+                    <div className="rounded-[14px] border border-socrat-border-light bg-socrat-surface px-3.5 py-2.5 text-sm text-slate-800 whitespace-pre-wrap break-words">
+                      {m.content}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <GuidedChatMessage
                   key={m.id ?? `${m.role}-${m.created_at}`}
@@ -1318,6 +1401,31 @@ export default function HomeworkProblem() {
             монолог). Lives inside the chat scroll container so it follows
             the conversation flow — last bubble → разбор → итог. NULL/empty
             on physics/maths/chemistry/other (renders nothing). */}
+        {/* voice-speaking-mvp [P1]: two-phase progress after a voice submit —
+            «Распознаю речь… → Проверяю по критериям…» (not a frozen spinner). */}
+        {speakingPhase ? (
+          <div className="flex items-start gap-2">
+            <img
+              src={sokratChatIcon}
+              alt=""
+              aria-hidden="true"
+              loading="lazy"
+              className="h-9 w-9 rounded-full shrink-0 border border-socrat-border-light bg-white"
+            />
+            <div className="flex flex-col gap-1 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-socrat-primary">
+                Сократ AI
+              </span>
+              <div className="bg-socrat-primary-light/60 border border-socrat-primary/15 rounded-[14px] rounded-tl-md px-3.5 py-2.5 max-w-[86%] flex items-center gap-2">
+                <span className="text-sm text-slate-700" aria-live="polite">
+                  {speakingPhase === 'transcribing' ? 'Распознаю речь…' : 'Проверяю по критериям…'}
+                </span>
+                <TypingDots />
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion breakdown. */}
         {Array.isArray(currentTaskState?.ai_criteria_json) &&
         currentTaskState!.ai_criteria_json!.length > 0 ? (
           <CriteriaBreakdownTable
@@ -1353,6 +1461,8 @@ export default function HomeworkProblem() {
           Hidden on mobile (mobile composer has its own inline hint/mic
           group). The math button is supplied as a slot so MathQuickPicker
           can use it as the popover anchor (cursor position preserved). */}
+      {/* voice-speaking-mvp: speaking has no hint/math chips — one primary CTA. */}
+      {!isSpeaking ? (
       <ChatChipRow
         className="hidden md:flex"
         hintCount={hintCount}
@@ -1379,6 +1489,7 @@ export default function HomeworkProblem() {
           />
         }
       />
+      ) : null}
 
       {data.task.task_kind === 'numeric' ? (
         <NumericAnswerComposer
@@ -1421,7 +1532,7 @@ export default function HomeworkProblem() {
           The big-CTA «Сдать решение задачи» button below is mobile-only and
           extended/proof-only (numeric submits via inline answer; tablet+
           uses SubmitCtaBar in the left aside). */}
-      {(data.task.task_kind !== 'numeric' || isTabletPlus) ? (
+      {(!isSpeaking && (data.task.task_kind !== 'numeric' || isTabletPlus)) ? (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
         {/* Primary CTA — mobile-only AND extended/proof-only.
             - Tablet/desktop: SubmitCtaBar in the left aside owns it
@@ -1623,6 +1734,20 @@ export default function HomeworkProblem() {
       </div>
       ) : null}
 
+      {/* voice-speaking-mvp: устный монолог — рекордер + playback + submit.
+          Sole composer for speaking (chat/numeric/chip-row/SubmitCtaBar
+          suppressed above). One primary CTA. */}
+      {isSpeaking ? (
+        <SpeakingComposer
+          isSubmitting={speakingPhase !== null}
+          isCompleted={isCurrentCompleted}
+          isTutorClosed={isTutorForceCompleted}
+          hasNextTask={Boolean(nextTaskId)}
+          onNavigateNext={() => navigateAfterCorrect()}
+          onSubmit={handleSpeakingSubmit}
+        />
+      ) : null}
+
       </section>
 
       <SubmitSheet
@@ -1636,7 +1761,9 @@ export default function HomeworkProblem() {
           order_num: data.task.order_num,
           task_total: data.task_total,
           max_score: data.task.max_score,
-          task_kind: data.task.task_kind,
+          // SubmitSheet doesn't handle 'speaking' (uses SpeakingComposer) and is
+          // never opened for it — narrow to a valid SubmitSheetTaskKind.
+          task_kind: data.task.task_kind === 'speaking' ? 'extended' : data.task.task_kind,
           homework_title: data.assignment.title,
           current_score: liveScore,
         }}

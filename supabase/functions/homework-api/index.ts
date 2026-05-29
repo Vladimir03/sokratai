@@ -17,8 +17,13 @@ import {
   MAX_TASK_IMAGES,
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
-import { rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import { rewriteToDirect, rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
+import {
+  subjectToWhisperLang,
+  transcribeAudio,
+  VoiceTranscriptionError,
+} from "../_shared/voice-transcribe.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -68,6 +73,28 @@ function deriveTaskKind(
 ): "numeric" | "extended" {
   if (checkFormat === "short_answer") return "numeric";
   return "extended"; // detailed_solution | unknown | null
+}
+
+/**
+ * Resolve the persisted `task_kind` for a write-path (voice-speaking-mvp,
+ * 2026-05-29).
+ *
+ * `'speaking'` (устный монолог) is an explicit tutor choice — it is NOT
+ * derivable from `check_format`. When the client sends `task_kind='speaking'`
+ * verbatim, persist it as-is; otherwise fall back to
+ * `deriveTaskKind(check_format)`.
+ *
+ * Keeps the §0 dual-derive invariant: speaking must be set explicitly at EVERY
+ * write-path and never overwritten by check_format-based derivation. Only
+ * `'speaking'` is special-cased — numeric/extended stay derived (the tutor UI
+ * controls them via `check_format`).
+ */
+function resolveWriteTaskKind(
+  clientTaskKind: unknown,
+  checkFormat: string | null | undefined,
+): "numeric" | "extended" | "speaking" {
+  if (clientTaskKind === "speaking") return "speaking";
+  return deriveTaskKind(checkFormat);
 }
 type NotifyFailureReason =
   | "missing_telegram_link" | "telegram_send_failed" | "telegram_send_error"
@@ -162,6 +189,11 @@ const MAX_THREAD_ATTACHMENTS = MAX_GUIDED_CHAT_ATTACHMENTS;
 const THREAD_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"]);
 const THREAD_ATTACHMENT_EXTENSIONS = new Set([...THREAD_IMAGE_EXTENSIONS, "pdf"]);
 const THREAD_ATTACHMENT_BUCKETS = new Set(["homework-submissions", "homework-images"]);
+// Audio extensions for voice-speaking-mvp `voice_ref` validation (2026-05-29).
+// Same bucket/namespace/SSRF/path-safety guards as image attachments (reuses
+// extractStudentThreadAttachmentRefs) — only the allowed-extension set differs.
+// Mirrors getVoiceFilename() outputs (ogg/mp3/m4a/wav/webm) + a couple aliases.
+const THREAD_VOICE_EXTENSIONS = new Set(["webm", "m4a", "mp4", "ogg", "oga", "mp3", "wav"]);
 const MAX_VOICE_BYTES = 10 * 1024 * 1024;
 const VOICE_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo";
 const ALLOWED_VOICE_MIME_TYPES = new Set([
@@ -395,6 +427,28 @@ function getVoiceFilename(mimeType: string, providedName?: string): string {
   return "voice.webm";
 }
 
+// Reverse of getVoiceFilename: derive a Whisper-friendly MIME from a stored
+// voice_ref's file extension (voice-speaking-mvp, 2026-05-29). The ref carries
+// no MIME, so we infer it for transcribeAudio's Blob type + filename.
+function voiceMimeFromExtension(ext: string): string {
+  switch (ext.toLowerCase()) {
+    case "webm":
+      return "audio/webm";
+    case "m4a":
+    case "mp4":
+      return "audio/mp4";
+    case "ogg":
+    case "oga":
+      return "audio/ogg";
+    case "mp3":
+      return "audio/mpeg";
+    case "wav":
+      return "audio/wav";
+    default:
+      return "audio/webm";
+  }
+}
+
 // ─── Helpers: Auth & Ownership ───────────────────────────────────────────────
 
 interface AuthResult {
@@ -621,27 +675,28 @@ async function handleCreateAssignment(
     return jsonError(cors, 500, "DB_ERROR", "Failed to create assignment");
   }
 
-  const taskRows = (b.tasks as Record<string, unknown>[]).map((t, i) => ({
-    assignment_id: assignment.id,
-    order_num: isPositiveInt(t.order_num) ? t.order_num : i + 1,
-    task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
-    task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
-    correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
-    max_score: isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1,
-    rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
-    rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
-    solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
-    solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
-    check_format: (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string) ? t.check_format : "short_answer",
-    // Phase 3.1 hotfix (2026-05-13): keep `task_kind` in sync with `check_format`
-    // at every write. Without this, the DB default `'extended'` masked the
-    // tutor's «Краткий ответ» choice on student-side.
-    task_kind: deriveTaskKind(
-      (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
-        ? (t.check_format as string)
-        : "short_answer",
-    ),
-  }));
+  const taskRows = (b.tasks as Record<string, unknown>[]).map((t, i) => {
+    const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+      ? (t.check_format as string)
+      : "short_answer";
+    return {
+      assignment_id: assignment.id,
+      order_num: isPositiveInt(t.order_num) ? t.order_num : i + 1,
+      task_text: isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]",
+      task_image_url: isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : null,
+      correct_answer: isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : null,
+      max_score: isPositiveHalfStepNumber(t.max_score) ? t.max_score : 1,
+      rubric_text: isNonEmptyString(t.rubric_text) ? (t.rubric_text as string).trim() : null,
+      rubric_image_urls: isNonEmptyString(t.rubric_image_urls) ? (t.rubric_image_urls as string).trim() : null,
+      solution_text: isNonEmptyString(t.solution_text) ? (t.solution_text as string).trim() : null,
+      solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
+      check_format: normalizedCheckFormat,
+      // Phase 3.1 hotfix (2026-05-13): keep `task_kind` in sync with `check_format`
+      // at every write. voice-speaking-mvp (2026-05-29): explicit 'speaking' wins
+      // over derive (§0 dual-derive — устный монолог не выводится из check_format).
+      task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
+    };
+  });
 
   const { error: tasksErr } = await db
     .from("homework_tutor_tasks")
@@ -978,7 +1033,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1443,8 +1498,12 @@ async function handleUpdateAssignment(
             ? (t.check_format as string)
             : "short_answer";
           updateFields.check_format = normalizedCheckFormat;
-          // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
-          updateFields.task_kind = deriveTaskKind(normalizedCheckFormat);
+          // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync with check_format.
+          // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
+          updateFields.task_kind = resolveWriteTaskKind(t.task_kind, normalizedCheckFormat);
+        } else if (t.task_kind === "speaking") {
+          // Speaking-задача может прислать task_kind без check_format — фиксируем явно (§0).
+          updateFields.task_kind = "speaking";
         }
 
         const { error } = await db
@@ -1494,7 +1553,8 @@ async function handleUpdateAssignment(
               solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
               check_format: normalizedCheckFormat,
               // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
-              task_kind: deriveTaskKind(normalizedCheckFormat),
+              // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
+              task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
             })
             .select("id")
             .single();
@@ -1582,7 +1642,8 @@ async function handleUpdateAssignment(
           solution_image_urls: isNonEmptyString(t.solution_image_urls) ? (t.solution_image_urls as string).trim() : null,
           check_format: normalizedCheckFormat,
           // Phase 3.1 hotfix (2026-05-13): keep task_kind in sync.
-          task_kind: deriveTaskKind(normalizedCheckFormat),
+          // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
+          task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -4981,6 +5042,7 @@ function isValidStudentThreadAttachmentRef(
   storageRef: string,
   userId: string,
   assignmentId: string,
+  allowedExtensions: Set<string> = THREAD_ATTACHMENT_EXTENSIONS,
 ): boolean {
   if (!storageRef.trim().startsWith("storage://")) {
     return false;
@@ -5000,7 +5062,7 @@ function isValidStudentThreadAttachmentRef(
   }
 
   const extension = getThreadAttachmentExtension(storageRef);
-  if (!THREAD_ATTACHMENT_EXTENSIONS.has(extension)) {
+  if (!allowedExtensions.has(extension)) {
     return false;
   }
 
@@ -5012,6 +5074,7 @@ function extractStudentThreadAttachmentRefs(
   userId: string,
   assignmentId: string,
   cors: Record<string, string>,
+  allowedExtensions: Set<string> = THREAD_ATTACHMENT_EXTENSIONS,
 ): string[] | Response {
   let refs: string[] = [];
 
@@ -5034,7 +5097,7 @@ function extractStudentThreadAttachmentRefs(
   }
 
   for (const ref of refs) {
-    if (!isValidStudentThreadAttachmentRef(ref, userId, assignmentId)) {
+    if (!isValidStudentThreadAttachmentRef(ref, userId, assignmentId, allowedExtensions)) {
       return jsonError(cors, 400, "INVALID_ATTACHMENT_REF", "Invalid attachment reference");
     }
   }
@@ -7200,7 +7263,7 @@ async function runStudentAnswerGrading(args: {
       ? assignment.exam_type
       : null,
     kimNumber: typeof task.kim_number === "number" ? task.kim_number : null,
-    taskKind: (task.task_kind === "numeric" || task.task_kind === "extended" || task.task_kind === "proof")
+    taskKind: (task.task_kind === "numeric" || task.task_kind === "extended" || task.task_kind === "proof" || task.task_kind === "speaking")
       ? task.task_kind
       : null,
     conversationHistory: (recentMessages ?? []).map((m) => ({
@@ -7658,6 +7721,9 @@ async function handleStudentSubmission(
   const numericRaw = b.numeric as string;
   const textRaw = b.text as string;
   const photosRaw = b.photos as string[];
+  // voice-speaking-mvp (2026-05-29): optional voice_ref for task_kind='speaking'.
+  // Required + validated in step 6 (only when the task is a speaking task).
+  const voiceRefRaw = typeof b.voice_ref === "string" ? b.voice_ref.trim() : "";
 
   // 3. Ownership check (mirror handleGetStudentProblem). 404 — keep
   //    existence private from non-assigned students.
@@ -7675,24 +7741,11 @@ async function handleStudentSubmission(
   }
   const studentAssignment = sa as { id: string; assignment_id: string; student_id: string };
 
-  // 3a. AI-quota gate (mirror handleCheckAnswer). Free-students with a paying tutor get
-  // 50/day (vs 10) in homework context. Submission triggers runStudentAnswerGrading which
-  // runs evaluateStudentAnswer — same AI cost as chat-path check, so charge accordingly.
-  const quotaResult = await checkAiQuota(userId, db, {
-    incrementUsage: true,
-    context: "homework",
-  });
-  if (!quotaResult.allowed) {
-    console.warn(JSON.stringify({
-      event: "homework_ai_quota_reached",
-      handler: "handleStudentSubmission",
-      userId,
-      limit: quotaResult.limit,
-      messagesUsed: quotaResult.messagesUsed,
-      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
-    }));
-    return buildLimitReachedResponse(quotaResult, cors);
-  }
+  // 3a. AI-quota gate — MOVED below (fix #3, 2026-05-29): charged after ownership
+  // + task load + task_kind/voice_ref/photo validation, immediately before the
+  // first AI op. Иначе невалидный submit (нет/битый voice_ref, missing numeric)
+  // списывал квоту, хотя ни Whisper, ни Gemini не звались. Один charge на
+  // валидный submit покрывает обе AI-операции.
 
   // 4. Validate photo refs through the canonical student-side validator.
   //    Same Patch B+2 / SSRF / bucket whitelist guards as handleCheckAnswer.
@@ -7724,13 +7777,37 @@ async function handleStudentSubmission(
   const textTrim = textRaw.trim();
 
   // 6. task_kind requirements.
+  //    - 'speaking' → voice_ref required (устный монолог); numeric/text/photos
+  //                   игнорируются. voice-speaking-mvp 2026-05-29.
   //    - 'numeric'  → numeric required, photos optional, text optional
   //    - 'extended' → at least one photo OR text required; numeric optional
   //                   (preview-QA #9 relax 2026-05-11: photo OR text — iPad
   //                    ученики пишут решение в редакторе без фото; numeric
   //                    остаётся «по желанию»)
   //    - 'proof'    → at least one photo required, numeric ignored
-  if (taskKind === "numeric") {
+  let validatedVoiceRef: string | null = null;
+  if (taskKind === "speaking") {
+    if (!voiceRefRaw) {
+      return jsonError(cors, 400, "VALIDATION", "voice_ref is required for speaking task");
+    }
+    // Validate ТОЛЬКО через канонический extractStudentThreadAttachmentRefs (не
+    // вручную): те же Patch B+2 / SSRF / per-student namespace / bucket whitelist
+    // guards, что и для фото — отличается только набор расширений (аудио).
+    // voice_ref живёт в bucket homework-submissions, namespace
+    // {userId}/{assignmentId}/threads/... (TASK-6 bucket-решение).
+    const voiceRefsResult = extractStudentThreadAttachmentRefs(
+      { image_urls: [voiceRefRaw] },
+      userId,
+      hwId,
+      cors,
+      THREAD_VOICE_EXTENSIONS,
+    );
+    if (voiceRefsResult instanceof Response) return voiceRefsResult;
+    validatedVoiceRef = voiceRefsResult[0] ?? null;
+    if (!validatedVoiceRef) {
+      return jsonError(cors, 400, "INVALID_ATTACHMENT_REF", "Invalid voice reference");
+    }
+  } else if (taskKind === "numeric") {
     if (!numericTrim) {
       return jsonError(cors, 400, "VALIDATION", "numeric is required for numeric task");
     }
@@ -7816,19 +7893,100 @@ async function handleStudentSubmission(
     .order("created_at", { ascending: true })
     .limit(15);
 
-  // 11. Synthesize answer string.
-  //     For proof: photos are the "answer" (no numeric). For numeric/extended:
-  //     numeric is the formal answer, optional text is reasoning.
-  const lines: string[] = [];
-  if (taskKind !== "proof" && numericTrim) {
-    lines.push(`Числовой ответ: ${numericTrim}`);
+  // 3a→ AI-quota gate (moved here, fix #3 2026-05-29). Charged ONLY for a
+  // fully-validated submission, immediately before the first AI operation
+  // (Whisper for speaking; Gemini grading for numeric/extended/proof). One unit
+  // covers both AI calls. Free-students with a paying tutor get 50/day (vs 10).
+  const quotaResult = await checkAiQuota(userId, db, {
+    incrementUsage: true,
+    context: "homework",
+  });
+  if (!quotaResult.allowed) {
+    console.warn(JSON.stringify({
+      event: "homework_ai_quota_reached",
+      handler: "handleStudentSubmission",
+      userId,
+      limit: quotaResult.limit,
+      messagesUsed: quotaResult.messagesUsed,
+      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+    }));
+    return buildLimitReachedResponse(quotaResult, cors);
   }
-  if (textTrim) {
-    lines.push(textTrim);
+
+  // 11. Determine the answer text the AI will grade.
+  //     - speaking → transcribe voice_ref via Whisper; transcript = answer.
+  //     - numeric/extended/proof → synthesize from numeric + optional text.
+  let answerText: string;
+  if (taskKind === "speaking") {
+    // Quota уже списана на шаге 3a — одна единица покрывает ОБЕ AI-операции
+    // (Whisper + Gemini) на одну submission (§17). Пустой STT / сбой Whisper
+    // ниже возвращают ДО insert'а submission-сообщения и ДО grading →
+    // задача НЕ закрывается. Trade-off: квота списана 1 раз даже при пустом
+    // STT — приемлемо (Whisper всё равно отработал). Spec §5 / tasks.md TASK-8.
+    const voiceRef = validatedVoiceRef as string;
+    const mimeType = voiceMimeFromExtension(getThreadAttachmentExtension(voiceRef));
+
+    // Signed URL → rewriteToDirect для server-to-server fetch: edge function в
+    // USA, гонять аудио через Москву = +200-400ms без пользы (rule 95).
+    const signedUrl = await createSignedStorageUrl(db, voiceRef, "homework-submissions");
+    if (!signedUrl) {
+      return jsonError(cors, 502, "VOICE_URL_FAILED", "Не удалось получить запись для распознавания. Попробуй ещё раз.");
+    }
+    let audioBuffer: ArrayBuffer;
+    try {
+      const audioRes = await fetch(rewriteToDirect(signedUrl));
+      if (!audioRes.ok) {
+        throw new Error(`audio fetch status ${audioRes.status}`);
+      }
+      audioBuffer = await audioRes.arrayBuffer();
+    } catch (err) {
+      console.error("homework_voice_fetch_failed", {
+        taskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return jsonError(cors, 502, "VOICE_FETCH_FAILED", "Не удалось загрузить запись для распознавания. Попробуй ещё раз.");
+    }
+
+    let transcript: string;
+    try {
+      const transcription = await transcribeAudio(audioBuffer, {
+        language: subjectToWhisperLang(assignment.subject),
+        mimeType,
+      });
+      transcript = transcription.text.trim();
+    } catch (err) {
+      const code = err instanceof VoiceTranscriptionError ? err.code : "TRANSCRIPTION_FAILED";
+      console.error("homework_voice_transcribe_failed", { taskId, code });
+      if (code === "MISSING_API_KEY") {
+        return jsonError(cors, 503, "VOICE_UNAVAILABLE", "Распознавание речи временно недоступно. Попробуй позже.");
+      }
+      if (code === "AUDIO_TOO_LARGE") {
+        return jsonError(cors, 413, "VOICE_TOO_LARGE", "Запись слишком длинная. Сократи ответ и запиши ещё раз.");
+      }
+      return jsonError(cors, 502, "VOICE_TRANSCRIPTION_FAILED", "Не удалось расшифровать запись. Попробуй записать ещё раз.");
+    }
+
+    if (!transcript) {
+      // Пустой транскрипт (тишина / нераспознанное): НЕ зовём Gemini, задачу НЕ
+      // закрываем, submission НЕ персистим — ученик перезаписывает (Spec §6
+      // «никакой отправки вслепую» + AC TASK-8 «пустой STT → задача не закрыта»).
+      return jsonError(cors, 422, "VOICE_EMPTY_TRANSCRIPT", "Не удалось распознать речь. Запиши ответ ещё раз — говори чуть громче и ближе к микрофону.");
+    }
+    answerText = transcript;
+  } else {
+    // For proof: photos are the "answer" (no numeric). For numeric/extended:
+    // numeric is the formal answer, optional text is reasoning.
+    const lines: string[] = [];
+    if (taskKind !== "proof" && numericTrim) {
+      lines.push(`Числовой ответ: ${numericTrim}`);
+    }
+    if (textTrim) {
+      lines.push(textTrim);
+    }
+    answerText = lines.length > 0
+      ? lines.join("\n")
+      : "(см. фото решения)";
   }
-  const answerText = lines.length > 0
-    ? lines.join("\n")
-    : "(см. фото решения)";
 
   // 12. Insert submission message FIRST so the thread refetch at the
   //     end captures it (and the AI feedback inserted by the helper).
@@ -7845,11 +8003,12 @@ async function handleStudentSubmission(
       task_id: taskId,
       task_order: currentOrder,
       message_kind: "submission",
-      submission_payload: {
-        numeric: numericRaw,
-        photos: photoRefs,
-        text: textRaw,
-      },
+      // voice-speaking-mvp (2026-05-29): speaking stores voice_ref in the
+      // structured payload (TASK-10 tutor player reads submission_payload.voice_ref).
+      // image_url stays unset for speaking (no photos) — voice is NOT an image.
+      submission_payload: taskKind === "speaking"
+        ? { numeric: "", photos: [], text: "", voice_ref: validatedVoiceRef }
+        : { numeric: numericRaw, photos: photoRefs, text: textRaw },
       ...(serializedAttachments && { image_url: serializedAttachments }),
     })
     .select("id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student")

@@ -30,7 +30,7 @@ export interface StudentProblemTask {
   task_image_url: string | null;
   max_score: number;
   check_format: 'short_answer' | 'detailed_solution';
-  task_kind: 'numeric' | 'extended' | 'proof';
+  task_kind: 'numeric' | 'extended' | 'proof' | 'speaking';
 }
 
 export interface StudentProblemStudent {
@@ -76,6 +76,12 @@ export interface SubmitSolutionPayload {
   photos: string[];
   /** Optional reasoning. Empty string is acceptable. */
   text: string;
+  /**
+   * voice-speaking-mvp (2026-05-29): single `storage://...` audio ref after
+   * upload via `uploadStudentThreadVoice`, for `task_kind='speaking'`.
+   * Backend transcribes (Whisper) → grades transcript. Omitted for other kinds.
+   */
+  voice_ref?: string | null;
 }
 
 // ─── API ────────────────────────────────────────────────────────────────────

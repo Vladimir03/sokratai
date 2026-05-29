@@ -38,8 +38,8 @@ export interface SubjectRubricInput {
    * (e.g. № 18 параметр vs № 13 уравнения in math).
    */
   kim_number?: number | null;
-  /** Drives whether the rubric is "extended" (full methodology) or "numeric" (compact). */
-  task_kind: "numeric" | "extended" | "proof";
+  /** Drives whether the rubric is "extended" (full methodology) or "numeric" (compact). `speaking` forces oral format for languages (voice-speaking-mvp). */
+  task_kind: "numeric" | "extended" | "proof" | "speaking";
   /** Used for CEFR auto-detection in language subjects. */
   task_text?: string | null;
   /**

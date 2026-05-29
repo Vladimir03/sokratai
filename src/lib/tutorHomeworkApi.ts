@@ -80,6 +80,13 @@ export interface CreateAssignmentTask {
   solution_image_urls?: string | null;
   max_score?: number;
   check_format?: 'short_answer' | 'detailed_solution';
+  /**
+   * voice-speaking-mvp (2026-05-29): explicit 'speaking' (устный монолог) is
+   * persisted as-is by the backend (`resolveWriteTaskKind`); other values /
+   * undefined → backend derives from check_format. Only set when the tutor
+   * marks the task oral.
+   */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
 }
 
 export interface CreateAssignmentPayload {
@@ -571,6 +578,8 @@ export interface TutorHomeworkAssignmentDetails {
     solution_image_urls?: string | null;
     max_score: number;
     check_format?: 'short_answer' | 'detailed_solution';
+    /** voice-speaking-mvp: 'speaking' для устных задач (round-trips on edit). */
+    task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
     kb_task_id?: string | null;
     kb_snapshot_text?: string | null;
     kb_snapshot_answer?: string | null;
@@ -1257,6 +1266,8 @@ export interface UpdateAssignmentTask {
   /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. Tutor-only. */
   solution_image_urls?: string | null;
   check_format?: 'short_answer' | 'detailed_solution';
+  /** voice-speaking-mvp: explicit 'speaking' persists as-is; else backend derives. */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
 }
 
 export async function updateTutorHomeworkAssignment(

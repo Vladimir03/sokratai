@@ -135,6 +135,67 @@ function TaskContextGallery({
   );
 }
 
+// voice-speaking-mvp TASK-10 (2026-05-29): tutor playback surface for a speaking
+// submission. НАТИВНЫЙ <audio controls> (scrubbing + скорость 1.5× бесплатно —
+// нужно для прослушивания 5-7 мин фонетики) + транскрипт под меткой
+// «Распознанная речь». Signed URL через client supabase (хост api.sokratai.ru
+// hardcoded → browser-facing proxy, RU-safe; НЕ *.supabase.co). Тайм-коды /
+// голос-коммент репетитора — OUT (Spec §3).
+function SpeakingSubmissionPlayer({
+  voiceRef,
+  transcript,
+}: {
+  voiceRef: string;
+  transcript: string;
+}) {
+  const audioQuery = useQuery<string | null>({
+    queryKey: ['tutor', 'homework', 'voice-url', voiceRef],
+    queryFn: () => getHomeworkImageSignedUrl(voiceRef, { defaultBucket: 'homework-submissions' }),
+    // Signed URL TTL = 3600s; refetch comfortably before expiry on long sessions.
+    staleTime: 50 * 60 * 1000,
+    gcTime: TUTOR_GC_TIME_MS,
+    retry: 1,
+  });
+
+  const trimmedTranscript = (transcript ?? '').trim();
+
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-2">
+      <div className="space-y-1">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          Аудиозапись ученика
+        </span>
+        {audioQuery.isLoading ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            Загрузка записи…
+          </div>
+        ) : audioQuery.data ? (
+          <audio
+            src={audioQuery.data}
+            controls
+            preload="metadata"
+            className="w-full"
+            style={{ touchAction: 'manipulation' }}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground">Не удалось загрузить аудиозапись.</p>
+        )}
+      </div>
+      {trimmedTranscript ? (
+        <div className="space-y-1">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Распознанная речь
+          </span>
+          <p className="whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-800">
+            {trimmedTranscript}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── Main component ─────────────────────────────────────────────────────────
 
 export function GuidedThreadViewer({
@@ -265,6 +326,11 @@ export function GuidedThreadViewer({
                 message_kind: (newMessage.message_kind as import('@/types/homework').GuidedMessageKind) ?? undefined,
                 author_user_id: newMessage.author_user_id,
                 visible_to_student: newMessage.visible_to_student,
+                // voice-speaking-mvp fix #4: carry submission_payload so a
+                // speaking submission's voice_ref survives the realtime merge
+                // — иначе плеер не появляется до полного refetch.
+                submission_payload:
+                  (newMessage.submission_payload as import('@/types/homework').HomeworkSubmissionPayload | null) ?? null,
               }),
           );
           if (wasAtBottom) {
@@ -396,6 +462,25 @@ export function GuidedThreadViewer({
   }, [selectedTask, selectedTaskState]);
 
   const canEditScore = selectedTask !== null && selectedTaskState !== null;
+
+  // voice-speaking-mvp TASK-10: latest voice submission for the selected task
+  // (drives the native <audio> player + transcript). Gated on voice_ref presence
+  // — non-speaking tasks render nothing.
+  const selectedSpeakingSubmission = useMemo<{ voiceRef: string; transcript: string } | null>(() => {
+    if (!selectedTask) return null;
+    const msgs = threadQuery.data?.thread.homework_tutor_thread_messages ?? [];
+    let latest: { voiceRef: string; transcript: string; at: number } | null = null;
+    for (const m of msgs) {
+      if (m.message_kind !== 'submission' || m.task_id !== selectedTask.id) continue;
+      const ref = m.submission_payload?.voice_ref;
+      if (typeof ref !== 'string' || ref.trim().length === 0) continue;
+      const at = Date.parse(m.created_at) || 0;
+      if (!latest || at >= latest.at) {
+        latest = { voiceRef: ref, transcript: m.content ?? '', at };
+      }
+    }
+    return latest ? { voiceRef: latest.voiceRef, transcript: latest.transcript } : null;
+  }, [selectedTask, threadQuery.data?.thread.homework_tutor_thread_messages]);
 
   // Раскрываем блок при каждой смене задачи — иначе репетитор «теряет» условие.
   useEffect(() => {
@@ -622,6 +707,17 @@ export function GuidedThreadViewer({
                       </Button>
                     </div>
                   )}
+
+                  {/* voice-speaking-mvp TASK-10: native <audio> + транскрипт для
+                      устной submission, на той же поверхности (над таблицей
+                      критериев). Рендерится только когда у выбранной задачи есть
+                      voice-submission (voice_ref). */}
+                  {selectedSpeakingSubmission ? (
+                    <SpeakingSubmissionPlayer
+                      voiceRef={selectedSpeakingSubmission.voiceRef}
+                      transcript={selectedSpeakingSubmission.transcript}
+                    />
+                  ) : null}
 
                   {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion
                       breakdown next to the task score. Rendered when the

@@ -28,13 +28,19 @@ export function useSubmitSolution(
   const queryClient = useQueryClient();
   return useMutation<CheckAnswerResponse, Error, SubmitSolutionPayload>({
     mutationFn: (payload) => submitSolution(hwId, taskId, payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ['student', 'problem', hwId, taskId],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['student', 'homework', hwId],
-      });
-    },
+    // Return the invalidation promise so `mutateAsync` settles only AFTER the
+    // refetch lands (React Query awaits a promise returned from onSuccess). Без
+    // этого voice-submit снимал `speakingPhase` до refetch → на медленной сети
+    // кратко мигала кнопка «Отправить» поверх stale data (review P2, 2026-05-29).
+    // Также убирает гонку optimistic-removal в SubmitSheet flow.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['student', 'problem', hwId, taskId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['student', 'homework', hwId],
+        }),
+      ]),
   });
 }

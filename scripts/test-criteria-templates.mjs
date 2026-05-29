@@ -94,3 +94,26 @@ for (const subject of ["physics", "maths", "chemistry", "informatics", "history"
 test("numeric language task → no breakdown template", () => {
   assert.equal(resolveTemplate("french", "DELF B1 — choisissez la bonne réponse", "numeric"), null);
 });
+
+// voice-speaking-mvp fix #2 (2026-05-29): explicit task_kind='speaking' MUST force
+// the ORAL rubric even when the sujet has no oral keywords («монолог»/«orale»).
+// Before the fix, runStudentAnswerGrading nulled the speaking signal and format
+// detection fell back to task_text heuristics → a real oral answer was graded by
+// écrite criteria.
+test("speaking task_kind forces oral rubric (not text heuristic)", () => {
+  // sujet БЕЗ oral-ключевых слов — раньше → écrite.
+  const neutralFr = "DELF B1. Présentez votre point de vue sur les réseaux sociaux.";
+  const methodologyFor = (taskKind) =>
+    resolveSubjectRubric({
+      subject: "french",
+      exam_type: "ege",
+      kim_number: null,
+      task_kind: taskKind,
+      task_text: neutralFr,
+      tutor_rubric: null,
+    }).methodology;
+
+  assert.match(methodologyFor("speaking"), /orale/i, "speaking → production orale methodology");
+  // Контроль: тот же текст как extended → écrite (эвристика сама oral не поднимает).
+  assert.match(methodologyFor("extended"), /écrite|ecrite/i, "extended → production écrite methodology");
+});
