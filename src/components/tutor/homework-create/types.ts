@@ -139,6 +139,19 @@ export interface MetaState {
   deadline: string;
   disable_ai_bootstrap?: boolean;
   exam_type?: 'ege' | 'oge';
+  /**
+   * Assignment-level CEFR level (Phase 11, 2026-05-31). Каскадится во все задачи
+   * при сохранении (homework_tutor_tasks.cefr_level). Обязателен для языковых
+   * subjects (french/english/spanish) с письменными/устными задачами — иначе AI
+   * молча грейдит по B1 (баг Эмилии). null → не задан (валидация заблокирует save).
+   */
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  /**
+   * Язык AI-feedback (Phase 11, 2026-05-31), homework_tutor_assignments.feedback_language.
+   * 'auto' (default) — A2 русский / B1+ изучаемый; 'russian' / 'target' — override.
+   * Только для языковых subjects. null → 'auto'.
+   */
+  feedback_language?: 'auto' | 'russian' | 'target';
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -254,6 +254,12 @@ export interface EvaluateStudentAnswerParams {
    * overriding task_text heuristics. null → auto-detect.
    */
   cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
+  /**
+   * Assignment-level feedback language (Phase 11, 2026-05-31). 'auto' (default)
+   * → A2 русский / B1+ изучаемый; 'russian' / 'target' — явный override.
+   * Только для языковых subjects влияет на response_language_instruction.
+   */
+  feedbackLanguage?: "auto" | "russian" | "target" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -314,6 +320,8 @@ export interface GenerateHintParams {
   taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
   /** Explicit CEFR level («Уровень» selector); forces language rubric level. CEFR-level fix. */
   cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
+  /** See EvaluateStudentAnswerParams.feedbackLanguage (Phase 11). */
+  feedbackLanguage?: "auto" | "russian" | "target" | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -1550,6 +1558,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
     cefr_level: params.cefrLevel ?? null,
+    feedback_language: params.feedbackLanguage ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -1589,6 +1598,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     rubric.role,
     `Предмет: ${rubric.subject_label}.`,
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
+    // Phase 11 (2026-05-31): детерминированный язык feedback (язык. subjects).
+    rubric.response_language_instruction ?? "",
     // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
     // (выше priority AI attention). Раньше был в конце — тонул в 100+ строках
     // ФИПИ methodology / anti-spoiler / etc. См. .claude/rules/40-homework-system.md.
@@ -1790,6 +1801,7 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? "extended",
     cefr_level: params.cefrLevel ?? null,
+    feedback_language: params.feedbackLanguage ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -1798,6 +1810,8 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     rubric.role,
     `Предмет: ${rubric.subject_label}.`,
     rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
+    // Phase 11 (2026-05-31): детерминированный язык feedback (язык. subjects).
+    rubric.response_language_instruction ?? "",
     // Phase 8 (2026-05-20): student identity guidance в НАЧАЛЕ system prompt
     // (после role/subject/CEFR, перед task content). Раньше был в конце —
     // тонул в 80+ строках hint level rules + ФИПИ methodology. См. .claude/rules/40-homework-system.md.
@@ -1983,6 +1997,7 @@ export async function evaluateStudentAnswer(
     kim_number: params.kimNumber,
     task_kind: params.taskKind ?? (params.checkFormat === "detailed_solution" ? "extended" : "numeric"),
     cefr_level: params.cefrLevel ?? null,
+    feedback_language: params.feedbackLanguage ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
   });
@@ -2386,6 +2401,7 @@ export async function generateHint(
         kim_number: params.kimNumber ?? null,
         task_kind: params.taskKind ?? "extended",
         cefr_level: params.cefrLevel ?? null,
+        feedback_language: params.feedbackLanguage ?? null,
         task_text: params.taskText ?? null,
         tutor_rubric: null,
       });

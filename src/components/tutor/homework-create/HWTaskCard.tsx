@@ -1125,35 +1125,15 @@ export function HWTaskCard({
           </div>
           ) : null}
 
-          {/* CEFR-level fix (2026-05-29): «Уровень» selector для языковых задач.
-              Явный выбор форсит уровень рубрики (A2/B1/B2) на бэкенде — иначе
-              уровень угадывался из текста с дефолтом B1 (баг Эмилии). «Авто» = null. */}
-          {cefrLevelEnabled ? (
-            <div className="space-y-1">
-              <Label htmlFor={`cefr-level-${task.localId}`}>Уровень (CEFR)</Label>
-              <select
-                id={`cefr-level-${task.localId}`}
-                value={task.cefr_level ?? ''}
-                onChange={(e) =>
-                  onUpdate({
-                    ...task,
-                    cefr_level: e.target.value === '' ? null : (e.target.value as 'A2' | 'B1' | 'B2' | 'C1'),
-                  })
-                }
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                style={{ fontSize: '16px', touchAction: 'manipulation' }}
-              >
-                <option value="">Авто (по тексту задания)</option>
-                <option value="A2">A2</option>
-                <option value="B1">B1</option>
-                <option value="B2">B2</option>
-              </select>
-              <p className="text-xs text-muted-foreground">
-                {task.cefr_level
-                  ? `AI оценит строго по критериям уровня ${task.cefr_level}`
-                  : 'Уровень определится из текста задания (если не указан — B1)'}
-              </p>
-            </div>
+          {/* Phase 11 (2026-05-31): CEFR-уровень теперь задаётся на уровне ВСЕГО ДЗ
+              (селектор «Уровень CEFR» в шапке конструктора) и каскадится во все
+              задачи — это убрало per-task friction (топик-банки по 10 задач). Здесь
+              показываем read-only бейдж текущего уровня для наглядности. */}
+          {cefrLevelEnabled && task.cefr_level ? (
+            <p className="text-xs text-muted-foreground">
+              Уровень CEFR: <span className="font-medium text-foreground">{task.cefr_level}</span>{' '}
+              — задан для всего ДЗ (изменить можно в шапке конструктора).
+            </p>
           ) : null}
         </div>
 

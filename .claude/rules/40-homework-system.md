@@ -243,6 +243,37 @@ Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 
 Spec: `docs/delivery/features/voice-speaking-mvp/spec.md` (CEFR-level fix 2026-05-29).
 
+### Phase 11 (2026-05-31) — CEFR обязателен (assignment-level) + детерминированный язык feedback
+
+Расширение CEFR-fix после повторного репорта Эмилии: несмотря на per-task селектор `cefr_level` (2026-05-29), **все** её French-задачи остались `cefr_level=NULL` (диагностика: 100% NULL в БД). Причины: (1) per-task селектор не замечен («не видела опцию»); (2) задачи картинками (`task_text="[Задача на фото]"`, `has_rubric_text=false`) → авто-детект нечего сканировать → silent B1; (3) топик-банки по 10 задач → per-task friction. Плюс новый баг: **язык ответа недетерминирован** (один ученик — русский, другой — французский на одном ДЗ).
+
+**Архитектурный сдвиг — CEFR теперь assignment-level (каскад), НЕ per-task:**
+- Селектор «Уровень CEFR» + «Язык объяснений AI» — в **L0 конструктора** (`TutorHomeworkCreate`, всегда видно, gated `isLanguageSubject` = french/english/spanish). НЕ в L1 (required-поле в свёрнутой секции = повтор бага «не видела опцию»).
+- Хранение остаётся **per-task** (`homework_tutor_tasks.cefr_level`). Селектор каскадит `meta.cefr_level` во **все** задачи: (а) onChange → `setTasks(map cascade)` (триггерит `tasksDirty` через `buildTaskSignature`); (б) belt-and-suspenders в create/update body (`cefr_level: isLanguageSubject ? meta.cefr_level : null` для каждой задачи — покрывает задачи, добавленные после смены уровня).
+- Per-task селектор в `HWTaskCard` **удалён** → read-only бейдж «Уровень CEFR: A2 — задан для всего ДЗ».
+- Edit prefill: `meta.cefr_level` ← `existingAssignment.tasks[0].cefr_level`; `meta.feedback_language` ← `assignment.feedback_language`.
+
+**CEFR обязателен (kill silent B1):**
+- Frontend `validateAll`: language subject + хоть одна письменная/устная задача (`extended`/`proof`/`speaking`) без `meta.cefr_level` → `errs.cefr_level` блокирует save (scroll target `hw-cefr-section`).
+- Backend defense (`homework-api/index.ts` create validator): `LANGUAGE_SUBJECTS_REQUIRING_CEFR` (french/english/spanish) + `resolveWriteTaskKind` extended/proof/speaking + нет `cefr_level` → 400 `MISSING_CEFR_LEVEL` (russian phrase).
+- Авто-подстановка (bonus, `src/lib/cefrDetect.ts::detectCefrLevelFromText` — explicit-marker mirror, **без** B1-default): при смене subject на язык + cefr пуст → скан `title + task_texts` на «DELF A2»/«A2» → prefill. Для image-задач Эмилии маркера нет → required = backstop.
+
+**Детерминированный язык feedback (`feedback_language`):**
+- Миграция `20260531120000` — `homework_tutor_assignments.feedback_language TEXT NULL CHECK IN ('auto','russian','target') DEFAULT 'auto'`. Assignment-level (одна политика на ДЗ).
+- `'auto'` = A2 → русские объяснения (примеры на изучаемом), B1+ → иммерсия на изучаемом. `'russian'`/`'target'` — явный override.
+- Резолвится в `_shared/subject-rubrics`: `SubjectRubricInput.feedback_language` → `buildResponseLanguageInstruction(subject, cefr, feedback_language)` (`languages-ege.ts`) → `SubjectRubric.response_language_instruction` (optional, null для не-языковых). Инжектится во **все 3 AI-пути**: `guided_ai.ts::buildCheckPrompt`/`buildHintPrompt` (после role+cefr line) + `chat/index.ts` subjectBlock. chat path **server-side подтверждает** `feedback_language` из assignment (anti-tamper).
+- SELECT extensions: 3 grading paths (`runStudentAnswerGrading` assignment arg + handleRequestHint + chat) добавили `feedback_language`. `normalizeFeedbackLanguage` helper. evaluateStudentAnswer/generateHint params: `feedbackLanguage`.
+
+**Инварианты:**
+- `response_language_instruction` НЕ трогает anti-spoiler/solution/rubric leak — только инструкция стиля ответа.
+- Non-language subjects: `response_language_instruction = null`, CEFR не required (физика/математика не затронуты).
+- Backward compat: existing French ДЗ с `cefr_level=NULL` грейдятся B1 (как раньше) до пересохранения; Эмилия открывает ДЗ → required-validation форсит A2 → save каскадит. ИЛИ targeted backfill SQL (если все её ДЗ A2 — подтверждает Эмилия).
+- `feedback_language` DEFAULT 'auto' покрывает HWDrawer path B (не пишет колонку явно).
+
+**При расширении:** новый язык feedback override → расширь `VALID_FEEDBACK_LANGUAGES` + `buildResponseLanguageInstruction`; CEFR-required для нового языкового subject → добавь в `LANGUAGE_SUBJECTS_REQUIRING_CEFR` (backend) + `isLanguageSubject` (frontend, 3 callsite); язык — assignment-level, CEFR — per-task storage но assignment-level UI (каскад).
+
+Spec: `~/.claude/plans/1-functional-meteor.md` Phase 11.
+
 ### Голосовые задания (`task_kind='speaking'`) — voice-speaking-mvp Этап 2
 
 Устный монолог: ученик записывает голос → Whisper транскрибирует → транскрипт идёт в **тот же** `runStudentAnswerGrading` + criteria_breakdown (Этап 1). Аудио сохраняется; репетитор переслушивает в `GuidedThreadViewer`. За feature-флагом тутора (Эмилия). **Статус:** TASK-6..10 ✅; TASK-11 (включить флаг Эмилии + тест на реальной FR-записи) — pending.
@@ -1144,6 +1175,8 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 5. **Drag-and-drop в секциях task/solution/rubric/materials:** перетащить фото → `ring-2 ring-dashed ring-accent` + overlay «Отпустите для добавления» → drop → фото в галерее. Ctrl+V paste в textarea тоже (regression check).
 
 6. **Subject = french/russian/literature:** создать ДЗ с subject «Французский язык» → verify save без ошибок (`homework_tutor_templates.subject` CHECK) → verify в Detail.
+
+6a. **CEFR обязателен + язык feedback (Phase 11, french/english/spanish):** выбрать subject «Французский язык» → в L0 появляются селекторы «Уровень CEFR *» + «Язык объяснений AI» → попытка save **без** уровня → блок с «Укажите уровень CEFR» (scroll к `hw-cefr-section`). Вписать «DELF A2» в текст задания → селектор авто-prefill «A2». Выбрать A2 → save → reload `/edit` → уровень round-trip из первой задачи. Ученик A2 сдаёт → AI feedback по-русски (auto+A2), word count A2 (60-80, НЕ 160). Переключить «Язык объяснений» → «Изучаемый» → AI отвечает по-французски даже на A2. Backend defense: прямой insert language-задачи без cefr → 400 `MISSING_CEFR_LEVEL`.
 
 7. **Max score шаг 0.5:** «Макс. баллов» — `12.5` → blur → сохранилось `12.5`; `12.7` → blur → snap на `12.5` без error modal.
 

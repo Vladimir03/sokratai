@@ -63,6 +63,25 @@ function normalizeCefrLevel(v: unknown): "A2" | "B1" | "B2" | "C1" | null {
     : null;
 }
 
+const VALID_FEEDBACK_LANGUAGES = ["auto", "russian", "target"] as const;
+
+// Phase 11 (2026-05-31): foreign-language subjects где письменные/устные задачи
+// ОБЯЗАНЫ нести явный CEFR-уровень (иначе silent default B1 — баг Эмилии).
+// Mirror frontend `cefrLevelEnabled`. NOTE: 'russian'/'literature' — родной язык,
+// CEFR не применяется.
+const LANGUAGE_SUBJECTS_REQUIRING_CEFR = new Set<string>(["french", "english", "spanish"]);
+
+/**
+ * Phase 11 (2026-05-31): normalize assignment-level `feedback_language`.
+ * Persist path returns 'auto'/'russian'/'target' or null (→ DB default 'auto').
+ * Read path (passed to AI resolver) coerces null/invalid → 'auto'.
+ */
+function normalizeFeedbackLanguage(v: unknown): "auto" | "russian" | "target" | null {
+  return typeof v === "string" && (VALID_FEEDBACK_LANGUAGES as readonly string[]).includes(v)
+    ? (v as "auto" | "russian" | "target")
+    : null;
+}
+
 /**
  * Derive `task_kind` (Phase 1 student-screen enum) from `check_format`.
  *
@@ -635,6 +654,26 @@ async function handleCreateAssignment(
     if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
       return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
     }
+    // Phase 11 (2026-05-31): для языковых subjects письменные/устные задачи ОБЯЗАНЫ
+    // нести явный CEFR-уровень (defense-in-depth; frontend тоже блокирует save).
+    // Без уровня resolveSubjectRubric молча берёт B1 → A2-ДЗ грейдится по B1 (баг Эмилии).
+    if (LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(b.subject as string)) {
+      const tk = resolveWriteTaskKind(
+        (t as { task_kind?: unknown }).task_kind,
+        (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+          ? (t.check_format as string)
+          : "short_answer",
+      );
+      const needsCefr = tk === "extended" || tk === "proof" || tk === "speaking";
+      if (needsCefr && !normalizeCefrLevel((t as { cefr_level?: unknown }).cefr_level)) {
+        return jsonError(
+          cors,
+          400,
+          "MISSING_CEFR_LEVEL",
+          "Для языкового ДЗ укажи уровень CEFR (A2 / B1 / B2) — без него AI проверит работу по B1.",
+        );
+      }
+    }
     const taskImageLimitError = validateAttachmentRefLimit(
       cors,
       t.task_image_url,
@@ -678,6 +717,8 @@ async function handleCreateAssignment(
       status: "draft",
       exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
+      // Phase 11 (2026-05-31): assignment-level AI feedback language (null → DB default 'auto').
+      feedback_language: normalizeFeedbackLanguage(b.feedback_language) ?? "auto",
       source_group_id: sourceGroupIdOrErr ?? null,
     })
     .select("id")
@@ -1320,6 +1361,10 @@ async function handleUpdateAssignment(
   }
   if (b.disable_ai_bootstrap !== undefined) {
     patch.disable_ai_bootstrap = b.disable_ai_bootstrap === true;
+  }
+  // Phase 11 (2026-05-31): assignment-level AI feedback language.
+  if (b.feedback_language !== undefined) {
+    patch.feedback_language = normalizeFeedbackLanguage(b.feedback_language) ?? "auto";
   }
   if (b.source_group_id !== undefined) {
     const sourceGroupIdOrErr = await validateOwnedSourceGroupId(
@@ -7213,6 +7258,8 @@ async function runStudentAnswerGrading(args: {
     subject: string | null;
     /** Phase 2 (2026-05-15): ЕГЭ/ОГЭ flag for subject-rubric resolver. */
     exam_type?: string | null;
+    /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
+    feedback_language?: string | null;
   };
   studentAnswer: string;
   recentMessages: Array<{
@@ -7294,6 +7341,8 @@ async function runStudentAnswerGrading(args: {
     cefrLevel: (task.cefr_level === "A2" || task.cefr_level === "B1" || task.cefr_level === "B2" || task.cefr_level === "C1")
       ? task.cefr_level
       : null,
+    // Phase 11 (2026-05-31): assignment-level feedback language → response_language_instruction.
+    feedbackLanguage: normalizeFeedbackLanguage(assignment.feedback_language) ?? "auto",
     conversationHistory: (recentMessages ?? []).map((m) => ({
       role: typeof m.role === "string" ? m.role : "",
       content: typeof m.content === "string" ? m.content : "",
@@ -7582,7 +7631,7 @@ async function handleCheckAnswer(
   // Load assignment for subject + exam_type (subject-rubric Phase 2 — 2026-05-15)
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
-    .select("subject, exam_type")
+    .select("subject, exam_type, feedback_language")
     .eq("id", ctx.sa.assignment_id)
     .single();
 
@@ -7905,7 +7954,7 @@ async function handleStudentSubmission(
   // 9. Assignment subject + exam_type (for AI subject-rubric resolver, Phase 2 2026-05-15).
   const { data: assignment, error: assignmentError } = await db
     .from("homework_tutor_assignments")
-    .select("subject, exam_type")
+    .select("subject, exam_type, feedback_language")
     .eq("id", hwId)
     .single();
   if (assignmentError || !assignment) {
@@ -8204,7 +8253,7 @@ async function handleRequestHint(
   // Load assignment for subject + exam_type (subject-rubric Phase 2 — 2026-05-15)
   const { data: assignment } = await db
     .from("homework_tutor_assignments")
-    .select("subject, exam_type")
+    .select("subject, exam_type, feedback_language")
     .eq("id", studentAssignment.assignment_id)
     .single();
 
@@ -8287,6 +8336,8 @@ async function handleRequestHint(
       const cl = (task as { cefr_level?: unknown }).cefr_level;
       return (cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") ? cl : null;
     })(),
+    // Phase 11 (2026-05-31): assignment-level feedback language.
+    feedbackLanguage: normalizeFeedbackLanguage((assignment as { feedback_language?: unknown })?.feedback_language) ?? "auto",
     conversationHistory: recentMessages ?? [],
     wrongAnswerCount: (activeState.wrong_answer_count as number) ?? 0,
     hintCount: (activeState.hint_count as number) ?? 0,

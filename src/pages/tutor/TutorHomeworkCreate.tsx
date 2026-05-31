@@ -34,6 +34,7 @@ import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
 import { getSubjectLabel } from '@/types/homework';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
+import { detectCefrLevelFromText } from '@/lib/cefrDetect';
 
 // ─── Extracted components ────────────────────────────────────────────────────
 import {
@@ -184,6 +185,18 @@ function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnap
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
       disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
       exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
+      // Phase 11 (2026-05-31): cefr_level — для display baseline (берётся из первой
+      // задачи, см. prefill). НЕ участвует в metaDirty — он внутри taskSignature
+      // (каскад в tasks). feedback_language — assignment-level, в metaDirty ниже.
+      cefr_level: (() => {
+        const cl = assignment.tasks[0]?.cefr_level;
+        return cl === 'A2' || cl === 'B1' || cl === 'B2' || cl === 'C1' ? cl : null;
+      })(),
+      feedback_language:
+        ((a as { feedback_language?: unknown }).feedback_language === 'russian' ||
+          (a as { feedback_language?: unknown }).feedback_language === 'target')
+          ? ((a as { feedback_language: 'russian' | 'target' }).feedback_language)
+          : 'auto',
     },
     taskSignature: buildTaskSignature(assignment.tasks),
     studentIds: assignment.assigned_students.map((s) => s.student_id).sort().join(','),
@@ -216,7 +229,10 @@ function buildEditDiffState(params: {
     meta.subject !== snapshot.meta.subject ||
     meta.deadline !== snapshot.meta.deadline ||
     (meta.disable_ai_bootstrap ?? true) !== (snapshot.meta.disable_ai_bootstrap ?? true) ||
-    (meta.exam_type ?? 'ege') !== (snapshot.meta.exam_type ?? 'ege');
+    (meta.exam_type ?? 'ege') !== (snapshot.meta.exam_type ?? 'ege') ||
+    // Phase 11 (2026-05-31): feedback_language (assignment-level). cefr_level —
+    // НЕ здесь, он внутри tasksDirty (каскад в tasks).
+    (meta.feedback_language ?? 'auto') !== (snapshot.meta.feedback_language ?? 'auto');
 
   const tasksDirty = buildTaskSignature(
     tasks.map((task, index) => ({
@@ -540,12 +556,23 @@ function TutorHomeworkCreateContent() {
     editPrefilledRef.current = true;
 
     const a = existingAssignment.assignment;
+    // Phase 11 (2026-05-31): assignment-level CEFR из первой задачи (все задачи
+    // несут один уровень через каскад). feedback_language — из assignment.
+    const firstTaskCefr = existingAssignment.tasks[0]?.cefr_level;
+    const prefilledCefr =
+      firstTaskCefr === 'A2' || firstTaskCefr === 'B1' || firstTaskCefr === 'B2' || firstTaskCefr === 'C1'
+        ? firstTaskCefr
+        : null;
+    const rawFeedbackLang = (a as { feedback_language?: unknown }).feedback_language;
     setMeta({
       title: a.title,
       subject: a.subject,
       deadline: a.deadline ? toLocalDatetimeString(a.deadline) : '',
       disable_ai_bootstrap: a.disable_ai_bootstrap ?? true,
       exam_type: (a.exam_type as 'ege' | 'oge') ?? 'ege',
+      cefr_level: prefilledCefr,
+      feedback_language:
+        rawFeedbackLang === 'russian' || rawFeedbackLang === 'target' ? rawFeedbackLang : 'auto',
     });
 
     const newTasks = [...existingAssignment.tasks]
@@ -855,6 +882,20 @@ function TutorHomeworkCreateContent() {
     if (!meta.title.trim()) errs.title = 'Укажите название';
     if (!meta.subject) errs.subject = 'Выберите предмет';
 
+    // Phase 11 (2026-05-31): для языковых subjects (french/english/spanish) с
+    // письменными/устными задачами — CEFR-уровень ОБЯЗАТЕЛЕН. Без него AI молча
+    // грейдит по B1 (баг Эмилии: A2-ДЗ проверялись по B1 + «160 слов»).
+    const isLang = ['french', 'english', 'spanish'].includes(meta.subject);
+    if (isLang) {
+      const hasWritingTask = tasks.some((t) => {
+        const tk = t.task_kind ?? (t.check_format === 'detailed_solution' ? 'extended' : 'numeric');
+        return tk === 'extended' || tk === 'proof' || tk === 'speaking';
+      });
+      if (hasWritingTask && !meta.cefr_level) {
+        errs.cefr_level = 'Укажите уровень CEFR — без него AI проверит работу по B1.';
+      }
+    }
+
     // Tasks
     if (tasks.length === 0) {
       errs._tasks = 'Добавьте хотя бы одну задачу';
@@ -888,11 +929,13 @@ function TutorHomeworkCreateContent() {
       ? 'hw-title'
       : errs.subject
         ? 'hw-subject'
-        : errs._tasks
-          ? 'hw-tasks-section'
-          : errs._students
-            ? 'hw-recipients-section'
-            : null;
+        : errs.cefr_level
+          ? 'hw-cefr-section'
+          : errs._tasks
+            ? 'hw-tasks-section'
+            : errs._students
+              ? 'hw-recipients-section'
+              : null;
     if (firstErrorId) {
       setTimeout(() => {
         const el = document.getElementById(firstErrorId);
@@ -947,8 +990,11 @@ function TutorHomeworkCreateContent() {
           check_format: t.check_format,
           // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
           task_kind: t.task_kind,
-          // CEFR-level fix: explicit «Уровень» (null → авто-детект).
-          cefr_level: t.cefr_level,
+          // Phase 11 (2026-05-31): CEFR — assignment-level каскад во все задачи для
+          // языковых subjects (single control в L0). Non-language → null.
+          cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
+            ? (meta.cefr_level ?? null)
+            : null,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -961,6 +1007,8 @@ function TutorHomeworkCreateContent() {
           source_group_id: sourceGroupId,
           disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
           exam_type: meta.exam_type ?? 'ege',
+          // Phase 11 (2026-05-31): assignment-level AI feedback language.
+          feedback_language: meta.feedback_language ?? 'auto',
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
@@ -1188,6 +1236,7 @@ function TutorHomeworkCreateContent() {
           deadline?: string | null;
           disable_ai_bootstrap?: boolean;
           exam_type?: 'ege' | 'oge';
+          feedback_language?: 'auto' | 'russian' | 'target';
           source_group_id?: string | null;
           tasks?: UpdateAssignmentTask[];
         } = {};
@@ -1198,6 +1247,8 @@ function TutorHomeworkCreateContent() {
           patch.deadline = meta.deadline ? parseISO(meta.deadline).toISOString() : null;
           patch.disable_ai_bootstrap = meta.disable_ai_bootstrap ?? true;
           patch.exam_type = meta.exam_type ?? 'ege';
+          // Phase 11 (2026-05-31): assignment-level AI feedback language.
+          patch.feedback_language = meta.feedback_language ?? 'auto';
         }
 
         if (editDiffState.tasksDirty) {
@@ -1215,8 +1266,11 @@ function TutorHomeworkCreateContent() {
             check_format: t.check_format,
             // voice-speaking-mvp: explicit 'speaking' (else undefined → backend derives).
             task_kind: t.task_kind,
-            // CEFR-level fix: explicit «Уровень» (null → авто-детект).
-            cefr_level: t.cefr_level,
+            // Phase 11 (2026-05-31): CEFR — assignment-level каскад (single L0 control).
+            // Belt-and-suspenders для задач, добавленных после смены уровня. Non-language → null.
+            cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
+              ? (meta.cefr_level ?? null)
+              : null,
           }));
         }
 
@@ -1362,7 +1416,7 @@ function TutorHomeworkCreateContent() {
       assignTabInitializedRef.current = true;
     }
 
-    setMeta({ title: '', subject: 'physics', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege' });
+    setMeta({ title: '', subject: 'physics', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege', cefr_level: null, feedback_language: 'auto' });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);
@@ -1379,6 +1433,9 @@ function TutorHomeworkCreateContent() {
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
   const hasLegacySelectedSubject =
     meta.subject !== '' && !SUBJECTS.some((subject) => subject.value === meta.subject);
+  // Phase 11 (2026-05-31): язык. subjects → показываем CEFR + feedback language
+  // селекторы в L0; CEFR обязателен. Mirror backend LANGUAGE_SUBJECTS_REQUIRING_CEFR.
+  const isLanguageSubject = ['french', 'english', 'spanish'].includes(meta.subject);
 
   const submitLabel = (() => {
     if (isEditMode && !isEditSnapshotReady) {
@@ -1508,7 +1565,22 @@ function TutorHomeworkCreateContent() {
             <select
               id="hw-subject"
               value={meta.subject}
-              onChange={(e) => setMeta({ ...meta, subject: e.target.value as HomeworkSubject })}
+              onChange={(e) => {
+                const nextSubject = e.target.value as HomeworkSubject;
+                // Phase 11: при переключении на языковой subject без заданного уровня —
+                // попробовать авто-подставить из текста (если репетитор написал «DELF A2»).
+                // Bonus: для image-задач (Эмилия) маркера нет → останется null → required.
+                const becameLanguage = ['french', 'english', 'spanish'].includes(nextSubject);
+                let nextCefr = meta.cefr_level ?? null;
+                if (becameLanguage && !nextCefr) {
+                  const haystack = [meta.title, ...tasks.map((t) => t.task_text)].join(' \n ');
+                  nextCefr = detectCefrLevelFromText(haystack);
+                }
+                setMeta({ ...meta, subject: nextSubject, cefr_level: nextCefr });
+                if (becameLanguage && nextCefr) {
+                  setTasks((prev) => prev.map((t) => ({ ...t, cefr_level: nextCefr })));
+                }
+              }}
               className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
               style={{ fontSize: '16px', touchAction: 'manipulation' }}
               aria-invalid={errors.subject ? 'true' : undefined}
@@ -1544,6 +1616,66 @@ function TutorHomeworkCreateContent() {
             </p>
           </div>
         </section>
+
+        {/* CEFR level + feedback language (L0 — language subjects only, Phase 11).
+            Намеренно в L0 (всегда видно), НЕ в L1: required-поле в свёрнутой секции
+            повторило бы баг Эмилии «не видела опцию». */}
+        {isLanguageSubject && (
+          <section id="hw-cefr-section" className="grid gap-4 md:grid-cols-2 rounded-lg border border-accent/30 bg-accent/5 p-4">
+            <div className="space-y-2">
+              <Label htmlFor="hw-cefr-level">Уровень CEFR *</Label>
+              <select
+                id="hw-cefr-level"
+                value={meta.cefr_level ?? ''}
+                onChange={(e) => {
+                  const next = e.target.value === '' ? null : (e.target.value as 'A2' | 'B1' | 'B2' | 'C1');
+                  setMeta({ ...meta, cefr_level: next });
+                  // Каскад в tasks state: cefr_level хранится per-task, поэтому
+                  // меняем у всех задач сразу. Это также триггерит tasksDirty
+                  // (buildTaskSignature включает cefr_level) → edit save отправит
+                  // обновлённые задачи даже если поменяли ТОЛЬКО уровень.
+                  setTasks((prev) => prev.map((t) => ({ ...t, cefr_level: next })));
+                }}
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
+                style={{ fontSize: '16px', touchAction: 'manipulation' }}
+                aria-invalid={errors.cefr_level ? 'true' : undefined}
+              >
+                <option value="">— выберите уровень —</option>
+                <option value="A2">A2</option>
+                <option value="B1">B1</option>
+                <option value="B2">B2</option>
+                <option value="C1">C1</option>
+              </select>
+              {errors.cefr_level ? (
+                <p className="text-sm text-red-500">{errors.cefr_level}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  AI проверит работу строго по критериям этого уровня (A2 ≈ 60–80 слов, B1 ≈ 160–180). Применится ко всем задачам ДЗ.
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="hw-feedback-language">Язык объяснений AI</Label>
+              <select
+                id="hw-feedback-language"
+                value={meta.feedback_language ?? 'auto'}
+                onChange={(e) =>
+                  setMeta({ ...meta, feedback_language: e.target.value as 'auto' | 'russian' | 'target' })
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
+                style={{ fontSize: '16px', touchAction: 'manipulation' }}
+              >
+                <option value="auto">Авто (A2 — русский, B1+ — изучаемый)</option>
+                <option value="russian">Русский</option>
+                <option value="target">Изучаемый язык</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                На каком языке AI пишет feedback ученику. «Авто» — по уровню.
+              </p>
+            </div>
+          </section>
+        )}
 
         {/* Deadline (L0 — optional) */}
         <section className="space-y-2">

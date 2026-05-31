@@ -54,6 +54,15 @@ export interface SubjectRubricInput {
    * AI sees both blocks: «Tutor сказал X. Дополнительно стандартные критерии: Y».
    */
   tutor_rubric?: string | null;
+  /**
+   * Assignment-level `homework_tutor_assignments.feedback_language` (Phase 11, 2026-05-31).
+   * Deterministic AI response language for LANGUAGE subjects only:
+   *   'auto'    — level-based: A2 → Russian explanations, B1+ → target-language immersion.
+   *   'russian' — always explain in Russian (examples in target language).
+   *   'target'  — always respond in target language (full immersion).
+   * `null`/undefined → 'auto'. Non-language subjects ignore it (instruction = null).
+   */
+  feedback_language?: "auto" | "russian" | "target" | null;
 }
 
 /**
@@ -111,6 +120,16 @@ export interface SubjectRubric {
   cefr_level: CefrLevel | null;
   /** Telemetry: was tutor_rubric prepended to methodology? */
   tutor_rubric_active: boolean;
+  /**
+   * Deterministic AI response-language instruction (Phase 11, 2026-05-31).
+   * Non-null ONLY for language subjects (english / french / spanish) — resolved
+   * from `feedback_language` (override) + `cefr_level`. `null`/undefined for
+   * non-language subjects (physics / maths / etc. keep their existing Russian
+   * prompt behaviour). Injected after methodology into all 3 AI paths.
+   * Optional so the per-subject builders (physics/math/chemistry/languages) need
+   * not provide it — only `resolveSubjectRubric` computes it at the end.
+   */
+  response_language_instruction?: string | null;
   /**
    * Per-criterion template for `criteria_breakdown` AI output. NULL for
    * subjects without a per-criterion rubric (physics / maths / chemistry /

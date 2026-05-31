@@ -30,7 +30,7 @@
  */
 
 import { buildChemistryEgeRubric } from "./chemistry-ege.ts";
-import { buildLanguagesRubric } from "./languages-ege.ts";
+import { buildLanguagesRubric, buildResponseLanguageInstruction } from "./languages-ege.ts";
 import { buildMathEgeRubric } from "./math-ege.ts";
 import { buildPhysicsEgeRubric } from "./physics-ege.ts";
 import type { SubjectRubric, SubjectRubricInput } from "./types.ts";
@@ -328,6 +328,18 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     ].join("\n");
   }
 
+  // Phase 11 (2026-05-31): deterministic response-language instruction для
+  // language subjects. Non-language → null (физика/математика не трогаем).
+  // 'auto' (default) — A2 → русский, B1+ → изучаемый.
+  let responseLanguageInstruction: string | null = null;
+  if (LANGUAGE_SUBJECTS.has(subjectId)) {
+    const fb = input.feedback_language === "russian" || input.feedback_language === "target"
+      ? input.feedback_language
+      : "auto";
+    const effectiveCefr = core.cefr_level ?? "B1";
+    responseLanguageInstruction = buildResponseLanguageInstruction(subjectId, effectiveCefr, fb);
+  }
+
   return {
     role: core.role,
     methodology,
@@ -337,6 +349,7 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     cefr_level: core.cefr_level ?? null,
     tutor_rubric_active: hasTutorRubric,
     criteria_breakdown_template: criteriaTemplate,
+    response_language_instruction: responseLanguageInstruction,
   };
 }
 

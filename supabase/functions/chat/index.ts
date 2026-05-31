@@ -1254,6 +1254,8 @@ async function processAIRequest(
   let resolvedRubricText: string | null = null;
   // CEFR-level fix (2026-05-29): explicit tutor level for language rubric.
   let resolvedCefr: "A2" | "B1" | "B2" | "C1" | null = null;
+  // Phase 11 (2026-05-31): assignment-level feedback language (server-confirmed).
+  let resolvedFeedbackLanguage: "auto" | "russian" | "target" = "auto";
   // Phase 8 (2026-05-20): start с client-supplied gender (UI consistency)
   // если есть; server-side lookup ниже WINS (anti-tamper).
   let resolvedStudentGender: "male" | "female" | null =
@@ -1306,7 +1308,7 @@ async function processAIRequest(
             .maybeSingle(),
           adminSupabase
             .from("homework_tutor_assignments")
-            .select("subject, exam_type, tutor_id")
+            .select("subject, exam_type, tutor_id, feedback_language")
             .eq("id", guidedHomeworkAssignmentId)
             .maybeSingle(),
         ]);
@@ -1327,6 +1329,11 @@ async function processAIRequest(
           if (dbExamType === "ege" || dbExamType === "oge") {
             resolvedExamType = dbExamType;
           }
+          // Phase 11 (2026-05-31): feedback_language hydrated from DB (server wins).
+          const dbFeedbackLang = (assignmentMetaResp.data as { feedback_language?: unknown }).feedback_language;
+          if (dbFeedbackLang === "russian" || dbFeedbackLang === "target") {
+            resolvedFeedbackLanguage = dbFeedbackLang;
+          } // null / 'auto' / anything else → 'auto' default
           // Phase 8 (2026-05-20) + Phase 8.1 (2026-05-26): server-side identity
           // lookup для name + gender. Priority chain:
           //   tutor_students.display_name + .gender (tutor-curated) →
@@ -1635,6 +1642,7 @@ async function processAIRequest(
       task_text: taskContext ?? null,
       tutor_rubric: resolvedRubricText,
       cefr_level: resolvedCefr,
+      feedback_language: resolvedFeedbackLanguage,
     });
     const subjectBlock = [
       "",
@@ -1643,6 +1651,8 @@ async function processAIRequest(
       rubric.cefr_level ? `Целевой уровень CEFR: ${rubric.cefr_level}.` : "",
       `Все подсказки, проверки и разъяснения должны быть строго из области ${rubric.subject_label}.`,
       "НЕ упоминай законы, величины, правила или термины из других предметов.",
+      // Phase 11 (2026-05-31): детерминированный язык ответа (язык. subjects only).
+      rubric.response_language_instruction ?? "",
       rubric.hint_examples,
       "",
       "МЕТОДОЛОГИЯ ОЦЕНКИ (используй для проверки и подсказок, AI должен думать в этих категориях):",

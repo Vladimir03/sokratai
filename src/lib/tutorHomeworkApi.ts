@@ -103,6 +103,8 @@ export interface CreateAssignmentPayload {
   save_as_template?: boolean;
   disable_ai_bootstrap?: boolean;
   exam_type?: 'ege' | 'oge';
+  /** Phase 11 (2026-05-31): assignment-level AI feedback language (language subjects). */
+  feedback_language?: 'auto' | 'russian' | 'target';
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -563,6 +565,8 @@ export interface TutorHomeworkAssignmentDetails {
     status: HomeworkAssignmentStatus;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
+    feedback_language?: 'auto' | 'russian' | 'target' | null;
     source_group_id?: string | null;
     created_at: string;
   };
@@ -1287,6 +1291,8 @@ export async function updateTutorHomeworkAssignment(
     status?: string;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
+    feedback_language?: 'auto' | 'russian' | 'target';
     source_group_id?: string | null;
     tasks?: UpdateAssignmentTask[];
   },
