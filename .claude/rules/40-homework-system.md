@@ -267,7 +267,7 @@ Spec: `docs/delivery/features/voice-speaking-mvp/spec.md` (CEFR-level fix 2026-0
 **Инварианты:**
 - `response_language_instruction` НЕ трогает anti-spoiler/solution/rubric leak — только инструкция стиля ответа.
 - Non-language subjects: `response_language_instruction = null`, CEFR не required (физика/математика не затронуты).
-- Backward compat: existing French ДЗ с `cefr_level=NULL` грейдятся B1 (как раньше) до пересохранения; Эмилия открывает ДЗ → required-validation форсит A2 → save каскадит. ИЛИ targeted backfill SQL (если все её ДЗ A2 — подтверждает Эмилия).
+- Backward compat: existing French ДЗ с `cefr_level=NULL` грейдились B1 до пересохранения. **Backfill `20260531130000`** проставил уровень из НАЗВАНИЯ ДЗ (Vladimir подтвердил: уровень подписан в title — «DELF A2 …», «… B1 …» — и критерии того же уровня загружены): word-boundary regex `\y(A2|B1|B2|C1)\y` (POSIX `~*`), только NULL + writing/speaking + french, идемпотентно. Titles без явного маркера остаются NULL → tutor задаёт через edit (required форсит).
 - `feedback_language` DEFAULT 'auto' покрывает HWDrawer path B (не пишет колонку явно).
 
 **При расширении:** новый язык feedback override → расширь `VALID_FEEDBACK_LANGUAGES` + `buildResponseLanguageInstruction`; CEFR-required для нового языкового subject → добавь в `LANGUAGE_SUBJECTS_REQUIRING_CEFR` (backend) + `isLanguageSubject` (frontend, 3 callsite); язык — assignment-level, CEFR — per-task storage но assignment-level UI (каскад).
