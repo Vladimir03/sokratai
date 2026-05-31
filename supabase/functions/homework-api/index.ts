@@ -1393,6 +1393,18 @@ async function handleUpdateAssignment(
       return jsonError(cors, 400, "VALIDATION", "tasks must be an array");
     }
 
+    // Phase 11 review fix R2 (2026-06-01): зеркалим CREATE-валидацию CEFR на UPDATE.
+    // Direct API / старый клиент могли обновить языковые письменные задачи без
+    // cefr_level → silent B1 (ровно то, что Phase 11 убивает). Валидируем только
+    // когда tasks present (status/assign-only апдейты задачи не шлют — не затронуты).
+    // Effective subject = новый (если меняется) ИЛИ текущий из БД.
+    const updateEffectiveSubject = isNonEmptyString(b.subject)
+      ? (b.subject as string)
+      : (typeof (assignmentOrErr as Record<string, unknown>).subject === "string"
+          ? ((assignmentOrErr as { subject: string }).subject)
+          : "");
+    const updateRequiresCefr = LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(updateEffectiveSubject);
+
     for (let i = 0; i < b.tasks.length; i++) {
       const t = b.tasks[i];
       if (!t || typeof t !== "object") {
@@ -1409,6 +1421,24 @@ async function handleUpdateAssignment(
       }
       if (t.check_format !== undefined && t.check_format !== null && !(VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format)) {
         return jsonError(cors, 400, "VALIDATION", `tasks[${i}].check_format must be one of: ${VALID_CHECK_FORMATS.join(", ")}`);
+      }
+      // Phase 11 review fix R2: язык. subject + письменная/устная задача → cefr_level обязателен.
+      if (updateRequiresCefr) {
+        const tk = resolveWriteTaskKind(
+          (t as { task_kind?: unknown }).task_kind,
+          (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+            ? (t.check_format as string)
+            : "short_answer",
+        );
+        const needsCefr = tk === "extended" || tk === "proof" || tk === "speaking";
+        if (needsCefr && !normalizeCefrLevel((t as { cefr_level?: unknown }).cefr_level)) {
+          return jsonError(
+            cors,
+            400,
+            "MISSING_CEFR_LEVEL",
+            "Для языкового ДЗ укажи уровень CEFR (A2 / B1 / B2) — без него AI проверит работу по B1.",
+          );
+        }
       }
       const taskImageLimitError = validateAttachmentRefLimit(
         cors,

@@ -744,10 +744,18 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     getTutorHomeworkTemplate(templateId)
       .then((tpl) => {
+        // Phase 11 review fix R1 (2026-06-01): шаблон НЕ хранит cefr_level —
+        // нельзя оставлять старый meta.cefr_level (каскад загнал бы чужой уровень,
+        // напр. B2 на DELF A2 шаблон). Reset + авто-детект из названия/текста шаблона;
+        // нет маркера → null → required-валидация форсит выбор.
+        const tplCefr = ['french', 'english', 'spanish'].includes(tpl.subject)
+          ? detectCefrLevelFromText([tpl.title, ...tpl.tasks_json.map((t) => t.task_text)].join(' \n '))
+          : null;
         setMeta((m) => ({
           ...m,
           title: tpl.title,
           subject: tpl.subject,
+          cefr_level: tplCefr,
         }));
         setTasks(
           tpl.tasks_json.map((t) => ({
@@ -760,6 +768,7 @@ function TutorHomeworkCreateContent() {
             solution_text: t.solution_text ?? '',
             solution_image_paths: t.solution_image_urls ?? null,
             max_score: t.max_score ?? 1,
+            cefr_level: tplCefr,
           })),
         );
         toast.success(`Шаблон «${tpl.title}» загружен`);
@@ -778,10 +787,16 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     try {
       const full = await getTutorHomeworkTemplate(tpl.id);
+      // Phase 11 review fix R1 (2026-06-01): см. URL-param путь выше — reset cefr +
+      // авто-детект из шаблона, чтобы каскад не загнал старый meta.cefr_level.
+      const tplCefr = ['french', 'english', 'spanish'].includes(full.subject)
+        ? detectCefrLevelFromText([full.title, ...full.tasks_json.map((t) => t.task_text)].join(' \n '))
+        : null;
       setMeta((m) => ({
         ...m,
         title: full.title,
         subject: full.subject,
+        cefr_level: tplCefr,
       }));
       setTasks(
         full.tasks_json.map((t) => ({
@@ -794,6 +809,7 @@ function TutorHomeworkCreateContent() {
           solution_text: t.solution_text ?? '',
           solution_image_paths: t.solution_image_urls ?? null,
           max_score: t.max_score ?? 1,
+          cefr_level: tplCefr,
         })),
       );
       toast.success(`Шаблон «${full.title}» применён`);

@@ -1585,7 +1585,10 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
         "- label должен совпадать с указанным дословно (включая регистр и знаки препинания).",
         "- score — число от 0 до max с шагом 0.1.",
         "- max — указанный максимум (повтори его в каждом объекте).",
-        "- comment — 1 короткое предложение по-русски, почему такой балл (без LaTeX, без цитирования эталона дословно).",
+        // Phase 11 review fix R3 (2026-06-01): comment следует языку feedback
+        // (см. «ЯЗЫК ОТВЕТА» выше) — иначе в target/immersion-режиме таблица
+        // критериев (видна ученику) была бы по-русски при французском feedback.
+        "- comment — 1 короткое предложение на ТОМ ЖЕ языке, что и весь feedback (см. инструкцию «ЯЗЫК ОТВЕТА» выше; по умолчанию русский), почему такой балл (без LaTeX, без цитирования эталона дословно).",
         "- Σ score (без tutor_only) = ai_score. Если разойдётся — сервер нормализует.",
       ]
     : [];
@@ -2004,8 +2007,14 @@ export async function evaluateStudentAnswer(
   const criteriaTemplate: SubjectCriterionTemplate[] | null =
     checkRubric.criteria_breakdown_template ?? null;
 
-  // Skip deterministic fast path for detailed_solution — AI must enforce format
-  if (params.checkFormat !== "detailed_solution") {
+  // Skip deterministic fast path for detailed_solution — AI must enforce format.
+  // Phase 11 review fix R3 (2026-06-01): также skip для языковых subjects
+  // (french/english/spanish) — deterministic возвращает русский «Верно», что в
+  // target/immersion-режиме (feedback_language) даёт mixed-language ученику.
+  // Языковые numeric-задачи редки → стоимость лишнего AI-вызова приемлема ради
+  // консистентного языка ответа.
+  const isLanguageSubject = ["french", "english", "spanish"].includes(params.subject);
+  if (params.checkFormat !== "detailed_solution" && !isLanguageSubject) {
     const deterministicMatch = tryDeterministicShortAnswerMatch(
       params.studentAnswer,
       params.correctAnswer,
