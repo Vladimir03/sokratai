@@ -809,6 +809,7 @@ export type Database = {
           description: string | null
           disable_ai_bootstrap: boolean
           exam_type: string
+          feedback_language: string | null
           group_id: string | null
           id: string
           max_attempts: number
@@ -825,6 +826,7 @@ export type Database = {
           description?: string | null
           disable_ai_bootstrap?: boolean
           exam_type?: string
+          feedback_language?: string | null
           group_id?: string | null
           id?: string
           max_attempts?: number
@@ -841,6 +843,7 @@ export type Database = {
           description?: string | null
           disable_ai_bootstrap?: boolean
           exam_type?: string
+          feedback_language?: string | null
           group_id?: string | null
           id?: string
           max_attempts?: number
