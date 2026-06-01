@@ -1,14 +1,13 @@
-import { memo, type KeyboardEvent } from 'react';
+import { memo, type ComponentType, type KeyboardEvent } from 'react';
 import {
-  AlertTriangle,
   BookOpen,
   CheckCircle2,
   ChevronRight,
   MessageCircle,
   Send,
-  type LucideIcon,
 } from 'lucide-react';
 import type { DialogItem } from '@/hooks/useTutorRecentDialogs';
+import { SokratBearIcon } from '@/components/tutor/home/primitives/SokratBearIcon';
 
 export type { DialogItem };
 
@@ -24,21 +23,27 @@ function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
-// Per-kind visual config. All chip classes use existing .t-chip-- tokens from
-// src/styles/tutor-dashboard.css (rule 90 — no new colours / hex). Visual
-// ramp: gray (looked) → amber (talking) → blue (submitted) → green (done) →
-// red (needs help) — so a tutor scanning the feed reads urgency by colour.
+// lucide icons and our SokratBearIcon both satisfy this minimal shape.
+type ChipIcon = ComponentType<{ size?: number; className?: string }>;
+
+// Per-kind visual config. Chip classes use existing .t-chip-- tokens from
+// tutor-dashboard.css (rule 90 — no hex). The chip now carries the ACTION (so
+// the preview line can drop the duplicate and just name the homework). Palette:
+//   gray   opened / wrote   — passive (looked / chatted)
+//   blue   submitted        — delivered work
+//   green  completed        — finished
+//   amber  stuck            — needs help (warm, NOT a red alarm) + Сократ bear
 interface KindMeta {
-  Icon: LucideIcon;
+  Icon: ChipIcon;
   chipClass: string;
   chipLabel: string;
-  /** italic + muted preview — used for the low-signal 'opened' row. */
+  /** italic + muted preview — only for the low-signal 'opened' row. */
   muted: boolean;
 }
 
 function kindMeta(chat: DialogItem): KindMeta {
   const n = chat.taskOrder;
-  const num = typeof n === 'number' ? ` №${n}` : '';
+  const numDot = typeof n === 'number' ? ` · №${n}` : '';
   switch (chat.kind) {
     case 'completed':
       return {
@@ -48,52 +53,61 @@ function kindMeta(chat: DialogItem): KindMeta {
         muted: false,
       };
     case 'stuck':
+      // «Застрял» = повод помочь, не ЧП. Тёплый янтарный тон + Сократ-мишка
+      // (положительная привязка к бренду), а не красный alarm (см. spec §8).
       return {
-        Icon: AlertTriangle,
-        chipClass: 't-chip t-chip--danger',
-        chipLabel: typeof n === 'number' ? `Застрял · №${n}` : 'Застрял',
+        Icon: SokratBearIcon,
+        chipClass: 't-chip t-chip--warning',
+        chipLabel: `Нужна помощь${numDot}`,
         muted: false,
       };
     case 'submitted':
       return {
         Icon: Send,
         chipClass: 't-chip t-chip--info',
-        chipLabel: `Сдал${num}`,
+        chipLabel: `Сдал${numDot}`,
         muted: false,
       };
     case 'opened':
       return {
         Icon: BookOpen,
         chipClass: 't-chip t-chip--neutral',
-        chipLabel: `Задача${num}`,
+        chipLabel: `Открыл${numDot}`,
         muted: true,
       };
     case 'wrote':
     default:
       return {
         Icon: MessageCircle,
-        chipClass: 't-chip t-chip--warning',
-        chipLabel: 'Ученик',
+        chipClass: 't-chip t-chip--neutral',
+        chipLabel: 'Написал',
         muted: false,
       };
   }
 }
 
-// The preview sentence. 'wrote' shows the actual message content (already
-// trimmed server-side); every other kind renders an event line that folds in
-// the homework title so the row is self-explanatory.
+// Visible preview line. 'wrote' shows the message content; every other (fact)
+// event shows just the homework title — the chip already states what happened,
+// so repeating it here would be noise (Q4: kill chip/preview duplication).
 function previewLine(chat: DialogItem): string {
+  if (chat.kind === 'wrote') return chat.preview;
+  return `«${chat.hwTitle}»`;
+}
+
+// Full sentence for a11y (aria-label / title) — keeps the action explicit even
+// though the visible preview is tightened.
+function eventDescription(chat: DialogItem): string {
   const n = chat.taskOrder;
   const num = typeof n === 'number' ? ` №${n}` : '';
   switch (chat.kind) {
     case 'completed':
-      return `Завершил ДЗ «${chat.hwTitle}»`;
+      return `завершил ДЗ «${chat.hwTitle}»`;
     case 'stuck':
-      return `Застрял на задаче${num} в «${chat.hwTitle}»`;
+      return `нужна помощь на задаче${num} в «${chat.hwTitle}»`;
     case 'submitted':
-      return `Сдал задачу${num} в «${chat.hwTitle}»`;
+      return `сдал задачу${num} в «${chat.hwTitle}»`;
     case 'opened':
-      return `Открыл условие задачи${num} в «${chat.hwTitle}»`;
+      return `открыл условие задачи${num} в «${chat.hwTitle}»`;
     case 'wrote':
     default:
       return chat.preview;
@@ -106,10 +120,11 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
   const meta = kindMeta(chat);
   const KindIcon = meta.Icon;
   const preview = previewLine(chat);
+  const event = eventDescription(chat);
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
+  const handleKeyDown = (keyEvent: KeyboardEvent<HTMLButtonElement>) => {
+    if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+      keyEvent.preventDefault();
       onOpen(chat);
     }
   };
@@ -125,7 +140,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
 
   const ariaParts = [
     `Открыть диалог с ${chat.name}`,
-    preview,
+    event,
     showBadge
       ? `${unreadCount} непрочитанных сообщений`
       : hasUnread
@@ -139,7 +154,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       className="chat-row"
       onClick={() => onOpen(chat)}
       onKeyDown={handleKeyDown}
-      title={`Открыть ДЗ «${chat.hwTitle}» — ${preview}`}
+      title={`${chat.name}: ${event} — открыть`}
       aria-label={ariaParts.join(', ')}
       style={{ touchAction: 'manipulation' }}
     >

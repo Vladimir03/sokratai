@@ -373,3 +373,12 @@ const kind: RecentDialogKind =
 - **P2 — open-write latency:** kept `await` (a guarded `IS NULL` UPDATE, no-op after first open) — a floating promise is unreliable in the edge isolate and `EdgeRuntime.waitUntil` isn't used in this repo; comment corrected to stop claiming "fire-and-forget".
 - **P2 — schema-cache race:** migration now ends with `NOTIFY pgrst, 'reload schema';` (repo convention) so PostgREST exposes `student_opened_at` immediately on deploy.
 - Verified anti-leak/RU-bypass clean (reviewer + our grep); build + smoke-check green.
+
+### Round 3 (2026-06-01, Vladimir UX) — warmth + anti-duplication (frontend-only)
+После прод-деплоя смотрели живую ленту. Решения владельца:
+- **«Застрял» → тёплый сигнал.** Был красный alarm (`t-chip--danger` + AlertTriangle). Стал янтарный (`t-chip--warning`) + **`SokratBearIcon`** (кастомная line-art SVG, метафора «Винни застрял в норе») + чип «Нужна помощь · №N». «Застрял» = повод помочь, не ЧП; мишка даёт положительную привязку к бренду. Иконка — НЕ эмодзи и НЕ кадр мультфильма (без копирайта; rule 90 waiver-таблица).
+- **Анти-дублирование чип/preview.** Раньше чип «Сдал №12» + preview «Сдал задачу №12 в «…»» повторяли действие. Теперь чип несёт действие (`Открыл·№N` / `Написал` / `Сдал·№N` / `Завершил ДЗ` / `Нужна помощь·№N`), а preview для событий-фактов = только название ДЗ (`«…»`); для `wrote` preview = текст сообщения. Полная фраза — в `eventDescription()` для aria/title.
+- **Палитра выровнена:** `wrote` переведён amber→neutral (gray), чтобы янтарный остался уникальным сигналом «нужна помощь». Теперь: gray opened/wrote, blue submitted, green completed, amber stuck.
+- **Охват:** мишка пока только на `stuck` (маленький шаг; не «система настроений»). Расширение — отдельное решение.
+- **Чисто фронтенд** (новый `SokratBearIcon.tsx` + `ChatRow.tsx`); бэкенд/миграции не тронуты → деплой только `deploy-sokratai`.
+- Файлы: `SokratBearIcon.tsx` (new), `ChatRow.tsx`. Docs: rule 40 (палитра), rule 90 (waiver), this §8.
