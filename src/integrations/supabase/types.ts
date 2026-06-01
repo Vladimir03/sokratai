@@ -1001,6 +1001,7 @@ export type Database = {
           id: string
           last_ai_feedback: string | null
           status: string
+          student_opened_at: string | null
           task_id: string
           thread_id: string
           tutor_force_completed_at: string | null
@@ -1027,6 +1028,7 @@ export type Database = {
           id?: string
           last_ai_feedback?: string | null
           status?: string
+          student_opened_at?: string | null
           task_id: string
           thread_id: string
           tutor_force_completed_at?: string | null
@@ -1053,6 +1055,7 @@ export type Database = {
           id?: string
           last_ai_feedback?: string | null
           status?: string
+          student_opened_at?: string | null
           task_id?: string
           thread_id?: string
           tutor_force_completed_at?: string | null
