@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Folder, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 
 interface FolderCardProps {
   folder: {
@@ -36,7 +37,8 @@ export const FolderCard = memo(function FolderCard({ folder, childCount = null, 
         <div className="truncate text-[15px] font-semibold text-slate-950">{folder.name}</div>
         {hasCounts ? (
           <div className="mt-0.5 text-xs text-slate-500">
-            {childCount ?? 0} папок · {taskCount ?? 0} задач
+            {childCount ?? 0} {pluralizeRu(childCount ?? 0, ['папка', 'папки', 'папок'])} ·{' '}
+            {taskCount ?? 0} {pluralizeRu(taskCount ?? 0, ['задача', 'задачи', 'задач'])}
           </div>
         ) : null}
       </div>

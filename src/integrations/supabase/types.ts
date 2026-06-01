@@ -3759,6 +3759,14 @@ export type Database = {
         Args: { _folder_id: string; _owner_id: string }
         Returns: boolean
       }
+      kb_folder_recursive_counts: {
+        Args: never
+        Returns: {
+          direct_child_count: number
+          folder_id: string
+          recursive_task_count: number
+        }[]
+      }
       kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
       kb_mod_reassign: {
         Args: { p_new_source_task_id: string; p_published_task_id: string }

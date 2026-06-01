@@ -19,9 +19,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
+import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
+import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
 import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
+import { countTasksBySubtopic, groupTasksByKim, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
 import type { KBTask, KBTopicWithCounts, KBFolderWithCounts } from '@/types/kb';
 
@@ -172,10 +175,32 @@ function CatalogBrowser({
 }) {
   const [selectedTopicId, setSelectedTopicId] = useState<string | undefined>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [subtopicFilter, setSubtopicFilter] = useState<string | null>(null);
 
   const { topics, loading: topicsLoading } = useTopics(undefined, undefined);
   const { subtopics } = useSubtopics(selectedTopicId);
   const { tasks, loading: tasksLoading } = useCatalogTasks(selectedTopicId);
+
+  const subtopicCounts = useMemo(() => countTasksBySubtopic(tasks), [tasks]);
+  const subtopicOrder = useMemo(
+    () => new Map(subtopics.map((s) => [s.id, s.sort_order])),
+    [subtopics],
+  );
+  const visibleTasks = useMemo(() => {
+    if (subtopicFilter === null) return tasks;
+    if (subtopicFilter === NO_SUBTOPIC_FILTER) return tasks.filter((t) => !t.subtopic_id);
+    return tasks.filter((t) => t.subtopic_id === subtopicFilter);
+  }, [tasks, subtopicFilter]);
+  const taskGroups = useMemo(
+    () => groupTasksByKim(visibleTasks, subtopicOrder),
+    [visibleTasks, subtopicOrder],
+  );
+
+  // Сменить подтему/тему — сбросить batch-выбор (selection всегда в рамках текущего вида).
+  const handleSelectSubtopic = useCallback((id: string | null) => {
+    setSubtopicFilter(id);
+    setSelectedIds(new Set());
+  }, []);
 
   // Auto-select topic matching hint (one-time, after topics load)
   const hintMatchedTopicId = useMemo(() => {
@@ -202,14 +227,14 @@ function CatalogBrowser({
   }, []);
 
   const handleBatchAdd = useCallback(() => {
-    const toAdd = tasks.filter(
+    const toAdd = visibleTasks.filter(
       (t) => selectedIds.has(t.id) && !addedIds.has(t.id),
     );
     if (toAdd.length > 0) onAddTasks(toAdd);
     setSelectedIds(new Set());
-  }, [tasks, selectedIds, addedIds, onAddTasks]);
+  }, [visibleTasks, selectedIds, addedIds, onAddTasks]);
 
-  const availableTasks = tasks.filter((t) => !addedIds.has(t.id));
+  const availableTasks = visibleTasks.filter((t) => !addedIds.has(t.id));
   const showBatch = availableTasks.length >= 3;
   const batchCount = [...selectedIds].filter(
     (id) => !addedIds.has(id),
@@ -231,7 +256,11 @@ function CatalogBrowser({
           <TopicRow
             key={topic.id}
             topic={topic}
-            onClick={() => setSelectedTopicId(topic.id)}
+            onClick={() => {
+              setSelectedTopicId(topic.id);
+              setSubtopicFilter(null);
+              setSelectedIds(new Set());
+            }}
           />
         ))}
         {topics.length === 0 && (
@@ -253,6 +282,7 @@ function CatalogBrowser({
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         onClick={() => {
           setSelectedTopicId(undefined);
+          setSubtopicFilter(null);
           setSelectedIds(new Set());
         }}
       >
@@ -261,16 +291,12 @@ function CatalogBrowser({
       </button>
 
       {subtopics.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {subtopics.map((s) => (
-            <span
-              key={s.id}
-              className="rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] text-gray-600"
-            >
-              {s.name}
-            </span>
-          ))}
-        </div>
+        <SubtopicFilterChips
+          subtopics={subtopics}
+          counts={subtopicCounts}
+          activeId={subtopicFilter}
+          onSelect={handleSelectSubtopic}
+        />
       )}
 
       {tasksLoading ? (
@@ -309,10 +335,12 @@ function CatalogBrowser({
             </div>
           )}
 
-          <div className="space-y-2">
-            {tasks.map((task) => (
+          <CatalogTaskGroups
+            key={selectedTopicId}
+            groups={taskGroups}
+            groupBodyClassName="flex flex-col gap-2"
+            renderTask={(task) => (
               <PickerTaskCard
-                key={task.id}
                 task={task}
                 added={addedIds.has(task.id)}
                 selected={selectedIds.has(task.id)}
@@ -320,14 +348,18 @@ function CatalogBrowser({
                 onAdd={() => onAddTasks([task])}
                 onToggleSelect={() => toggleSelect(task.id)}
               />
-            ))}
-          </div>
+            )}
+          />
 
-          {tasks.length === 0 && (
+          {tasks.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">
               Нет задач по этой теме
             </p>
-          )}
+          ) : visibleTasks.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Нет задач по выбранной подтеме
+            </p>
+          ) : null}
         </>
       )}
     </div>

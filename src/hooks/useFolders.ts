@@ -55,35 +55,54 @@ function buildTree(folders: KBFolder[]): KBFolderTreeNode[] {
   return roots;
 }
 
+interface FolderCounts {
+  /** folder_id → задачи РЕКУРСИВНО (папка + все вложенные подпапки любой глубины) */
+  recursiveTaskCount: Map<string, number>;
+  /** folder_id → число ПРЯМЫХ подпапок */
+  directChildCount: Map<string, number>;
+}
+
+interface FolderCountRow {
+  folder_id: string;
+  recursive_task_count: number;
+  direct_child_count: number;
+}
+
+/**
+ * Рекурсивные счётчики задач по всем папкам пользователя — считаются НА СЕРВЕРЕ
+ * (RPC `kb_folder_recursive_counts`, recursive CTE, scoped to `auth.uid()`).
+ * Серверная агрегация не упирается в лимит строк PostgREST (default 1000), в
+ * отличие от клиентского подсчёта по всем папкам/задачам.
+ */
+async function fetchFolderCounts(): Promise<FolderCounts> {
+  const { data, error } = await supabase.rpc('kb_folder_recursive_counts');
+  if (error) throw error;
+
+  const recursiveTaskCount = new Map<string, number>();
+  const directChildCount = new Map<string, number>();
+  for (const row of (data ?? []) as FolderCountRow[]) {
+    recursiveTaskCount.set(row.folder_id, row.recursive_task_count);
+    directChildCount.set(row.folder_id, row.direct_child_count);
+  }
+  return { recursiveTaskCount, directChildCount };
+}
+
 async function fetchRootFolders(): Promise<KBFolderWithCounts[]> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
   const userId = session.user.id;
 
-  const [foldersRes, allChildrenRes, allTasksRes] = await Promise.all([
+  const [foldersRes, counts] = await Promise.all([
     supabase.from('kb_folders').select('*').eq('owner_id', userId).is('parent_id', null).order('sort_order'),
-    supabase.from('kb_folders').select('parent_id').eq('owner_id', userId).not('parent_id', 'is', null),
-    supabase.from('kb_tasks').select('folder_id').eq('owner_id', userId).not('folder_id', 'is', null),
+    fetchFolderCounts(),
   ]);
   if (foldersRes.error) throw foldersRes.error;
-  if (allChildrenRes.error) throw allChildrenRes.error;
-  if (allTasksRes.error) throw allTasksRes.error;
 
-  const childCounts = new Map<string, number>();
-  for (const r of allChildrenRes.data ?? []) {
-    const pid = (r as { parent_id: string }).parent_id;
-    childCounts.set(pid, (childCounts.get(pid) ?? 0) + 1);
-  }
-  const taskCounts = new Map<string, number>();
-  for (const r of allTasksRes.data ?? []) {
-    const fid = (r as { folder_id: string }).folder_id;
-    taskCounts.set(fid, (taskCounts.get(fid) ?? 0) + 1);
-  }
-
+  // child_count = прямые подпапки; task_count = задачи РЕКУРСИВНО (вкл. все вложенные подпапки).
   return (foldersRes.data ?? []).map((f) => ({
     ...f,
-    child_count: childCounts.get(f.id) ?? 0,
-    task_count: taskCounts.get(f.id) ?? 0,
+    child_count: counts.directChildCount.get(f.id) ?? 0,
+    task_count: counts.recursiveTaskCount.get(f.id) ?? 0,
   })) as KBFolderWithCounts[];
 }
 
@@ -100,10 +119,15 @@ interface FolderDetail {
 }
 
 async function fetchFolder(folderId: string): Promise<FolderDetail> {
-  const [folderRes, childrenRes, tasksRes] = await Promise.all([
-    supabase.from('kb_folders').select('*').eq('id', folderId).single(),
-    supabase.from('kb_folders').select('*').eq('parent_id', folderId).order('sort_order'),
-    supabase.from('kb_tasks').select('*').eq('folder_id', folderId).order('created_at'),
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Нет активной сессии');
+  const userId = session.user.id;
+
+  const [folderRes, childrenRes, tasksRes, counts] = await Promise.all([
+    supabase.from('kb_folders').select('*').eq('id', folderId).eq('owner_id', userId).single(),
+    supabase.from('kb_folders').select('*').eq('parent_id', folderId).eq('owner_id', userId).order('sort_order'),
+    supabase.from('kb_tasks').select('*').eq('folder_id', folderId).eq('owner_id', userId).order('created_at'),
+    fetchFolderCounts(),
   ]);
 
   if (folderRes.error) throw folderRes.error;
@@ -121,36 +145,18 @@ async function fetchFolder(folderId: string): Promise<FolderDetail> {
       .from('kb_folders')
       .select('id, name, parent_id')
       .eq('id', currentParentId)
+      .eq('owner_id', userId)
       .single();
     if (parentErr || !parent) break;
     breadcrumbs.unshift({ id: parent.id, name: parent.name });
     currentParentId = (parent as KBFolder).parent_id;
   }
 
-  // Count grandchildren and tasks for each child folder
-  const childIds = childFolders.map((c) => c.id);
-  let grandchildCounts = new Map<string, number>();
-  let childTaskCounts = new Map<string, number>();
-
-  if (childIds.length > 0) {
-    const [gcRes, ctRes] = await Promise.all([
-      supabase.from('kb_folders').select('parent_id').in('parent_id', childIds),
-      supabase.from('kb_tasks').select('folder_id').in('folder_id', childIds),
-    ]);
-    for (const r of gcRes.data ?? []) {
-      const pid = (r as { parent_id: string }).parent_id;
-      grandchildCounts.set(pid, (grandchildCounts.get(pid) ?? 0) + 1);
-    }
-    for (const r of ctRes.data ?? []) {
-      const fid = (r as { folder_id: string }).folder_id;
-      childTaskCounts.set(fid, (childTaskCounts.get(fid) ?? 0) + 1);
-    }
-  }
-
+  // child_count = прямые подпапки; task_count = задачи РЕКУРСИВНО (вкл. все вложенные подпапки).
   const children: KBFolderWithCounts[] = childFolders.map((c) => ({
     ...c,
-    child_count: grandchildCounts.get(c.id) ?? 0,
-    task_count: childTaskCounts.get(c.id) ?? 0,
+    child_count: counts.directChildCount.get(c.id) ?? 0,
+    task_count: counts.recursiveTaskCount.get(c.id) ?? 0,
   }));
 
   return {

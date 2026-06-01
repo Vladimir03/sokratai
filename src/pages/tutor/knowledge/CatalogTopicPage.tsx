@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,12 +8,15 @@ import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { MaterialCard } from '@/components/kb/MaterialCard';
 import { TaskCard } from '@/components/kb/TaskCard';
+import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
 import { ExamBadge } from '@/components/kb/ui/ExamBadge';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { StatCounter } from '@/components/kb/ui/StatCounter';
+import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
+import { countTasksBySubtopic, groupTasksByKim, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
@@ -42,14 +45,43 @@ function CatalogTopicContent() {
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
   const [kimFilter, setKimFilter] = useState<number | null>(null);
+  const [subtopicFilter, setSubtopicFilter] = useState<string | null>(null);
   const { addTask, hasTask } = useHWDraftStore();
   const queryClient = useQueryClient();
 
-  // Tasks filtered by clicked-on KIM badge. `null` shows all.
-  const visibleTasks = useMemo(
-    () => (kimFilter === null ? tasks : tasks.filter((t) => t.kim_number === kimFilter)),
-    [tasks, kimFilter],
+  const subtopicById = useMemo(() => new Map(subtopics.map((s) => [s.id, s])), [subtopics]);
+  const subtopicOrder = useMemo(
+    () => new Map(subtopics.map((s) => [s.id, s.sort_order])),
+    [subtopics],
   );
+  // Счётчики по всем задачам темы (до фильтра) — чтобы числа на чипах не «прыгали».
+  const subtopicCounts = useMemo(() => countTasksBySubtopic(tasks), [tasks]);
+
+  // Фильтры по КИМ (клик по бейджу) и по подтеме (клик по чипу) комбинируются (AND).
+  const visibleTasks = useMemo(() => {
+    let list = tasks;
+    if (kimFilter !== null) list = list.filter((t) => t.kim_number === kimFilter);
+    if (subtopicFilter !== null) {
+      list =
+        subtopicFilter === NO_SUBTOPIC_FILTER
+          ? list.filter((t) => !t.subtopic_id)
+          : list.filter((t) => t.subtopic_id === subtopicFilter);
+    }
+    return list;
+  }, [tasks, kimFilter, subtopicFilter]);
+
+  // Группировка по возрастанию КИМ — секции «КИМ № N · M задач».
+  const taskGroups = useMemo(
+    () => groupTasksByKim(visibleTasks, subtopicOrder),
+    [visibleTasks, subtopicOrder],
+  );
+
+  // Сброс фильтров/раскрытия при смене темы (param-only навигация не размонтирует компонент).
+  useEffect(() => {
+    setKimFilter(null);
+    setSubtopicFilter(null);
+    setExpandedTaskId(null);
+  }, [topicId]);
 
   const handleUnpublish = useCallback(
     async (task: KBTask) => {
@@ -137,14 +169,20 @@ function CatalogTopicContent() {
                     {topic.section}
                     {topic.kim_numbers.length > 0 ? ` · КИМ № ${topic.kim_numbers.join(', ')}` : ''}
                   </p>
-                  <div className="flex flex-wrap gap-2">
-                    {(subtopics.length > 0
-                      ? subtopics
-                      : topic.subtopic_names.map((name, index) => ({ id: `${topic.id}-${index}`, name }))
-                    ).map((subtopic) => (
-                      <TopicChip key={subtopic.id} label={subtopic.name} />
-                    ))}
-                  </div>
+                  {subtopics.length > 0 ? (
+                    <SubtopicFilterChips
+                      subtopics={subtopics}
+                      counts={subtopicCounts}
+                      activeId={subtopicFilter}
+                      onSelect={setSubtopicFilter}
+                    />
+                  ) : topic.subtopic_names.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {topic.subtopic_names.map((name, index) => (
+                        <TopicChip key={`${topic.id}-${index}`} label={name} />
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
 
                 <StatCounter value={topic.task_count} label="задач" />
@@ -165,7 +203,7 @@ function CatalogTopicContent() {
                   <X className="h-3 w-3" />
                 </button>
               ) : null}
-              {kimFilter !== null && visibleTasks.length !== tasks.length ? (
+              {(kimFilter !== null || subtopicFilter !== null) && visibleTasks.length !== tasks.length ? (
                 <span className="text-[11px] text-slate-400">
                   {visibleTasks.length} из {tasks.length}
                 </span>
@@ -186,28 +224,35 @@ function CatalogTopicContent() {
               </div>
             ) : null}
 
-            {!tasksLoading && visibleTasks.length === 0 && kimFilter !== null ? (
+            {!tasksLoading &&
+            tasks.length > 0 &&
+            visibleTasks.length === 0 &&
+            (kimFilter !== null || subtopicFilter !== null) ? (
               <div className="rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-8 text-center text-sm text-slate-500">
-                В этой теме нет задач с КИМ № {kimFilter}.{' '}
+                Нет задач по выбранному фильтру.{' '}
                 <button
                   type="button"
-                  onClick={() => setKimFilter(null)}
+                  onClick={() => {
+                    setKimFilter(null);
+                    setSubtopicFilter(null);
+                  }}
                   className="font-semibold text-socrat-primary hover:underline"
                 >
-                  Сбросить фильтр
+                  Сбросить фильтры
                 </button>
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3">
-              {visibleTasks.map((task) => (
+            <CatalogTaskGroups
+              key={topicId}
+              groups={taskGroups}
+              renderTask={(task) => (
                 <TaskCard
-                  key={task.id}
                   task={task}
                   isOwn={false}
                   inHW={hasTask(task.id)}
                   isModerator={isModerator}
-                  subtopicName={subtopics.find((subtopic) => subtopic.id === task.subtopic_id)?.name}
+                  subtopicName={subtopicById.get(task.subtopic_id ?? '')?.name}
                   isExpanded={expandedTaskId === task.id}
                   onKimClick={(kim) => setKimFilter(kim)}
                   onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
@@ -216,8 +261,8 @@ function CatalogTopicContent() {
                   onUnpublish={() => handleUnpublish(task)}
                   onReassign={() => handleReassign(task)}
                 />
-              ))}
-            </div>
+              )}
+            />
           </section>
 
           {!materialsLoading && materials.length > 0 ? (

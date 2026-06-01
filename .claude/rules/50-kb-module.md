@@ -107,6 +107,37 @@
 
 **Важно:** KBPickerSheet работает через локальный React state визарда (`onAddTasks` callback → `DraftTask[]`), а **НЕ** через глобальный `hwDraftStore` (Zustand).
 
+## Каталог: группировка по КИМ + фильтр подтем + рекурсивные счётчики папок (2026-06-01)
+
+### Внутри темы — группировка по номеру КИМ + кликабельные подтемы
+Задачи темы рендерятся секциями «КИМ № N · M задач» (по возрастанию КИМ; группа без номера — в конце) + кликабельные чипы подтем со счётчиками (single-select, комбинируется с фильтром по КИМ). Применяется в **ДВУХ** поверхностях: витрина (`CatalogTopicPage.tsx`) и пикер конструктора ДЗ (`KBPickerSheet.tsx::CatalogBrowser`).
+
+**Канонические примитивы (переиспользовать, НЕ дублировать sort/filter):**
+- `src/lib/kbCatalogGrouping.ts` — `groupTasksByKim(tasks, subtopicOrder?)`, `countTasksBySubtopic(tasks)`, sentinel `NO_SUBTOPIC_FILTER` (= «Без подтемы», отличается от `null` = «Все»).
+- `src/components/kb/CatalogTaskGroups.tsx` — сворачиваемые КИМ-секции, **render-prop** (`renderTask`): каждая поверхность отдаёт свою карточку (каталог → `TaskCard`, пикер → `PickerTaskCard`).
+- `src/components/kb/ui/SubtopicFilterChips.tsx` — чипы подтем со счётчиками.
+
+**Инварианты:**
+- Сорт внутри группы: `kim asc → subtopic.sort_order → created_at → id`. `kim_number=null` → группа «Без номера КИМ» в конце.
+- `key={topicId}` на `CatalogTaskGroups` сбрасывает collapse при смене темы; page-level фильтры — `useEffect([topicId])` (param-only навигация не размонтирует компонент).
+- Фильтры КИМ (клик по бейджу) × подтема (чип) комбинируются как **AND**. Счётчики подтем считаются по ВСЕМ задачам темы (до фильтра).
+- В пикере batch-select привязан к `visibleTasks`; `selectedIds` очищается при смене темы/подтемы.
+- Новый catalog-surface → переиспользуй примитивы, а не реализуй сорт/фильтр заново.
+
+### «Моя база»: рекурсивные счётчики задач в папках
+Карточка папки показывает «N задач» **РЕКУРСИВНО** (папка + все вложенные подпапки любой глубины); «N папок» — **ПРЯМЫЕ** подпапки.
+
+**Источник истины — RPC `kb_folder_recursive_counts()`** (миграция `20260601130000`, `SECURITY DEFINER`, scoped `auth.uid()`, `GRANT EXECUTE TO authenticated`). Возвращает `(folder_id, recursive_task_count, direct_child_count)` для всех папок вызывающего. `useFolders.ts::fetchRootFolders` / `fetchFolder` зовут его.
+
+**Инварианты (КРИТИЧНО):**
+- **НИКОГДА** не возрождай client-side безлимитный подсчёт по всем `kb_tasks` / `kb_folders` — PostgREST режет ответ на 1000 строк → тихий недосчёт у крупной базы (модератор каталога). Рекурсивные счётчики — только через RPC.
+- Новый RPC, вызываемый клиентом → обнови `src/integrations/supabase/types.ts` (`Functions`): strict `createClient<Database>` иначе не пропустит `.rpc()` (no-arg стиль = `Args: never`).
+- `fetchFolder` фильтрует личные чтения `.eq('owner_id', userId)` (defense-in-depth поверх RLS).
+- Дерево папок без циклов (репэрентинга папок в UI нет) → в recursive CTE нет cycle-guard. Появится перенос папок — добавить `CYCLE`/depth-cap.
+
+### Русское склонение
+`src/lib/pluralizeRu(n, [one, few, many])` — канонический helper («1 задача / 2 задачи / 5 задач», корректный `% 100 / % 10`). Используй вместо inline `n < 5 ? …`. Применён в `CatalogTaskGroups`, `FolderCard`. Старые места (`TopicRow` / `FolderRow` / `TopicCard`) — кандидаты на миграцию.
+
 ## Спецификация
 - Tech spec: docs/delivery/features/kb/kb-tech-spec.md
 - Design ref: docs/discovery/product/kb/kb-design-ref.jsx
