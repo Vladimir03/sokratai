@@ -935,43 +935,46 @@ export async function postTutorThreadMessage(
   );
 }
 
-// ─── Recent dialogs + unread tracking (TASK-7, extended in TASK-8) ───────────
+// ─── Recent dialogs / activity feed + unread tracking ───────────────────────
 
 /**
- * TASK-8: `kind` discriminator split:
- *   - 'task_opened'  — ученик открыл / перешёл на задачу, но ещё не писал
- *                      ответ. Frontend рендерит system-style «Открыл задачу
- *                      №N» (italic + BookOpen icon).
- *   - 'conversation' — идёт переписка: student/tutor/AI message. Preview —
- *                      содержимое последнего сообщения.
+ * Event feed `kind` discriminator (v2.0 — replaces the old task_opened/
+ * conversation split). Priority high→low when several signals coexist:
+ *   - 'completed' — ученик закрыл всё ДЗ (thread.status='completed').
+ *   - 'stuck'     — застрял: ≥ N неверных ответов или подсказок на задаче.
+ *   - 'submitted' — сдал решение задачи (submission/answer).
+ *   - 'wrote'     — написал в guided-chat (вопрос / запрос подсказки).
+ *   - 'opened'    — открыл условие задачи, но ещё ничего не делал.
  *
- * Старые deploy-ы edge function могут не вернуть `kind` — в этом случае
- * хук трактует строку как `conversation` (backward compat).
+ * Legacy values ('task_opened' → 'opened', 'conversation' → 'wrote') and a
+ * missing `kind` are normalized in the hook (`useTutorRecentDialogs.mapItem`)
+ * for forward/backward-deploy resilience.
  */
-export type RecentDialogKind = 'task_opened' | 'conversation';
+export type RecentDialogKind =
+  | 'opened'
+  | 'wrote'
+  | 'submitted'
+  | 'completed'
+  | 'stuck';
 
 export interface RecentDialogItem {
   /** Discriminator — см. `RecentDialogKind`. Optional for backward compat. */
-  kind?: RecentDialogKind;
+  kind?: RecentDialogKind | 'task_opened' | 'conversation';
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  /**
-   * Wire values: only TASK-7 legacy set ('student' | 'tutor' | 'ai') so old
-   * clients render a sensible chip for Case A (backend returns 'ai' on wire
-   * for kind='task_opened'). New clients branch on `kind` — ChatRow
-   * ignores lastAuthor for Case A and shows BookOpen + «Задача №N» instead.
-   */
-  lastAuthor: 'student' | 'tutor' | 'ai';
+  /** Backward-compat only — old clients render a chip from it; new UI ignores it. */
+  lastAuthor?: 'student' | 'tutor' | 'ai';
   unread: boolean;
   /**
    * Number of student messages with `created_at > tutor_last_viewed_at`.
-   * 0 when there are no unread messages, включая все Case A (ученик
-   * ничего не писал). Используется для Telegram-style badge на /tutor/home.
+   * 0 for 'opened'-only rows (no student message). Drives the Telegram-style
+   * badge on /tutor/home; a dot is shown instead when unread but count is 0.
    */
   unreadCount: number;
+  /** Human summary; also the fallback line for old clients that ignore `kind`. */
   preview: string;
-  /** Номер задачи для kind='task_opened' (1-based). Undefined в Case B. */
+  /** 1-based task number for 'opened' / 'submitted' / 'stuck'. */
   taskOrder?: number;
   at: string;
   hwId: string;

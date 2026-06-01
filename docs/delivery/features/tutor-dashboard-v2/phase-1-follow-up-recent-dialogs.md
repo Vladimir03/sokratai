@@ -1,12 +1,20 @@
 # Follow-up: «Последние действия учеников» — edge function + unread + deep-link + kind split
 
-**Version:** v1.1 (TASK-8 extension)
-**Date:** 2026-04-22
+**Version:** v2.0 (event-feed redesign)
+**Date:** 2026-06-01
 **Parent:** [tutor-dashboard-v2/spec.md](./spec.md) (Phase 1)
 **Status:** approved
-**Tasks:** TASK-7 (base), TASK-8 (Case A / Case B split)
+**Tasks:** TASK-7 (base), TASK-8 (Case A / Case B split), v2.0 (event feed)
 
 ## Changelog
+
+- **v2.0 (2026-06-01):** «Лента действий» redesign + bug fix (reporter — Vladimir).
+  - **Bug:** блок показывал «Открыл задачу №1» на просто выданном, никогда не открытом ДЗ. Root cause: открытие задачи не оставляло следа в БД (чистая frontend-навигация), а `provisionGuidedThread` пишет `task_states` с `updated_at=now()` при выдаче — поэтому `kind='task_opened'` (сигнал `max(task_states.updated_at) > last_student_message_at`) ложно срабатывал. Старая запись §4 «треды без signal отбрасываются» неверна на практике.
+  - **Fix:** genuine-activity filter (показываем тред только при `last_student_message_at`/counters/`student_opened_at`/`completed`); `task_states.updated_at` больше не сигнал.
+  - **Новый сигнал:** `homework_tutor_task_states.student_opened_at` (миграция `20260601120000`), записывается в `handleGetStudentProblem` (guarded `IS NULL`, fire-and-forget). Service-role only.
+  - **Event-feed `kind`:** `task_opened`/`conversation` заменены на 5 видов — `opened` / `wrote` / `submitted` / `completed` / `stuck` (приоритет high→low). `ChatRow` рендерит per-kind иконку/чип/цвет.
+  - **Решения (Vladimir):** роль = лента действий; assigned-never-opened — скрывать; события — wrote/submitted/completed/stuck/opened.
+  - Детали инвариантов — `.claude/rules/40-homework-system.md` → «Последние действия учеников».
 
 - **v1.0 (TASK-7, 2026-04-22):** edge function handler + unread + deep-link. Блок показывал только треды с student message (единственный case — «переписка»).
 - **v1.1 (TASK-8, 2026-04-22):** расширение до «Последние действия учеников» — добавлен Case A («ученик открыл задачу, но не написал»); блок поднимает через `task_states.updated_at`; `kind` discriminator в payload; ChatRow рендерит system-style «Открыл задачу №N» для Case A.
@@ -323,3 +331,45 @@ const kind: RecentDialogKind =
 - **Unread count (not boolean)** — показать "3 новых" вместо просто точки.
 - **Telegram / email ingress** — messages из Telegram bot / emails когда появятся.
 - **`ai_flag` integration** — AI confidence сигнал в chip («AI сомневается»).
+
+---
+
+## 8. v2.0 — Event-feed redesign (2026-06-01)
+
+### Problem
+1. **Bug:** «Открыл задачу №1» показывалось на просто выданном, никогда не открытом ДЗ (см. Changelog v2.0 — root cause). Открытие не писалось в БД; `provisionGuidedThread` оставлял `task_states.updated_at=now()`, ложно зажигавший `task_opened`.
+2. **Низкая польза:** блок плохо помогал репетитору. Запрос: уметь отличать «не решил, потому что не смог» от «даже не открывал».
+
+### Decisions (Vladimir)
+- **Роль:** «Лента действий» — хронология значимых событий, один row на ученика (свежайшее), новое сверху.
+- **Assigned-never-opened:** скрывать (прокрастинаторы видны в `StudentsActivityBlock` → «Нет сдач»).
+- **События:** Написал в чат / Сдал задачу / Завершил ДЗ / Застрял **+ Открыл условие задачи**.
+
+### Solution
+- **Migration `20260601120000`** — `homework_tutor_task_states.student_opened_at TIMESTAMPTZ NULL`. Service-role only (не GRANT'ится, не в student SELECT / `THREAD_SELECT`), без backfill.
+- **`handleGetStudentProblem`** — guarded `IS NULL`-update пишет `student_opened_at` при первом открытии задачи (канонический problem-screen fetch всех viewport'ов; legacy `GuidedHomeworkWorkspace` отключён).
+- **`handleGetRecentDialogs`** — переписан:
+  - SELECT'ы расширены: `threads.status`; task_states → `attempts, hint_count, wrong_answer_count, student_opened_at, homework_tutor_tasks(order_num)`; messages → `message_kind, task_order` + фильтр `role='user'`.
+  - **Genuine-activity filter** (KEEP/DROP) вместо сломанного `latestEventAt===0`.
+  - `latestEventAt = max(last_student_message_at, max(student_opened_at))`.
+  - 5-kind classification (приоритет: completed → stuck → submitted → wrote → opened). Константы `RECENT_DIALOGS_STUCK_WRONG/HINT = 3`.
+- **Frontend:** `RecentDialogKind` (5 видов) + `mapItem.normalizeKind` (legacy `task_opened→opened`, `conversation→wrote`); `ChatRow` per-kind иконка/чип/цвет (gray/amber/blue/green/red, `.t-chip--*`); `RecentDialogsBlock` — meta + empty-state copy.
+
+### Acceptance
+- **AC-V1** Просто выданное, никогда не открытое ДЗ → НЕ в блоке (нет «Открыл задачу»).
+- **AC-V2** Ученик открыл problem-screen, ничего не делал → `opened` «Открыл условие задачи №N».
+- **AC-V3** Написал в чат → `wrote` (content); сдал → `submitted` «Сдал задачу №N»; завершил всё → `completed` «Завершил ДЗ».
+- **AC-V4** ≥3 неверных/подсказок на задаче → `stuck` «Застрял на задаче №N».
+- **AC-V5** Клик → `/tutor/homework/:hwId?student=:sid` (drill-down раскрыт); unread сбрасывается после визита.
+
+### Changed files
+- Backend: `supabase/migrations/20260601120000_add_student_opened_at_to_task_states.sql` (new); `supabase/functions/homework-api/index.ts` (`handleGetStudentProblem` + `handleGetRecentDialogs`).
+- Frontend: `src/lib/tutorHomeworkApi.ts`, `src/hooks/useTutorRecentDialogs.ts`, `src/components/tutor/home/primitives/ChatRow.tsx`, `src/components/tutor/home/RecentDialogsBlock.tsx`.
+- Docs: `.claude/rules/40-homework-system.md`, this file.
+
+### Review round 2 (2026-06-01, ChatGPT-5.5) — hardening
+- **P1 — false-"opened" regression risk:** latest-student-message lookup was one global query with `LIMIT pickedThreadIds.length * 8`; a chatty thread could starve another's message out of the result set → that thread misclassified as `opened`. **Fix:** per-thread `.limit(1)` via `Promise.all` (≤5 parallel, same shape as unread counts) — starvation impossible. Defensive: final classification fallback is `wrote` («Работает над ДЗ»), **never** `opened` without a real `student_opened_at`.
+- **P1 — wrong stuck task №:** `stuckOrder` ranked by `wrong+hint` could pick a non-stuck task (2+2) over a stuck one (3+0). **Fix:** `stuckOrder` only updates from tasks that individually cross `RECENT_DIALOGS_STUCK_WRONG`/`HINT`, ranked by `wrong+hint` among them.
+- **P2 — open-write latency:** kept `await` (a guarded `IS NULL` UPDATE, no-op after first open) — a floating promise is unreliable in the edge isolate and `EdgeRuntime.waitUntil` isn't used in this repo; comment corrected to stop claiming "fire-and-forget".
+- **P2 — schema-cache race:** migration now ends with `NOTIFY pgrst, 'reload schema';` (repo convention) so PostgREST exposes `student_opened_at` immediately on deploy.
+- Verified anti-leak/RU-bypass clean (reviewer + our grep); build + smoke-check green.

@@ -27,32 +27,22 @@ import {
  */
 export interface DialogItem {
   /**
-   * TASK-8 discriminator:
-   *   - 'task_opened'  — ученик перешёл на задачу, но не писал по ней;
-   *                      ChatRow рендерит italic «Открыл задачу №N».
-   *   - 'conversation' — идёт переписка; preview = текст последнего сообщения.
-   * Default 'conversation' если edge function не вернул поле (backward compat).
+   * Event kind (v2.0). ChatRow branches on it for icon/chip/preview:
+   * 'opened' / 'wrote' / 'submitted' / 'completed' / 'stuck'. Normalized in
+   * `mapItem` from any legacy wire value ('task_opened' / 'conversation').
    */
   kind: RecentDialogKind;
   studentId: string;
   name: string;
   stream: 'ЕГЭ' | 'ОГЭ';
-  /**
-   * Legacy-safe union ('student' | 'tutor' | 'ai'). For kind='task_opened'
-   * backend returns 'ai' on wire — UI branches on `kind` and ignores
-   * lastAuthor in that case (see ChatRow). Keeping narrow union here
-   * protects old TASK-7 code paths that index AUTHOR_LABEL directly.
-   */
-  lastAuthor: 'student' | 'tutor' | 'ai';
   unread: boolean;
   /**
    * Number of unread student messages — Telegram-style counter badge.
-   * 0 when caught up или kind='task_opened' (student не писал). Falls
-   * back to 0 when older edge-function deploys don't include the field.
+   * 0 for 'opened'-only rows; a dot is shown instead when unread.
    */
   unreadCount: number;
   preview: string;
-  /** Номер задачи (1-based) для kind='task_opened'. */
+  /** 1-based task number for 'opened' / 'submitted' / 'stuck'. */
   taskOrder?: number;
   at: string;
   hwId: string;
@@ -80,13 +70,32 @@ function formatRelativeShort(tsIso: string): string {
   return format(parsed, 'dd.MM');
 }
 
+/**
+ * Normalize the wire `kind` into the v2.0 union, tolerating older/newer edge
+ * deploys: legacy 'task_opened' → 'opened', 'conversation' → 'wrote', and a
+ * missing/unknown value → 'wrote' (the safe "student did something" default).
+ */
+function normalizeKind(raw: RecentDialogItem['kind']): RecentDialogKind {
+  switch (raw) {
+    case 'opened':
+    case 'wrote':
+    case 'submitted':
+    case 'completed':
+    case 'stuck':
+      return raw;
+    case 'task_opened':
+      return 'opened';
+    default: // 'conversation' | undefined | anything unexpected
+      return 'wrote';
+  }
+}
+
 function mapItem(raw: RecentDialogItem): DialogItem {
   return {
-    kind: raw.kind ?? 'conversation',
+    kind: normalizeKind(raw.kind),
     studentId: raw.studentId,
     name: raw.name,
     stream: raw.stream,
-    lastAuthor: raw.lastAuthor,
     unread: raw.unread,
     unreadCount: raw.unreadCount ?? 0,
     preview: raw.preview,

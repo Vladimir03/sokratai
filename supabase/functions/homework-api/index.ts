@@ -6485,6 +6485,31 @@ async function handleGetStudentProblem(
     threadId = typeof provisioned?.id === "string" ? provisioned.id : null;
   }
 
+  // 6b. Record the genuine "student opened this task's statement" signal for
+  //     the /tutor/home «Последние действия учеников» feed. The real "opened"
+  //     event — opening a task is otherwise pure frontend navigation with no
+  //     DB trace — letting the tutor tell "opened but did not solve" from
+  //     "never opened". Idempotent: the IS NULL guard means only the FIRST
+  //     open writes; every later refetch is a 0-row no-op.
+  //
+  //     We AWAIT it (it adds one guarded UPDATE, negligible and a no-op after
+  //     first open). Not floated: an un-awaited promise can be killed once the
+  //     edge isolate returns the response. Not EdgeRuntime.waitUntil: that's
+  //     not used anywhere in this codebase, and the latency saved here doesn't
+  //     justify a new runtime dependency. Errors are non-fatal — a missed feed
+  //     signal must never block the problem-screen load.
+  if (threadId) {
+    const { error: openedErr } = await db
+      .from("homework_tutor_task_states")
+      .update({ student_opened_at: new Date().toISOString() })
+      .eq("thread_id", threadId)
+      .eq("task_id", taskId)
+      .is("student_opened_at", null);
+    if (openedErr) {
+      console.error("student_problem_mark_opened_error", { error: openedErr.message });
+    }
+  }
+
   // 7. Hydrate thread for the student.
   //    fetchStudentThread = fetchFullThread + stripHiddenMessages
   //                       + stripStudentSensitiveTaskStateFields
@@ -8617,21 +8642,25 @@ async function handleTutorPostMessage(
 
 // ─── Endpoint: GET /recent-dialogs (tutor) ───────────────────────────────────
 //
-// Powers the «Последние действия учеников» block on /tutor/home. Returns up
-// to `RECENT_DIALOGS_DISPLAY_LIMIT` latest events per tutor, deduped by
-// student_id (one student = one row).
+// Powers the «Последние действия учеников» event feed on /tutor/home. Returns
+// up to `RECENT_DIALOGS_DISPLAY_LIMIT` latest events per tutor, deduped by
+// student_id (one student = one row, their single most recent event).
 //
-// Each item carries a `kind` discriminator:
-//   - 'task_opened'  — ученик открыл / перешёл на задачу, но ещё не написал
-//                      ответ по ней. Signal: max(task_states.updated_at)
-//                      превышает last_student_message_at (или student не
-//                      писал вовсе). Preview рендерится на фронте как
-//                      system-style «Открыл задачу №N» (italic + icon).
-//   - 'conversation' — идёт переписка: student/tutor/AI message. Preview —
-//                      содержимое последнего сообщения.
+// Each item carries a `kind` discriminator (priority high→low when several
+// signals coexist on one thread):
+//   - 'completed'  — thread.status='completed' (ученик закрыл всё ДЗ).
+//   - 'stuck'      — на задаче ≥ STUCK_WRONG неверных ИЛИ ≥ STUCK_HINT подсказок.
+//   - 'submitted'  — последнее сообщение ученика = submission/answer (сдал решение).
+//   - 'wrote'      — последнее сообщение ученика = question/hint_request (написал в чат).
+//   - 'opened'     — ученик открыл условие задачи (task_states.student_opened_at),
+//                    но ещё ничего не написал и не пытался решать.
 //
-// Items sorted by `latestEventAt` DESC (самое свежее действие сверху),
-// независимо от kind.
+// Threads без РЕАЛЬНОЙ активности (assigned-but-never-opened — нет message, нет
+// counters, нет student_opened_at) ОТБРАСЫВАЮТСЯ. Раньше они ложно всплывали
+// как «Открыл задачу №N», т.к. provisionGuidedThread пишет task_states с
+// updated_at = now() при выдаче ДЗ (см. student_opened_at миграцию).
+//
+// Items sorted by `latestEventAt` DESC (самое свежее действие сверху).
 //
 // Why service_role: PostgREST nested embed filters через 3 уровня JOIN
 // молча теряют строки при drift RLS. Единый серверный aggregation
@@ -8640,19 +8669,18 @@ async function handleTutorPostMessage(
 // Pilot-scale pre-fetch: ≤ 30 tutor students × ≤ few active assignments ≈
 // well under 200 threads. We intentionally skip SQL ORDER BY because no
 // single DB column is reliably bumped on every action — check/hint paths
-// only update last_student_message_at, task-advance only task_states. Sort
+// only update last_student_message_at, opens only student_opened_at. Sort
 // happens in Deno over the enriched (latestEventAt) set. Cap at 500 as a
 // safety ceiling; a tutor with that many active threads will get RPC-based
 // aggregation in Phase 2 (parking lot).
 const RECENT_DIALOGS_PREFETCH_LIMIT = 500;
 const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
+// «Застрял» thresholds — single task accumulating this many wrong answers or
+// hints reads as struggling. Tunable; kept conservative so the signal is rare.
+const RECENT_DIALOGS_STUCK_WRONG = 3;
+const RECENT_DIALOGS_STUCK_HINT = 3;
 
-type RecentDialogKind = "task_opened" | "conversation";
-// Wire-level lastAuthor is intentionally limited to TASK-7 legacy values so
-// old clients (that don't know kind='task_opened') still render a sensible
-// chip in Case A — 'ai' is closest: it's the bot-driven advance/intro. New
-// clients branch on `kind` and ignore lastAuthor for Case A, rendering
-// system-style «Открыл задачу №N» with a BookOpen icon instead.
+type RecentDialogKind = "opened" | "wrote" | "submitted" | "completed" | "stuck";
 type RecentDialogAuthor = "student" | "tutor" | "ai";
 
 interface RecentDialogItem {
@@ -8660,21 +8688,17 @@ interface RecentDialogItem {
   studentId: string;
   name: string;
   stream: "ЕГЭ" | "ОГЭ";
-  lastAuthor: RecentDialogAuthor;
+  /** Optional, backward-compat only — old clients read it; new UI branches on `kind`. */
+  lastAuthor?: RecentDialogAuthor;
   unread: boolean;
   unreadCount: number;
+  /** Human summary + graceful fallback for old clients that don't know `kind`. */
   preview: string;
-  /** For kind='task_opened' — номер задачи (1-based), для UI «Открыл задачу №N». */
+  /** For 'opened' / 'submitted' / 'stuck' — номер задачи (1-based). */
   taskOrder?: number;
   at: string; // ISO timestamp — frontend formats it with date-fns
   hwId: string;
   hwTitle: string;
-}
-
-function authorFromMessage(role: string | null | undefined): "student" | "tutor" | "ai" {
-  if (role === "user") return "student";
-  if (role === "tutor") return "tutor";
-  return "ai"; // assistant | system | anything unknown defaults to AI
 }
 
 function buildPreviewForDialog(
@@ -8702,13 +8726,12 @@ async function handleGetRecentDialogs(
   cors: Record<string, string>,
 ): Promise<Response> {
   // 1. Load ALL candidate threads belonging to the tutor (no SQL ORDER BY).
-  //    Rationale (review fix): `thread.updated_at` не обновляется в
-  //    handleCheckAnswer / handleRequestHint — ordering by it могло бы
-  //    обрезать свежие Case A/B items из top-50 LIMIT. Honest sort по
-  //    latestEventAt делаем в Deno после enrichment. Limit 500 — safety
-  //    cap для pilot (≤ 30 студентов × ≤ 10 ДЗ << 500).
+  //    No single column is reliably bumped on every action, so we enrich and
+  //    sort by latestEventAt in Deno. Limit 500 — pilot safety cap
+  //    (≤ 30 students × ≤ 10 assignments << 500).
   type ThreadRow = {
     id: string;
+    status: string | null;
     tutor_last_viewed_at: string | null;
     last_student_message_at: string | null;
     current_task_order: number | null;
@@ -8730,6 +8753,7 @@ async function handleGetRecentDialogs(
     .from("homework_tutor_threads")
     .select(`
       id,
+      status,
       tutor_last_viewed_at,
       last_student_message_at,
       current_task_order,
@@ -8760,88 +8784,131 @@ async function handleGetRecentDialogs(
   const threads = (threadsData ?? []) as unknown as ThreadRow[];
   if (threads.length === 0) return jsonOk(cors, { items: [] });
 
-  // 2. Batch-fetch MAX(task_states.updated_at) per thread. task_states rows
-  //    обновляются при advance (locked→active, active→completed) и при
-  //    attempts++ — это signal для Case A «ученик перешёл на задачу».
-  //    PostgREST не умеет GROUP BY — фильтруем всё in Deno.
+  // 2. Batch-fetch task_states for all threads: engagement counters + the real
+  //    "opened" timestamp + the task's order_num (embedded via FK task_id).
+  //    PostgREST has no GROUP BY — we aggregate per thread in Deno.
   type TaskStateRow = {
     thread_id: string;
-    updated_at: string;
+    attempts: number | null;
+    hint_count: number | null;
+    wrong_answer_count: number | null;
+    student_opened_at: string | null;
+    homework_tutor_tasks: { order_num: number | null } | null;
   };
   const allThreadIds = threads.map((t) => t.id);
   const { data: taskStatesData, error: taskStatesError } = await db
     .from("homework_tutor_task_states")
-    .select("thread_id, updated_at")
-    .in("thread_id", allThreadIds)
-    .order("updated_at", { ascending: false });
+    .select(
+      "thread_id, attempts, hint_count, wrong_answer_count, student_opened_at, homework_tutor_tasks ( order_num )",
+    )
+    .in("thread_id", allThreadIds);
 
   if (taskStatesError) {
     console.error("recent_dialogs_task_states_error", {
       error: taskStatesError.message,
     });
-    // Non-fatal: продолжаем без task_state signal, блок покажет только Case B
+    // Non-fatal: degrade to message-only signals (submitted / wrote).
   }
 
-  const maxTaskStateAtByThread = new Map<string, string>();
+  // Per-thread aggregate: engagement flag, worst-task stuck signal, latest open.
+  type TaskAgg = {
+    hasCounters: boolean;
+    maxWrong: number;
+    maxHint: number;
+    stuckScore: number; // max(wrong+hint) seen — picks the "worst" task order
+    stuckOrder: number | null;
+    maxOpenedMs: number; // max student_opened_at across the thread's tasks
+    openedOrder: number | null;
+  };
+  const aggByThread = new Map<string, TaskAgg>();
   for (const row of (taskStatesData ?? []) as unknown as TaskStateRow[]) {
-    // First occurrence per thread_id (array sorted DESC) — это max.
-    if (!maxTaskStateAtByThread.has(row.thread_id)) {
-      maxTaskStateAtByThread.set(row.thread_id, row.updated_at);
+    const attempts = typeof row.attempts === "number" ? row.attempts : 0;
+    const hint = typeof row.hint_count === "number" ? row.hint_count : 0;
+    const wrong = typeof row.wrong_answer_count === "number" ? row.wrong_answer_count : 0;
+    const order = typeof row.homework_tutor_tasks?.order_num === "number"
+      ? row.homework_tutor_tasks.order_num
+      : null;
+    const openedMs = parseIsoToMillis(row.student_opened_at);
+    const agg = aggByThread.get(row.thread_id) ?? {
+      hasCounters: false,
+      maxWrong: 0,
+      maxHint: 0,
+      stuckScore: -1,
+      stuckOrder: null,
+      maxOpenedMs: 0,
+      openedOrder: null,
+    };
+    if (attempts > 0 || hint > 0 || wrong > 0) agg.hasCounters = true;
+    if (wrong > agg.maxWrong) agg.maxWrong = wrong;
+    if (hint > agg.maxHint) agg.maxHint = hint;
+    // stuckOrder must point at a task that ITSELF crosses a stuck threshold.
+    // Ranking by (wrong+hint) alone could pick a non-stuck task (e.g. 2+2=4)
+    // over a genuinely stuck one (3+0=3) → wrong task number in «Застрял №N».
+    // Among crossing tasks, keep the worst (max wrong+hint).
+    const crossesStuck =
+      wrong >= RECENT_DIALOGS_STUCK_WRONG || hint >= RECENT_DIALOGS_STUCK_HINT;
+    if (crossesStuck && wrong + hint > agg.stuckScore) {
+      agg.stuckScore = wrong + hint;
+      agg.stuckOrder = order;
     }
+    if (openedMs > 0 && openedMs >= agg.maxOpenedMs) {
+      agg.maxOpenedMs = openedMs;
+      agg.openedOrder = order;
+    }
+    aggByThread.set(row.thread_id, agg);
   }
 
-  // 3. Для каждого thread compute latestEventAt (max между
-  //    last_student_message_at и max task_state updated_at). Треды без
-  //    ни одного signal (ни student message, ни task_state) отбрасываем —
-  //    provisioned thread без activity репетитору не интересен.
+  // 3. Keep only threads with GENUINE student activity. THIS IS THE BUG FIX:
+  //    a merely-assigned, never-opened HW has provisioned task_states (so the
+  //    old max(updated_at) signal lit up and surfaced «Открыл задачу №N»), but
+  //    it has no student message, no counters and no student_opened_at — drop
+  //    it. latestEventAt is built only from REAL event timestamps.
   type EnrichedThread = {
     row: ThreadRow;
+    agg: TaskAgg | undefined;
     latestEventAtMs: number;
     latestEventAtIso: string;
-    lastStudentMessageAtMs: number;
-    lastTaskStateAtMs: number;
-    kind: RecentDialogKind;
+    isCompleted: boolean;
   };
 
   const enrichedAll: EnrichedThread[] = [];
   for (const row of threads) {
+    const agg = aggByThread.get(row.id);
     const lastStudentMessageAtMs = parseIsoToMillis(row.last_student_message_at);
-    const lastTaskStateAtMs = parseIsoToMillis(
-      maxTaskStateAtByThread.get(row.id) ?? null,
-    );
-    const latestEventAtMs = Math.max(lastStudentMessageAtMs, lastTaskStateAtMs);
-    if (latestEventAtMs === 0) continue; // никаких signal'ов — пропускаем
-
-    const latestEventAtIso = new Date(latestEventAtMs).toISOString();
-    // Case A: task-advance timestamp строго новее последнего user-message,
-    //          либо user никогда не писал. Bootstrap AI intro не считается
-    //          за переписку per product решению.
-    const kind: RecentDialogKind =
-      lastStudentMessageAtMs === 0 || lastTaskStateAtMs > lastStudentMessageAtMs
-        ? "task_opened"
-        : "conversation";
+    const maxOpenedMs = agg?.maxOpenedMs ?? 0;
+    const isCompleted = row.status === "completed";
+    const hasActivity =
+      lastStudentMessageAtMs > 0 ||
+      (agg?.hasCounters ?? false) ||
+      maxOpenedMs > 0 ||
+      isCompleted;
+    if (!hasActivity) continue;
+    const latestEventAtMs = Math.max(lastStudentMessageAtMs, maxOpenedMs);
+    // No real student-event timestamp → skip. This also drops a thread that is
+    // 'completed' but was closed by the tutor with zero student trace (no
+    // message, no open): we surface STUDENT activity, not tutor actions. A
+    // genuinely student-completed thread always has last_student_message_at.
+    if (latestEventAtMs === 0) continue;
 
     enrichedAll.push({
       row,
+      agg,
       latestEventAtMs,
-      latestEventAtIso,
-      lastStudentMessageAtMs,
-      lastTaskStateAtMs,
-      kind,
+      latestEventAtIso: new Date(latestEventAtMs).toISOString(),
+      isCompleted,
     });
   }
 
   if (enrichedAll.length === 0) return jsonOk(cors, { items: [] });
 
-  // 4. Sort by latestEventAt DESC, затем dedup by student_id — первое
-  //    вхождение на ученика = его самый свежий thread.
+  // 4. Sort by latestEventAt DESC, then dedup by student_id (one row per
+  //    student = their single most recent event).
   enrichedAll.sort((a, b) => b.latestEventAtMs - a.latestEventAtMs);
 
   const seenStudents = new Set<string>();
   const picked: EnrichedThread[] = [];
   for (const e of enrichedAll) {
-    const sa = e.row.homework_tutor_student_assignments;
-    const studentId = sa?.student_id;
+    const studentId = e.row.homework_tutor_student_assignments?.student_id;
     if (!studentId) continue;
     if (seenStudents.has(studentId)) continue;
     seenStudents.add(studentId);
@@ -8851,53 +8918,55 @@ async function handleGetRecentDialogs(
 
   if (picked.length === 0) return jsonOk(cors, { items: [] });
 
-  const pickedThreads = picked.map((e) => e.row);
-  const pickedThreadIds = pickedThreads.map((t) => t.id);
+  const pickedThreadIds = picked.map((e) => e.row.id);
   const pickedStudentIds = Array.from(
     new Set(
-      pickedThreads.map(
-        (t) => t.homework_tutor_student_assignments.student_id,
-      ),
+      picked.map((e) => e.row.homework_tutor_student_assignments.student_id),
     ),
   );
 
-  // 5. Fetch the latest message per picked thread for Case B preview.
-  //    Case A rows не нуждаются в message content (UI рендерит system-style
-  //    «Открыл задачу №N»), но мы всё равно загружаем messages — если
-  //    threshold зазор очень маленький, имеем fallback и lastAuthor.
+  // 5. Latest STUDENT message PER picked thread — drives 'submitted' / 'wrote'
+  //    classification and the 'wrote' preview. role='user', visible only
+  //    (tutor notes / AI replies / system transitions are not student actions).
+  //    One .limit(1) query per thread (≤ 5, parallel — same shape as the
+  //    unread counts below). A single global-LIMIT query would let one chatty
+  //    thread starve another's latest message out of the result set → that
+  //    thread then misclassifies as 'opened' even though the student
+  //    wrote/submitted (resurrecting the false-"opened" bug). Per-thread
+  //    .limit(1) makes starvation impossible.
   type MessageRow = {
-    id: string;
     thread_id: string;
-    role: string | null;
     content: string | null;
     image_url: string | null;
+    message_kind: string | null;
+    task_order: number | null;
     created_at: string;
-    visible_to_student: boolean | null;
   };
-  const { data: messagesData, error: messagesError } = await db
-    .from("homework_tutor_thread_messages")
-    .select("id, thread_id, role, content, image_url, created_at, visible_to_student")
-    .in("thread_id", pickedThreadIds)
-    .order("created_at", { ascending: false })
-    .limit(pickedThreadIds.length * 12); // enough headroom to find a visible message per thread
-
-  if (messagesError) {
-    console.error("recent_dialogs_messages_error", { error: messagesError.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load latest messages");
-  }
-
-  const messages = (messagesData ?? []) as unknown as MessageRow[];
-  const latestByThread = new Map<string, MessageRow>();
-  for (const m of messages) {
-    if (m.visible_to_student === false) continue; // skip hidden tutor notes
-    // Skip internal task-transition system messages ("Задача N выполнена! Переходим...",
-    // "Все задачи выполнены! 🎉"). They are UI noise — would otherwise surface as the
-    // preview line on /tutor/home «Последние действия учеников» right after a student
-    // completes the last task. The actual conversation reply is what tutor needs to see.
-    if (m.role === "system") continue;
-    if (!latestByThread.has(m.thread_id)) {
-      latestByThread.set(m.thread_id, m);
-    }
+  const latestMsgResults = await Promise.all(
+    pickedThreadIds.map(async (tid) => {
+      const { data, error } = await db
+        .from("homework_tutor_thread_messages")
+        .select("thread_id, content, image_url, message_kind, task_order, created_at")
+        .eq("thread_id", tid)
+        .eq("role", "user")
+        .neq("visible_to_student", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        // Non-fatal: a single bad thread must not blank the whole feed.
+        console.error("recent_dialogs_latest_msg_error", {
+          thread_id: tid,
+          error: error.message,
+        });
+        return null;
+      }
+      return data as MessageRow | null;
+    }),
+  );
+  const latestStudentMsgByThread = new Map<string, MessageRow>();
+  for (const m of latestMsgResults) {
+    if (m) latestStudentMsgByThread.set(m.thread_id, m);
   }
 
   // 4. Resolve student names via tutor_students (display_name) + profiles.username fallback.
@@ -8934,15 +9003,12 @@ async function handleGetRecentDialogs(
   };
 
   // 6a. Per-thread unread count: number of student messages (role='user',
-  //     visible_to_student != false) с created_at > tutor_last_viewed_at.
-  //     Только для Case B — в Case A student не писал, unreadCount=0 по
-  //     определению. Один COUNT query на thread, всего ≤ 5 — дёшево благодаря
-  //     index (thread_id, created_at).
+  //     visible_to_student != false) with created_at > tutor_last_viewed_at.
+  //     For 'opened'-only threads the count is naturally 0 (no student msg) →
+  //     the row shows a dot, not a badge. One COUNT query per picked thread
+  //     (≤ 5) — cheap thanks to index (thread_id, created_at).
   const unreadCounts = await Promise.all(
     picked.map(async (e) => {
-      if (e.kind === "task_opened") {
-        return { threadId: e.row.id, count: 0 };
-      }
       const viewedAtIso = e.row.tutor_last_viewed_at ?? "1970-01-01T00:00:00Z";
       const { count, error } = await db
         .from("homework_tutor_thread_messages")
@@ -8964,13 +9030,21 @@ async function handleGetRecentDialogs(
   const unreadMap = new Map<string, number>();
   for (const u of unreadCounts) unreadMap.set(u.threadId, u.count);
 
+  // ` №N` suffix only when a task order is known.
+  const taskSuffix = (order: number | null | undefined): string =>
+    typeof order === "number" ? ` №${order}` : "";
+
   const items: RecentDialogItem[] = picked.map((e) => {
     const t = e.row;
     const sa = t.homework_tutor_student_assignments;
     const assignment = sa.homework_tutor_assignments;
     const studentId = sa.student_id;
     const student = studentMap.get(studentId);
-    const latest = latestByThread.get(t.id);
+    const agg = e.agg;
+    const latestMsg = latestStudentMsgByThread.get(t.id);
+    const fallbackOrder = typeof t.current_task_order === "number"
+      ? t.current_task_order
+      : null;
 
     const streamKey =
       (assignment.exam_type ?? student?.exam_type ?? "").toLowerCase();
@@ -8980,57 +9054,69 @@ async function handleGetRecentDialogs(
       student?.profiles?.username?.trim() ||
       "Ученик";
 
-    // Unread triggers off latestEventAt — task-advance тоже считается за
-    // «новое событие» для репетитора. GuidedThreadViewer на mount
-    // выставляет tutor_last_viewed_at = NOW() → sweep очищается.
+    // Unread triggers off latestEventAt. GuidedThreadViewer on mount sets
+    // tutor_last_viewed_at = NOW() → the signal clears on next /tutor/home load.
     const tutorViewedAtMs = parseIsoToMillis(t.tutor_last_viewed_at);
     const unread = e.latestEventAtMs > tutorViewedAtMs;
     const unreadCount = unreadMap.get(t.id) ?? 0;
 
-    if (e.kind === "task_opened") {
-      // Номер задачи для UI берём из thread.current_task_order (резолв
-      // через current_task_id → tasks.order_num — overhead на отдельный
-      // JOIN, а current_task_order поддерживается синхронно всеми handlers).
-      const taskOrder = typeof t.current_task_order === "number"
-        ? t.current_task_order
-        : 1;
-      // Preview-текст для frontend fallback (если старый клиент не
-      // понимает `kind`, он покажет хотя бы осмысленную строку).
-      const preview = `Открыл задачу №${taskOrder}`;
-      return {
-        kind: "task_opened",
-        studentId,
-        name,
-        stream,
-        // `'ai'` wire value keeps TASK-7 clients rendering a sensible chip
-        // until they rebuild. New clients branch on `kind`, ignoring author
-        // chip for Case A (see ChatRow.tsx).
-        lastAuthor: "ai",
-        unread,
-        unreadCount,
-        preview,
-        taskOrder,
-        at: e.latestEventAtIso,
-        hwId: assignment.id,
-        hwTitle: assignment.title ?? "Без названия",
-      };
+    // Classify the headline event — priority high→low. `preview` doubles as
+    // the graceful-degradation line for old clients that don't know `kind`.
+    const mk = latestMsg?.message_kind ?? null;
+    let kind: RecentDialogKind;
+    let taskOrder: number | undefined;
+    let preview: string;
+    if (e.isCompleted) {
+      kind = "completed";
+      preview = "Завершил ДЗ";
+    } else if (
+      agg &&
+      (agg.maxWrong >= RECENT_DIALOGS_STUCK_WRONG ||
+        agg.maxHint >= RECENT_DIALOGS_STUCK_HINT)
+    ) {
+      kind = "stuck";
+      taskOrder = (agg.stuckOrder ?? fallbackOrder) ?? undefined;
+      preview = `Застрял на задаче${taskSuffix(taskOrder)}`;
+    } else if (mk === "submission" || mk === "answer") {
+      kind = "submitted";
+      const msgOrder = typeof latestMsg?.task_order === "number"
+        ? latestMsg.task_order
+        : null;
+      taskOrder = (msgOrder ?? fallbackOrder) ?? undefined;
+      preview = `Сдал задачу${taskSuffix(taskOrder)}`;
+    } else if (mk === "hint_request") {
+      kind = "wrote";
+      preview = "Попросил подсказку";
+    } else if (latestMsg) {
+      // 'question' or any other student-authored chat message.
+      kind = "wrote";
+      preview = buildPreviewForDialog(latestMsg.content, latestMsg.image_url);
+    } else if ((agg?.maxOpenedMs ?? 0) > 0) {
+      // Only opened the statement — no message, no counters.
+      kind = "opened";
+      taskOrder = ((agg?.openedOrder ?? null) ?? fallbackOrder) ?? undefined;
+      preview = `Открыл условие задачи${taskSuffix(taskOrder)}`;
+    } else {
+      // Defensive: kept by genuine activity but no message row / open ts
+      // resolved (shouldn't happen with the per-thread fetch above). NEVER
+      // claim 'opened' here — that would resurrect the false-"opened" bug.
+      kind = "wrote";
+      preview = "Работает над ДЗ";
     }
 
-    // Case B — обычная переписка, preview из latest visible message.
-    const lastAuthor = authorFromMessage(latest?.role);
-    const preview = buildPreviewForDialog(latest?.content, latest?.image_url);
-    const at = latest?.created_at ?? e.latestEventAtIso;
-
     return {
-      kind: "conversation",
+      kind,
       studentId,
       name,
       stream,
-      lastAuthor,
+      // Backward-compat chip for old clients (they render "Ученик"); new UI
+      // branches on `kind` and ignores this.
+      lastAuthor: "student",
       unread,
       unreadCount,
       preview,
-      at,
+      taskOrder,
+      at: e.latestEventAtIso,
       hwId: assignment.id,
       hwTitle: assignment.title ?? "Без названия",
     };

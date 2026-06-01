@@ -1,5 +1,13 @@
 import { memo, type KeyboardEvent } from 'react';
-import { BookOpen, ChevronRight } from 'lucide-react';
+import {
+  AlertTriangle,
+  BookOpen,
+  CheckCircle2,
+  ChevronRight,
+  MessageCircle,
+  Send,
+  type LucideIcon,
+} from 'lucide-react';
 import type { DialogItem } from '@/hooks/useTutorRecentDialogs';
 
 export type { DialogItem };
@@ -16,29 +24,88 @@ function initialsOf(name: string): string {
   return (first + second).toUpperCase();
 }
 
-// TASK-8: Wire-level lastAuthor is 'student' | 'tutor' | 'ai'. Backend
-// returns 'ai' for kind='task_opened' (see handleGetRecentDialogs) for
-// legacy-safe rendering — new UI ignores it and branches on `kind` below.
-const AUTHOR_LABEL: Record<DialogItem['lastAuthor'], string> = {
-  student: 'Ученик',
-  tutor: 'Вы',
-  ai: 'AI',
-};
+// Per-kind visual config. All chip classes use existing .t-chip-- tokens from
+// src/styles/tutor-dashboard.css (rule 90 — no new colours / hex). Visual
+// ramp: gray (looked) → amber (talking) → blue (submitted) → green (done) →
+// red (needs help) — so a tutor scanning the feed reads urgency by colour.
+interface KindMeta {
+  Icon: LucideIcon;
+  chipClass: string;
+  chipLabel: string;
+  /** italic + muted preview — used for the low-signal 'opened' row. */
+  muted: boolean;
+}
 
-// Uses existing .t-chip tokens defined in src/styles/tutor-dashboard.css
-// (rule 90 design system — no new colours, no hex).
-const AUTHOR_CHIP_CLASS: Record<DialogItem['lastAuthor'], string> = {
-  student: 't-chip t-chip--warning',
-  tutor: 't-chip t-chip--info',
-  ai: 't-chip t-chip--neutral',
-};
+function kindMeta(chat: DialogItem): KindMeta {
+  const n = chat.taskOrder;
+  const num = typeof n === 'number' ? ` №${n}` : '';
+  switch (chat.kind) {
+    case 'completed':
+      return {
+        Icon: CheckCircle2,
+        chipClass: 't-chip t-chip--success',
+        chipLabel: 'Завершил ДЗ',
+        muted: false,
+      };
+    case 'stuck':
+      return {
+        Icon: AlertTriangle,
+        chipClass: 't-chip t-chip--danger',
+        chipLabel: typeof n === 'number' ? `Застрял · №${n}` : 'Застрял',
+        muted: false,
+      };
+    case 'submitted':
+      return {
+        Icon: Send,
+        chipClass: 't-chip t-chip--info',
+        chipLabel: `Сдал${num}`,
+        muted: false,
+      };
+    case 'opened':
+      return {
+        Icon: BookOpen,
+        chipClass: 't-chip t-chip--neutral',
+        chipLabel: `Задача${num}`,
+        muted: true,
+      };
+    case 'wrote':
+    default:
+      return {
+        Icon: MessageCircle,
+        chipClass: 't-chip t-chip--warning',
+        chipLabel: 'Ученик',
+        muted: false,
+      };
+  }
+}
+
+// The preview sentence. 'wrote' shows the actual message content (already
+// trimmed server-side); every other kind renders an event line that folds in
+// the homework title so the row is self-explanatory.
+function previewLine(chat: DialogItem): string {
+  const n = chat.taskOrder;
+  const num = typeof n === 'number' ? ` №${n}` : '';
+  switch (chat.kind) {
+    case 'completed':
+      return `Завершил ДЗ «${chat.hwTitle}»`;
+    case 'stuck':
+      return `Застрял на задаче${num} в «${chat.hwTitle}»`;
+    case 'submitted':
+      return `Сдал задачу${num} в «${chat.hwTitle}»`;
+    case 'opened':
+      return `Открыл условие задачи${num} в «${chat.hwTitle}»`;
+    case 'wrote':
+    default:
+      return chat.preview;
+  }
+}
 
 function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
   const streamChipClass =
     chat.stream === 'ЕГЭ' ? 't-chip t-chip--ege' : 't-chip t-chip--oge';
-  const authorLabel = AUTHOR_LABEL[chat.lastAuthor];
-  const authorChipClass = AUTHOR_CHIP_CLASS[chat.lastAuthor];
-  const isTaskOpened = chat.kind === 'task_opened';
+  const meta = kindMeta(chat);
+  const KindIcon = meta.Icon;
+  const preview = previewLine(chat);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -47,11 +114,10 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
     }
   };
 
-  // TASK-8 unread contract (spec §4 «Unread extended»):
-  //   `chat.unread`      — общий флаг «есть новое событие» (student message
-  //                        ИЛИ task-advance); драйвит визуал (bold name).
-  //   `chat.unreadCount` — численный counter только по student messages;
-  //                        для Case A всегда 0, поэтому badge только при > 0.
+  // Unread contract:
+  //   `chat.unread`      — общий флаг «есть новое событие»; драйвит bold name.
+  //   `chat.unreadCount` — counter только по student messages; badge при > 0,
+  //                        иначе (например 'opened') — точка.
   const unreadCount = chat.unreadCount ?? 0;
   const hasUnread = Boolean(chat.unread);
   const showBadge = unreadCount > 0;
@@ -59,9 +125,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
 
   const ariaParts = [
     `Открыть диалог с ${chat.name}`,
-    isTaskOpened
-      ? `открыл задачу №${chat.taskOrder ?? '?'} в «${chat.hwTitle}»`
-      : `последнее сообщение от ${authorLabel}`,
+    preview,
     showBadge
       ? `${unreadCount} непрочитанных сообщений`
       : hasUnread
@@ -75,11 +139,7 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
       className="chat-row"
       onClick={() => onOpen(chat)}
       onKeyDown={handleKeyDown}
-      title={
-        isTaskOpened
-          ? `Перейти в ДЗ «${chat.hwTitle}» — задача №${chat.taskOrder ?? '?'}`
-          : `Открыть ДЗ «${chat.hwTitle}» с чатом ученика`
-      }
+      title={`Открыть ДЗ «${chat.hwTitle}» — ${preview}`}
       aria-label={ariaParts.join(', ')}
       style={{ touchAction: 'manipulation' }}
     >
@@ -95,32 +155,23 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
             {chat.name}
           </span>
           <span className={streamChipClass}>{chat.stream}</span>
-          {isTaskOpened ? (
-            // Case A: system-style маркер «перешёл на задачу». BookOpen icon
-            // + нейтральная chip с номером задачи. Читается как «событие»,
-            // не «сообщение в чате» — убирает визуальный шум Author-chip.
-            <span
-              className="t-chip t-chip--neutral"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              aria-hidden="true"
-            >
-              <BookOpen size={12} />
-              Задача №{chat.taskOrder ?? '?'}
-            </span>
-          ) : (
-            <span className={authorChipClass}>{authorLabel}</span>
-          )}
+          <span
+            className={meta.chipClass}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            aria-hidden="true"
+          >
+            <KindIcon size={12} />
+            {meta.chipLabel}
+          </span>
         </span>
         <span
           className="chat-row__preview"
           style={{
-            fontStyle: isTaskOpened ? 'italic' : undefined,
-            color: isTaskOpened ? 'var(--sokrat-fg3)' : undefined,
+            fontStyle: meta.muted ? 'italic' : undefined,
+            color: meta.muted ? 'var(--sokrat-fg3)' : undefined,
           }}
         >
-          {isTaskOpened
-            ? `Открыл задачу №${chat.taskOrder ?? '?'} в «${chat.hwTitle}»`
-            : chat.preview}
+          {preview}
         </span>
       </span>
       <span className="chat-row__meta">
@@ -133,8 +184,8 @@ function ChatRowImpl({ chat, onOpen }: ChatRowProps) {
             {badgeText}
           </span>
         ) : hasUnread ? (
-          // Case A (task-advance без student message): нет числа, но есть
-          // unread-signal — показываем точку вместо counter.
+          // Unread event without a student-message count (e.g. 'opened'):
+          // show a dot instead of a number.
           <span
             aria-hidden="true"
             style={{

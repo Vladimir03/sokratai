@@ -461,21 +461,29 @@ Spec: `docs/delivery/features/check-format/spec.md`.
 - `POST /threads/:id/viewed-by-tutor` (`handleMarkThreadViewed`) обновляет timestamp. Ownership: `thread → student_assignment → assignment.tutor_id === auth.uid()`.
 - `GuidedThreadViewer` при mount вызывает `markThreadViewedByTutor(threadId)` fire-and-forget + invalidates `['tutor','home','recent-dialogs']` (ref-sentinel — одна сессия на mount).
 - Partial index `idx_homework_tutor_threads_student_message_desc`.
-- Dedup by `student_id` в Deno (PostgREST не имеет `DISTINCT ON`). `visible_to_student=false` (hidden tutor notes) исключаются из latest-message lookup.
-- `lastAuthor`: `role='user' → 'student'`, `role='tutor' → 'tutor'`, `role='assistant'|'system' → 'ai'`.
+- Dedup by `student_id` в Deno (PostgREST не имеет `DISTINCT ON`). `visible_to_student=false` (hidden tutor notes) и `role!='user'` исключаются из latest-student-message lookup.
 
-**Case A / Case B split** (payload `kind` discriminator):
-- `kind='task_opened'` — ученик перешёл на задачу, не писал. Signal: `max(task_states.updated_at) per thread > last_student_message_at` (или не писал вовсе). Bootstrap AI intro **не** считается за переписку. Preview = `Открыл задачу №N`, `lastAuthor='system'`.
-- `kind='conversation'` — переписка. Signal: `last_student_message_at ≥ max(task_states.updated_at)`. Preview = content latest visible message.
+**Genuine-activity filter (KEEP/DROP — фикс бага «Открыл задачу №1»):** тред показывается ТОЛЬКО при реальной активности ученика: `last_student_message_at IS NOT NULL` **ИЛИ** какой-то task_state имеет `attempts/hint_count/wrong_answer_count > 0` **ИЛИ** `student_opened_at IS NOT NULL` **ИЛИ** `thread.status='completed'`. Иначе тред отбрасывается. Причина бага: `provisionGuidedThread` пишет task_states с `updated_at=now()` при выдаче ДЗ, поэтому старый сигнал `max(task_states.updated_at)` ложно срабатывал на просто выданном (никогда не открытом) ДЗ. **`task_states.updated_at` БОЛЬШЕ НЕ сигнал** «открыл» — не возрождать.
+
+**`student_opened_at` (миграция `20260601120000`, `homework_tutor_task_states`):** реальный сигнал «ученик открыл условие». Записывается в `handleGetStudentProblem` (guarded `IS NULL`-update, fire-and-forget, первое открытие задачи) — открытие иначе не оставляет следа в БД (чистая frontend-навигация). **Service-role only:** НЕ GRANT'ится authenticated (как `tutor_force_completed_by`), НЕ в student-facing SELECT / `THREAD_SELECT`. Без backfill (исторические открытия = NULL).
+
+**Event-feed `kind` (v2.0, payload discriminator) — приоритет high→low при совпадении сигналов:**
+1. `completed` — `thread.status='completed'`. Preview «Завершил ДЗ».
+2. `stuck` — `max(wrong_answer_count) >= RECENT_DIALOGS_STUCK_WRONG (3)` ИЛИ `max(hint_count) >= RECENT_DIALOGS_STUCK_HINT (3)`. Preview «Застрял на задаче №N».
+3. `submitted` — последнее сообщение ученика (`role='user'`, visible) `message_kind ∈ {submission, answer}`. `taskOrder` из `task_order` сообщения. Preview «Сдал задачу №N».
+4. `wrote` — последнее сообщение ученика `message_kind ∈ {question, hint_request}` (hint_request → «Попросил подсказку»; иначе content preview).
+5. `opened` — `student_opened_at` есть, но НЕТ сообщений и counters. Preview «Открыл условие задачи №N».
+
+Продуктовая цель: различать «не решил, потому что не смог» (`opened`/`stuck`) от «даже не открывал» (тред скрыт фильтром). «Не приступал» вообще — surface в `StudentsActivityBlock` («Нет сдач»), не здесь.
 
 **Инварианты:**
-- `latestEventAt = max(last_student_message_at, max(task_states.updated_at per thread))`. Sort all items `latestEventAt DESC` перед dedup.
-- `unread = latestEventAt > tutor_last_viewed_at` — task-advance тоже триггерит. **Frontend driver = `chat.unread` boolean** (bold name + dot при Case A); `unreadCount` — Telegram-style badge при `> 0` (для Case A всегда 0).
-- Треды без signal (`latestEventAt === 0`) отбрасываются.
-- **Prefetch ordering:** handler НЕ использует `.order('updated_at')` (student check/hint не бампили эту колонку, top-50 LIMIT мог терять свежие). Fetch без ORDER BY + LIMIT 500, sort по `latestEventAt` в Deno. Belt-and-suspenders: `handleCheckAnswer`/`handleRequestHint` тоже обновляют `thread.updated_at`.
-- Wire-level `lastAuthor` backward compat: union `'student'|'tutor'|'ai'`; Case A возвращает `'ai'` (legacy-safe), новый UI branch-ит на `kind`.
-- Старый deploy без `kind` → фронт дефолтит `'conversation'` в `mapItem`.
-- Новые signal'ы — добавлять в Deno-side aggregate, не в SQL GROUP BY.
+- `latestEventAt = max(last_student_message_at, max(student_opened_at per thread))`. Sort items `latestEventAt DESC`, затем dedup by `student_id` (один ученик = один row, его свежайшее событие).
+- `taskOrder`: для `submitted` — `task_order` сообщения; для `stuck`/`opened` — `order_num` соответствующего task_state (embed `homework_tutor_tasks(order_num)` через FK `task_id`); fallback `thread.current_task_order`.
+- `unread = latestEventAt > tutor_last_viewed_at`. **Frontend driver = `chat.unread`** (bold name + dot); `unreadCount` (student messages since viewed) — badge при `> 0`, для `opened` всегда 0 → dot.
+- `lastAuthor` — **backward-compat only** (wire `'student'`); старые клиенты рендерят чип, новый `ChatRow` branch-ит по `kind` (цвет/иконка: gray `opened` / amber `wrote` / blue `submitted` / green `completed` / red `stuck` — все `.t-chip--*` токены, rule 90).
+- Backward/forward deploy: backend auto-деплоится раньше frontend (`deploy-sokratai`); `preview` несёт человекочитаемую строку для каждого `kind` (старый `ChatRow` отрендерит её). `useTutorRecentDialogs.mapItem.normalizeKind` маппит legacy `'task_opened'→'opened'`, `'conversation'→'wrote'`, unknown→`'wrote'`.
+- **Prefetch ordering:** без `.order(...)` + LIMIT 500, sort по `latestEventAt` в Deno.
+- Новые signal'ы — в Deno-side aggregate, не в SQL GROUP BY.
 
 **Deep-link contract:** `/tutor/homework/:hwId?student=:sid` → `TutorHomeworkDetail` через `useSearchParams` сидирует `expandedStudentId`, scroll один раз per id+student pair. Manual collapse сохраняется.
 

@@ -29,7 +29,7 @@ function RecentDialogsBlockImpl({
       <div className="t-section__header">
         <h2>Последние действия учеников</h2>
         <span className="t-section__meta">
-          переписка и открытие задач, сортировка по последнему событию
+          что ученики делали в ДЗ — новое сверху
         </span>
         <span style={{ marginLeft: 'auto' }}>
           <Button
@@ -53,8 +53,8 @@ function RecentDialogsBlockImpl({
           />
           <div className="t-empty__title">Пока нет активности учеников</div>
           <div className="t-empty__body">
-            Как только ученик откроет задачу или напишет в guided chat —
-            событие появится здесь.
+            Как только ученик откроет условие задачи, напишет в чат или сдаст
+            решение — событие появится здесь.
           </div>
           {onAddStudent && (
             <div className="t-empty__cta">
