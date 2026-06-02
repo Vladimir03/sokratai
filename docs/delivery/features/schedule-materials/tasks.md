@@ -16,6 +16,24 @@ P0 первым релизом (TASK-1..6), P1 — fast-follow через 1-2 д
 
 ---
 
+## Статус реализации (BUILD, 2026-06-02)
+
+**P0 (TASK-1..6) — реализовано, ветка `feat/schedule-materials`** (commit feature-only). Codex-ревью: CONDITIONAL PASS → блокеры закрыты. Durable-инварианты вынесены в **`.claude/rules/98-schedule-materials.md`**.
+
+- **TASK-1/2/4 (backend, CC-1):** миграции `20260602140000` (таблица + RLS + GRANT-whitelist + partial-unique homework_ref), `20260602140100` (bucket `lesson-materials`, 20 МБ / `application/pdf`), `20260602140200` (per-student `homework_ref` RLS — фикс ревью #2). Edge `lesson-materials-api` (tutor CRUD, `verify_jwt=true`) + `student-lessons-api` (read feed, column-whitelist, signed PDF, `entry_task_id`). Обе в `config.toml` + deploy workflow.
+- **TASK-3 (tutor drawer, CC-2):** `LessonMaterialsDrawer` + кнопка «Материалы» в `LessonDetailsDialog` (`TutorSchedule.tsx` минимально).
+- **TASK-5/6 (student, CC-3):** вкладка «Занятия» (`StudentSchedule` + `LessonFeedItem`/`LessonGroupHeader`/`MaterialChips`) + `LessonDetail` + Navigation-таб (leftmost) + пост-логин лендинг ученика → `/student/schedule`.
+
+**Фиксы по ревью:** AC-6 one-hop через `entry_task_id` (а не redirect-экран `/homework/:id`); per-student RLS на `homework_ref` (anti-leak defense-in-depth); rule-97 flat-parse на student client (не `extractApiErrorMessage`); `min-h-[100dvh]`; убрана мёртвая `MAX_LESSON_PDF_BYTES` в edge (лимит — на бакете).
+
+**Осознанные отклонения от SPEC §5.2:** `homework_assignment_id` FK = `ON DELETE CASCADE` (не `SET NULL` — иначе `chk_kind_payload` нарушается на cascade); видимость групповых занятий — через `tutor_lesson_participants` + SECURITY DEFINER `student_can_see_lesson`/`student_assigned_to_homework` (unified-группа = ОДНА строка `tutor_lessons` с `student_id IS NULL`, участники в junction-таблице).
+
+**P1 (TASK-7/8/9) — отложено (fast-follow):** notify-каскад (сейчас ownership-checked stub), «Создать ДЗ» из drawer, нудж после «Отметить проведённым».
+
+**Open:** push ветки + PR · Lovable preview (применить миграции + задеплоить 2 функции) · `deploy-sokratai` (frontend) · ручная QA (Safari/iOS, anti-leak, one-hop) · анонс репетиторам **после** деплоя.
+
+---
+
 ## Задачи
 
 ### TASK-1 (P0): Миграция `tutor_lesson_materials` + bucket

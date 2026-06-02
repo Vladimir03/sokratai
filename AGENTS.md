@@ -31,6 +31,7 @@ Agents implement, debug, validate. Humans own architecture, feature design, revi
 - `src/` frontend · `src/App.tsx` routes · `src/main.tsx` entry
 - Student: `src/pages/{Chat,Practice,Diagnostic,StudentHomework,StudentHomeworkDetail}.tsx`, `src/pages/student/*`, `src/components/homework/*`
 - Tutor: `src/pages/tutor/*`, `src/components/tutor/*`
+- Schedule materials («Занятия»): `src/components/tutor/schedule/*` (tutor drawer) · `src/pages/StudentSchedule.tsx` + `src/pages/student/LessonDetail.tsx` + `src/components/student/schedule/*` (student) · edge `lesson-materials-api` + `student-lessons-api` (rule 98)
 - Shared: `src/components/ui`, `src/types`
 - Backend: `supabase/functions/` (edge) · `supabase/migrations/` (DB)
 - Architecture: `docs/delivery/engineering/architecture/README.md` (human) + `modules.json` (machine) + `high-risk-zones.md`
@@ -145,6 +146,7 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `95-production-deploy.md` | When `deploy-sokratai` is required (Selectel VPS) |
 | `96-auth-ru-bypass.md` | 11 hard rules for auth flows in RU |
 | `97-edge-function-error-contract.md` | Non-2xx JSON error contract |
+| `98-schedule-materials.md` | «Занятия»: lesson materials, anti-leak/FK-drift, group model, one-hop ДЗ, post-login landing |
 | `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser |
 
 ---

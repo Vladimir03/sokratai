@@ -1,0 +1,40 @@
+# Schedule Materials — «Занятия» (`tutor_lesson_materials`)
+
+Репетитор крепит к занятию материалы (запись-URL / PDF-конспект / ссылку на существующее ДЗ); ученик читает их в новой вкладке **«Занятия»** (лента + деталка). Spec: `docs/delivery/features/schedule-materials/spec.md`. Build-лог: memory `project_schedule_materials.md`. P0 shipped 2026-06-02; P1 (notify/create-ДЗ/нудж) — отложено.
+
+## Архитектура
+- Таблица `tutor_lesson_materials` (`material_kind ∈ recording|pdf|homework_ref`, `chk_kind_payload`). Bucket `lesson-materials` (PDF only). Миграции `20260602140000` (table+RLS+GRANT), `_140100` (bucket), `_140200` (per-student homework_ref RLS).
+- Edge **`lesson-materials-api`** (tutor CRUD, `verify_jwt=true`) + **`student-lessons-api`** (student read feed, `verify_jwt=true`, service_role DB-клиент). Обе в `config.toml` + deploy workflow, без `--no-verify-jwt` (rule 96 #11).
+- Tutor UI: `LessonMaterialsDrawer` из `LessonDetailsDialog` (`TutorSchedule.tsx` — только кнопка+state, rule 10). Student UI: `/student/schedule` (лента) + `/student/schedule/:lessonId` (деталка), вкладка «Занятия» leftmost.
+
+## Группы — unified model (КРИТИЧНО, не как homework)
+Unified mini-group = **ОДНА** строка `tutor_lessons` с `student_id IS NULL`; участники в junction `tutor_lesson_participants(lesson_id, student_id, …)`. Поэтому членство НЕ резолвится через `tutor_lessons.student_id`/`group_session_id` — только через participants. Все student-проверки идут через **SECURITY DEFINER** хелперы (participants под tutor-only RLS → прямой subquery как `authenticated` даст false-negative):
+- `student_can_see_lesson(_lesson_id)` — `tutor_lessons.student_id = auth.uid()` OR participant.
+- `student_assigned_to_homework(_assignment_id)` — есть `homework_tutor_student_assignments` для `auth.uid()`.
+
+## Anti-leak (mirror rule 40)
+- `student-lessons-api` — **column-whitelist, никогда `SELECT *`**; `tutor_lessons.notes` и tutor-only поля НЕ отдаются. `tutor_id`/`student_id` читаются server-side (имя тутора, membership) и **drop'аются из ответа** (явный маппинг, не spread).
+- **`homework_ref` виден только назначенному ученику** — на ОБОИХ путях: feed (`loadHomeworkInfo` скоупит по `student_id = uid`, не-назначенному омитит) И RLS (`tlm_student_select`: `material_kind <> 'homework_ref' OR student_assigned_to_homework(...)`). Co-participant не получает UUID чужого ДЗ даже прямым PostgREST.
+
+## FK-дрейф ownership (`lesson-materials-api`, mirror rule 40)
+`tutor_lessons.tutor_id → tutors.id`; `homework_tutor_assignments.tutor_id → auth.users.id`. `homework_ref` attach требует ВСЕ три: (а) lesson owned (`lesson.tutor_id === resolveTutorPkId(uid)`); (б) `assignment.tutor_id === uid` (auth.uid, НЕ tutorPkId); (в) assignment назначено ученику занятия (`studentSet = lesson.student_id ∪ participants`). Иначе 403 `INVALID_HOMEWORK_REF`. 1:1 на занятие — partial-unique index + 409 `HW_REF_EXISTS`.
+
+## Прочие инварианты
+- `homework_assignment_id` FK = **`ON DELETE CASCADE`** (НЕ `SET NULL` — иначе строка `homework_ref` с NULL id молча нарушает `chk_kind_payload`: Postgres не перепроверяет CHECK на cascade).
+- **PDF ≤20 МБ + `application/pdf` энфорсятся БАКЕТОМ** (`file_size_limit`/`allowed_mime_types`, миграция `_140100`) на upload — авторитетно. В edge байт-чек НЕ нужен (не плодить мёртвую `MAX_LESSON_PDF_BYTES`). Клиент дополнительно pre-check'ит (`lessonMaterialsApi.MAX_LESSON_PDF_BYTES`).
+- **DELETE** (`lesson-materials-api`): ownership → удалить row → `storage.remove()` только для `kind='pdf'` (rule 50 order; recording/homework_ref не трогают storage/ДЗ).
+- **One-hop ДЗ (AC-6):** `student-lessons-api` возвращает `entry_task_id` в `homework_ref` (резолв `current_task_id → first-unfinished → first by order_num`); чип/кнопка идут прямо на `/student/homework/:id/problem/:entry_task_id`, fallback `/homework/:id` только если `entry_task_id` null. НЕ вести на redirect-only `/homework/:id` как основной путь.
+
+## Клиентские контракты
+- `lessonMaterialsApi.ts` (tutor): `supabase.functions.invoke('lesson-materials-api/<subpath>')` + `extractEdgeFunctionError` (subpath роутится — `FunctionsClient` строит `new URL(${functionsUrl}/${name})`; functionsUrl = `api.sokratai.ru`, RU-safe).
+- `studentScheduleApi.ts` (student): транспорт-клон `requestStudentHomeworkApi` (401→refresh+retry→signOut, rule Phase 3.1), но **flat-shape парсинг напрямую** (`body.error`/`body.code`) — НЕ `extractApiErrorMessage` (тот трактует строковый `error` как code, mirror `tutorProgressApi`).
+- PDF/recording URL в браузер — recording = generic URL; pdf = `createSignedUrl` (TTL 3600) + `rewriteToProxy` (CC-1, server-side).
+
+## Пост-логин лендинг ученика → `/student/schedule`
+Изменён дефолт лендинга студента с `/chat` на `/student/schedule` в 9 точках: `Login.tsx` (pre-check, post-login, OAuth `redirectPath`), `SignUp.tsx` (×3), `TelegramLoginButton.tsx` (×3). Tutor-ветки (`/tutor/home`) не тронуты. Легко откатить (pilot-scope).
+
+## При расширении
+- Новый student-facing fetch материалов — только через service_role edge (column-whitelist), не прямой PostgREST с RLS.
+- Новый bucket для материалов — добавить в валидацию `lesson-materials-api` + bucket policy + (если уходит в браузер) signed-URL путь.
+- Новое поле, видимое ученику, — явное решение tutor-only / student-visible (default paranoid); расширять edge-whitelist, не клиентский select.
+- Группы — всегда через participants + SECURITY DEFINER хелперы, не `tutor_lessons.student_id`.
