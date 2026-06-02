@@ -1,0 +1,96 @@
+# Tasks: Подтверждение прошедших занятий (schedule-bulk-complete)
+
+**Дата:** 2026-06-02 · **SPEC:** `spec.md` (v1.0). Паттерн: Claude Code (plan mode) → lint/build/smoke → Codex (чистая сессия) → fix → merge → deploy-sokratai.
+
+## Деплой-порядок
+Backend (TASK-A) первым; затем frontend (TASK-B); после фронт-правок — `deploy-sokratai` (rule 95).
+
+---
+
+## TASK-A (P0): Backend — атомарное подтверждение
+- **Job:** R4 · **AC:** AC-2, AC-3, AC-4, AC-5
+- **Files:** RPC/миграция или `supabase/functions/*` (решить в plan mode), reuse `complete_lesson_and_create_payment`.
+- Атомарное подтверждение занятия (индивид: amount; группа: per-participant `payment_amount`, >0 → payment) + bulk-обёртка. Idempotency `(lesson_id, tutor_student_id)`. Ownership через `tutors.id`; только `booked` + `regular`.
+
+## TASK-B (P0): Frontend — баннер + sheet
+- **Job:** R4 · **AC:** AC-1, AC-2, AC-3, AC-4, AC-6
+- **Files:** новые компоненты `src/components/tutor/schedule/*`, `src/pages/tutor/TutorSchedule.tsx` (минимально: баннер+entry+state), reuse `LessonMaterialsDrawer`.
+- Дерив списка клиентом; sheet (индивид + группа); «Подтвердить все»; «не состоялось»; связка с материалами.
+
+## TASK-C: Верификация
+- Codex (чистая сессия) + ручная QA (Safari/iOS, деньги/идемпотентность, откат, окно 3ч/14д, расписание не сломано).
+
+---
+
+## Copy-paste промпты
+
+### CC-A — Backend (TASK-A)
+```
+Роль: senior product-minded full-stack engineer в SokratAI (Supabase/Deno). Reuse > rewrite. Финансовая логика — высокий риск.
+
+Контекст: фича schedule-bulk-complete — bulk-подтверждение прошедших занятий «проведено» (презумпция + подтверждение). Создаём backend для атомарного подтверждения с редактируемыми суммами и групповой посещаемостью.
+
+Прочитай: docs/delivery/features/schedule-bulk-complete/spec.md; .claude/rules/60-telegram-bot.md (оплаты: идемпотентность (lesson_id, tutor_student_id), pending/paid, дата=start_at), 10-safe-change-policy.md, 97-edge-function-error-contract.md; миграцию с complete_lesson_and_create_payment (group-aware) + tutor_lesson_participants; src/lib/tutorSchedule.ts (completeLessonAndCreatePayment), src/lib/tutorScheduleGroupCreate.ts (calculateLessonPaymentAmount, getLessonParticipants).
+
+Задача (plan mode сначала):
+1. Атомарное подтверждение ОДНОГО занятия с суммами:
+   - индивид: status='completed' + tutor_payments(pending, amount) — reuse/extend complete_lesson_and_create_payment.
+   - группа (unified, student_id IS NULL, участники в tutor_lesson_participants): per-participant суммы → participants.payment_amount → payments только для amount>0 (≤0 → пропуск) → status='completed'. ВСЁ в одной транзакции.
+   - Решить: новый RPC tutor_confirm_lesson(p_lesson_id, p_payload) vs extend существующего. Идемпотентность участника (повтор не дублирует payments).
+2. Bulk-обёртка для «Подтвердить все»: один вызов на массив занятий, per-lesson результат (ok/skip/error), без partial-corruption (каждое занятие атомарно).
+3. Ownership: tutor_lessons.tutor_id → tutors.id (resolveTutorPkId-паттерн). Только status='booked' + lesson_type='regular'; иначе отклонять.
+4. Edge → verify_jwt=true, flat {error,code} (rule 97), config.toml + deploy workflow (rule 96 #11) + drift-check. Чистый RPC → REVOKE/GRANT как у hw_tutor_* RPC.
+
+AC: AC-2/AC-3/AC-4. Деньги создаются ТОЛЬКО этим вызовом. «Не состоялось» — reuse cancelLesson, не в этом RPC.
+
+Guardrails: НЕ менять поведение complete_lesson_and_create_payment для текущего 3-кнопочного flow; идемпотентность; без overdue; дата=start_at; не логировать суммы/PII; без новых npm-deps.
+
+Mandatory end block: изменённые файлы; summary; lint/build/smoke-check (+drift если edge); self-check против AC + rule 60/10/97; docs обновить; deploy-напоминание.
+```
+
+### CC-B — Frontend (TASK-B)
+```
+Роль: senior product-minded full-stack engineer в SokratAI. Reuse > rewrite. Backend подтверждения готов (CC-A).
+
+Контекст: баннер «Прошедшие занятия (N) — подтвердите» на /tutor/schedule + sheet подтверждения. TutorSchedule.tsx — HIGH-RISK (rule 10).
+
+Прочитай: docs/delivery/features/schedule-bulk-complete/spec.md; .claude/rules/10, 60, 80, 90, 97; src/pages/tutor/TutorSchedule.tsx (LessonDetailsDialog, handleCompleteLesson, useTutorLessons, LessonMaterialsDrawer entry), src/lib/tutorScheduleGroupCreate.ts (getLessonParticipants, calculateLessonPaymentAmount), src/components/ui/sheet.tsx.
+
+Задача (plan mode):
+1. Дерив списка клиентом (useMemo, без нового запроса): booked + regular + (start_at+duration_min)+3ч < now + start_at > now−14д.
+2. Баннер вверху Расписания «Прошедшие занятия (N) — подтвердите» + «Позже». React.memo.
+3. Sheet (Radix): индивид-строка [✓ проведено]·ученик·время·[сумма editable 16px, дефолт=calculateLessonPaymentAmount]·[не состоялось]; групповая — getLessonParticipants → по участнику [✓ был]·имя·[сумма editable], снял «был» → 0. Один primary CTA «Подтвердить все» → CC-A bulk; «не состоялось» → cancelLesson.
+4. После успеха — non-blocking «Приложить записи?» → LessonMaterialsDrawer (reuse).
+5. TutorSchedule.tsx — МИНИМАЛЬНО: баннер + state + sheet. 3-кнопочный flow и handleCompleteLesson НЕ трогать (coexist, rule 10).
+
+AC: AC-1/2/3/4/6. До «Подтвердить» — ноль изменений в БД. Деньги показываем /100 (formatCurrency).
+
+Guardrails: rule 10 (минимум в TutorSchedule); rule 80 (16px, touch-action, без Array.at); rule 90 (один primary CTA, Lucide без эмодзи, socrat); performance (React.memo, lazy, нет framer-motion).
+
+Mandatory end block: изменённые файлы; summary; lint/build/smoke-check; self-check против AC + rule 10/60/80/90; БЛОК «🚀 Deploy needed».
+```
+
+### CODEX-REVIEW (TASK-C, чистая сессия)
+```
+Ты — независимый ревьюер SokratAI. Контекст автора недоступен. Дотошно, особенно к ФИНАНСАМ.
+
+Порядок: docs/.../tutor-ai-agents/16,17; docs/delivery/features/schedule-bulk-complete/spec.md; .claude/rules/10,60,80,90,97 (+96 #11 если edge); git diff (весь PR).
+
+Проверь (PASS/FAIL):
+- ФИНАНСЫ: деньги (tutor_payments) ТОЛЬКО на «Подтвердить» (AC-4)? идемпотентность (lesson_id, tutor_student_id) — повтор не дублирует? группа: «был»>0 → payment, «не был»→0 → НЕТ; edited суммы; атомарно (нет partial)?
+- No-show дефолт = 0; «не состоялось» → cancelled, 0 платежей.
+- Откат: отмена подтверждённого сторнирует payment (AC-5).
+- Окно: только regular + 3ч + 14д; trial/mock/consultation и старое НЕ трогаются (AC-6).
+- rule 10: TutorSchedule.tsx минимально, complete/cancel/create НЕ изменён.
+- rule 60: pending/paid, без overdue, дата=start_at.
+- Safari rule 80 (16px суммы, touch-action); design rule 90 (один primary CTA, без эмодзи); performance (memo/lazy).
+- Edge: flat {error,code}, config.toml+deploy (rule 96 #11). Деньги /100.
+- AC §spec: каждый PASS/FAIL.
+
+Формат: PASS / CONDITIONAL PASS / FAIL + находки (blocker/major/minor) с файл:строка и фиксом.
+```
+
+---
+
+## Definition of Done
+1. Job linkage ✓ (R4) 2. Spec ✓ 3. CC-A+CC-B impl 4. Codex review 5. Feedback fixed 6. No payment/schedule regression 7. AC §7 pass 8. deploy-sokratai + ручная QA.
