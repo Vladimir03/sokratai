@@ -27,6 +27,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.invite-preview]
     verify_jwt = false
+  [functions.lesson-materials-api]
+    verify_jwt = true
   [functions.oauth-google-callback]
     verify_jwt = false
   [functions.oauth-google-init]
@@ -42,6 +44,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
   [functions.setup-telegram-webhook]
     verify_jwt = false
   [functions.student-account]
+    verify_jwt = true
+  [functions.student-lessons-api]
     verify_jwt = true
   [functions.telegram-auth]
     verify_jwt = false

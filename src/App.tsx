@@ -27,6 +27,8 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const Chat = lazy(() => import("./pages/Chat"));
 const StudentHomework = lazy(() => import("./pages/StudentHomework"));
 const StudentHomeworkDetail = lazy(() => import("./pages/StudentHomeworkDetail"));
+const StudentSchedule = lazy(() => import("./pages/StudentSchedule"));
+const LessonDetail = lazy(() => import("./pages/student/LessonDetail"));
 // Phase 1 student homework problem screen — production data via
 // `useStudentProblemTask`. Mounted under <AuthGuard fullBleed> below so
 // the mobile-first 100dvh layout is preserved while still requiring a
@@ -211,6 +213,22 @@ const App = () => (
                     <HomeworkProblem />
                   </Suspense>
                 </AuthGuard>
+              }
+            />
+            <Route
+              path="/student/schedule"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentSchedule />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/student/schedule/:lessonId"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <LessonDetail />
+                </Suspense>
               }
             />
             <Route

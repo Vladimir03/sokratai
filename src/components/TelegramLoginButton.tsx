@@ -85,13 +85,13 @@ const TelegramLoginButton = ({
               if (isTutor) {
                 navigate("/tutor/home");
               } else {
-                navigate("/chat");
+                navigate("/student/schedule");
               }
             } else {
-              navigate("/chat");
+              navigate("/student/schedule");
             }
           } catch {
-            navigate("/chat");
+            navigate("/student/schedule");
           }
         }, 500);
         
