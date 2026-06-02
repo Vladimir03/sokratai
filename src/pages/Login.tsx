@@ -68,7 +68,7 @@ const Login = () => {
         if (isTutor) {
           navigate("/tutor/home");
         } else {
-          navigate("/chat");
+          navigate("/student/schedule");
         }
       }
     };
@@ -123,7 +123,7 @@ const Login = () => {
       }
 
       toast.success("Успешный вход!");
-      navigate("/chat");
+      navigate("/student/schedule");
     } catch (error: any) {
       toast.error(getAuthErrorMessage(error, "Ошибка входа"));
     } finally {
@@ -204,7 +204,7 @@ const Login = () => {
           {/* OAuth options — Google + Telegram */}
           <div className="flex flex-col items-stretch gap-3">
             <GoogleAuthButton
-              redirectPath="/chat"
+              redirectPath="/student/schedule"
               consentSource="google-oauth-student"
             />
             <div

@@ -68,7 +68,7 @@ const SignUp = () => {
       } = await supabase.auth.getSession();
       if (cancelled) return;
       if (session) {
-        navigate("/chat", { replace: true });
+        navigate("/student/schedule", { replace: true });
       }
     })();
     return () => {
@@ -188,7 +188,7 @@ const SignUp = () => {
       }
 
       toast.success("Регистрация успешна! Входим в систему...");
-      navigate("/chat");
+      navigate("/student/schedule");
     } catch (error) {
       toast.error(getAuthErrorMessage(error, "Ошибка регистрации"));
     } finally {
@@ -544,7 +544,7 @@ const SignUp = () => {
               <TelegramLoginButton className="w-full" />
             </div>
             <GoogleAuthButton
-              redirectPath="/chat"
+              redirectPath="/student/schedule"
               consentSource="google-oauth-student"
               enabled={consent}
             />

@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -75,6 +75,14 @@ import type {
   TutorStudentWithProfile,
   TutorWeeklySlot,
 } from '@/types/tutor';
+
+// schedule-materials: drawer to attach recording/PDF/homework to a lesson.
+// Lazy — keeps this large page's chunk lean (performance.md); only loads on first open.
+const LessonMaterialsDrawer = lazy(() =>
+  import('@/components/tutor/schedule/LessonMaterialsDrawer').then((m) => ({
+    default: m.LessonMaterialsDrawer,
+  })),
+);
 
 // =============================================
 // Constants & Utils
@@ -1825,6 +1833,7 @@ interface LessonDetailsDialogProps {
   onUpdate: () => void;
   onComplete?: (lessonId: string, amount: number, paymentStatus: string) => void;
   isCompleting?: boolean;
+  onOpenMaterials?: () => void;
 }
 
 function LessonDetailsDialog({
@@ -1836,6 +1845,7 @@ function LessonDetailsDialog({
   onUpdate,
   onComplete,
   isCompleting = false,
+  onOpenMaterials,
 }: LessonDetailsDialogProps) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -2217,7 +2227,16 @@ function LessonDetailsDialog({
               </Button>
             </>
           ) : (
-            lesson.status === 'booked' && (
+            <>
+              <Button
+                variant="outline"
+                style={{ touchAction: 'manipulation' }}
+                onClick={() => onOpenMaterials?.()}
+              >
+                <FileText className="mr-1.5 h-4 w-4" />
+                Материалы
+              </Button>
+              {lesson.status === 'booked' && (
               isPast ? (
                 /* Past booked lesson — 3 action buttons matching Telegram bot UX */
                 <div className="flex flex-col gap-2 w-full">
@@ -2262,7 +2281,8 @@ function LessonDetailsDialog({
                   </Button>
                 </>
               )
-            )
+            )}
+            </>
           )}
         </DialogFooter>
       </DialogContent>
@@ -2930,6 +2950,7 @@ function TutorScheduleContent() {
   const [reminderSettingsOpen, setReminderSettingsOpen] = useState(false);
   const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
+  const [materialsDrawerLesson, setMaterialsDrawerLesson] = useState<TutorLessonWithStudent | null>(null);
   const [selectedGroupBucket, setSelectedGroupBucket] = useState<GroupLessonBucket | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
@@ -4060,7 +4081,21 @@ function TutorScheduleContent() {
           onUpdate={() => refetchLessons()}
           onComplete={handleCompleteLesson}
           isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
+          onOpenMaterials={() => {
+            setLessonDetailsOpen(false);
+            setMaterialsDrawerLesson(selectedLesson);
+          }}
         />
+
+        {materialsDrawerLesson && (
+          <Suspense fallback={null}>
+            <LessonMaterialsDrawer
+              open={!!materialsDrawerLesson}
+              onOpenChange={(o) => { if (!o) setMaterialsDrawerLesson(null); }}
+              lesson={materialsDrawerLesson}
+            />
+          </Suspense>
+        )}
 
         <GroupDetailsDialog
           open={groupDetailsOpen}

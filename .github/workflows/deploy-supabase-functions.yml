@@ -46,6 +46,8 @@ jobs:
           supabase functions deploy tutor-manual-add-student
           supabase functions deploy tutor-update-student
           supabase functions deploy tutor-progress-api
+          supabase functions deploy lesson-materials-api
+          supabase functions deploy student-lessons-api
           supabase functions deploy oauth-google-init --no-verify-jwt
           supabase functions deploy oauth-google-callback --no-verify-jwt
           supabase functions deploy email-verify --no-verify-jwt
