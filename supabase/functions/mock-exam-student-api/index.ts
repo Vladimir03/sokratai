@@ -1197,7 +1197,9 @@ async function handleUploadPhoto(
   const ref = toStorageRef(bucket, path);
 
   // Persist ref into the canonical column per kind.
-  const MAX_PART2_BULK_PHOTOS = 7;
+  // 2026-06-01: raised 7 → 10 (Часть 2 = 6 задач, решения многостраничные).
+  // Frontend MAX_BULK_PART2_PHOTOS (StudentMockExam.tsx) держит тот же лимит.
+  const MAX_PART2_BULK_PHOTOS = 10;
   if (kind === "blank") {
     const { error } = await db
       .from("mock_exam_attempts")

@@ -1109,7 +1109,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // продолжает читать их `photo_url` для read-only показа. Новые attempts
   // используют только bulk-pack (uploadPart2Bulk ниже).
 
-  const MAX_BULK_PART2_PHOTOS = 7;
+  // 2026-06-01: raised 7 → 10. Часть 2 = 6 задач (KIM 21-26), решения часто
+  // занимают несколько страниц → 7 не хватало. Backend MAX_PART2_BULK_PHOTOS
+  // (mock-exam-student-api) держит тот же лимит — менять синхронно.
+  const MAX_BULK_PART2_PHOTOS = 10;
 
   const uploadPart2Bulk = useCallback(
     async (file: File) => {

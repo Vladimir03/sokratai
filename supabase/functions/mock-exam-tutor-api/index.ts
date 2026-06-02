@@ -1940,9 +1940,19 @@ async function handlePart1ManualScore(
       (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
       0,
     );
+    // Bug fix (2026-06-01): keep ИТОГО (total_score) in sync — never let stored
+    // total_score drift from its components. Only when already finalized
+    // (total_score !== null); pre-approval total_score stays null. Этот handler
+    // 409'ит на approved/manually_entered, поэтому здесь total_score обычно null
+    // (no-op) — но guard защищает от любого будущего «reopen approved» пути.
+    const attemptUpdate: Record<string, unknown> = { total_part1_score: totalPart1 };
+    if (attempt.total_score !== null) {
+      attemptUpdate.total_score =
+        totalPart1 + ((attempt.total_part2_score as number | null) ?? 0);
+    }
     const { error: totalsErr } = await db
       .from("mock_exam_attempts")
-      .update({ total_part1_score: totalPart1 })
+      .update(attemptUpdate)
       .eq("id", attemptId);
     if (totalsErr) {
       console.warn("mock_exam_part1_manual_score_totals_update_failed", {
@@ -2065,9 +2075,17 @@ async function handlePart1Finalize(
     0,
   );
 
+  // Bug fix (2026-06-01): resync total_score when attempt уже finalized (invariant
+  // total_score = part1 + part2). Этот handler 409'ит на approved (line ~1947),
+  // поэтому total_score обычно null здесь — guard защищает от future reopen path.
+  const finalizeUpdate: Record<string, unknown> = { total_part1_score: totalPart1 };
+  if (attempt.total_score !== null) {
+    finalizeUpdate.total_score =
+      totalPart1 + ((attempt.total_part2_score as number | null) ?? 0);
+  }
   const { error: updateErr } = await db
     .from("mock_exam_attempts")
-    .update({ total_part1_score: totalPart1 })
+    .update(finalizeUpdate)
     .eq("id", attemptId);
   if (updateErr) {
     console.error("mock_exam_part1_finalize_failed", { error: updateErr.message });
@@ -2347,9 +2365,20 @@ async function handleRecheckPart1(
         (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
         0,
       );
+      // Bug fix (2026-06-01) — THE drift culprit: handleRecheckPart1 allows
+      // approved attempts (Егор пересчитывает старые binary-scored пробники
+      // кнопкой «Применить критерии ФИПИ»). Раньше обновлялся ТОЛЬКО
+      // total_part1_score → total_score (ИТОГО в heatmap + балл ученика на
+      // result page) застывал: part1 рос на partial credit, итог нет.
+      // Инвариант: total_score (non-null) = part1 + part2.
+      const recheckUpdate: Record<string, unknown> = { total_part1_score: newTotal };
+      if (attempt.total_score !== null) {
+        recheckUpdate.total_score =
+          newTotal + ((attempt.total_part2_score as number | null) ?? 0);
+      }
       const { error: attemptUpdateErr } = await db
         .from("mock_exam_attempts")
-        .update({ total_part1_score: newTotal })
+        .update(recheckUpdate)
         .eq("id", attemptId);
       if (attemptUpdateErr) {
         console.warn("mock_exam_recheck_part1_total_update_failed", {

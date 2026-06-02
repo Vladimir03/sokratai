@@ -151,7 +151,7 @@ export interface StudentMockExamAssignmentView {
     blank_photo_url: string | null;
     /** Fallback Часть 1 photo (signed URL) — для случая когда ученик не на ФИПИ бланке. */
     part1_blank_photo_url: string | null;
-    /** Optional bulk Part 2 photos (signed URL array, max 7). Additive to per-task. */
+    /** Optional bulk Part 2 photos (signed URL array, max 10). Additive to per-task. */
     part2_bulk_photo_urls: string[];
     total_part1_score: number | null;
     total_part2_score: number | null;

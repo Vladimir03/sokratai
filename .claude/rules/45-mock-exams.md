@@ -30,6 +30,7 @@ Endpoint hardening (`mock-exam-public`, `mock-exam-student-api`):
 - **Bulk Часть 2** = two-pass: Pass 1 assigns photos→KIM (`buildBulkAssignmentPrompt`), Pass 2 grades per-KIM in parallel. Persisted tutor `assigned_photo_indices` are NOT overwritten on regrade.
 - **Tutor status preservation:** the bulk path never overwrites rows `status IN (tutor_approved, tutor_modified)` — only `ai_draft_json`.
 - **Approve never blocks:** missing scores auto-zero with a transparent `tutor_comment` (no `INCOMPLETE_*` 400s).
+- **`total_score` is STORED, not derived** — heatmap (`MockExamHeatmap.tsx`) and student result API read the column directly, no recompute. **Invariant: when non-null, `total_score = COALESCE(total_part1_score,0) + COALESCE(total_part2_score,0)`.** Every handler that writes `total_part1_score`/`total_part2_score` MUST resync `total_score` in the same UPDATE (guard `if (attempt.total_score !== null)` — pre-approval stays null). `handleApproveAll` writes all three together; `handleRecheckPart1` / `handlePart1ManualScore` / `handlePart1Finalize` touch part1 only → each resyncs. Drift bug 2026-06-01: recheck («Применить критерии ФИПИ») on an `approved` attempt raised part1 via partial credit but left `total_score` stale → ИТОГО showed 19 instead of 21 (part1 19 + part2 2). Backfill migration `20260601140000`. `manually_entered` is exempt (its `total_score` is tutor-entered, parts NULL).
 
 ## Part 1 — deterministic checker + OCR
 
