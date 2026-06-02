@@ -5,10 +5,8 @@
  * 67462e3b, but the component itself has not landed in main yet. This stub
  * keeps the preview build green; replace when CC-B is merged.
  */
-import type { TutorLesson } from '@/types/tutor';
-
 interface Props {
-  onOpenMaterials?: (lesson: TutorLesson) => void;
+  onOpenMaterials?: (lesson: any) => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
