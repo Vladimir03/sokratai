@@ -24,7 +24,10 @@ function initialsOf(name: string): string {
 }
 
 // lucide icons and our SokratBearIcon both satisfy this minimal shape.
-type ChipIcon = ComponentType<{ size?: number; className?: string }>;
+// Use a loose prop signature — lucide's ForwardRefExoticComponent declares
+// `size` as `string | number`, which is incompatible with a strict
+// `{ size?: number }` shape under TS exactOptionalPropertyTypes.
+type ChipIcon = ComponentType<any>;
 
 // Per-kind visual config. Chip classes use existing .t-chip-- tokens from
 // tutor-dashboard.css (rule 90 — no hex). The chip now carries the ACTION (so
