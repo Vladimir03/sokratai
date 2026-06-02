@@ -1006,6 +1006,8 @@ export type Database = {
           thread_id: string
           tutor_force_completed_at: string | null
           tutor_force_completed_by: string | null
+          tutor_reviewed_at: string | null
+          tutor_reviewed_by: string | null
           tutor_score_override: number | null
           tutor_score_override_at: string | null
           tutor_score_override_by: string | null
@@ -1033,6 +1035,8 @@ export type Database = {
           thread_id: string
           tutor_force_completed_at?: string | null
           tutor_force_completed_by?: string | null
+          tutor_reviewed_at?: string | null
+          tutor_reviewed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
@@ -1060,6 +1064,8 @@ export type Database = {
           thread_id?: string
           tutor_force_completed_at?: string | null
           tutor_force_completed_by?: string | null
+          tutor_reviewed_at?: string | null
+          tutor_reviewed_by?: string | null
           tutor_score_override?: number | null
           tutor_score_override_at?: string | null
           tutor_score_override_by?: string | null
@@ -3720,6 +3726,34 @@ export type Database = {
         Returns: Json
       }
       hw_tutor_force_complete_task: {
+        Args: {
+          p_assignment_id: string
+          p_comment: string
+          p_score: number
+          p_student_id: string
+          p_task_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
+      hw_tutor_reopen_review: {
+        Args: {
+          p_assignment_id: string
+          p_student_id: string
+          p_task_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
+      hw_tutor_review_all_ai: {
+        Args: {
+          p_assignment_id: string
+          p_student_id: string
+          p_tutor_id: string
+        }
+        Returns: Json
+      }
+      hw_tutor_review_task: {
         Args: {
           p_assignment_id: string
           p_comment: string
