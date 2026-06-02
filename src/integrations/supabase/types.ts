@@ -2771,6 +2771,70 @@ export type Database = {
           },
         ]
       }
+      tutor_lesson_materials: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          group_session_id: string | null
+          homework_assignment_id: string | null
+          id: string
+          lesson_id: string
+          material_kind: string
+          sort_order: number
+          title: string | null
+          tutor_id: string
+          url: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          group_session_id?: string | null
+          homework_assignment_id?: string | null
+          id?: string
+          lesson_id: string
+          material_kind: string
+          sort_order?: number
+          title?: string | null
+          tutor_id: string
+          url?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          group_session_id?: string | null
+          homework_assignment_id?: string | null
+          id?: string
+          lesson_id?: string
+          material_kind?: string
+          sort_order?: number
+          title?: string | null
+          tutor_id?: string
+          url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_lesson_materials_homework_assignment_id_fkey"
+            columns: ["homework_assignment_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_lesson_materials_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_lesson_materials_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_lesson_participants: {
         Row: {
           created_at: string
@@ -3883,6 +3947,11 @@ export type Database = {
           read_ct: number
         }[]
       }
+      student_assigned_to_homework: {
+        Args: { _assignment_id: string }
+        Returns: boolean
+      }
+      student_can_see_lesson: { Args: { _lesson_id: string }; Returns: boolean }
       update_group_participant_payment_status: {
         Args: {
           _lesson_id: string
