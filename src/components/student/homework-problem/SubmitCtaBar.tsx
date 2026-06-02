@@ -12,6 +12,11 @@ interface SubmitCtaBarProps {
    * Default false для backward-compat с callsites, не передающими этот prop.
    */
   isTutorClosed?: boolean;
+  /**
+   * R1 (2026-06-02): репетитор подтвердил задачу («проверено»). Приоритет над
+   * isTutorClosed в completed-subtitle. Default false для backward-compat.
+   */
+  isReviewed?: boolean;
   /** Whether there is a next task to navigate to when completed. */
   hasNextTask: boolean;
   /** Tap when isCompleted → advance to next task (or back to list). */
@@ -50,6 +55,7 @@ export function SubmitCtaBar({
   onOpen,
   isCompleted,
   isTutorClosed = false,
+  isReviewed = false,
   hasNextTask,
   onNavigateNext,
   draftLabel,
@@ -63,7 +69,7 @@ export function SubmitCtaBar({
       <div className="flex items-center justify-between gap-3 px-4 py-3 bg-white border-t border-socrat-border-light shrink-0">
         <div className="flex flex-col min-w-0 flex-1">
           <span className="text-[14px] font-bold text-slate-900 leading-tight">
-            {isTutorClosed ? 'Закрыто репетитором' : 'Задача сдана'}
+            {isReviewed ? 'Проверено репетитором' : isTutorClosed ? 'Закрыто репетитором' : 'Задача сдана'}
           </span>
           <span className="text-[12px] font-medium text-slate-500 truncate">
             {hasNextTask ? 'Переходи к следующей' : 'Все задачи решены'}

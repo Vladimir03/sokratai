@@ -1,0 +1,80 @@
+/* ============================================================
+   SokratAI hero v2 — additions on top of hero/hero.css
+   Native scales: goal card owns the header; exam chips neutral.
+   ============================================================ */
+
+/* single centered stage (not the 3-up scroll) */
+.v2-stage { display:flex; justify-content:center; padding:26px 26px 80px; }
+.v2-frame { width:1180px; max-width:100%; }
+.cv-top .v2-switch { margin-left:auto; display:flex; align-items:center; gap:10px; }
+.cv-top .v2-switch .sl { font-size:12px; color:var(--fg3); }
+.cv-jump .sub { font-weight:400; color:var(--fg-muted); margin-left:4px; }
+
+/* ── score rollup (native unit) on a work ───────────────── */
+.work-score .sub, .tc-score .sub { display:block; font-size:11.5px; font-weight:600; color:var(--fg3); margin-top:2px; letter-spacing:0; }
+.mark-tag { display:inline-flex; align-items:center; font-size:10px; font-weight:600; letter-spacing:0.05em; text-transform:uppercase; color:var(--fg3); border:1px solid var(--border); border-radius:4px; padding:2px 5px; margin-left:6px; vertical-align:2px; }
+
+/* exam chip — neutral, icon differentiates (rule 90: green is reserved) */
+.exam-chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; color:var(--fg2); background:var(--surface); border:1px solid var(--border); border-radius:5px; padding:2px 7px 2px 6px; }
+.exam-chip svg { width:12px; height:12px; color:var(--fg-muted); }
+
+/* ── GOAL CARD (replaces "средний балл") ─────────────────── */
+.goalcard {
+  display:grid; grid-template-columns: 1fr 300px; gap:22px; align-items:center;
+  background:var(--card); border:1px solid var(--border); border-radius:13px;
+  padding:16px 18px;
+}
+.goalcard .gl-label { font-size:11px; font-weight:600; color:var(--fg3); letter-spacing:0.04em; text-transform:uppercase; display:flex; align-items:center; gap:6px; }
+.goalcard .gl-label svg { width:14px; height:14px; color:var(--green-700); }
+.goalcard .gl-main { margin-top:9px; display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.goalcard .gl-cur { font-size:32px; font-weight:800; letter-spacing:-0.02em; color:var(--fg1); line-height:1; }
+.goalcard .gl-arrow { color:var(--fg-muted); }
+.goalcard .gl-arrow svg { width:18px; height:18px; }
+.goalcard .gl-target { font-size:16px; font-weight:600; color:var(--fg2); display:inline-flex; align-items:baseline; gap:5px; }
+.goalcard .gl-target .t { font-size:22px; font-weight:800; color:var(--green-700); letter-spacing:-0.01em; }
+.goalcard .gl-edit { display:inline-flex; align-items:center; gap:4px; font-size:11.5px; color:var(--fg-muted); cursor:pointer; border:1px solid transparent; border-radius:6px; padding:3px 6px; }
+.goalcard .gl-edit:hover { color:var(--green-700); background:var(--green-50); }
+.goalcard .gl-edit svg { width:13px; height:13px; }
+.goalcard .gl-target-edit { font:inherit; font-size:16px; width:64px; border:1px solid var(--green-700); border-radius:7px; padding:3px 7px; box-shadow:var(--focus); }
+.goalcard .gl-bar { margin-top:12px; height:8px; border-radius:5px; background:var(--border); position:relative; overflow:visible; }
+.goalcard .gl-bar .fill { position:absolute; left:0; top:0; bottom:0; border-radius:5px; background:linear-gradient(90deg,var(--green-500),var(--green-700)); }
+.goalcard .gl-bar .goalpin { position:absolute; top:-4px; width:2px; height:16px; background:var(--green-800); border-radius:1px; }
+.goalcard .gl-bar .goalpin::after { content:'цель'; position:absolute; top:-15px; left:50%; transform:translateX(-50%); font-size:9.5px; font-weight:600; color:var(--green-800); white-space:nowrap; }
+.goalcard .gl-bar .gl-thresh { position:absolute; top:-2px; width:1.5px; height:12px; background:var(--fg-muted); border-radius:1px; }
+.goalcard .gl-thresh-cap { color:var(--fg-muted); }
+.goalcard .gl-scale { margin-top:9px; display:flex; justify-content:space-between; font-size:10.5px; color:var(--fg-muted); }
+.goalcard .gl-note { margin-top:9px; font-size:12px; color:var(--fg3); display:flex; align-items:center; gap:6px; }
+.goalcard .gl-note .dl { font-weight:600; }
+.goalcard .gl-note .approx { color:var(--fg-muted); }
+
+/* sparkline panel (right) */
+.gl-spark { background:var(--surface); border:1px solid var(--border-l); border-radius:11px; padding:11px 12px 9px; }
+.gl-spark .sh { font-size:11px; font-weight:600; color:var(--fg3); display:flex; align-items:center; justify-content:space-between; }
+.gl-spark .sh .dyn { font-weight:700; }
+.gl-spark .sh .dyn.up { color:var(--s-success-fg); }
+.gl-spark .sh .dyn.down { color:var(--s-danger-fg); }
+.gl-spark svg { width:100%; height:54px; display:block; margin-top:5px; }
+.gl-spark .sx { display:flex; justify-content:space-between; font-size:9.5px; color:var(--fg-muted); margin-top:3px; }
+
+/* summary metric tiles row (3 tiles now) */
+.summary-tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:14px; }
+
+/* ── STATES (empty / error / skeleton) — shared desktop+mobile ── */
+.state-wrap { display:flex; flex-direction:column; align-items:center; text-align:center; padding:54px 28px 60px; gap:6px; }
+.state-ill { width:64px; height:64px; border-radius:18px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--fg3); margin-bottom:10px; }
+.state-ill.danger { background:var(--s-danger-bg); border-color:#FCA5A5; color:var(--s-danger-fg); }
+.state-h { margin:0; font-size:18px; font-weight:700; color:var(--fg1); letter-spacing:-0.01em; }
+.state-p { margin:0 0 12px; font-size:13.5px; color:var(--fg3); max-width:400px; line-height:1.5; text-wrap:pretty; }
+.state-wrap .btn--primary { min-height:44px; }
+
+@keyframes skl { 0%{ background-position:-200% 0 } 100%{ background-position:200% 0 } }
+.skel { background:linear-gradient(90deg,#EDF0F3 25%,#F7F9FB 37%,#EDF0F3 63%); background-size:200% 100%; animation:skl 1.5s linear infinite; border-radius:8px; }
+.skel-wrap { padding:18px 24px 28px; }
+.skel-goal { height:120px; border-radius:13px; }
+.skel-tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:14px; }
+.skel-tile { height:80px; border-radius:11px; }
+.skel-work { display:grid; grid-template-columns:38px 1fr 64px; gap:14px; align-items:center; padding:16px; border:1px solid var(--border); border-radius:12px; margin-top:12px; }
+.skel-ico { width:38px; height:38px; border-radius:10px; }
+.skel-lines { display:flex; flex-direction:column; gap:9px; min-width:0; }
+.skel-l1 { height:13px; width:58%; } .skel-l2 { height:11px; width:34%; } .skel-heat { height:24px; width:190px; max-width:100%; border-radius:6px; }
+.skel-score { height:20px; width:52px; justify-self:end; }

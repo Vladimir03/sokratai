@@ -556,5 +556,39 @@ if (criteriaResult.status !== 0) {
 }
 ok("criteria template invariants pass (sum totals + IELTS disabled + non-language null)");
 
+// ─── 10. Score-scales mirror invariant (student-progress R2) ─────────────────
+// `src/lib/scoreScales.ts` (frontend) ↔ `supabase/functions/_shared/score-scales.ts`
+// (Deno) must keep EGE_PHYS_2026.map identical (current_level / pct_to_goal / trend
+// depend on it). Text-based: extract the `map: [...]` array from both + compare.
+console.log("");
+console.log("10. Score-scales mirror invariant (student-progress R2)...");
+const scaleFront = path.join(srcDir, "lib", "scoreScales.ts");
+const scaleDeno = path.join(rootDir, "supabase", "functions", "_shared", "score-scales.ts");
+if (!fs.existsSync(scaleFront) || !fs.existsSync(scaleDeno)) {
+  fail("score-scales module missing (frontend or Deno copy)");
+}
+function extractEgeMap(filePath) {
+  const content = readText(filePath);
+  const m = content.match(/map:\s*\[([\s\S]*?)\]/);
+  if (!m) fail(`EGE_PHYS_2026.map not found in ${rel(filePath)}`);
+  return m[1]
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => /^-?\d+$/.test(s))
+    .map(Number);
+}
+const frontMap = extractEgeMap(scaleFront);
+const denoMap = extractEgeMap(scaleDeno);
+if (frontMap.length !== denoMap.length || frontMap.some((v, i) => v !== denoMap[i])) {
+  fail("EGE_PHYS_2026.map DRIFT between scoreScales.ts and _shared/score-scales.ts — must stay identical");
+}
+if (frontMap.length !== 46) {
+  fail(`EGE_PHYS_2026.map must have 46 entries (0..45 primary), got ${frontMap.length}`);
+}
+if (frontMap[21] !== 59 || frontMap[45] !== 100 || frontMap[0] !== 0) {
+  fail(`EGE_PHYS_2026.map lookup wrong: [21]=${frontMap[21]} (exp 59), [45]=${frontMap[45]} (exp 100), [0]=${frontMap[0]} (exp 0)`);
+}
+ok("score-scales mirror in sync (46 entries, primary 21→59, 45→100)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

@@ -46,6 +46,12 @@ export interface TaskStepItem {
    * (отличаем от AI-CORRECT closure).
    */
   tutor_force_completed_at?: string | null;
+  /**
+   * 2026-06-02 (student-progress R1): ISO timestamp когда репетитор подтвердил
+   * задачу («проверено»). Бейдж «Проверено» имеет приоритет над «Закрыто
+   * репетитором». NULL = не подтверждена.
+   */
+  tutor_reviewed_at?: string | null;
 }
 
 function formatScore(value: number): string {
@@ -167,12 +173,17 @@ const TaskStepper = memo(({ tasks, currentTaskOrder, onTaskClick, celebratingTas
                 <TooltipContent side="bottom" className="max-w-[260px] text-xs">
                   <div className="font-medium">Задача {task.order_num}</div>
                   <div className="text-muted-foreground mb-1">{STATUS_LABELS[task.status]}</div>
-                  {task.status === 'completed' && task.tutor_force_completed_at != null && (
+                  {task.tutor_reviewed_at != null ? (
+                    <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">
+                      <Check className="h-3 w-3" />
+                      Проверено
+                    </div>
+                  ) : task.status === 'completed' && task.tutor_force_completed_at != null ? (
                     <div className="mb-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 ring-1 ring-emerald-200">
                       <Check className="h-3 w-3" />
                       Закрыто репетитором
                     </div>
-                  )}
+                  ) : null}
                   {task.status === 'completed' && task.max_score != null && (
                     <div className="mb-1 space-y-0.5">
                       {task.tutor_score_override != null ? (

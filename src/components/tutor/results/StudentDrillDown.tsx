@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
+import { BadgeCheck, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -21,6 +21,7 @@ import {
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsPerStudent,
 } from '@/lib/tutorHomeworkApi';
+import { reviewAllAi } from '@/lib/tutorProgressApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 // ─── StudentDrillDown (TASK-6, AC-3 / AC-4) ──────────────────────────────────
@@ -88,6 +89,7 @@ export function StudentDrillDown({
         tutor_score_override: number | null;
         tutor_score_override_comment: string | null;
         tutor_force_completed_at: string | null;
+        tutor_reviewed_at: string | null;
         status: string;
       }
     >();
@@ -101,6 +103,7 @@ export function StudentDrillDown({
         tutor_score_override: ts.tutor_score_override ?? null,
         tutor_score_override_comment: ts.tutor_score_override_comment ?? null,
         tutor_force_completed_at: ts.tutor_force_completed_at ?? null,
+        tutor_reviewed_at: ts.tutor_reviewed_at ?? null,
         status: ts.status ?? 'active',
       });
     }
@@ -118,6 +121,7 @@ export function StudentDrillDown({
         tutor_score_override: cell?.tutor_score_override ?? null,
         tutor_score_override_comment: cell?.tutor_score_override_comment ?? null,
         tutor_force_completed_at: cell?.tutor_force_completed_at ?? null,
+        tutor_reviewed_at: cell?.tutor_reviewed_at ?? null,
         // Если cell отсутствует — это provisionGuidedThread-stub: status='active'.
         // Если cell есть — берём его status (может быть 'completed' или 'active').
         status: cell?.status ?? 'active',
@@ -131,6 +135,14 @@ export function StudentDrillDown({
   // `!== 'completed'` и включал бы locked/skipped — UI и backend mismatch.
   const activeTasksCount = useMemo(
     () => taskMeta.filter((t) => t.status === 'active').length,
+    [taskMeta],
+  );
+
+  // R1 «проверено»: число задач, проверенных AI и ещё не подтверждённых.
+  // СТРОГО совпадает с RPC `hw_tutor_review_all_ai` WHERE
+  // (ai_score IS NOT NULL AND tutor_reviewed_at IS NULL) — mirror activeTasksCount инвариант.
+  const reviewableCount = useMemo(
+    () => taskMeta.filter((t) => t.ai_score != null && t.tutor_reviewed_at == null).length,
     [taskMeta],
   );
 
@@ -187,6 +199,34 @@ export function StudentDrillDown({
     },
   });
 
+  // ─── Bulk review «Подтвердить всё, что AI проверил» (R1) ─────────────────
+  const [bulkReviewConfirmOpen, setBulkReviewConfirmOpen] = useState(false);
+  const bulkReviewMutation = useMutation({
+    mutationFn: () => reviewAllAi({ assignmentId, studentId }),
+    onSuccess: (data) => {
+      trackGuidedHomeworkEvent('task_reviewed', {
+        assignmentId,
+        studentId,
+        taskId: null,
+        source: 'bulk',
+        hadOverride: false,
+        reviewedCount: data.reviewed_count,
+      });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'results', assignmentId] });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId] });
+      toast.success(
+        data.reviewed_count > 0
+          ? `Подтверждено задач: ${data.reviewed_count}`
+          : 'Нечего подтверждать',
+      );
+      setBulkReviewConfirmOpen(false);
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Не удалось подтвердить задачи');
+    },
+  });
+
   return (
     <div className="space-y-4">
       {/* Mini-cards row + bulk CTA на одном ряду (code review P2, 2026-05-16).
@@ -215,14 +255,28 @@ export function StudentDrillDown({
               maxScore={task.max_score}
               hintCount={task.hint_count}
               hasOverride={task.has_override}
+              isReviewed={task.tutor_reviewed_at != null}
               isSelected={selectedTaskId === task.id}
               onSelect={handleSelect}
               onEdit={() => handleEdit(task.id)}
             />
           ))}
         </div>
-        {/* Bulk CTA — рендерится только если есть незакрытые задачи.
-            AlertDialog подтверждает действие. Balls не выставляется
+        {/* Bulk-review CTA (R1, primary) — подтвердить всё, что AI проверил.
+            Баллы не трогает (RPC review-all-ai). */}
+        {reviewableCount > 0 ? (
+          <Button
+            size="sm"
+            onClick={() => setBulkReviewConfirmOpen(true)}
+            disabled={bulkReviewMutation.isPending}
+            className="shrink-0 bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            <BadgeCheck className="mr-1 h-4 w-4" />
+            Подтвердить всё, что AI проверил ({reviewableCount})
+          </Button>
+        ) : null}
+        {/* Bulk force-complete CTA — рендерится только если есть незакрытые задачи.
+            AlertDialog подтверждает действие. Балл не выставляется
             автоматически — тутор может править через Pencil → EditScoreDialog
             отдельно (план §6). */}
         {activeTasksCount > 0 ? (
@@ -274,6 +328,42 @@ export function StudentDrillDown({
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={bulkReviewConfirmOpen}
+        onOpenChange={(open) => {
+          if (!bulkReviewMutation.isPending) setBulkReviewConfirmOpen(open);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Подтвердить {reviewableCount} {reviewableCount === 1 ? 'задачу' : 'задач'}, проверенных AI?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Ученику откроются баллы и пометка «проверено». AI-баллы остаются как есть —
+              если с каким-то не согласны, поправьте его отдельно через «Изменить балл».
+              Решение и AI-рубрика ученику не показываются.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkReviewMutation.isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={bulkReviewMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                bulkReviewMutation.mutate();
+              }}
+              className="bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              {bulkReviewMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Подтвердить ({reviewableCount})
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {editingTask ? (
         <EditScoreDialog
           open={editingTaskId !== null}
@@ -294,6 +384,7 @@ export function StudentDrillDown({
           currentComment={editingTask.tutor_score_override_comment}
           status={editingTask.status as 'active' | 'completed' | 'locked' | 'skipped'}
           tutorForceCompletedAt={editingTask.tutor_force_completed_at}
+          tutorReviewedAt={editingTask.tutor_reviewed_at}
         />
       ) : null}
 

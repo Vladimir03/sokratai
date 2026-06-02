@@ -694,6 +694,13 @@ export interface TutorHomeworkResultsPerStudent {
      */
     tutor_force_completed_at?: string | null;
     /**
+     * 2026-06-02 (student-progress R1): ISO timestamp когда задача подтверждена
+     * репетитором («проверено»), иначе null. Ортогонально status. Drives bulk
+     * «Подтвердить всё, что AI проверил» count (ai_score!=null && reviewed_at==null)
+     * + per-task бейдж «Проверено».
+     */
+    tutor_reviewed_at?: string | null;
+    /**
      * task_state.status. Нужно EditScoreDialog для решения, рендерить ли CTA
      * «Сохранить и закрыть задачу» (active) или «Открыть обратно»
      * (completed + tutor_force_completed_at!==null).

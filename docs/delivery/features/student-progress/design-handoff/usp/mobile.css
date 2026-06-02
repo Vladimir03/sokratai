@@ -1,0 +1,122 @@
+/* ============================================================
+   SokratAI · №2 «Успеваемость» — MOBILE (390px). Scoped to .usp--m.
+   Table → student row-cards. Filter/sort in a bottom-sheet.
+   Windowed render for 62+ (no lag at Эмилия scale).
+   ============================================================ */
+
+.usp--m { height:100%; overflow:hidden; position:relative; background:var(--surface); display:flex; flex-direction:column; }
+
+/* sticky header: title + active-filter summary + controls trigger */
+.um-head { padding:52px 16px 10px; background:#fff; border-bottom:1px solid var(--border-l); }
+.um-head .ht { display:flex; align-items:flex-start; gap:10px; }
+.um-head h2 { margin:0; font-size:19px; font-weight:800; letter-spacing:-0.01em; color:var(--fg1); }
+.um-head .count { font-size:12.5px; color:var(--fg3); margin-top:2px; }
+.um-head .count b.r { color:var(--s-danger-fg); font-weight:700; } .um-head .count b.b { color:var(--s-warn-fg); font-weight:700; }
+.um-head .ctrl { margin-left:auto; display:flex; gap:8px; flex:0 0 auto; }
+.um-ctrl-btn { min-height:40px; padding:0 13px; border-radius:10px; border:1px solid var(--border); background:#fff; color:var(--fg1); font:inherit; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:7px; cursor:pointer; touch-action:manipulation; position:relative; }
+.um-ctrl-btn svg { width:16px; height:16px; }
+.um-ctrl-btn .badge { position:absolute; top:-6px; right:-6px; min-width:17px; height:17px; padding:0 4px; border-radius:9px; background:var(--green-700); color:#fff; font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+
+/* active filter chips row */
+.um-chips { display:flex; gap:7px; padding:10px 16px 0; flex-wrap:wrap; }
+.um-chip { font-size:12px; font-weight:600; border-radius:999px; padding:5px 11px; display:inline-flex; align-items:center; gap:6px; }
+.um-chip.risk { background:var(--s-danger-bg); color:var(--s-danger-fg); }
+.um-chip.backlog { background:var(--s-warn-bg); color:var(--s-warn-fg); }
+.um-chip .x { cursor:pointer; opacity:0.7; display:inline-flex; }
+.um-chip .x svg { width:13px; height:13px; }
+.um-chip.sort { background:var(--surface); color:var(--fg2); border:1px solid var(--border); }
+
+/* scroller */
+.um-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:10px 16px 24px; }
+
+/* group header (when grouped) */
+.um-grp { display:flex; align-items:center; gap:8px; padding:14px 2px 7px; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--fg2); }
+.um-grp svg { width:14px; height:14px; color:var(--fg3); }
+.um-grp .c { text-transform:none; letter-spacing:0; font-size:11px; font-weight:600; color:var(--fg3); background:#fff; border:1px solid var(--border); border-radius:10px; padding:1px 8px; }
+.um-grp .ga { text-transform:none; letter-spacing:0; font-size:11px; font-weight:600; color:var(--s-danger-fg); display:inline-flex; align-items:center; gap:3px; }
+.um-grp .ga svg { width:11px; height:11px; color:var(--s-danger-fg); }
+
+/* student row-card */
+.um-card { background:#fff; border:1px solid var(--border); border-radius:13px; padding:13px 14px; margin-bottom:10px; cursor:pointer; transition:border-color .12s; }
+.um-card:active { border-color:#CBD5E1; }
+.um-card .c-top { display:flex; align-items:center; gap:10px; }
+.um-card .adot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+.um-card .adot.risk { background:var(--s-danger-fg); } .um-card .adot.backlog { background:var(--ochre-500); } .um-card .adot.off { background:transparent; }
+.um-card .nm { font-size:15px; font-weight:700; color:var(--fg1); flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.um-card .stream { font-size:10.5px; font-weight:600; color:var(--fg3); background:var(--surface); border:1px solid var(--border); border-radius:5px; padding:2px 7px; flex:0 0 auto; }
+.um-card .chev { width:18px; height:18px; color:var(--fg-muted); flex:0 0 auto; }
+.um-card .grade { font-size:12px; color:var(--fg-muted); margin-top:3px; }
+
+/* metric row: goal bar + checked */
+.um-metrics { display:flex; align-items:center; gap:14px; margin-top:11px; }
+.um-metrics .mg { flex:1; min-width:0; }
+.um-metrics .ml { font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; color:var(--fg-muted); margin-bottom:4px; display:flex; justify-content:space-between; }
+.um-metrics .ml .v { font-weight:700; font-variant-numeric:tabular-nums; }
+.um-metrics .ml .v.low { color:var(--s-danger-fg); } .um-metrics .ml .v.mid { color:var(--s-warn-fg); } .um-metrics .ml .v.hi { color:var(--fg1); }
+.um-metrics .bar { height:7px; border-radius:4px; background:var(--border); overflow:hidden; }
+.um-metrics .bar span { display:block; height:100%; border-radius:4px; }
+.um-metrics .bar.low span { background:var(--s-danger-fg); } .um-metrics .bar.mid span { background:var(--ochre-500); } .um-metrics .bar.hi span { background:linear-gradient(90deg,var(--green-500),var(--green-700)); }
+.um-metrics .mc { flex:0 0 auto; text-align:right; }
+.um-metrics .mc .v { font-size:13px; font-weight:700; color:var(--fg3); font-variant-numeric:tabular-nums; display:inline-flex; align-items:center; gap:5px; }
+.um-metrics .mc .v.full { color:var(--s-success-fg); }
+.um-metrics .mc .v svg { width:14px; height:14px; }
+.um-metrics .trend-i { width:13px; height:13px; vertical-align:-2px; margin-left:2px; }
+.um-metrics .trend-i.down { color:var(--s-danger-fg); } .um-metrics .trend-i.up { color:var(--s-success-fg); } .um-metrics .trend-i.flat { color:var(--fg-muted); }
+
+/* signal chips on card */
+.um-sigs { display:flex; flex-wrap:wrap; gap:6px; margin-top:11px; }
+.um-sig { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:600; padding:3px 9px; border-radius:6px; }
+.um-sig svg { width:12px; height:12px; }
+.um-sig.risk { background:var(--s-danger-bg); color:var(--s-danger-fg); }
+.um-sig.backlog { background:var(--s-warn-bg); color:var(--s-warn-fg); }
+.um-sig.ok { color:var(--fg-muted); font-weight:500; }
+
+/* windowing spacer */
+.um-spacer { width:1px; flex:0 0 auto; }
+
+/* ── bottom-sheet: filter + sort ── */
+.um-sheet-scrim { position:absolute; inset:0; z-index:40; background:rgba(15,23,42,0.42); display:flex; align-items:flex-end; animation:fade .15s ease both; }
+@keyframes fade { from{opacity:0} to{opacity:1} }
+.um-sheet { width:100%; background:#fff; border-radius:20px 20px 0 0; padding:8px 18px calc(20px + env(safe-area-inset-bottom)); animation:sheetup .24s cubic-bezier(.2,.7,.3,1) both; max-height:86%; overflow-y:auto; }
+@keyframes sheetup { from{transform:translateY(100%)} to{transform:none} }
+.um-sheet .grab { width:38px; height:4px; border-radius:2px; background:var(--border); margin:6px auto 14px; }
+.um-sheet h3 { margin:0 0 4px; font-size:17px; font-weight:800; color:var(--fg1); }
+.um-sheet .sec { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--fg3); margin:18px 0 9px; }
+.um-opt { display:flex; align-items:center; gap:12px; width:100%; min-height:50px; padding:0 4px; border:0; background:transparent; font:inherit; font-size:15px; font-weight:500; color:var(--fg1); cursor:pointer; border-bottom:1px solid var(--border-l); text-align:left; }
+.um-opt:last-child { border-bottom:0; }
+.um-opt .oi { width:34px; height:34px; border-radius:9px; background:var(--surface); display:flex; align-items:center; justify-content:center; color:var(--fg2); flex:0 0 auto; }
+.um-opt .oi svg { width:17px; height:17px; }
+.um-opt.risk .oi { background:var(--s-danger-bg); color:var(--s-danger-fg); }
+.um-opt.backlog .oi { background:var(--s-warn-bg); color:var(--s-warn-fg); }
+.um-opt .ot { flex:1; min-width:0; }
+.um-opt .ot .os { display:block; font-size:12px; color:var(--fg-muted); font-weight:400; margin-top:1px; }
+.um-opt .chk { width:22px; height:22px; border-radius:50%; border:2px solid var(--border); flex:0 0 auto; display:flex; align-items:center; justify-content:center; }
+.um-opt.on .chk { background:var(--green-700); border-color:var(--green-700); color:#fff; }
+.um-opt.on .chk svg { width:13px; height:13px; }
+.um-opt .cnt { font-size:13px; font-weight:700; color:var(--fg3); }
+.um-opt.risk.on .chk, .um-opt.backlog.on .chk { background:var(--green-700); border-color:var(--green-700); }
+.um-sheet .applybar { display:flex; gap:10px; margin-top:18px; }
+.um-sheet .applybar .btn { flex:1; justify-content:center; min-height:48px; }
+.um-sheet .applybar .reset { flex:0 0 auto; }
+
+/* ── states ── */
+.um-state { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:40px 28px; gap:5px; }
+.um-state .ill { width:64px; height:64px; border-radius:18px; background:#fff; border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--fg3); margin-bottom:10px; }
+.um-state .ill.danger { background:var(--s-danger-bg); border-color:#FCA5A5; color:var(--s-danger-fg); }
+.um-state h3 { margin:0; font-size:18px; font-weight:800; color:var(--fg1); }
+.um-state p { margin:6px 0 0; font-size:14px; color:var(--fg3); max-width:300px; line-height:1.5; }
+.um-state .cta { margin-top:16px; min-height:48px; padding:0 20px; border-radius:12px; background:var(--green-700); color:#fff; border:0; font:inherit; font-size:14px; font-weight:600; display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+.um-state .cta svg { width:17px; height:17px; }
+
+@keyframes skl { 0%{background-position:-200% 0} 100%{background-position:200% 0} }
+.um-skel { padding:12px 16px; }
+.um-sk { background:linear-gradient(90deg,#EDF0F3 25%,#F7F9FB 37%,#EDF0F3 63%); background-size:200% 100%; animation:skl 1.5s linear infinite; border-radius:8px; }
+.um-skcard { background:#fff; border:1px solid var(--border); border-radius:13px; padding:14px; margin-bottom:10px; }
+.um-skcard .r1 { display:flex; gap:10px; align-items:center; }
+.um-sk-dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; }
+.um-sk-nm { height:14px; flex:1; } .um-sk-chip { height:14px; width:42px; }
+.um-sk-bar { height:8px; margin-top:14px; border-radius:4px; }
+.um-sk-sig { height:20px; width:140px; margin-top:11px; border-radius:6px; }
+
+/* harness */
+.um-stage { display:flex; justify-content:center; padding:30px 26px 70px; }

@@ -280,6 +280,16 @@ export interface HomeworkTaskState {
    */
   tutor_force_completed_at?: string | null;
   /**
+   * 2026-06-02 (student-progress R1): ISO timestamp когда репетитор подтвердил
+   * задачу («проверено»), иначе null. **Visible to student** — бейдж «Проверено»
+   * (приоритет над «Закрыто репетитором»). Ортогонально status: задача может быть
+   * completed но reviewed_at=null (ждёт подтверждения).
+   *
+   * `tutor_reviewed_by` (UUID туторa) — audit-only, strip'ается на бэке через
+   * `stripStudentSensitiveTaskStateFields`, на клиенте отсутствует.
+   */
+  tutor_reviewed_at?: string | null;
+  /**
    * Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion AI grading
    * breakdown for language subjects (DELF / ЕГЭ EN / IELTS / ОГЭ — written
    * and oral). NULL for physics / maths / chemistry / other.

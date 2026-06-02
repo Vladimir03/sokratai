@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -41,6 +41,9 @@ import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/teleg
 import { toast } from 'sonner';
 import type { TutorGroup, TutorGroupMembership, TutorStudentWithProfile } from '@/types/tutor';
 
+// Успеваемость — подвкладка (student-progress R2). Lazy: грузится только при выборе.
+const StudentsProgressOverview = lazy(() => import('./students/StudentsProgressOverview'));
+
 const PAGE_SIZE = 10;
 
 // Extended type with new fields
@@ -59,6 +62,9 @@ type StudentCredentialsData = {
 
 function TutorStudentsContent() {
   const navigate = useNavigate();
+  // Подвкладка «Успеваемость» (R2). ?view=progress — linkable (deep-link с Главной).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get('view') === 'progress' ? 'progress' : 'students';
   const {
     tutor,
     error: tutorError,
@@ -498,6 +504,32 @@ function TutorStudentsContent() {
           }}
         />
 
+        {/* Sub-tabs: Ученики (список) / Успеваемость (обзор R2) */}
+        <div role="tablist" aria-label="Раздел учеников" className="flex gap-1 border-b border-slate-200">
+          {([
+            { key: 'students', label: 'Ученики' },
+            { key: 'progress', label: 'Успеваемость' },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={view === t.key}
+              onClick={() => setSearchParams(t.key === 'students' ? {} : { view: 'progress' }, { replace: true })}
+              className={`min-h-[40px] -mb-px border-b-2 px-4 text-sm font-medium transition-colors touch-manipulation ${
+                view === t.key ? 'border-accent text-accent' : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {view === 'progress' ? (
+          <Suspense fallback={<StudentsSkeleton />}>
+            <StudentsProgressOverview />
+          </Suspense>
+        ) : (
+        <>
         {/* Loading state */}
         {initialLoading && <StudentsSkeleton />}
 
@@ -554,6 +586,8 @@ function TutorStudentsContent() {
             {/* Pagination */}
             {renderPagination()}
           </>
+        )}
+        </>
         )}
       </div>
 

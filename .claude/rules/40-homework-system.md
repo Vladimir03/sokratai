@@ -733,6 +733,62 @@ Spec: `docs/delivery/features/homework-results-v2/spec.md`.
 
 Spec: `~/.claude/plans/lexical-brewing-gadget.md`.
 
+### Tutor review «галочка проверено» (`tutor_reviewed_at`)
+
+R1 фичи «Прогресс по ученикам» (student-progress): репетитор подтверждает AI-черновик балла перед показом ученику/родителю. Паритет с approve-экраном пробника (rule 45), но через **новую ортогональную колонку**, НЕ через `status`.
+
+**Schema (`homework_tutor_task_states`, миграция `20260602090000`):**
+- `tutor_reviewed_at TIMESTAMPTZ NULL` — подтверждено репетитором. **Видна ученику** (бейдж «Проверено»). Явный `GRANT SELECT (tutor_reviewed_at) ... TO authenticated` (после table-level REVOKE из `20260516120100` новые колонки НЕ грантятся автоматически).
+- `tutor_reviewed_by UUID NULL` — audit, **tutor-only**: НЕ GRANT'ится authenticated + добавлена в `stripStudentSensitiveTaskStateFields` (mirror `tutor_force_completed_by`).
+
+**Ортогональность `status` (КРИТИЧНО):** `tutor_reviewed_at` ≠ `status` ≠ `tutor_force_completed_at`. Задача может быть `completed` (AI-CORRECT) но `reviewed_at IS NULL` (ждёт подтверждения). Reopen-review (`hw_tutor_reopen_review`) чистит **только** флаг — status НЕ трогает. Bulk-review **не меняет** баллы/статус.
+
+**RPC (миграция `20260602090100`, SECURITY DEFINER, `REVOKE ALL FROM PUBLIC` + `GRANT service_role`, race-guard как force-complete):**
+- `hw_tutor_review_task(assignment, student, task, tutor, score?, comment?)` — ставит `tutor_reviewed_at`+`tutor_reviewed_by` (+опц. override). **Для `status='active'` делегирует закрытие/advance существующему `hw_tutor_force_complete_task` через `PERFORM`** (re-entrant `FOR UPDATE` в одной транзакции безопасен → НЕ дублируем advance). Для `completed` — только флаг (+override). Race-guard: `tutor_reviewed_at IS NOT NULL` → `ALREADY_REVIEWED` (22023 → 409).
+- `hw_tutor_review_all_ai(assignment, student, tutor)` — bulk: флаг всем `ai_score IS NOT NULL AND tutor_reviewed_at IS NULL`. **Баллы/status не трогает.** Returns `{reviewed_count}`. **WHERE строго совпадает** с frontend `reviewableCount` (mirror `activeTasksCount` инвариант).
+- `hw_tutor_reopen_review(assignment, student, task, tutor)` — `tutor_reviewed_at=NULL`. Race-guard `NOT_REVIEWED` (22023 → 409).
+
+**Edge (`tutor-progress-api`, новый, `verify_jwt=true` per spec §3, config.toml + deploy workflow без `--no-verify-jwt`):** `POST /assignments/:id/students/:sid/{review-task,review-all-ai,reopen-review}`. Тонкие обёртки над RPC + GoTrue auth → userId как `p_tutor_id` (ownership внутри RPC). Ошибки **rule 97 flat-shape** `{ error: "<рус>", code }`. Будущие R2-эндпоинты (агрегат/обзор/цель) — в этот же роутер.
+
+**Client (`src/lib/tutorProgressApi.ts`):** `reviewTask` / `reviewAllAi` / `reopenReview` через свой `requestTutorProgressApi` (НЕ `extractApiErrorMessage` — он трактует строковый `error` как code; flat-shape парсится напрямую). Инвалидация: `['tutor','homework',{results,detail}, id]` + `['tutor','homework','thread', id, studentId]`.
+
+**Read-path wiring (homework-api):** `THREAD_SELECT` + `handleGetResults.task_scores` несут `tutor_reviewed_at`. Студент видит через `fetchStudentThread` (strip оставляет `tutor_reviewed_at`, убирает `tutor_reviewed_by`).
+
+**Frontend surfaces (reuse, НЕ новый /review-роут):**
+- `EditScoreDialog` — чекбокс «Подтвердить задачу» (default ON, скрыт если reviewed) → `reviewTask`; CTA «Сохранить и подтвердить»/«Подтвердить»/«Поставить балл и подтвердить» (manual без AI); review закрывает force-complete-чекбокс на active; ghost «Снять подтверждение» → `reopenReview`; **anti-leak плашка** (ShieldCheck, нейтральный фон). Override шлётся только если балл/коммент менялись («AI-балл не перезаписывается») **ИЛИ `aiScore == null`** (manual/no-AI: `finalScore` приходит `0`-fallback'ом, поэтому ввод балла `0` иначе выглядел бы как «не изменилось» → `score:null` → force_complete → итог fallback'ился в max; **`reviewWantsOverride` ОБЯЗАН включать `aiScore == null`**, иначе manual-`0` молча даёт максимум).
+- `GuidedThreadViewer` per-task row: бейдж «Проверено» + быстрая «Подтвердить» (только `ai_score != null`; manual → диалог).
+- `StudentDrillDown`: bulk «Подтвердить всё, что AI проверил ({reviewableCount})» + **AlertDialog** → `reviewAllAi`. `TaskMiniCard` — `isReviewed` BadgeCheck-индикатор.
+- `StudentProgressPage` (R2): page-level bulk «Подтвердить всё…» — тоже **через AlertDialog** (паритет, spec §4.3); loop `reviewAllAi` per assignment, ловит per-assignment 409 `NOTHING_TO_REVIEW`/`ALREADY_REVIEWED` и продолжает (одна stale-работа не валит весь bulk).
+- Student: «Проверено» приоритет над «Закрыто репетитором» в `SubmitCtaBar` / `HomeworkProblem` big-CTA / `TaskStepper` tooltip.
+
+**`hw_tutor_review_all_ai` race-guard (spec §10):** атомарный условный `UPDATE ... WHERE tutor_reviewed_at IS NULL` уже не допускает double-write, но при 0 строк бросает **`NOTHING_TO_REVIEW` (22023 → 409)** — explicit сигнал клиенту «обновись» (паритет с per-task 409). Кнопка bulk видна только при count>0, поэтому в норме 409 не бывает; loop на странице ученика обрабатывает gracefully.
+
+**Телеметрия (PII-free):** `task_reviewed` (`{assignmentId, studentId, taskId|null, source:'single'|'dialog'|'bulk', hadOverride, reviewedCount?}`), `task_review_reopened`.
+
+**При расширении:** новое scoring/review-действие на `task_states` → новая SECURITY DEFINER RPC (multi-query НЕ воспроизводить); review-флаг — explicit-orthogonal (не выводить из status); bulk-count на фронте = RPC WHERE; manual/no-AI grade → персистить override даже при значении `0` (`aiScore == null` → always-override).
+
+Spec: `docs/delivery/features/student-progress/spec.md` (§2.1, §3.1, §4.3, §5, §8 R1) + `~/.claude/plans/senior-scalable-scott.md`.
+
+### Прогресс по ученикам R2 — агрегат ДЗ+пробники (`tutor-progress-api`)
+
+Кросс-ученический обзор «Успеваемость» + страница ученика `/tutor/students/:id/progress` (агрегат всех работ «по ученику»). Read-only эндпоинты в **существующей** `tutor-progress-api` (R1 review там же). v1 = физика-ЕГЭ; ОГЭ/школа — UI-каркас.
+
+**Цель — reuse `tutor_students` (НЕ новая таблица, решение Vladimir 2026-06-02):** `target_score`/`exam_type`/`subject` уже есть. `PATCH /students/:id/target` пишет туда (ownership через `tutors.id`). `tutor_student_targets`/multi-subject/school-target — P2.
+
+**Эндпоинты (service_role + Deno-агрегация, без N+1, column-whitelist):**
+- `GET /students/progress-overview` — items[]: scale-agnostic метрики (`pct_to_goal`, `reviewed_pct`) + **два сигнала раздельно** `signals:{review_backlog, overdue, behind_goal, declining}` (risk ≠ backlog; mirror `usp/data.js`). Группы через `tutor_group_memberships`. **Сырого балла НЕТ** (нельзя сравнить 100-шкалу и оценку 2–5).
+- `GET /students/:id/progress` — `{student, target, works[], summary}`. works = ДЗ (`score_kind:'primary'`) + пробники (`ege_scaled`). `reviewed` ДЗ = `reviewed_count==total` (Q1); пробник = `status IN (approved, manually_entered)`. `current_level` = scaled последнего подтверждённого пробника (Q2; нет → null + «нужен пробник»). cells = только score/max.
+- `PATCH /students/:id/target` — UPDATE `tutor_students` (track ege 0-100 / oge 2-5; school → 400, каркас).
+
+**Инварианты (КРИТИЧНО):**
+- **FK-конверсия (rule 40):** `tutor_students`/группы — через `tutors.id` (resolveTutorPkId: `auth.uid → tutors.id`); homework/mock assignments — `auth.uid` напрямую (их `tutor_id` → `auth.users.id`). `resolveTutorPkId` обязателен перед любым `tutor_students` JOIN.
+- **`computeFinalScore` НЕ дублирован** — вынесен в `supabase/functions/_shared/score-compute.ts`, импортируют ОБА (`homework-api` + `tutor-progress-api`). `TaskStateScoreFields` структурно совместим с `FinalScoreFields`.
+- **Шкалы — mirror-synced** `src/lib/scoreScales.ts` ↔ `supabase/functions/_shared/score-scales.ts` (`EGE_PHYS_2026.map`, `egePrimaryToScaled`, `ogeMark`). Smoke-guard секция 10 (`egePrimaryToScaled(21)=59`, 46 entries, map-drift). Цвет ячеек = % от max везде (`getCellStyle`), exam-agnostic. **НЕ усреднять разные шкалы в «средний /5»** (Q2).
+- **Anti-leak (spec §5):** агрегат НЕ селектит `solution_*`/`rubric_*`/`ai_score_comment`/hints; cells = score/max; пробник — только агрегаты подтверждённого (rule 45 state-aware).
+- **Frontend:** подвкладка `StudentsProgressOverview` (tab `?view=progress` в `TutorStudents`); `StudentProgressPage` (`/tutor/students/:id/progress`, `:id` = `tutor_students.id`; профиль остаётся на `:id` без `/progress`). Drill-down работы → navigate `/tutor/homework/:id?student=` (реюз R1 HeatmapGrid/StudentDrillDown, НЕ embed). Home-блок `StudentsAtRiskBlock` (reuse overview-query cache). Новые `useQuery` → `refetchOnWindowFocus:false`. Перф 100+: `React.memo` строки (без virt-deps).
+
+Spec: `spec.md` (§2.2 revised, §3.2/§3.3, §4.0-4.2, §8 R2, §11 Q1-Q3) + `~/.claude/plans/senior-scalable-scott.md` (R2).
+
 ### Drill-down (Results v2)
 - `src/components/tutor/results/heatmapStyles.ts` — single source of truth для `getCellStyle` + `formatScore` (вынесено из `HeatmapGrid.tsx` — react-refresh/only-export-components). **НЕ дублировать** color/format helpers.
 - `src/components/tutor/results/TaskMiniCard.tsx` — `React.memo`. Props `{ taskOrder, taskId, score, maxScore, hintCount, isSelected, isAllTasks?, onSelect }`. Цвет через `getCellStyle`. `ring-2 ring-slate-800 ring-offset-1` при selected. Lucide `Lightbulb` 12px при `hintCount >= 1`. `touch-action: manipulation`, `aria-pressed`, `role="button"`, `tabIndex={0}`.

@@ -721,6 +721,7 @@ export default function GuidedHomeworkWorkspace({
         tutor_score_override_comment: state?.tutor_score_override_comment ?? null,
         final_score: finalScore,
         tutor_force_completed_at: state?.tutor_force_completed_at ?? null,
+        tutor_reviewed_at: state?.tutor_reviewed_at ?? null,
       };
     });
   }, [assignment.tasks, taskStates]);

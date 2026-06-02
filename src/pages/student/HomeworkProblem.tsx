@@ -339,6 +339,9 @@ export default function HomeworkProblem() {
   // TaskStepper tooltip, нужен явный text differentiator в CTA subtitle.
   const isTutorForceCompleted =
     isCurrentCompleted && currentTaskState?.tutor_force_completed_at != null;
+  // R1 «проверено»: репетитор подтвердил задачу. Приоритет над «Закрыто
+  // репетитором» в subtitle CTA (ученик видит «Проверено репетитором»).
+  const isTutorReviewed = currentTaskState?.tutor_reviewed_at != null;
   const hintCount = currentTaskState?.hint_count ?? 0;
 
   /**
@@ -1228,6 +1231,7 @@ export default function HomeworkProblem() {
             }}
             isCompleted={isCurrentCompleted}
             isTutorClosed={isTutorForceCompleted}
+            isReviewed={isTutorReviewed}
             hasNextTask={Boolean(nextTaskId)}
             onNavigateNext={() => navigateAfterCorrect()}
             subject={data.assignment.subject}
@@ -1578,9 +1582,11 @@ export default function HomeworkProblem() {
             </span>
             <span className="text-[11px] font-medium text-white/80 truncate">
               {isCurrentCompleted
-                ? isTutorForceCompleted
-                  ? 'Закрыто репетитором'
-                  : 'Задача сдана'
+                ? isTutorReviewed
+                  ? 'Проверено репетитором'
+                  : isTutorForceCompleted
+                    ? 'Закрыто репетитором'
+                    : 'Задача сдана'
                 : isHumanitiesWritingSubject(data.assignment.subject)
                   ? 'Текст или фото готового решения'
                   : 'Ответ + фото решения от руки'}

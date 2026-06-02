@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Lightbulb, Pencil } from 'lucide-react';
+import { BadgeCheck, Lightbulb, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getCellStyle, formatScore } from './heatmapStyles';
 
@@ -27,6 +27,8 @@ interface TaskMiniCardProps {
   isAllTasks?: boolean;
   /** True if `tutor_score_override` is set — renders a small indicator dot. */
   hasOverride?: boolean;
+  /** R1: true if `tutor_reviewed_at` is set — renders a «проверено» badge-check. */
+  isReviewed?: boolean;
   /** Optional pencil button → opens EditScoreDialog. Hidden on "Все задачи". */
   onEdit?: () => void;
   onSelect: (taskId: string | null) => void;
@@ -41,6 +43,7 @@ export const TaskMiniCard = memo(function TaskMiniCard({
   isSelected,
   isAllTasks = false,
   hasOverride = false,
+  isReviewed = false,
   onEdit,
   onSelect,
 }: TaskMiniCardProps) {
@@ -93,6 +96,12 @@ export const TaskMiniCard = memo(function TaskMiniCard({
           <span
             className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-slate-800"
             aria-label="Балл правлен репетитором"
+          />
+        ) : null}
+        {!isAllTasks && isReviewed ? (
+          <BadgeCheck
+            className="absolute bottom-1 left-1 h-3 w-3 text-emerald-600"
+            aria-label="Проверено репетитором"
           />
         ) : null}
       </button>

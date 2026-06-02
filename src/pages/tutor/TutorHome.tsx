@@ -13,6 +13,7 @@ import {
   RecentDialogsBlock,
   StudentsActivityBlock,
 } from '@/components/tutor/home';
+import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import type { DialogItem } from '@/components/tutor/home/primitives/ChatRow';
 import type { TodaySession } from '@/components/tutor/home/primitives/SessionBlock';
 import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
@@ -274,6 +275,10 @@ function TutorHomeContent() {
               onOpenAll={handleOpenHomeworkList}
               onAddStudent={hasStudents ? undefined : handleAddStudent}
             />
+
+            {/* Триаж «кто отстаёт от цели» (R2 §4.0). Self-contained: reuses the
+                overview query cache; скрыт, если отстающих нет. */}
+            {hasStudents && <StudentsAtRiskBlock />}
 
             {/* Per spec §AC-3: при 0 учеников таблица «Активность
                 учеников» полностью скрыта (не «пустая секция»). */}

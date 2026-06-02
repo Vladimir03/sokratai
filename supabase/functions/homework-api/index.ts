@@ -18,6 +18,7 @@ import {
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
 import { rewriteToDirect, rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import { computeFinalScore } from "../_shared/score-compute.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
 import {
   subjectToWhisperLang,
@@ -815,24 +816,10 @@ interface TaskStateScoreFields {
   attempts: number | null;
 }
 
-/**
- * Compute the final score for a single task state with the priority chain
- * tutor_score_override → earned_score → ai_score → status fallback. Used by
- * both per-student and per-task aggregations so the shapes stay consistent.
- *
- * earned_score takes priority over ai_score because it reflects hint/wrong-
- * answer degradation — the same value the student sees on their results
- * screen. ai_score is the AI's raw evaluation BEFORE degradation and is
- * kept as a supplementary field for the tutor's "AI: X/Y" display in the
- * edit-score dialog.
- */
-function computeFinalScore(ts: TaskStateScoreFields, maxScore: number): number {
-  if (ts.tutor_score_override != null) return Number(ts.tutor_score_override);
-  if (ts.earned_score != null) return Number(ts.earned_score);
-  if (ts.ai_score != null) return Number(ts.ai_score);
-  if (ts.status === "completed") return maxScore;
-  return 0;
-}
+// computeFinalScore moved to `../_shared/score-compute.ts` (student-progress R2)
+// so the tutor-progress aggregate reuses the SAME priority chain (not duplicated).
+// `TaskStateScoreFields` is structurally assignable to the shared `FinalScoreFields`.
+// Priority: tutor_score_override → earned_score → ai_score → (completed ? max : 0).
 
 /**
  * Wall-clock minutes between the first and last `homework_tutor_thread_messages.created_at`
@@ -3111,6 +3098,9 @@ async function handleGetResults(
       // Null = задача не была закрыта вручную (либо AI-CORRECT, либо ещё active).
       // ISO timestamp = закрыта репетитором; tutor-side UI рисует индикатор.
       tutor_force_completed_at: string | null;
+      // 2026-06-02 (student-progress R1): tutor «проверено» marker. ISO = подтверждена;
+      // null = в очереди на проверку. Drives bulk «Подтвердить всё, что AI проверил».
+      tutor_reviewed_at: string | null;
       status: string;
     }[];
     total_score: number;
@@ -3134,6 +3124,7 @@ async function handleGetResults(
     tutor_score_override: number | null;
     tutor_score_override_comment: string | null;
     tutor_force_completed_at: string | null;
+    tutor_reviewed_at: string | null;
     status: string;
   }>> = {};
 
@@ -3184,7 +3175,7 @@ async function handleGetResults(
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
         .select(
-          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts, tutor_force_completed_at",
+          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts, tutor_force_completed_at, tutor_reviewed_at",
         )
         .in("thread_id", allThreadIdsForStates);
 
@@ -3259,6 +3250,7 @@ async function handleGetResults(
             const overrideCommentRaw = (ts as { tutor_score_override_comment?: string | null }).tutor_score_override_comment;
 
             const forceCompletedAtRaw = (ts as { tutor_force_completed_at?: string | null }).tutor_force_completed_at;
+            const reviewedAtRaw = (ts as { tutor_reviewed_at?: string | null }).tutor_reviewed_at;
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
@@ -3272,6 +3264,7 @@ async function handleGetResults(
                 ? overrideCommentRaw
                 : null,
               tutor_force_completed_at: typeof forceCompletedAtRaw === "string" ? forceCompletedAtRaw : null,
+              tutor_reviewed_at: typeof reviewedAtRaw === "string" ? reviewedAtRaw : null,
               status: typeof ts.status === "string" ? ts.status : "active",
             };
           }
@@ -3395,6 +3388,7 @@ async function handleGetResults(
         tutor_score_override: cell.tutor_score_override,
         tutor_score_override_comment: cell.tutor_score_override_comment,
         tutor_force_completed_at: cell.tutor_force_completed_at,
+        tutor_reviewed_at: cell.tutor_reviewed_at,
         status: cell.status,
       }));
 
@@ -6936,7 +6930,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, ai_criteria_json)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, tutor_reviewed_at, tutor_reviewed_by, ai_criteria_json)
 `;
 
 /**
@@ -6966,11 +6960,12 @@ function stripStudentSensitiveTaskStateFields(
     ...thread,
     homework_tutor_task_states: taskStates.map((taskState) => {
       if (!taskState || typeof taskState !== "object") return taskState;
-      // tutor_force_completed_at — оставляем (ученик видит бейдж).
-      // tutor_force_completed_by — strip (UUID туторa, audit-only).
+      // tutor_force_completed_at / tutor_reviewed_at — оставляем (ученик видит бейдж).
+      // tutor_force_completed_by / tutor_reviewed_by — strip (UUID туторa, audit-only).
       const {
         ai_score_comment: _aiScoreComment,
         tutor_force_completed_by: _forceCompletedBy,
+        tutor_reviewed_by: _reviewedBy,
         ...safeTaskState
       } = taskState as Record<string, unknown>;
       return safeTaskState;

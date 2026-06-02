@@ -108,7 +108,13 @@ type GuidedTelemetryEvent =
   // закрытие из StudentDrillDown «Закрыть все оставшиеся».
   | 'homework_task_force_completed'
   | 'homework_task_reopened'
-  | 'homework_bulk_force_completed';
+  | 'homework_bulk_force_completed'
+  // ─── tutor review «проверено» (2026-06-02, student-progress R1) ──────────
+  // PII-free. `task_reviewed` covers single per-task confirm, dialog
+  // «Сохранить и подтвердить», and bulk «Подтвердить всё, что AI проверил»
+  // (discriminated by `source`). `task_review_reopened` = «Снять подтверждение».
+  | 'task_reviewed'
+  | 'task_review_reopened';
 
 type GuidedTelemetryValue =
   | string
@@ -316,6 +322,29 @@ interface HomeworkBulkForceCompletedPayload
   closedCount: number;
 }
 
+// ─── Tutor review «проверено» (2026-06-02, student-progress R1) ──────────────
+// PII-free: ids + booleans + counts. `source` различает single per-task confirm
+// vs dialog «Сохранить и подтвердить» vs bulk. `taskId` = null для bulk.
+// `reviewedCount` — только для bulk. `hadOverride` — был ли выставлен балл вместе
+// с подтверждением (manual «Поставить балл и подтвердить» / правка в диалоге).
+
+interface TaskReviewedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  taskId: string | null;
+  source: 'single' | 'dialog' | 'bulk';
+  hadOverride: boolean;
+  reviewedCount?: number;
+}
+
+interface TaskReviewReopenedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  taskId: string;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -351,6 +380,8 @@ export function trackGuidedHomeworkEvent(event: 'student_hint_requested', payloa
 export function trackGuidedHomeworkEvent(event: 'homework_task_force_completed', payload: HomeworkTaskForceCompletedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_task_reopened', payload: HomeworkTaskReopenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_bulk_force_completed', payload: HomeworkBulkForceCompletedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'task_reviewed', payload: TaskReviewedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'task_review_reopened', payload: TaskReviewReopenedPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

@@ -1,0 +1,125 @@
+/* ============================================================
+   SokratAI · №4 «Отчёт родителю» — MOBILE (390px, /p/:slug)
+   Scoped to .rpt--m (viewport media queries won't fire inside a
+   390px phone on a wide canvas). Built for in-app WebView
+   (Telegram/VK): no heavy JS, full render, graceful download degrade.
+   ============================================================ */
+
+.rpt--m { height:100%; overflow:hidden; position:relative; background:#fff; }
+.rpt--m .m-scroll { height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+
+/* ── public top bar (parent's view; sticky, lives inside the page) ── */
+.m-pubbar { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:9px; padding:52px 16px 12px; background:rgba(255,255,255,0.92); backdrop-filter:blur(8px); border-bottom:1px solid var(--border-l); }
+.m-pubbar .logo { width:30px; height:30px; border-radius:8px; flex:0 0 auto; }
+.m-pubbar .pb-t { min-width:0; flex:1; }
+.m-pubbar .pb-t .nm { font-size:14px; font-weight:700; color:var(--fg1); line-height:1.1; }
+.m-pubbar .pb-t .sub { font-size:11.5px; color:var(--fg3); margin-top:1px; }
+.m-pubbar .conf { font-size:10.5px; font-weight:600; color:var(--s-success-fg); background:var(--s-success-bg); border-radius:999px; padding:4px 9px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; flex:0 0 auto; }
+.m-pubbar .conf svg { width:12px; height:12px; }
+
+/* ── ABOVE THE FOLD: result hero ── */
+.m-hero { padding:18px 16px 16px; }
+.m-hero .who { font-size:13px; color:var(--fg3); }
+.m-hero h1 { margin:3px 0 0; font-size:22px; font-weight:800; letter-spacing:-0.02em; color:var(--fg1); line-height:1.15; text-wrap:balance; }
+.m-hero .tutor { margin-top:5px; font-size:12.5px; color:var(--fg3); }
+
+/* big current + forecast pair, stacked emphasis */
+.m-bigstats { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+.m-bs { border:1px solid var(--border); border-left-width:3px; border-radius:12px; padding:12px 13px; background:var(--card); }
+.m-bs.cur { border-left-color:var(--green-700); }
+.m-bs.fc { border-left-color:var(--ochre-500); }
+.m-bs .l { font-size:10.5px; font-weight:600; text-transform:uppercase; letter-spacing:0.03em; color:var(--fg3); display:flex; align-items:center; gap:5px; }
+.m-bs .l svg { width:13px; height:13px; }
+.m-bs.cur .l svg { color:var(--green-700); } .m-bs.fc .l svg { color:var(--ochre-500); }
+.m-bs .v { margin-top:7px; font-size:30px; font-weight:800; letter-spacing:-0.02em; color:var(--fg1); line-height:1; }
+.m-bs .v .u { font-size:13px; font-weight:600; color:var(--fg-muted); }
+.m-bs.fc .v { color:var(--ochre-700); }
+.m-bs .s { margin-top:5px; font-size:11.5px; color:var(--fg3); }
+.m-bs .s .up { color:var(--s-success-fg); font-weight:700; } .m-bs .s .down { color:var(--s-danger-fg); font-weight:700; }
+
+/* trend chart — readable at 390, no horizontal scroll */
+.m-trend { margin-top:14px; border:1px solid var(--border-l); border-radius:12px; padding:13px 14px 9px; background:var(--surface); }
+.m-trend .th { display:flex; align-items:baseline; justify-content:space-between; }
+.m-trend .th .t { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:var(--green-800); }
+.m-trend .th .d { font-size:12.5px; font-weight:700; }
+.m-trend .th .d.up { color:var(--s-success-fg); } .m-trend .th .d.down { color:var(--s-danger-fg); } .m-trend .th .d.flat { color:var(--fg-muted); }
+.m-trend svg { width:100%; height:120px; display:block; margin-top:6px; }
+
+/* period selector — full width segmented, ≥44px */
+.m-period { display:flex; gap:4px; margin:14px 16px 0; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:4px; }
+.m-period button { flex:1; min-height:40px; font:inherit; font-size:13px; font-weight:600; color:var(--fg2); background:transparent; border:0; border-radius:8px; cursor:pointer; }
+.m-period button.on { background:#fff; color:var(--green-800); box-shadow:0 1px 2px rgba(15,23,42,0.08); }
+
+/* section label */
+.m-sec { font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--green-800); padding:0 2px; display:flex; align-items:baseline; gap:8px; }
+.m-sec .h { font-weight:500; text-transform:none; letter-spacing:0; color:var(--fg-muted); font-size:11.5px; }
+.m-block { padding:20px 16px 0; }
+
+/* topic map → vertical stack of zone strips */
+.m-zones { display:flex; flex-direction:column; gap:10px; margin-top:11px; }
+.m-zone { border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+.m-zone .zhead { display:flex; align-items:center; gap:9px; padding:11px 13px; }
+.m-zone.green .zhead { background:#F4FBF7; } .m-zone.yellow .zhead { background:#FFFBF4; } .m-zone.red .zhead { background:#FEF6F6; }
+.m-zone .zdot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+.m-zone.green .zdot { background:var(--s-success-fg); } .m-zone.yellow .zdot { background:var(--ochre-500); } .m-zone.red .zdot { background:var(--s-danger-fg); }
+.m-zone .zttl { font-size:14px; font-weight:700; color:var(--fg1); }
+.m-zone .zcount { margin-left:auto; font-size:11.5px; font-weight:600; color:var(--fg3); }
+.m-zone .ztopics { padding:4px 13px 12px; display:flex; flex-wrap:wrap; gap:6px; }
+.m-zone .tp { font-size:12.5px; font-weight:500; color:var(--fg2); background:#fff; border:1px solid var(--border); border-radius:7px; padding:5px 9px; }
+
+/* recent works */
+.m-recent { margin-top:11px; display:flex; flex-direction:column; }
+.m-ri { display:flex; align-items:center; gap:11px; padding:12px 0; border-bottom:1px solid var(--border-l); }
+.m-ri:last-child { border-bottom:0; }
+.m-ri .rt { flex:1; min-width:0; }
+.m-ri .rt .t { font-size:14px; font-weight:600; color:var(--fg1); }
+.m-ri .rt .s { font-size:12px; color:var(--fg3); margin-top:2px; }
+.m-ri .pct { font-size:13px; font-weight:700; padding:5px 12px; border-radius:999px; white-space:nowrap; flex:0 0 auto; }
+.m-ri .pct.hi { background:var(--s-success-bg); color:var(--s-success-fg); }
+.m-ri .pct.mid { background:var(--s-warn-bg); color:var(--s-warn-fg); }
+.m-ri .pct.low { background:var(--s-danger-bg); color:var(--s-danger-fg); }
+.m-ri .pend { font-size:12px; font-weight:600; color:var(--fg-muted); background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:5px 12px; white-space:nowrap; flex:0 0 auto; }
+
+/* tutor comment */
+.m-comment { margin-top:12px; border:1px solid var(--border); border-radius:13px; padding:14px 15px; background:#FCFCFB; }
+.m-comment .ch { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--fg1); margin-bottom:7px; }
+.m-comment .ch svg { width:15px; height:15px; color:var(--green-700); }
+.m-comment .ct { font-size:14px; line-height:1.55; color:var(--fg2); }
+.m-comment .by { margin-top:9px; font-size:12.5px; color:var(--fg-muted); }
+
+/* footer */
+.m-foot { padding:18px 16px 8px; margin-top:16px; border-top:1px solid var(--border-l); }
+.m-foot .leak { font-size:12px; color:var(--fg-muted); display:flex; align-items:center; gap:7px; }
+.m-foot .leak svg { width:14px; height:14px; color:var(--green-700); flex:0 0 auto; }
+.m-foot .site { margin-top:8px; font-weight:700; color:var(--green-800); font-size:14px; }
+
+/* ── sticky action bar (the «продающий» CTA zone) ── */
+.m-actions { position:sticky; bottom:0; z-index:12; background:rgba(255,255,255,0.96); backdrop-filter:blur(10px); border-top:1px solid var(--border); padding:11px 16px calc(11px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:8px; }
+.m-actions .row { display:flex; gap:8px; }
+.m-actions .mbtn { flex:1; min-height:48px; font:inherit; font-size:14px; font-weight:600; border-radius:12px; border:1px solid var(--border); background:#fff; color:var(--fg1); display:inline-flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; touch-action:manipulation; }
+.m-actions .mbtn svg { width:17px; height:17px; }
+.m-actions .mbtn.primary { background:var(--green-700); border-color:var(--green-700); color:#fff; }
+.m-actions .mbtn.primary:active { background:var(--green-800); }
+/* WebView hint: shown when download likely blocked */
+.m-actions .wv-hint { font-size:11.5px; color:var(--fg-muted); display:flex; align-items:center; gap:6px; justify-content:center; text-align:center; }
+.m-actions .wv-hint svg { width:13px; height:13px; flex:0 0 auto; }
+.m-actions .wv-hint a { color:var(--green-700); font-weight:600; text-decoration:none; }
+
+/* ── EXPIRED state (separate screen, not 404) ── */
+.m-expired { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:40px 28px; gap:4px; }
+.m-expired .ill { width:68px; height:68px; border-radius:19px; background:var(--surface); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--fg-muted); margin-bottom:12px; }
+.m-expired h2 { margin:0; font-size:20px; font-weight:800; color:var(--fg1); letter-spacing:-0.01em; }
+.m-expired p { margin:6px 0 0; font-size:14.5px; line-height:1.5; color:var(--fg3); max-width:300px; }
+.m-expired .who2 { margin-top:14px; font-size:13px; color:var(--fg-muted); display:flex; align-items:center; gap:8px; padding:9px 14px; border:1px solid var(--border); border-radius:11px; background:#fff; }
+.m-expired .who2 .av { width:30px; height:30px; border-radius:50%; background:var(--green-700); color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.m-expired .cta { margin-top:20px; min-height:48px; padding:0 22px; border-radius:12px; background:var(--green-700); color:#fff; font:inherit; font-size:14px; font-weight:600; border:0; display:inline-flex; align-items:center; gap:8px; cursor:pointer; }
+.m-expired .cta svg { width:17px; height:17px; }
+.m-expired .leak { margin-top:auto; font-size:11.5px; color:var(--fg-muted); display:flex; align-items:center; gap:6px; }
+.m-expired .leak svg { width:13px; height:13px; color:var(--green-700); }
+
+/* toast inside phone */
+.rpt--m .m-toast { position:absolute; left:50%; bottom:96px; transform:translateX(-50%); z-index:30; background:var(--fg1); color:#fff; font-size:13px; font-weight:500; padding:10px 15px; border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.3); display:flex; align-items:center; gap:8px; max-width:84%; }
+.rpt--m .m-toast svg { width:15px; height:15px; color:#6EE7B7; flex:0 0 auto; }
+
+/* harness */
+.m-stage { display:flex; justify-content:center; padding:30px 26px 70px; }

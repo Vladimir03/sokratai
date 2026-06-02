@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru" data-sokrat-mode="tutor">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Прогресс ученика · hero · 3 варианта · Сократ AI</title>
+<link rel="stylesheet" href="hero/hero.css" />
+</head>
+<body>
+  <div class="cv-top">
+    <div class="lede">
+      <h1>Страница ученика → вкладка «Прогресс» · hero</h1>
+      <div class="path"><code>/tutor/students/:id</code> · 3 варианта layout-а — сравните и выберите</div>
+    </div>
+    <div class="cv-jump" id="jump">
+      <button data-go="0" class="active"><span class="k">a</span> Карточки</button>
+      <button data-go="1"><span class="k">b</span> Heatmap-таблица</button>
+      <button data-go="2"><span class="k">c</span> Timeline</button>
+    </div>
+  </div>
+
+  <div class="cv-track" id="track">
+    <section class="frame" id="frame-0">
+      <div class="frame-band">
+        <span class="tag">a</span>
+        <div class="ft">
+          <h2>Список-карточки по работам</h2>
+          <div class="why">Каждая работа — строка-карточка с мини-картой задач и статусом проверки. Самый прямой ответ на боль Елены: сверху вниз видно «что сдано / что проверено / что висит», клик раскрывает задачи. Подтверждение — на каждой карточке.</div>
+        </div>
+      </div>
+      <div id="mount-cards"></div>
+    </section>
+
+    <section class="frame" id="frame-1">
+      <div class="frame-band">
+        <span class="tag">b</span>
+        <div class="ft">
+          <h2>Таблица-heatmap «работы × задачи»</h2>
+          <div class="why">Плотная сетка как в Results v2: строка — работа, столбцы — задачи, цвет клетки = доля от макс. балла. За один взгляд видно провальные темы по всем работам. Sticky-колонка с названием, проверка — в правой части строки.</div>
+        </div>
+      </div>
+      <div id="mount-table"></div>
+    </section>
+
+    <section class="frame" id="frame-2">
+      <div class="frame-band">
+        <span class="tag">c</span>
+        <div class="ft">
+          <h2>Timeline по датам с динамикой балла</h2>
+          <div class="why">График среднего балла сверху + лента работ по датам. Акцент на тренд: видно, как ученик движется во времени — удобно для разговора с родителем и для понимания спадов. Проверка — прямо в карточке даты.</div>
+        </div>
+      </div>
+      <div id="mount-timeline"></div>
+    </section>
+  </div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <script src="hero/data.js"></script>
+  <script type="text/babel" src="hero/components.jsx"></script>
+  <script type="text/babel" src="hero/variant-cards.jsx"></script>
+  <script type="text/babel" src="hero/variant-table.jsx"></script>
+  <script type="text/babel" src="hero/variant-timeline.jsx"></script>
+  <script type="text/babel" src="hero/app.jsx"></script>
+  <script type="text/babel" data-presets="react">
+    ReactDOM.createRoot(document.getElementById('mount-cards')).render(<HeroShell variant="cards" />);
+    ReactDOM.createRoot(document.getElementById('mount-table')).render(<HeroShell variant="table" />);
+    ReactDOM.createRoot(document.getElementById('mount-timeline')).render(<HeroShell variant="timeline" />);
+
+    // jump-to-frame + active state on scroll
+    const track = document.getElementById('track');
+    const frames = [0, 1, 2].map(i => document.getElementById('frame-' + i));
+    document.querySelectorAll('#jump button').forEach(b => {
+      b.addEventListener('click', () => {
+        const f = frames[+b.dataset.go];
+        track.scrollTo({ left: f.offsetLeft - 26, behavior: 'smooth' });
+      });
+    });
+    track.addEventListener('scroll', () => {
+      const c = track.scrollLeft + track.clientWidth / 2;
+      let idx = 0;
+      frames.forEach((f, i) => { if (f.offsetLeft <= track.scrollLeft + 80) idx = i; });
+      document.querySelectorAll('#jump button').forEach((b, i) => b.classList.toggle('active', i === idx));
+    }, { passive: true });
+  </script>
+</body>
+</html>

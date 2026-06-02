@@ -1,11 +1,11 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
+import { BadgeCheck, ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
 import { toast } from 'sonner';
 import {
@@ -30,6 +30,8 @@ import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
 } from '@/components/homework/CriteriaBreakdownTable';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
+import { reviewTask } from '@/lib/tutorProgressApi';
+import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
@@ -265,6 +267,30 @@ export function GuidedThreadViewer({
     () => ['tutor', 'homework', 'thread', assignmentId, studentId] as const,
     [assignmentId, studentId],
   );
+
+  // R1 «проверено» — быстрое подтверждение задачи (без правки балла). Для
+  // active-задачи backend сам закрывает её. «Изменить балл и подтвердить» /
+  // manual / reopen-review идут через EditScoreDialog.
+  const reviewMutation = useMutation({
+    mutationFn: (taskId: string) =>
+      reviewTask({ assignmentId, studentId, taskId, score: null, comment: null }),
+    onSuccess: (_data, taskId) => {
+      trackGuidedHomeworkEvent('task_reviewed', {
+        assignmentId,
+        studentId,
+        taskId,
+        source: 'single',
+        hadOverride: false,
+      });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'results', assignmentId] });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
+      queryClient.invalidateQueries({ queryKey: threadQueryKey });
+      toast.success('Задача подтверждена');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Не удалось подтвердить задачу');
+    },
+  });
 
   const threadQuery = useQuery<TutorStudentGuidedThreadResponse>({
     queryKey: threadQueryKey,
@@ -695,16 +721,41 @@ export function GuidedThreadViewer({
                           ручная правка
                         </span>
                       ) : null}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="ml-auto h-7 px-2 text-xs touch-manipulation"
-                        onClick={() => setIsEditScoreOpen(true)}
-                        aria-label={`Изменить балл задачи №${selectedTask.order_num}`}
-                      >
-                        <Pencil className="h-3 w-3 md:mr-1" />
-                        <span className="hidden md:inline">Изменить балл</span>
-                      </Button>
+                      {selectedTaskState?.tutor_reviewed_at != null ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">
+                          <BadgeCheck className="h-3 w-3" />
+                          Проверено
+                        </span>
+                      ) : null}
+                      <div className="ml-auto flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-xs touch-manipulation"
+                          onClick={() => setIsEditScoreOpen(true)}
+                          aria-label={`Изменить балл задачи №${selectedTask.order_num}`}
+                        >
+                          <Pencil className="h-3 w-3 md:mr-1" />
+                          <span className="hidden md:inline">Изменить балл</span>
+                        </Button>
+                        {selectedTaskState?.tutor_reviewed_at == null
+                          && selectedTaskState?.ai_score != null ? (
+                          <Button
+                            size="sm"
+                            className="h-7 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700 touch-manipulation"
+                            disabled={reviewMutation.isPending}
+                            onClick={() => reviewMutation.mutate(selectedTask.id)}
+                            aria-label={`Подтвердить задачу №${selectedTask.order_num}`}
+                          >
+                            {reviewMutation.isPending ? (
+                              <Loader2 className="h-3 w-3 animate-spin md:mr-1" />
+                            ) : (
+                              <BadgeCheck className="h-3 w-3 md:mr-1" />
+                            )}
+                            <span className="hidden md:inline">Подтвердить</span>
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   )}
 
@@ -888,6 +939,7 @@ export function GuidedThreadViewer({
           currentComment={selectedTaskState?.tutor_score_override_comment ?? null}
           status={(selectedTaskState?.status ?? 'active') as 'active' | 'completed' | 'locked' | 'skipped'}
           tutorForceCompletedAt={selectedTaskState?.tutor_force_completed_at ?? null}
+          tutorReviewedAt={selectedTaskState?.tutor_reviewed_at ?? null}
         />
       ) : null}
     </div>

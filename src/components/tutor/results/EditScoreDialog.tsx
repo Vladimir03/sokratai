@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -23,6 +23,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { setTutorScoreOverride } from '@/lib/tutorHomeworkApi';
+import { reopenReview, reviewTask } from '@/lib/tutorProgressApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 // ─── EditScoreDialog (Homework Results v2 P0-5 / AC-5 + 2026-05-16 force-complete) ─
@@ -90,6 +91,13 @@ interface EditScoreDialogProps {
    * (P3 fix) — null явное значение, не undefined.
    */
   tutorForceCompletedAt: string | null;
+  /**
+   * 2026-06-02 (student-progress R1): ISO timestamp когда задача подтверждена
+   * репетитором («проверено»), либо null. Required — null явное значение.
+   * isReviewed=true → скрыть чекбокс «Подтвердить задачу», показать ghost
+   * «Снять подтверждение». Ортогонально status / tutorForceCompletedAt.
+   */
+  tutorReviewedAt: string | null;
 }
 
 function formatScore(value: number): string {
@@ -110,6 +118,7 @@ export function EditScoreDialog({
   currentComment,
   status,
   tutorForceCompletedAt,
+  tutorReviewedAt,
 }: EditScoreDialogProps) {
   const queryClient = useQueryClient();
   // Prefill priority: existing override → current displayed final_score → AI
@@ -123,6 +132,10 @@ export function EditScoreDialog({
   // без закрытия — снимет галочку.
   const [closeAfterSave, setCloseAfterSave] = useState<boolean>(true);
   const [reopenConfirmOpen, setReopenConfirmOpen] = useState(false);
+  // R1 «проверено»: default ON, чтобы «Сохранить и подтвердить» был дефолтным
+  // терминальным действием. Скрыт, если задача уже reviewed.
+  const [reviewAfterSave, setReviewAfterSave] = useState<boolean>(true);
+  const [reviewReopenConfirmOpen, setReviewReopenConfirmOpen] = useState(false);
 
   // Reset form whenever the dialog is (re)opened for a new task.
   useEffect(() => {
@@ -131,6 +144,8 @@ export function EditScoreDialog({
       setComment(currentComment ?? '');
       setCloseAfterSave(true);
       setReopenConfirmOpen(false);
+      setReviewAfterSave(true);
+      setReviewReopenConfirmOpen(false);
     }
   }, [open, currentOverride, finalScore, aiScore, currentComment]);
 
@@ -191,10 +206,44 @@ export function EditScoreDialog({
   // Reopen CTA — только для force-completed (НЕ для AI-CORRECT).
   const showReopenCta = isForceCompletedByTutor;
 
-  type Mode = 'save' | 'reset' | 'reopen';
+  // ── R1 «проверено» derived flags ──────────────────────────────────────────
+  const isReviewed = tutorReviewedAt != null;
+  // Чекбокс «Подтвердить задачу» — пока задача не подтверждена.
+  const showReviewCheckbox = !isReviewed;
+  const willReview = showReviewCheckbox && reviewAfterSave;
+  // Когда подтверждаем — review-RPC сам закроет active-задачу, поэтому
+  // отдельный force-complete чекбокс прячем (иначе два конкурирующих close).
+  const showCloseCheckboxEffective = showCloseCheckbox && !willReview;
+  // Балл реально менялся относительно текущего отображаемого (override → final → ai).
+  // Для confirm без правки → не создаём override (AI-балл не перезаписывается).
+  const effectiveCurrentScore = currentOverride ?? finalScore ?? aiScore ?? null;
+  const scoreChanged = !Number.isNaN(numericValue) && numericValue !== effectiveCurrentScore;
+  const commentChanged = trimmedComment !== (currentComment ?? '') && trimmedComment.length > 0;
+  // КРИТИЧНО (manual/no-AI): когда AI-вердикта НЕТ, `finalScore` приходит как 0
+  // (fallback), поэтому ввод балла «0» выглядел бы как «не изменилось» → score:null →
+  // force_complete без override → итог fallback'ился в max_score. Нет AI = нечего
+  // сохранять, поэтому ВСЕГДА персистим введённый балл (включая 0).
+  const reviewWantsOverride = scoreChanged || commentChanged || aiScore == null;
+
+  type Mode = 'save' | 'reset' | 'reopen' | 'review-reopen';
 
   const saveMutation = useMutation({
     mutationFn: async (mode: Mode) => {
+      // R1 «проверено» — снять подтверждение (status НЕ трогаем).
+      if (mode === 'review-reopen') {
+        return reopenReview({ assignmentId, studentId, taskId: task.id });
+      }
+      // R1 «проверено» — подтвердить (+опц. override). Для active-задачи
+      // backend сам закроет её. AI-балл не перезаписывается, если не менялся.
+      if (mode === 'save' && willReview) {
+        return reviewTask({
+          assignmentId,
+          studentId,
+          taskId: task.id,
+          score: reviewWantsOverride ? numericValue : null,
+          comment: reviewWantsOverride ? (trimmedComment || null) : null,
+        });
+      }
       // P1 fix: reopen НЕ должен silently писать override=numericValue,
       // если у задачи override=null (bulk-closed без override → finalScore=max
       // через fallback → user открывает диалог → numericValue=max). Reopen
@@ -229,12 +278,13 @@ export function EditScoreDialog({
     },
     onSuccess: (_data, mode) => {
       const isReset = mode === 'reset';
-      const closedTask = mode === 'save' && willCloseAfterSave;
-      // Existing AC-10 event — emit only when override меняется (save / reset).
-      // P3 fix (code review round 2): mode='reopen' preserves currentOverride,
-      // не вызывает override change → emit'ить telemetry с `tutorScore: numericValue`
-      // здесь было бы false-positive (telemetry показала бы изменение, которого нет).
-      if (mode === 'save' || mode === 'reset') {
+      const reviewedTask = mode === 'save' && willReview;
+      // force-complete close ТОЛЬКО когда НЕ подтверждаем (review-RPC сам закроет).
+      const closedTask = mode === 'save' && !willReview && willCloseAfterSave;
+      // Existing AC-10 event — emit only когда override меняется через
+      // setTutorScoreOverride путь (save без review / reset). Review-save идёт
+      // через reviewTask → отдельное событие task_reviewed, не manual_score_override.
+      if ((mode === 'save' && !willReview) || mode === 'reset') {
         trackGuidedHomeworkEvent('manual_score_override_saved', {
           assignmentId,
           taskId: task.id,
@@ -259,6 +309,22 @@ export function EditScoreDialog({
           taskId: task.id,
         });
       }
+      // R1 «проверено» events.
+      if (reviewedTask) {
+        trackGuidedHomeworkEvent('task_reviewed', {
+          assignmentId,
+          studentId,
+          taskId: task.id,
+          source: 'dialog',
+          hadOverride: reviewWantsOverride,
+        });
+      } else if (mode === 'review-reopen') {
+        trackGuidedHomeworkEvent('task_review_reopened', {
+          assignmentId,
+          studentId,
+          taskId: task.id,
+        });
+      }
 
       // Invalidate the three React Query keys required by AC-5.
       queryClient.invalidateQueries({
@@ -273,7 +339,11 @@ export function EditScoreDialog({
         queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId],
       });
 
-      if (closedTask) {
+      if (mode === 'save' && willReview) {
+        toast.success(reviewWantsOverride ? 'Балл сохранён, задача подтверждена' : 'Задача подтверждена');
+      } else if (mode === 'review-reopen') {
+        toast.success('Подтверждение снято');
+      } else if (closedTask) {
         toast.success('Балл сохранён, задача закрыта');
       } else if (mode === 'reopen') {
         toast.success('Задача открыта обратно');
@@ -291,9 +361,20 @@ export function EditScoreDialog({
   });
 
   const isPending = saveMutation.isPending;
-  const primaryLabel = willCloseAfterSave
+  const primaryLabel = willReview
+    ? (aiScore == null
+        ? 'Поставить балл и подтвердить'
+        : reviewWantsOverride
+        ? 'Сохранить и подтвердить'
+        : 'Подтвердить')
+    : willCloseAfterSave
     ? 'Сохранить и закрыть задачу'
     : 'Сохранить балл';
+  // Зелёный (success-семантика, rule 90) для подтверждения и для закрытия.
+  const primaryIsSuccess = willReview || willCloseAfterSave;
+  // Disabled для unchanged — только когда нет ни close, ни review (оба — meaningful action).
+  const primaryDisabled =
+    isPending || validationError !== null || (isUnchanged && !willCloseAfterSave && !willReview);
 
   return (
     <>
@@ -332,6 +413,15 @@ export function EditScoreDialog({
               {isForceCompletedByTutor ? (
                 <div className="text-xs text-emerald-700">
                   Задача закрыта вами вручную.
+                </div>
+              ) : null}
+              {isReviewed ? (
+                <div className="text-xs text-emerald-700">
+                  Задача подтверждена — ученик видит «Проверено».
+                </div>
+              ) : aiScore == null ? (
+                <div className="text-xs text-slate-500">
+                  AI-вердикта нет — оцените задачу вручную.
                 </div>
               ) : null}
             </div>
@@ -375,7 +465,26 @@ export function EditScoreDialog({
               />
             </div>
 
-            {showCloseCheckbox ? (
+            {showReviewCheckbox ? (
+              <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                <Checkbox
+                  checked={reviewAfterSave}
+                  onCheckedChange={(next) => setReviewAfterSave(next === true)}
+                  disabled={isPending}
+                  className="mt-0.5"
+                />
+                <span>
+                  Подтвердить задачу
+                  <span className="block text-xs text-slate-500">
+                    {status === 'active'
+                      ? 'Ученик увидит балл и «проверено». Задача будет закрыта.'
+                      : 'Ученик увидит балл и «проверено репетитором».'}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
+            {showCloseCheckboxEffective ? (
               <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
                 <Checkbox
                   checked={closeAfterSave}
@@ -391,6 +500,15 @@ export function EditScoreDialog({
                 </span>
               </label>
             ) : null}
+
+            {/* Anti-leak плашка (rule 45 / spec §5) — нейтральный фон, не зелёный. */}
+            <div className="flex items-start gap-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              <span>
+                Ученик видит только итоговый балл и «проверено». AI-рубрика,
+                подсказки и решение не раскрываются.
+              </span>
+            </div>
           </div>
 
           <DialogFooter className="flex-col gap-2 md:flex-row md:justify-between">
@@ -417,6 +535,17 @@ export function EditScoreDialog({
                   Открыть задачу обратно
                 </Button>
               ) : null}
+              {isReviewed ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => setReviewReopenConfirmOpen(true)}
+                >
+                  Снять подтверждение
+                </Button>
+              ) : null}
             </div>
             <div className="flex gap-2">
               <Button
@@ -429,9 +558,9 @@ export function EditScoreDialog({
               </Button>
               <Button
                 type="button"
-                disabled={isPending || validationError !== null || (isUnchanged && !willCloseAfterSave)}
+                disabled={primaryDisabled}
                 onClick={() => saveMutation.mutate('save')}
-                className={willCloseAfterSave ? 'bg-emerald-600 text-white hover:bg-emerald-700' : undefined}
+                className={primaryIsSuccess ? 'bg-emerald-600 text-white hover:bg-emerald-700' : undefined}
               >
                 {isPending && saveMutation.variables === 'save' ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -471,6 +600,39 @@ export function EditScoreDialog({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
               Открыть обратно
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Снять подтверждение «проверено» (R1). Чистит только флаг review —
+          status задачи НЕ меняется (ортогонально). */}
+      <AlertDialog
+        open={reviewReopenConfirmOpen}
+        onOpenChange={(next) => (!isPending ? setReviewReopenConfirmOpen(next) : null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Снять подтверждение?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Задача вернётся в очередь «требует проверки», у ученика пропадёт пометка
+              «Проверено». Балл и статус задачи не изменятся.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isPending}>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                saveMutation.mutate('review-reopen');
+                setReviewReopenConfirmOpen(false);
+              }}
+            >
+              {isPending && saveMutation.variables === 'review-reopen' ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : null}
+              Снять подтверждение
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,0 +1,84 @@
+/* ============================================================
+   SokratAI hero v2 — mobile (390px). Scoped to .app--m because
+   the phone frame is 390px inside a wide canvas → viewport media
+   queries won't fire. Container-class scoping instead.
+   ============================================================ */
+
+/* phone harness stage */
+.m-stage { display:flex; justify-content:center; padding:30px 26px 70px; }
+
+/* full-bleed inside the phone; .app--m is the fixed-height stage,
+   .m-scroll is the only scroller, overlays pin to .app--m */
+.app--m { height:100%; overflow:hidden; position:relative; border:0; border-radius:0; box-shadow:none; }
+.app--m .m-scroll { height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; padding-bottom:40px; }
+
+/* hide desktop topnav; breadcrumb clears status bar / dynamic island */
+.app--m .topnav { display:none; }
+.app--m .crumb { padding:56px 16px 0; font-size:12px; }
+
+/* student header */
+.app--m .student-head { flex-wrap:wrap; padding:12px 16px 14px; gap:11px; }
+.app--m .student-head .avatar { width:46px; height:46px; font-size:15px; }
+.app--m .student-head .who { flex:1 1 160px; min-width:0; }
+.app--m .student-head .who h2 { font-size:19px; }
+.app--m .student-head .who .line2 { font-size:12px; gap:6px; margin-top:3px; }
+.app--m .student-head .actions { width:100%; }
+.app--m .student-head .actions .btn { width:100%; justify-content:center; min-height:44px; }
+
+/* summary + goal card stack */
+.app--m .summary { padding:14px 16px 4px; }
+.app--m .goalcard { grid-template-columns:1fr; gap:13px; padding:14px; }
+.app--m .goalcard .gl-cur { font-size:27px; }
+.app--m .goalcard .gl-main { gap:9px; }
+.app--m .gl-spark svg { height:48px; }
+
+/* tiles: compact 3-up, glanceable */
+.app--m .summary-tiles { grid-template-columns:repeat(3,1fr); gap:8px; }
+.app--m .metric { padding:10px 10px 9px; border-radius:10px; }
+.app--m .metric .label { font-size:9.5px; gap:3px; letter-spacing:0.02em; }
+.app--m .metric .label .i { width:11px; height:11px; }
+.app--m .metric .value { font-size:20px; margin-top:5px; }
+.app--m .metric .sub { font-size:10.5px; margin-top:3px; }
+
+/* bulk bar wraps; CTA full width */
+.app--m .bulkbar { flex-wrap:wrap; padding:12px 13px; }
+.app--m .bulkbar .btn--primary { width:100%; justify-content:center; min-height:46px; order:3; margin-top:4px; }
+
+.app--m .vadim-note { margin:12px 16px 0; flex-wrap:wrap; }
+
+/* work cards reflow: info row, then score/status/actions row */
+.app--m .work-list { padding:12px 16px 24px; gap:10px; }
+.app--m .work-main { display:flex; flex-wrap:wrap; gap:11px; align-items:flex-start; padding:13px 14px; }
+.app--m .work-info { flex:1 1 0; min-width:0; }
+.app--m .work-info .heatrow { margin-top:8px; }
+.app--m .heat { width:24px; height:23px; }
+.app--m .work-right { width:100%; flex-direction:row; flex-wrap:wrap; align-items:center; gap:9px 12px; margin-top:2px; padding-top:11px; border-top:1px solid var(--border-l); }
+.app--m .work-right .work-score { order:1; }
+.app--m .work-right .st-badge { order:2; }
+.app--m .work-right .controls { order:3; margin-left:auto; }
+.app--m .work-right .reopen { margin-left:auto; }
+.app--m .work .btn--sm { min-height:40px; }
+.app--m .task-cards { grid-template-columns:1fr 1fr; }
+.app--m .detail-foot { flex-direction:column; align-items:stretch; gap:11px; }
+.app--m .detail-foot .btn { min-height:44px; justify-content:center; }
+
+/* edit modal → bottom sheet */
+.app--m .modal-scrim { align-items:flex-end; padding:0; }
+.app--m .modal { width:100%; max-width:100%; border-radius:18px 18px 0 0; animation:sheet .22s cubic-bezier(.2,.7,.3,1) both; }
+@keyframes sheet { from{ transform:translateY(100%) } to{ transform:none } }
+.app--m .modal-f { padding-bottom:26px; flex-wrap:wrap; }
+.app--m .modal-f .btn { min-height:46px; }
+.app--m .modal-f .btn--primary { flex:1; justify-content:center; }
+
+/* report popover → bottom sheet */
+.app--m .report-pop { position:absolute; left:0; right:0; bottom:0; top:auto; width:auto; border-radius:18px 18px 0 0; box-shadow:0 -10px 40px rgba(15,23,42,0.22); animation:sheet .22s cubic-bezier(.2,.7,.3,1) both; }
+.app--m .report-pop .rf { padding-bottom:26px; }
+.app--m .report-pop .rf .btn { min-height:46px; }
+
+.app--m .toast { bottom:48px; }
+
+/* states fit the narrow column */
+.app--m .state-wrap { padding:40px 22px 52px; }
+.app--m .skel-wrap { padding:16px 16px 24px; }
+.app--m .skel-tiles { gap:8px; }
+.app--m .skel-heat { width:150px; }
