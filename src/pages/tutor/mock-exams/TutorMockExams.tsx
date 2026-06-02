@@ -555,8 +555,6 @@ function TutorMockExamsContent() {
     error,
     refetch,
     isFetching,
-    isRecovering,
-    failureCount,
   } = useMockExamAssignments();
 
   const sorted = useMemo(() => sortByCreatedDesc(assignments), [assignments]);
@@ -595,10 +593,8 @@ function TutorMockExamsContent() {
 
       {/* Error / Recovery status */}
       <TutorDataStatus
-        error={error}
+        criticalError={error}
         isFetching={isFetching}
-        isRecovering={isRecovering}
-        failureCount={failureCount}
         onRetry={refetch}
       />
 

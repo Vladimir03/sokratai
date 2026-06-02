@@ -2199,8 +2199,6 @@ function TutorMockExamReviewContent() {
     error: attemptError,
     refetch: refetchAttempt,
     isFetching: attemptFetching,
-    isRecovering: attemptRecovering,
-    failureCount: attemptFailureCount,
   } = useMockExamAttempt(attemptId);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -2313,11 +2311,10 @@ function TutorMockExamReviewContent() {
   if (error && !attempt) {
     return (
       <TutorDataStatus
-        error={error}
+        criticalError={error}
         isFetching={attemptFetching}
-        isRecovering={attemptRecovering}
-        failureCount={attemptFailureCount}
         onRetry={refetchAttempt}
+        escalateAfterMs={8000}
       />
     );
   }
@@ -2475,10 +2472,8 @@ function TutorMockExamReviewContent() {
 
       {/* Recovery / non-blocking errors */}
       <TutorDataStatus
-        error={attemptError}
+        degraded={!!attemptError}
         isFetching={attemptFetching}
-        isRecovering={attemptRecovering}
-        failureCount={attemptFailureCount}
         onRetry={refetchAttempt}
       />
 

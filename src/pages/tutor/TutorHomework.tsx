@@ -352,8 +352,6 @@ function TutorHomeworkContent() {
     error,
     refetch,
     isFetching,
-    isRecovering,
-    failureCount,
   } = useTutorHomeworkAssignments({
     filter,
     groupId,
@@ -425,10 +423,8 @@ function TutorHomeworkContent() {
 
         {/* Error / Recovery status */}
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={isFetching}
-          isRecovering={isRecovering}
-          failureCount={failureCount}
           onRetry={handleRetry}
         />
 

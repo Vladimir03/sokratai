@@ -248,10 +248,8 @@ function TutorHomeworkTemplatesContent() {
         </div>
 
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={isFetching}
-          isRecovering={false}
-          failureCount={0}
           onRetry={refetch}
         />
 

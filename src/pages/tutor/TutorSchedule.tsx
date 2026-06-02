@@ -24,6 +24,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import { PastLessonsConfirmBanner } from '@/components/tutor/schedule/PastLessonsConfirmBanner';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import {
@@ -3067,7 +3068,14 @@ function TutorScheduleContent() {
   const hasScheduleData = slots.length > 0 || lessons.length > 0;
   const hasCriticalError = Boolean(slotsError || lessonsError);
   const showInitialSkeleton = loading && !hasScheduleData && !hasCriticalError;
-  const pageError = slotsError || lessonsError || tutorError || studentsError || reminderError || calendarError || exceptionsError;
+  // Tiered (2026-06-02): banner only when the schedule itself failed to load
+  // (slots/lessons = load-bearing). Peripheral settings (tutor / students /
+  // reminder / calendar / exceptions) failures are `degraded` — the calendar
+  // still renders, so a single settings blip must not alarm (was OR-of-7).
+  const scheduleDataError = slotsError || lessonsError || null;
+  const scheduleDegraded = Boolean(
+    tutorError || studentsError || reminderError || calendarError || exceptionsError,
+  );
   const pageIsFetching =
     tutorIsFetching ||
     studentsIsFetching ||
@@ -3076,23 +3084,6 @@ function TutorScheduleContent() {
     reminderIsFetching ||
     calendarIsFetching ||
     exceptionsIsFetching;
-  const pageIsRecovering =
-    tutorIsRecovering ||
-    studentsIsRecovering ||
-    slotsIsRecovering ||
-    lessonsIsRecovering ||
-    reminderIsRecovering ||
-    calendarIsRecovering ||
-    exceptionsIsRecovering;
-  const pageFailureCount = Math.max(
-    tutorFailureCount,
-    studentsFailureCount,
-    slotsFailureCount,
-    lessonsFailureCount,
-    reminderFailureCount,
-    calendarFailureCount,
-    exceptionsFailureCount,
-  );
 
   const handleRetryAll = useCallback(() => {
     refetchTutor();
@@ -3691,12 +3682,13 @@ function TutorScheduleContent() {
   return (
       <div className="space-y-4">
         <TutorDataStatus
-          error={pageError}
+          criticalError={scheduleDataError}
+          degraded={scheduleDegraded}
           isFetching={pageIsFetching}
-          isRecovering={pageIsRecovering}
-          failureCount={pageFailureCount}
           onRetry={handleRetryAll}
         />
+
+        <PastLessonsConfirmBanner onOpenMaterials={setMaterialsDrawerLesson} />
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

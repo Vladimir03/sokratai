@@ -120,13 +120,6 @@ function TutorStudentsContent() {
   const initialLoading = loading && students.length === 0 && !error;
   const hasErrors = Boolean(error || tutorError || (miniGroupsEnabled && (groupsError || membershipsError)));
   const isPageFetching = isFetching || tutorIsFetching || (miniGroupsEnabled && (groupsIsFetching || membershipsIsFetching));
-  const isPageRecovering = isRecovering || tutorIsRecovering || (miniGroupsEnabled && (groupsIsRecovering || membershipsIsRecovering));
-  const pageFailureCount = Math.max(
-    failureCount,
-    tutorFailureCount,
-    miniGroupsEnabled ? groupsFailureCount : 0,
-    miniGroupsEnabled ? membershipsFailureCount : 0
-  );
   
   // Invite URLs
   const inviteCode = tutor?.invite_code;
@@ -451,10 +444,8 @@ function TutorStudentsContent() {
     <>
       <div className="space-y-6">
         <TutorDataStatus
-          error={error || tutorError}
+          criticalError={error || tutorError}
           isFetching={isPageFetching}
-          isRecovering={isPageRecovering}
-          failureCount={pageFailureCount}
           onRetry={handleRetryAll}
         />
 

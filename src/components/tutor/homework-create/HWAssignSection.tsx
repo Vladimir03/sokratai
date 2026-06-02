@@ -175,8 +175,6 @@ export function HWAssignSection({
     error,
     refetch,
     isFetching,
-    isRecovering,
-    failureCount,
   } = useTutorStudents();
 
   const lockedStudentIds = useMemo(
@@ -543,10 +541,8 @@ export function HWAssignSection({
           {assignTab === 'groups' && (
             <div className="space-y-4">
               <TutorDataStatus
-                error={groupsError}
+                criticalError={groupsError}
                 isFetching={groupsIsFetching}
-                isRecovering={groupsIsRecovering}
-                failureCount={groupsFailureCount}
                 onRetry={onGroupsRetry ?? (() => {})}
               />
 
@@ -684,10 +680,8 @@ export function HWAssignSection({
         )}
 
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={isFetching}
-          isRecovering={isRecovering}
-          failureCount={failureCount}
           onRetry={refetch}
         />
 

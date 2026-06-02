@@ -145,9 +145,9 @@ export function toTutorErrorMessage(defaultMessage: string, error: unknown): str
     return `${defaultMessage} (истекло время ожидания ответа)`;
   }
 
-  if (isTutorNetworkError(error)) {
-    return "Не получается подключиться к серверу из вашей сети. Часто помогает мобильный интернет или включённый VPN.";
-  }
-
+  // Network-level failures (DPI reset / blocked host) keep the page-specific
+  // neutral message. TutorDataStatus calmly explains the transient-connection
+  // context; we no longer blame the tutor's network or push VPN here — the
+  // fragile leg is our cross-border proxy hop, usually not them (rule 95).
   return defaultMessage;
 }

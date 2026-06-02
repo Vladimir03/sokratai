@@ -16,7 +16,6 @@ import {
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import type { DialogItem } from '@/components/tutor/home/primitives/ChatRow';
 import type { TodaySession } from '@/components/tutor/home/primitives/SessionBlock';
-import { useTutor, useTutorStudents, useTutorPayments } from '@/hooks/useTutor';
 import { useTutorHomeData } from '@/hooks/useTutorHomeData';
 import {
   getTutorInviteTelegramLink,
@@ -57,25 +56,6 @@ function TutorHomeContent() {
   const navigate = useNavigate();
   const home = useTutorHomeData();
   const { tutor, students, payments, studentActivity } = home;
-
-  // Pull per-query refetchers so TutorDataStatus can retry everything.
-  const tutorQuery = useTutor();
-  const studentsQuery = useTutorStudents();
-  const paymentsQuery = useTutorPayments();
-
-  const isFetching =
-    tutorQuery.isFetching ||
-    studentsQuery.isFetching ||
-    paymentsQuery.isFetching;
-  const isRecovering =
-    tutorQuery.isRecovering ||
-    studentsQuery.isRecovering ||
-    paymentsQuery.isRecovering;
-  const failureCount = Math.max(
-    tutorQuery.failureCount,
-    studentsQuery.failureCount,
-    paymentsQuery.failureCount,
-  );
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
 
@@ -202,6 +182,12 @@ function TutorHomeContent() {
     home.refetchAll();
   }, [home]);
 
+  // Silent critical self-heal targets only профиль + ученики (cheap), while the
+  // manual button + slow degraded loop refetch everything.
+  const handleRetryCritical = useCallback(() => {
+    home.refetchCritical();
+  }, [home]);
+
   const tutorName = tutor?.name?.trim() ?? '';
   const hasStudents = students.length > 0;
 
@@ -212,11 +198,12 @@ function TutorHomeContent() {
     <>
       <div>
         <TutorDataStatus
-          error={home.error}
-          isFetching={isFetching}
-          isRecovering={isRecovering}
-          failureCount={failureCount}
+          criticalError={home.criticalError}
+          degraded={home.degraded}
+          isFetching={home.criticalFetching}
           onRetry={handleRetryAll}
+          onAutoRetry={handleRetryCritical}
+          bannerTitle="Не удалось загрузить кабинет"
         />
 
         {showSkeleton ? (

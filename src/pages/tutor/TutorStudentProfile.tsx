@@ -191,8 +191,6 @@ function TutorStudentProfileContent() {
   const initialLoading = loading && !student && !error;
   const pageError = error || mockExamsError || chatsError;
   const pageIsFetching = studentIsFetching || mockExamsIsFetching || chatsIsFetching;
-  const pageIsRecovering = studentIsRecovering || mockExamsIsRecovering || chatsIsRecovering;
-  const pageFailureCount = Math.max(studentFailureCount, mockExamsFailureCount, chatsFailureCount);
   
   // Инициализация полей при загрузке студента
   if (student && !notesInitialized) {
@@ -498,10 +496,8 @@ function TutorStudentProfileContent() {
   return (
       <div className="space-y-6">
         <TutorDataStatus
-          error={pageError}
+          degraded={!!pageError}
           isFetching={pageIsFetching}
-          isRecovering={pageIsRecovering}
-          failureCount={pageFailureCount}
           onRetry={() => {
             refetchStudent();
             refetchMockExams();
@@ -1373,11 +1369,10 @@ function ChatMessagesDialog({
         </DialogHeader>
 
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={isFetching}
-          isRecovering={isRecovering}
-          failureCount={failureCount}
           onRetry={refetch}
+          escalateAfterMs={8000}
         />
         
         <ScrollArea className="flex-1 pr-4">

@@ -430,7 +430,7 @@ function NotFoundState() {
 function TutorMockExamDetailContent() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { detail, loading, error, refetch, isFetching, isRecovering, failureCount } =
+  const { detail, loading, error, refetch, isFetching } =
     useMockExamAssignment(id);
 
   // TASK-17: dialog states для Add / Delete / Remove student.
@@ -480,11 +480,10 @@ function TutorMockExamDetailContent() {
     return (
       <div className="space-y-4">
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={isFetching}
-          isRecovering={isRecovering}
-          failureCount={failureCount}
           onRetry={refetch}
+          escalateAfterMs={8000}
         />
       </div>
     );
@@ -515,10 +514,8 @@ function TutorMockExamDetailContent() {
 
       {/* Recovery / error status (non-blocking, shown above content) */}
       <TutorDataStatus
-        error={error}
+        degraded={!!error}
         isFetching={isFetching}
-        isRecovering={isRecovering}
-        failureCount={failureCount}
         onRetry={refetch}
       />
 

@@ -83,6 +83,7 @@ Hard rules for any Supabase HTTP call:
 - **`profiles` has no `email` column** — email lives only in `auth.users` (`auth.admin.getUserById`). (rule 70)
 - **Anti-leak:** homework `solution_text` / `rubric_*` are **tutor-only forever**; mock-exam reveal is **state-aware** (Часть 2 only post-approval). Student endpoints must never SELECT tutor-only fields. (rule 40, rule 45)
 - **Edge-function errors:** every non-2xx is JSON `{ error, code? }` with a Russian phrase; clients parse via `extractEdgeFunctionError`; email lookup via `find_auth_user_id_by_email` RPC, never `listUsers`. (rule 97)
+- **Tutor data-fetch UX:** never OR-aggregate query errors into a banner (RU DPI drops ~1 of N parallel requests → false alarm). `TutorDataStatus` is tiered: `criticalError` only when the surface has no usable content, `degraded` when a block failed while the page rendered; quiet→escalate + self-heal; network errors stay neutral (no «VPN» blame). (rule 95)
 
 ---
 

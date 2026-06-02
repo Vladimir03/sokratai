@@ -138,8 +138,6 @@ function TutorPaymentsContent() {
   const initialLoading = loading && payments.length === 0 && !error;
   const hasErrors = Boolean(error || studentsError);
   const isPageFetching = paymentsIsFetching || studentsIsFetching;
-  const isPageRecovering = paymentsIsRecovering || studentsIsRecovering;
-  const pageFailureCount = Math.max(paymentsFailureCount, studentsFailureCount);
   
   // Фильтрация платежей
   const filteredPayments = useMemo(() => {
@@ -247,10 +245,8 @@ function TutorPaymentsContent() {
   return (
       <div className="space-y-6">
         <TutorDataStatus
-          error={error || studentsError}
+          criticalError={error || studentsError}
           isFetching={isPageFetching}
-          isRecovering={isPageRecovering}
-          failureCount={pageFailureCount}
           onRetry={handleRetryAll}
         />
 

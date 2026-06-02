@@ -635,10 +635,8 @@ function TutorHomeworkDetailContent() {
       <div className="space-y-6">
         {/* Error */}
         <TutorDataStatus
-          error={error}
+          criticalError={error}
           isFetching={detailsQuery.isFetching}
-          isRecovering={detailsQuery.isFetching && detailsQuery.failureCount > 0}
-          failureCount={detailsQuery.failureCount}
           onRetry={() => void detailsQuery.refetch()}
         />
 
