@@ -140,6 +140,7 @@ Emoji допустимы ТОЛЬКО в:
 - Input: border-slate-200 rounded-md text-base (16px!)
 - Focus ring: `ring-2 ring-accent/20 border-accent`
 - Error: border-red-500 + text-sm text-red-500 под input
+- **Авто-растущие `<textarea>` (composer'ы, поля длинного текста):** канонический хук `src/hooks/useAutoResizeTextarea.ts` (`ref, value, maxHeight`). `maxHeight` — число или `() => px` (для viewport-cap'а; пересчитывается на `resize`). Cap считать в JS (`window.innerHeight * factor`), **не** `dvh`/`vh` (rule 80, Safari 15.0–15.3). Не плодить локальные копии — `GuidedChatInput.tsx` / `ChatInput.tsx` держат legacy-дубликаты (150px / 96-120px), мигрировать на хук при касании.
 
 ## Конкурентные референсы (вдохновение)
 

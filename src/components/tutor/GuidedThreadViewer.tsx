@@ -36,9 +36,15 @@ import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { usePasteImages } from '@/hooks/usePasteImages';
+import { useAutoResizeTextarea } from '@/hooks/useAutoResizeTextarea';
 import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
 const STICKY_BOTTOM_THRESHOLD_PX = 100;
+
+// Cap the tutor composer at ~half the viewport so student/AI messages above stay
+// visible. JS-computed (not 50dvh) — rule 80: dvh is unsafe on iOS 15.0–15.3,
+// and the textarea height is already set imperatively for auto-resize.
+const halfViewportPx = () => window.innerHeight * 0.5;
 
 const TASK_STATUS_LABELS: Record<string, string> = {
   locked: 'Закрыта',
@@ -262,11 +268,15 @@ export function GuidedThreadViewer({
   const [attachPreview, setAttachPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
   const queryClient = useQueryClient();
   const threadQueryKey = useMemo(
     () => ['tutor', 'homework', 'thread', assignmentId, studentId] as const,
     [assignmentId, studentId],
   );
+
+  // Auto-grow the composer with content, capped at ~half the viewport.
+  useAutoResizeTextarea(messageTextareaRef, messageText, halfViewportPx);
 
   // R1 «проверено» — быстрое подтверждение задачи (без правки балла). Для
   // active-задачи backend сам закрывает её. «Изменить балл и подтвердить» /
@@ -891,10 +901,11 @@ export function GuidedThreadViewer({
                     <Paperclip className="h-4 w-4" />
                   </Button>
                   <textarea
+                    ref={messageTextareaRef}
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
                     placeholder={hiddenNote ? 'Инструкция для AI (ученик не увидит)...' : 'Сообщение ученику (можно вставить скриншот Ctrl+V)...'}
-                    className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[40px] focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="flex-1 resize-none overflow-y-auto rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[40px] focus:outline-none focus:ring-2 focus:ring-ring"
                     rows={2}
                     style={{ fontSize: '16px' }}
                     onKeyDown={(e) => {

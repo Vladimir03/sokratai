@@ -933,6 +933,7 @@ Spec: `docs/delivery/features/homework-reuse-v1/spec.md`.
 - Сообщения через `MathText`. `ThreadAttachments` резолвит `storage://` refs через signed URLs.
 - Репетитор может прикрепить изображение (upload через `uploadTutorHomeworkTaskImage`, ref в `image_url`). Backend `handleTutorPostMessage` принимает optional `image_url`.
 - Student-side `GuidedChatMessage` отображает `image_url` через `ThreadAttachments` (резолвит через `getStudentTaskImageSignedUrl`).
+- **Авто-рост composer'а (фидбэк Эмилии 2026-06-03):** поле ввода сообщения репетитору растёт под текст через `useAutoResizeTextarea(messageTextareaRef, messageText, halfViewportPx)`, cap = `window.innerHeight * 0.5` (не `dvh` — rule 80), `rows={2}` resting + `overflow-y-auto` для скролла за капом. Сброс высоты на отправку — автоматический (`setMessageText('')` → effect). Лента сообщений выше — отдельный sibling с `max-h-[320px]`, авто-рост её не сжимает. При расширении composer'а — этот же хук, не локальная копия.
 
 ### Guided chat media upload
 - **Transport/persist:** `handlePostThreadMessage` принимает optional `image_url` (только `storage://...` refs). `saveThreadMessage()` отправляет как `image_url` в `POST /threads/:id/messages`.
