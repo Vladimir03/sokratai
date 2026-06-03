@@ -471,6 +471,7 @@ interface HomeworkTemplateTask {
 - **AC-10** `SaveTasksToKBDialog` (drawer desktop / bottom sheet mobile) открывается из Actions-меню Detail. Чекбоксы задач дефолтом **все selected**. Список папок — `Моя база` с возможностью выбора существующей. Inline-строка «+ Создать новую папку» разворачивает text-input → создаёт папку inline → автоматически выбирает её.
 - **AC-11** Для каждой задачи: если `kb_task_id` ссылается на задачу в моей базе → skip с меткой «✓ уже в базе». Если из каталога (`owner_id IS NULL`) — создаём копию в выбранной папке через existing mechanism. Если новая задача (`kb_task_id IS NULL`) — `INSERT` с fingerprint-check; collision → вернуть ссылку на существующую.
 - **AC-12** Копируются поля: `task_text`, `task_image_url`, `correct_answer`, `solution_text`, `solution_image_urls`. **НЕ копируются**: `rubric_text`, `rubric_image_urls` (рубрика ДЗ-специфична).
+  - ⚠️ **Обновлено 2026-06-03 (field-parity fix):** рубрика ТЕПЕРЬ копируется в «Мою базу» (запрос Эмилии «критерии не прикрепились») — `kb_tasks.rubric_text`/`rubric_image_urls`. В общий **Каталог** по-прежнему НЕ утекает (moderation-триггеры копируют явный список колонок без rubric). Канон: rule 40 «Field-parity (2026-06-03)».
 - **AC-13** Per-task иконка `BookmarkPlus` появляется на `HWTaskCard` **только в edit-mode** конструктора ДЗ. Клик → `SaveTasksToKBDialog` в режиме single-task (один чекбокс, предвыбран).
 
 **Save as Template post-factum:**

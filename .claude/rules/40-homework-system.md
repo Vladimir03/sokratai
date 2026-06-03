@@ -887,7 +887,7 @@ Spec: `docs/delivery/features/homework-reuse-v1/spec.md`.
 
 **Fingerprint-based dedup — единственный путь (КРИТИЧНО):** `rpc('kb_normalize_fingerprint', { p_text, p_answer, p_attachment_url })` (3-arg). SELECT `kb_tasks WHERE owner_id = tutor AND fingerprint = fp` → если найден, `already_in_base=true` с **его** фактической folder (не выбранной). Покрывает все три провенанса (catalog copy / personal-already / manual duplicate). Не найден → INSERT с fingerprint, `source_label: 'my'`. **Нет** unique index на `(owner_id, fingerprint)` — SELECT-then-INSERT best-effort.
 
-**Anti-leak invariant:** копирует ТОЛЬКО `task_text`, `task_image_url`, `correct_answer`, `solution_text`, `solution_image_urls`. `rubric_text`/`rubric_image_urls` **НИКОГДА** не селектятся (рубрика ДЗ-специфична).
+**Anti-leak invariant (обновлено 2026-06-03):** копирует `task_text`, `task_image_url`, `correct_answer`, `solution_text`, `solution_image_urls` + **`rubric_text`/`rubric_image_urls`** (field-parity fix — рубрика теперь едет в «Мою базу», запрос Эмилии). Это **НЕ** утечка в Каталог: moderation-триггеры публикации (`kb_publish_task`/`kb_resync_task`) копируют явный список колонок без rubric → каталожная копия (`owner_id IS NULL`) рубрику не несёт. `check_format`/`cefr_level` обратно в Базу **НЕ** дописываются (Q3, отложено) — задача из ДЗ при повторном импорте получит check_format по эвристике. См. секцию «Field-parity (2026-06-03)».
 
 **Inline folder create:** при `new_folder_name` — `SELECT id, name FROM kb_folders WHERE owner_id = tutor AND parent_id IS NULL AND name ILIKE ?` + `.find(lowercase match)`. Совпадение → reuse (`created_folder = null`); иначе INSERT. Двойной клик не плодит близнецов.
 
@@ -923,6 +923,20 @@ Spec: `docs/delivery/features/homework-reuse-v1/spec.md`.
 **Dialog (`SaveAsTemplateDialog.tsx`):** prefill title `${assignment.title} — шаблон` (idempotent suffix guard); prefill tags `[subjectLabel, topic?]` (dedupe); multi-chip tag input (Enter/comma adds, Backspace deletes last). Три toggle default ON.
 
 Spec: `docs/delivery/features/homework-reuse-v1/spec.md`.
+
+### Field-parity: Создание ДЗ ↔ Шаблоны ↔ База задач (2026-06-03)
+
+Источник дрейфа: «Создание ДЗ» обросло полями (`check_format`, `task_kind`, `cefr_level`, рубрика, `exam_type`, `feedback_language`), а Шаблоны и База строились раньше → теряли их при переиспользовании. Баги: (1) «развёрнутый → краткий» после загрузки шаблона; (2) «добавила из базы — критерии не прикрепились».
+
+**Шаблоны несут ВСЕ поля задачи (КРИТИЧНО).** Миграция `20260603120000` добавила в `homework_tutor_templates`: `exam_type`, `feedback_language`, `disable_ai_bootstrap`. Per-task `check_format`/`task_kind`/`cefr_level` живут в `tasks_json` (тип `HomeworkTemplateTask`).
+- **Save-path'ы (КРИТИЧНО — клиентский payload тоже считается write-path):** (1) **видимый чекбокс «Сохранить как шаблон»** при создании ДЗ → **клиентский** `createTutorHomeworkTemplate` (`TutorHomeworkCreate.tsx`, ~стр.1219) → legacy `POST /templates` (`handleCreateTemplate`). **НЕ `save_as_template`-флаг** — тот в `handleCreateAssignment` живёт, но UI его НЕ шлёт (мёртвый путь, оставлен defensive). Review P0: клиентский payload ОБЯЗАН слать `check_format`/`task_kind`/`cefr_level` + `exam_type`/`feedback_language`/`disable_ai_bootstrap`, иначе бага #1 живёт на кнопке несмотря на backend-фикс. (2) `handleCreateTemplateFromAssignment` post-factum (`check_format`/`task_kind`/`cefr` под `include_ai_settings`). `handleCreateTemplate` нормализует AI-поля server-side (review P1-3: валидный `check_format`, `resolveWriteTaskKind`, cefr lang-only) — паритет с `handleCreateAssignment`.
+- **2 load-path через единый `resolveTemplateLoad(tpl)`** в `TutorHomeworkCreate.tsx` (URL-param + picker) — НЕ дублировать; раньше load хардкодил `check_format='short_answer'` и игнорировал поле. Читает `t.check_format`/`t.task_kind`/`t.cefr_level` из шаблона; meta ← `exam_type`/`disable_ai_bootstrap`/`feedback_language`.
+- **CEFR + feedback_language — только для языковых** (`french/english/spanish`, mirror `LANGUAGE_SUBJECTS_REQUIRING_CEFR` бэка / inline `['french','english','spanish']` фронта). На физике/математике этих полей НЕТ. `exam_type`/`disable_ai_bootstrap` — для всех.
+- Backward-compat: старые шаблоны без полей → fallback (`short_answer` / derive / авто-детект CEFR). Forward-only — старые шаблоны данные не восстанавливают (Q4), репетиторов уведомить пересохранить.
+
+**Рубрика — first-class поле «Моей базы» (НЕ Каталога).** Миграция `20260603120100` добавила `kb_tasks.rubric_text`/`rubric_image_urls`. Триггеры публикации в Каталог **НЕ трогаем** → рубрика остаётся в личной базе (owner=tutor), в общий Каталог не утекает. **Путь рубрики — правь ВСЕ write-site'ы (КРИТИЧНО, легко пропустить):** `KBTask` тип → `kbTaskToDraftTask` (import path A) → `hwDraftStore.addTask`+`HWDrawer` INSERT (import path B) → `handleSaveTasksToKB` (save-back; review P1-1: fingerprint без рубрики → при already_in_base **fill-blank** апдейт рубрики, не перезатирая) → **`copyTaskToFolder` (`useFolders.ts`) — base→base копия, lossless** (review P1-2: добавлены `rubric_*` + `check_format`) → `KBTask` Create/Edit modal (текст видим/редактируем; update через `.update(input)` не зануляет). `check_format`/`cefr` ДЗ→Base save-back — отложено (Q3), но base→base копия их сохраняет.
+
+Spec/build-лог: `~/.claude/plans/atomic-humming-pumpkin.md` + memory `project_field_parity_template_kb.md`.
 
 ### Fallback для legacy subject ids
 - `src/types/homework.ts` — `LEGACY_SUBJECT_LABELS: Record<string, string>` (`math` → `Математика`, `rus` → `Русский язык`). В `getSubjectLabel()` как второй fallback после `SUBJECT_NAME_MAP`.

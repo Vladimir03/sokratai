@@ -56,6 +56,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const [answerFormat, setAnswerFormat] = useState('');
   const [answer, setAnswer] = useState('');
   const [solution, setSolution] = useState('');
+  // Field-parity fix (2026-06-03): рубрика — first-class поле задачи в «Моей базе».
+  const [rubricText, setRubricText] = useState('');
   const [exam, setExam] = useState<ExamType | ''>('');
   const [kimNumber, setKimNumber] = useState('');
   const [primaryScore, setPrimaryScore] = useState('');
@@ -133,6 +135,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           text: taskText,
           answer: answer.trim() || undefined,
           solution: solution.trim() || undefined,
+          rubric_text: rubricText.trim() || undefined,
           exam: exam || undefined,
           answer_format: answerFormat || undefined,
           attachment_url: attachmentUrl,
@@ -306,6 +309,18 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
               {/* Solution images */}
               <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
+
+              {/* Rubric / criteria (field-parity fix 2026-06-03) — переносятся в ДЗ. */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Критерии оценки</legend>
+                <textarea
+                  value={rubricText}
+                  onChange={(e) => setRubricText(e.target.value)}
+                  rows={3}
+                  placeholder="Как начислять баллы (используется AI при проверке). Например: «Полное решение — 2 балла; ошибка в знаке — минус 1 балл»."
+                  className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                />
+              </fieldset>
 
               {/* Exam + KIM number + primary score row */}
               <div className="grid grid-cols-3 gap-3">

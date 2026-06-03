@@ -1218,9 +1218,18 @@ function TutorHomeworkCreateContent() {
       // Phase: save as template (optional)
       if (saveAsTemplate) {
         try {
+          // Field-parity fix (2026-06-03, review P0): чекбокс «Сохранить как шаблон»
+          // идёт через legacy POST /templates (а НЕ save_as_template-флаг), поэтому
+          // ОБЯЗАН слать те же поля, что submit-payload выше — иначе reuse шаблона
+          // терял check_format/task_kind/cefr + assignment-meta (баг #1 на видимой
+          // кнопке). cefr_level + feedback_language — только для языковых (Q2).
+          const isLang = ['french', 'english', 'spanish'].includes(meta.subject);
           await createTutorHomeworkTemplate({
             title: resolvedTitle,
             subject: meta.subject as ModernHomeworkSubject,
+            exam_type: meta.exam_type ?? 'ege',
+            disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
+            feedback_language: isLang ? (meta.feedback_language ?? 'auto') : null,
             tasks_json: tasks.map((t) => ({
               task_text: t.task_text.trim(),
               task_image_url: t.task_image_path ?? null,
@@ -1230,6 +1239,9 @@ function TutorHomeworkCreateContent() {
               solution_text: t.solution_text.trim() || null,
               solution_image_urls: t.solution_image_paths ?? null,
               max_score: t.max_score,
+              check_format: t.check_format,
+              task_kind: t.task_kind ?? null,
+              cefr_level: isLang ? (meta.cefr_level ?? null) : null,
             })),
           });
           void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });

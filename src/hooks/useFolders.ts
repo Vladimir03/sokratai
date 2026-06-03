@@ -293,6 +293,11 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       answer: original.answer,
       solution: original.solution,
       answer_format: original.answer_format,
+      // Field-parity fix (2026-06-03, review P1-2): base→base копия должна быть
+      // lossless. Раньше терялись check_format и рубрика — добавлено явно.
+      check_format: original.check_format,
+      rubric_text: original.rubric_text,
+      rubric_image_urls: original.rubric_image_urls,
       source_label: 'my',
       attachment_url: original.attachment_url,
       solution_attachment_url: original.solution_attachment_url,

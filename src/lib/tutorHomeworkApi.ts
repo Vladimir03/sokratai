@@ -122,6 +122,15 @@ export interface HomeworkTemplateTask {
   /** Dual-format — см. `@/lib/attachmentRefs`. Лимит 5. */
   solution_image_urls?: string | null;
   max_score?: number;
+  /**
+   * Field-parity fix (2026-06-03): шаблон обязан хранить формат проверки,
+   * иначе при загрузке «развёрнутый» молча откатывался в «краткий» (баг #1).
+   */
+  check_format?: 'short_answer' | 'detailed_solution' | null;
+  /** Explicit task_kind (вкл. 'speaking'); без него reuse откатывал в numeric. */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
+  /** CEFR-уровень — пишется только для языковых задач (french/english/spanish). */
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
 }
 
 export interface HomeworkTemplateListItem {
@@ -142,6 +151,15 @@ export interface HomeworkTemplate {
   tags: string[];
   tasks_json: HomeworkTemplateTask[];
   created_at: string;
+  /**
+   * Assignment-level settings (field-parity fix 2026-06-03). exam_type /
+   * disable_ai_bootstrap — для всех предметов; feedback_language —
+   * только для языковых (на не-языковых null/«auto»). Optional для
+   * backward-compat со старыми шаблонами.
+   */
+  exam_type?: 'ege' | 'oge' | null;
+  feedback_language?: 'auto' | 'russian' | 'target' | null;
+  disable_ai_bootstrap?: boolean | null;
 }
 
 export interface CreateTemplatePayload {
@@ -150,6 +168,10 @@ export interface CreateTemplatePayload {
   topic?: string | null;
   tags?: string[];
   tasks_json: HomeworkTemplateTask[];
+  /** Assignment-level settings (field-parity fix 2026-06-03). */
+  exam_type?: 'ege' | 'oge' | null;
+  feedback_language?: 'auto' | 'russian' | 'target' | null;
+  disable_ai_bootstrap?: boolean | null;
 }
 
 // ─── Materials ───────────────────────────────────────────────────────────────

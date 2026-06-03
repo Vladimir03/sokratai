@@ -91,6 +91,14 @@ export interface KBTask {
   attachment_url: string | null;
   /** Solution images — same format as attachment_url. */
   solution_attachment_url: string | null;
+  /**
+   * Grading criteria (rubric). Field-parity fix (2026-06-03): «Моя база» only —
+   * the moderation triggers never copy it into the public catalog. Mirrors
+   * homework_tutor_tasks.rubric_text. Copied on import + persisted on save-back.
+   */
+  rubric_text: string | null;
+  /** Rubric photos — same dual-format as attachment_url (limit 3). «Моя база» only. */
+  rubric_image_urls: string | null;
   /** Source task → its canonical public copy (set on source tasks in сократ) */
   published_task_id: string | null;
   /** Canonical public copy → its source task (set on catalog copies) */
@@ -125,6 +133,9 @@ export interface CreateKBTaskInput {
   answer_format?: string;
   attachment_url?: string;
   solution_attachment_url?: string;
+  /** Grading criteria (field-parity fix 2026-06-03, «Моя база» only). */
+  rubric_text?: string;
+  rubric_image_urls?: string;
   topic_id?: string;
   subtopic_id?: string;
   source_label?: string;
@@ -141,6 +152,9 @@ export interface UpdateKBTaskInput {
   answer_format?: string | null;
   attachment_url?: string | null;
   solution_attachment_url?: string | null;
+  /** Grading criteria (field-parity fix 2026-06-03, «Моя база» only). */
+  rubric_text?: string | null;
+  rubric_image_urls?: string | null;
   topic_id?: string | null;
   subtopic_id?: string | null;
   folder_id?: string | null;
@@ -180,6 +194,15 @@ export interface HWDraftTask {
    * через HWDrawer. См. plan wild-swinging-nova.md (2026-04-18).
    */
   solutionAttachmentSnapshot: string | null;
+  /**
+   * Frozen rubric (критерии) из KB-задачи. Field-parity fix (2026-06-03):
+   * переносится в `homework_tutor_tasks.rubric_text` / `rubric_image_urls` при
+   * финализации ДЗ через HWDrawer (path B). Раньше рубрика не переносилась из
+   * базы (баг #2 — «добавила из базы, критерии не прикрепились»). Optional для
+   * backward-compat со старыми localStorage-черновиками (undefined → null).
+   */
+  rubricTextSnapshot?: string | null;
+  rubricImageSnapshot?: string | null;
   /**
    * Frozen `check_format` для записи в `homework_tutor_tasks.check_format`
    * + derived `task_kind` через `deriveTaskKindFromCheckFormat()`. Без этого

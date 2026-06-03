@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import {
   MAX_TASK_IMAGES,
   MAX_SOLUTION_IMAGES,
+  MAX_RUBRIC_IMAGES,
   parseAttachmentUrls,
   serializeAttachmentUrls,
 } from '@/lib/attachmentRefs';
@@ -269,6 +270,13 @@ export function HWDrawer({
           0,
           MAX_SOLUTION_IMAGES,
         );
+        // Field-parity fix (2026-06-03): carry rubric (критерии) from KB snapshot
+        // into homework_tutor_tasks.rubric_* (path B). Без этого «В ДЗ» с KB-карточки
+        // терял критерии (баг #2). Truncate до MAX_RUBRIC_IMAGES (backend validator).
+        const rubricImageRefs = parseAttachmentUrls(task.rubricImageSnapshot ?? null).slice(
+          0,
+          MAX_RUBRIC_IMAGES,
+        );
 
         // Phase 3.1 hotfix (2026-05-13): write check_format + task_kind explicitly.
         // Раньше эти поля опускались → DB default `task_kind='extended'` применялся
@@ -285,6 +293,8 @@ export function HWDrawer({
           correct_answer: task.answerSnapshot ?? null,
           solution_text: task.solutionSnapshot ?? null,
           solution_image_urls: serializeAttachmentUrls(solutionImageRefs),
+          rubric_text: task.rubricTextSnapshot ?? null,
+          rubric_image_urls: rubricImageRefs.length > 0 ? serializeAttachmentUrls(rubricImageRefs) : null,
           order_num: index + 1,
           check_format: checkFormat,
           task_kind: deriveTaskKindFromCheckFormat(checkFormat),

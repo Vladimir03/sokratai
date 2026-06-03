@@ -767,6 +767,10 @@ async function handleCreateAssignment(
 
   // Feature 1: save_as_template
   if (b.save_as_template === true) {
+    // Field-parity fix (2026-06-03): шаблон обязан нести check_format / task_kind
+    // (иначе reuse откатывал «развёрнутый»→«краткий» и task_kind→numeric).
+    // cefr_level — только для языковых предметов (на физике/математике поля нет).
+    const isLanguageTemplate = LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(b.subject as string);
     const templateTasksJson = taskRows.map((t) => ({
       task_text: t.task_text,
       task_image_url: t.task_image_url,
@@ -776,6 +780,9 @@ async function handleCreateAssignment(
       rubric_image_urls: t.rubric_image_urls,
       solution_text: t.solution_text,
       solution_image_urls: t.solution_image_urls,
+      check_format: t.check_format,
+      task_kind: t.task_kind,
+      cefr_level: isLanguageTemplate ? t.cefr_level : null,
     }));
     const { error: templateErr } = await db
       .from("homework_tutor_templates")
@@ -786,6 +793,11 @@ async function handleCreateAssignment(
         topic: isNonEmptyString(b.topic) ? (b.topic as string).trim() : null,
         tags: [],
         tasks_json: templateTasksJson,
+        // Assignment-level settings parity (field-parity fix 2026-06-03).
+        exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+        disable_ai_bootstrap: b.disable_ai_bootstrap === true,
+        // feedback_language — только для языковых (на не-языковых null).
+        feedback_language: isLanguageTemplate ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
       });
     if (templateErr) {
       console.warn("homework_api_template_save_failed", {
@@ -3897,6 +3909,28 @@ async function handleCreateTemplate(
     return jsonError(cors, 400, "VALIDATION", "tasks_json must be an array");
   }
 
+  // Field-parity fix (2026-06-03): per-task check_format / task_kind / cefr_level
+  // ride through tasks_json (HomeworkTemplateTask). feedback_language —
+  // только для языковых предметов.
+  const isLanguageTemplate = LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(b.subject as string);
+  // Review P1-3: этот endpoint — основной путь чекбокса «Сохранить как шаблон»
+  // (client-side createTutorHomeworkTemplate). Нормализуем AI-поля server-side
+  // (defense-in-depth, паритет с handleCreateAssignment): валидный check_format,
+  // task_kind через resolveWriteTaskKind (сохраняет 'speaking'), cefr только для
+  // языковых. Spread сохраняет все остальные поля задачи (verbatim).
+  const normalizedTasksJson = (b.tasks_json as unknown[]).map((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const t = raw as Record<string, unknown>;
+    const checkFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
+      ? (t.check_format as string)
+      : "short_answer";
+    return {
+      ...t,
+      check_format: checkFormat,
+      task_kind: resolveWriteTaskKind(t.task_kind, checkFormat),
+      cefr_level: isLanguageTemplate ? normalizeCefrLevel(t.cefr_level) : null,
+    };
+  });
   const { data, error } = await db
     .from("homework_tutor_templates")
     .insert({
@@ -3905,7 +3939,10 @@ async function handleCreateTemplate(
       subject: b.subject,
       topic: isNonEmptyString(b.topic) ? (b.topic as string).trim() : null,
       tags: Array.isArray(b.tags) ? b.tags.filter((t) => isString(t)) : [],
-      tasks_json: b.tasks_json,
+      tasks_json: normalizedTasksJson,
+      exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+      disable_ai_bootstrap: b.disable_ai_bootstrap === true,
+      feedback_language: isLanguageTemplate ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
     })
     .select("id")
     .single();
@@ -4057,12 +4094,14 @@ async function handleCreateTemplateFromAssignment(
   }
 
   // Read all tasks for this assignment. Ownership уже проверен выше.
+  // Field-parity fix (2026-06-03): + task_kind, cefr_level (раньше не читались →
+  // reuse откатывал task_kind в numeric и терял уровень языковой задачи).
   const { data: taskRows, error: tasksErr } = await db
     .from("homework_tutor_tasks")
     .select(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
-        "check_format",
+        "check_format, task_kind, cefr_level",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -4077,6 +4116,8 @@ async function handleCreateTemplateFromAssignment(
 
   const includeRubric = b.include_rubric === true;
   const includeAiSettings = b.include_ai_settings === true;
+  // CEFR — только для языковых предметов (на физике/математике поля нет, Q2).
+  const isLanguageTemplate = LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(assignmentSubject);
 
   // Build tasks_json[]. Additive per-task `source_kb_task_id` (AC-15) — provenance
   // для будущего Sprint 2+ sync-feature. Backward compatible внутри JSONB.
@@ -4090,6 +4131,8 @@ async function handleCreateTemplateFromAssignment(
     rubric_text: string | null;
     rubric_image_urls: string | null;
     check_format: string | null;
+    task_kind: string | null;
+    cefr_level: string | null;
   }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
@@ -4102,10 +4145,14 @@ async function handleCreateTemplateFromAssignment(
       rubric_text: includeRubric ? (t.rubric_text ?? null) : null,
       rubric_image_urls: includeRubric ? (t.rubric_image_urls ?? null) : null,
     };
-    // include_ai_settings=false → опускаем `check_format`, чтобы при использовании
-    // шаблона применился runtime default.
-    if (includeAiSettings && isNonEmptyString(t.check_format)) {
-      base.check_format = t.check_format;
+    // include_ai_settings=false → опускаем check_format / task_kind / cefr_level,
+    // чтобы при использовании шаблона применился runtime default. Field-parity
+    // fix (2026-06-03): раньше check_format сохранялся, а task_kind/cefr — нет.
+    if (includeAiSettings) {
+      if (isNonEmptyString(t.check_format)) base.check_format = t.check_format;
+      if (isNonEmptyString(t.task_kind)) base.task_kind = t.task_kind;
+      // cefr_level — только для языковых задач.
+      if (isLanguageTemplate && isNonEmptyString(t.cefr_level)) base.cefr_level = t.cefr_level;
     }
     return base;
   });
@@ -4130,8 +4177,18 @@ async function handleCreateTemplateFromAssignment(
       topic: isNonEmptyString(assignment.topic) ? (assignment.topic as string).trim() : null,
       tags,
       tasks_json: tasksJson,
+      // Assignment-level settings parity (field-parity fix 2026-06-03). Gated by
+      // include_ai_settings (тот же toggle, что check_format) — feedback_language
+      // только для языковых.
+      exam_type: includeAiSettings
+        ? ((VALID_EXAM_TYPES as readonly string[]).includes(assignment.exam_type as string) ? assignment.exam_type : "ege")
+        : null,
+      disable_ai_bootstrap: includeAiSettings ? assignment.disable_ai_bootstrap === true : false,
+      feedback_language: includeAiSettings && isLanguageTemplate
+        ? (normalizeFeedbackLanguage(assignment.feedback_language) ?? "auto")
+        : null,
     })
-    .select("id, title, subject, topic, tags, tasks_json, created_at")
+    .select("id, title, subject, topic, tags, tasks_json, created_at, exam_type, feedback_language, disable_ai_bootstrap")
     .single();
 
   if (insertErr || !inserted) {
@@ -4304,8 +4361,12 @@ async function handleUpdateTemplate(
 // создания дубликата. Fingerprint закрывает все три провенанса ровно (KB→my,
 // KB→catalog, ручной ввод) — не надо спец-кейсить `homework_kb_tasks` join.
 //
-// Anti-leak: rubric_text / rubric_image_urls НИКОГДА не копируются в KB
-// (AC-12 — рубрика ДЗ-специфична, не сущность задачи).
+// Field-parity fix (2026-06-03, Q1): rubric_text / rubric_image_urls ТЕПЕРЬ
+// копируются в «Мою базу» (owner_id=me) — критерии нужны при переиспользовании
+// (запрос Эмилии). Это НЕ отменяет anti-leak: moderation-триггеры публикации в
+// Каталог (kb_publish_task / kb_resync_task) копируют явный список колонок без
+// rubric_*, поэтому в общий Каталог (owner_id IS NULL) рубрика не попадает.
+// check_format / cefr_level обратно в Базу НЕ дописываем (Q3, отложено).
 //
 // Spec: docs/delivery/features/homework-reuse-v1/spec.md AC-10..AC-13.
 
@@ -4451,7 +4512,7 @@ async function handleSaveTasksToKB(
   const { data: tasks, error: tasksErr } = await db
     .from("homework_tutor_tasks")
     .select(
-      "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls",
+      "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, rubric_text, rubric_image_urls",
     )
     .eq("assignment_id", assignmentId)
     .in("id", taskIds);
@@ -4500,6 +4561,11 @@ async function handleSaveTasksToKB(
     const solutionImageUrls = isString(task.solution_image_urls)
       ? (task.solution_image_urls as string)
       : null;
+    // Field-parity fix (2026-06-03): рубрика теперь едет в «Мою базу» (Q1).
+    const rubricText = isString(task.rubric_text) ? (task.rubric_text as string) : null;
+    const rubricImageUrls = isString(task.rubric_image_urls)
+      ? (task.rubric_image_urls as string)
+      : null;
 
     const { data: fpData, error: fpErr } = await db.rpc("kb_normalize_fingerprint", {
       p_text: taskText,
@@ -4519,7 +4585,7 @@ async function handleSaveTasksToKB(
 
     const { data: existing, error: existingErr } = await db
       .from("kb_tasks")
-      .select("id, folder_id")
+      .select("id, folder_id, rubric_text, rubric_image_urls")
       .eq("owner_id", tutorUserId)
       .eq("fingerprint", fingerprint)
       .limit(1)
@@ -4550,6 +4616,32 @@ async function handleSaveTasksToKB(
           existingFolderName = existingFolder.name as string;
         }
       }
+      // Field-parity fix (2026-06-03, review P1-1): fingerprint считается по
+      // text+answer+attachment (без рубрики), поэтому save-back той же задачи с
+      // вновь добавленной рубрикой попадал в already_in_base и рубрику терял.
+      // Fill-blank (НЕ перезатираем уже введённую тутором): дописываем rubric_*
+      // на существующей записи только если там пусто, а во входящей — есть.
+      const rubricPatch: Record<string, string> = {};
+      if (!isNonEmptyString(existing.rubric_text) && isNonEmptyString(rubricText)) {
+        rubricPatch.rubric_text = rubricText as string;
+      }
+      if (!isNonEmptyString(existing.rubric_image_urls) && isNonEmptyString(rubricImageUrls)) {
+        rubricPatch.rubric_image_urls = rubricImageUrls as string;
+      }
+      if (Object.keys(rubricPatch).length > 0) {
+        const { error: rubricUpdErr } = await db
+          .from("kb_tasks")
+          .update(rubricPatch)
+          .eq("id", existing.id as string)
+          .eq("owner_id", tutorUserId);
+        if (rubricUpdErr) {
+          console.warn("homework_api_save_kb_rubric_fill_failed", {
+            route: "POST /assignments/:id/save-tasks-to-kb",
+            error: rubricUpdErr.message,
+            task_id: taskId,
+          });
+        }
+      }
       saved.push({
         task_id: taskId,
         kb_task_id: existing.id as string,
@@ -4560,10 +4652,16 @@ async function handleSaveTasksToKB(
       continue;
     }
 
-    // AC-12: копируем task_text, task_image_url, correct_answer, solution_text,
-    // solution_image_urls. НЕ копируем rubric_*. `fingerprint` сохраняем
-    // явно — чтобы при повторном save того же содержимого из другого ДЗ
-    // уйти в already_in_base (вне зависимости от жизненного цикла ДЗ).
+    // Копируем task_text, task_image_url, correct_answer, solution_text,
+    // solution_image_urls + rubric_text/rubric_image_urls. `fingerprint`
+    // сохраняем явно — чтобы при повторном save того же содержимого из другого
+    // ДЗ уйти в already_in_base (вне зависимости от жизненного цикла ДЗ).
+    //
+    // Field-parity fix (2026-06-03, Q1): рубрика теперь сохраняется в «Мою базу»
+    // (owner_id=me). Это НЕ утечка в общий Каталог — moderation-триггеры
+    // (kb_publish_task / kb_resync_task) копируют явный список колонок без
+    // rubric_*, поэтому каталожная копия (owner_id IS NULL) рубрику не несёт.
+    // check_format / cefr_level в Базу обратно НЕ дописываем (Q3, отложено).
     const { data: inserted, error: insertErr } = await db
       .from("kb_tasks")
       .insert({
@@ -4578,6 +4676,8 @@ async function handleSaveTasksToKB(
         answer_format: null,
         attachment_url: taskImageUrl || null,
         solution_attachment_url: solutionImageUrls,
+        rubric_text: rubricText,
+        rubric_image_urls: rubricImageUrls,
         fingerprint,
       })
       .select("id")

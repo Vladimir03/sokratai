@@ -35,6 +35,11 @@ export const useHWDraftStore = create<HWDraftStore>()(
           // Carry KB solution images snapshot so HWDrawer can persist them
           // into homework_tutor_tasks.solution_image_urls (plan wild-swinging-nova.md).
           solutionAttachmentSnapshot: task.solution_attachment_url ?? null,
+          // Field-parity fix (2026-06-03): freeze rubric (критерии) so HWDrawer
+          // persists it into homework_tutor_tasks.rubric_* (path B). Без этого
+          // «В ДЗ» с KB-карточки терял критерии (баг #2).
+          rubricTextSnapshot: task.rubric_text ?? null,
+          rubricImageSnapshot: task.rubric_image_urls ?? null,
           // Phase 3.1 hotfix (2026-05-13): freeze check_format so HWDrawer
           // can write it + task_kind into homework_tutor_tasks. Без этого
           // HWDrawer-flow создавал задачи с DB-default `task_kind='extended'`

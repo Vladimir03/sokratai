@@ -10,6 +10,7 @@ import {
   serializeAttachmentUrls,
   MAX_TASK_IMAGES,
   MAX_SOLUTION_IMAGES,
+  MAX_RUBRIC_IMAGES,
 } from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
@@ -47,7 +48,12 @@ function mapAnswerFormatToCheckFormat(af: string | null): 'short_answer' | 'deta
  */
 function kbTaskToDraftTask(
   task: KBTask,
-): { draft: DraftTask; truncatedFrom: number | null; solutionTruncatedFrom: number | null } {
+): {
+  draft: DraftTask;
+  truncatedFrom: number | null;
+  solutionTruncatedFrom: number | null;
+  rubricTruncatedFrom: number | null;
+} {
   const refs = parseAttachmentUrls(task.attachment_url);
   const slicedRefs = refs.slice(0, MAX_TASK_IMAGES);
   const taskImagePath = serializeAttachmentUrls(slicedRefs);
@@ -61,6 +67,15 @@ function kbTaskToDraftTask(
   const slicedSolutionRefs = solutionRefs.slice(0, MAX_SOLUTION_IMAGES);
   const solutionImagePaths = serializeAttachmentUrls(slicedSolutionRefs);
   const solutionTruncatedFrom = solutionRefs.length > MAX_SOLUTION_IMAGES ? solutionRefs.length : null;
+
+  // Rubric (критерии) from KB — field-parity fix (2026-06-03), баг #2 «добавила
+  // из базы, критерии не прикрепились». «Моя база» хранит рубрику; импорт копирует
+  // её в черновик. Truncation до MAX_RUBRIC_IMAGES (3) — иначе backend validator
+  // 400'нит на сохранении.
+  const rubricRefs = parseAttachmentUrls(task.rubric_image_urls);
+  const slicedRubricRefs = rubricRefs.slice(0, MAX_RUBRIC_IMAGES);
+  const rubricImagePaths = serializeAttachmentUrls(slicedRubricRefs);
+  const rubricTruncatedFrom = rubricRefs.length > MAX_RUBRIC_IMAGES ? rubricRefs.length : null;
 
   const checkFormat: 'short_answer' | 'detailed_solution' =
     (task.check_format === 'short_answer' || task.check_format === 'detailed_solution' ? task.check_format : null)
@@ -78,8 +93,9 @@ function kbTaskToDraftTask(
       task_image_preview_url: null,
       task_image_used_fallback: false,
       correct_answer: task.answer ?? '',
-      rubric_text: '',
-      rubric_image_paths: null,
+      // Field-parity fix (2026-06-03): рубрика теперь переносится из «Моей базы».
+      rubric_text: task.rubric_text ?? '',
+      rubric_image_paths: rubricImagePaths,
       // KB solution → auto-fill "Эталонное решение для AI" (P0 + KB-мост, 2026-04-18).
       // До этой итерации kb_snapshot_solution* теряли данные между draft и backend;
       // теперь копируем в solution_* и они сохраняются в homework_tutor_tasks.
@@ -100,6 +116,7 @@ function kbTaskToDraftTask(
     },
     truncatedFrom,
     solutionTruncatedFrom,
+    rubricTruncatedFrom,
   };
 }
 
@@ -179,7 +196,7 @@ export function HWTasksSection({
       // Surface truncation per task (spec §3 «KB-импорт»: импортируем первые N
       // и показываем toast `Из БЗ импортировано N из M фото`). Separately for
       // condition photos and reference-solution photos (plan wild-swinging-nova.md P1-5).
-      for (const { truncatedFrom, solutionTruncatedFrom } of converted) {
+      for (const { truncatedFrom, solutionTruncatedFrom, rubricTruncatedFrom } of converted) {
         if (truncatedFrom !== null) {
           toast.info(
             `Из БЗ импортировано ${MAX_TASK_IMAGES} из ${truncatedFrom} фото условия`,
@@ -188,6 +205,11 @@ export function HWTasksSection({
         if (solutionTruncatedFrom !== null) {
           toast.info(
             `Из БЗ импортировано ${MAX_SOLUTION_IMAGES} из ${solutionTruncatedFrom} фото решения`,
+          );
+        }
+        if (rubricTruncatedFrom !== null) {
+          toast.info(
+            `Из БЗ импортировано ${MAX_RUBRIC_IMAGES} из ${rubricTruncatedFrom} фото критериев`,
           );
         }
       }

@@ -89,6 +89,14 @@
 - Accent: `bg-socrat-accent` (orange, #E8913A, "Моя" badge)
 - Surface hover: `hover:bg-socrat-surface` (#F7F6F3)
 
+## Рубрика (критерии) в «Моей базе» (field-parity fix, 2026-06-03)
+
+`kb_tasks.rubric_text` + `rubric_image_urls` (миграция `20260603120100`, dual-format как у homework). Критерии — **first-class поле задачи в личной базе** (запрос Эмилии: «добавила из базы — критерии не прикрепились»).
+
+**Каталог чист (КРИТИЧНО):** moderation-триггеры публикации (`kb_publish_task` / `kb_resync_task`, `20260318150000`) копируют **явный список колонок без rubric** → каталожная копия (`owner_id IS NULL`) рубрику не несёт. Личные строки видит только owner (RLS). При добавлении нового поля в `kb_tasks`, которое должно/НЕ должно попадать в Каталог — синхронно реши, вносить ли его в INSERT-список триггеров.
+
+**Путь рубрики (правь ВСЕ):** `KBTask`/`Create`/`UpdateKBTaskInput` типы → `kbTaskToDraftTask` (импорт в ДЗ, обрезка до `MAX_RUBRIC_IMAGES`=3) → `hwDraftStore.addTask`+`HWDrawer` (path B) → `handleSaveTasksToKB` (save-back из ДЗ) → `Create/EditTaskModal` («Критерии оценки», текст; update через `.update(input)` не зануляет невыбранные поля). Детали — rule 40 «Field-parity (2026-06-03)».
+
 ## Snapshot-механика
 При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
 Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.
