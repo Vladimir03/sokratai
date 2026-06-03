@@ -105,7 +105,7 @@ Additive only: new tables / columns / indexes OK. **Forbidden:** modifying exist
 - **AI + images:** resolve `storage://` → signed URL, send multimodal `{ type:"image_url", image_url:{ url } }`, and audit **all** AI paths (check / hint / question / bootstrap) — pattern in `homework-api/guided_ai.ts` (`buildCheckPrompt`, `buildHintPrompt`). (rule 40)
 - **AI quota:** any new homework AI path must call `checkAiQuota(userId, db, { context:'homework', incrementUsage:true })` before the AI call (`_shared/subscription-limits.ts`). (rule 40)
 - **Subject-aware prompts:** all 3 guided AI paths (check / hint / chat) take `subject`; never hardcode "физик-наставник". (rule 40)
-- **Tutor payments:** participant-level idempotency `(lesson_id, tutor_student_id)`; statuses `pending`/`paid` only (no `overdue`); lesson date = `tutor_lessons.start_at`. (rule 60)
+- **Tutor payments:** participant-level idempotency `(lesson_id, tutor_student_id)`; statuses `pending`/`paid` only (no `overdue`); lesson date = `tutor_lessons.start_at`. Presumptive past-lesson confirm (`tutor_confirm_lessons`/`tutor_revert_lesson`) creates `tutor_payments` **only on explicit «Подтвердить»**, never silently; group no-show → 0. (rule 60)
 - **Image upload UX:** reuse `usePasteImages` + `useDragDropFiles` + `compressForUpload`; route broken image URLs through a fallback, never a raw `<img>`. (rule 40, rule 90)
 
 ---

@@ -5,6 +5,11 @@
 ## Деплой-порядок
 Backend (TASK-A) первым; затем frontend (TASK-B); после фронт-правок — `deploy-sokratai` (rule 95).
 
+## Статус (2026-06-02)
+- **TASK-A — DONE, в `main`** (commit `594d197`, миграция `20260602150000`). Lovable переприменил RPC как `20260602191806`.
+- **TASK-B — DONE, в `main`** (commit `6cf71fa`): `scheduleBulkComplete.ts`, `PastLessonsConfirmBanner.tsx`, `ConfirmLessonsSheet.tsx`, минимальный entry в `TutorSchedule.tsx`.
+- **TASK-C — Codex прошёл, 2 major-фикса внесены** (commit `6cf71fa`): (1) group-гонка «подтвердить до загрузки участников» → фронт дизейблит CTA + бэкстоп-миграция `20260602200000` (`skipped('no_participants')`); (2) отмены через `Promise.allSettled`, считаем только успешные. Открыто: `deploy-sokratai` + ручная QA (Safari, деньги/идемпотентность, откат, окно 3ч/14д, группа «не был»→0).
+
 ---
 
 ## TASK-A (P0): Backend — атомарное подтверждение
