@@ -70,24 +70,39 @@ Guardrails: rule 10 (минимум в TutorSchedule); rule 80 (16px, touch-acti
 Mandatory end block: изменённые файлы; summary; lint/build/smoke-check; self-check против AC + rule 10/60/80/90; БЛОК «🚀 Deploy needed».
 ```
 
-### CODEX-REVIEW (TASK-C, чистая сессия)
+### CODEX-REVIEW (TASK-C, чистая сессия) — scoped к CC-A+CC-B
 ```
-Ты — независимый ревьюер SokratAI. Контекст автора недоступен. Дотошно, особенно к ФИНАНСАМ.
+Ты — независимый ревьюер SokratAI. Контекст автора недоступен. Дотошно и скептично, особенно к ФИНАНСАМ.
 
-Порядок: docs/.../tutor-ai-agents/16,17; docs/delivery/features/schedule-bulk-complete/spec.md; .claude/rules/10,60,80,90,97 (+96 #11 если edge); git diff (весь PR).
+СКОУП — ревьюй ТОЛЬКО эти файлы (вся фича schedule-bulk-complete = CC-A backend + CC-B frontend):
+- supabase/migrations/20260602150000_schedule_bulk_complete_rpcs.sql   (CC-A, уже в main — `git show 594d197`)
+- src/lib/scheduleBulkComplete.ts                                       (CC-B)
+- src/components/tutor/schedule/PastLessonsConfirmBanner.tsx            (CC-B)
+- src/components/tutor/schedule/ConfirmLessonsSheet.tsx                 (CC-B)
+- src/pages/tutor/TutorSchedule.tsx — ТОЛЬКО diff `+import PastLessonsConfirmBanner` + 1 строка `<PastLessonsConfirmBanner .../>`
+НЕ ревьюй connectivity-banner рефакторинг (~12 tutor-файлов: TutorDataStatus/TutorHome/TutorPayments/TutorStudents/… и connectivity-изменения В ТОМ ЖЕ TutorSchedule.tsx) и mock-exams — это чужой параллельный WIP, НЕ часть этой фичи. Если правка не в списке выше — игнорируй.
 
-Проверь (PASS/FAIL):
-- ФИНАНСЫ: деньги (tutor_payments) ТОЛЬКО на «Подтвердить» (AC-4)? идемпотентность (lesson_id, tutor_student_id) — повтор не дублирует? группа: «был»>0 → payment, «не был»→0 → НЕТ; edited суммы; атомарно (нет partial)?
-- No-show дефолт = 0; «не состоялось» → cancelled, 0 платежей.
-- Откат: отмена подтверждённого сторнирует payment (AC-5).
-- Окно: только regular + 3ч + 14д; trial/mock/consultation и старое НЕ трогаются (AC-6).
-- rule 10: TutorSchedule.tsx минимально, complete/cancel/create НЕ изменён.
-- rule 60: pending/paid, без overdue, дата=start_at.
-- Safari rule 80 (16px суммы, touch-action); design rule 90 (один primary CTA, без эмодзи); performance (memo/lazy).
-- Edge: flat {error,code}, config.toml+deploy (rule 96 #11). Деньги /100.
-- AC §spec: каждый PASS/FAIL.
+Порядок: 1) docs/.../tutor-ai-agents/16,17 (UX/UI); 2) docs/delivery/features/schedule-bulk-complete/spec.md (§7 AC, §8); 3) .claude/rules/10,60,80,90,97; 4) diff перечисленных файлов.
 
-Формат: PASS / CONDITIONAL PASS / FAIL + находки (blocker/major/minor) с файл:строка и фиксом.
+Проверь конкретно (PASS/FAIL):
+- ФИНАНСЫ (критично):
+  • tutor_payments создаётся ТОЛЬКО через RPC `tutor_confirm_lessons` (на «Подтвердить»); в CC-B нигде раньше/молча (AC-4)?
+  • Идемпотентность: reuse `complete_lesson_and_create_payment` (ON CONFLICT (lesson_id, tutor_student_id)) — повтор не дублирует? `tutor_confirm_lessons` повторно на уже-completed → skip (guard status='booked')?
+  • Группа: «был» amount>0 → payment; «не был» amount=0 → RPC пропускает (НЕТ payment)? edited суммы (UPDATE tutor_lesson_participants.payment_amount) применяются ПЕРЕД complete?
+  • Атомарность: per-lesson BEGIN…EXCEPTION (savepoint) — ошибка одного занятия не валит остальные и не оставляет partial?
+  • `complete_lesson_and_create_payment` НЕ изменён (только reuse)?
+  • amount = РУБЛИ (integer), НЕ копейки — нет двойного /100; `formatCurrency(rubles)` корректно?
+- No-show / отмена: группа «не был» дефолт 0 (не переплата); «не состоялось» → `cancelLesson` (cancelled, 0 платежей — до создания оплаты).
+- Откат (AC-5): `tutor_revert_lesson` удаляет ТОЛЬКО pending (paid сохраняет + флаг had_paid); status→cancelled; guard ownership+status='completed'. (UI-кнопка отката в CC-B сознательно не вешается — RPC готов; это ок по spec, не FAIL.)
+- Окно (AC-6): баннер-запрос status='booked' + lesson_type='regular' + start_at ≥ now−14д + клиентский фильтр +3ч буфер; trial/mock/consultation и старое не попадают. RPC дополнительно отклоняет не-booked/не-regular → skipped.
+- RPC (НЕ edge): SECURITY DEFINER + SET search_path; REVOKE ALL FROM PUBLIC + GRANT authenticated,service_role; ownership ВНУТРИ по auth.uid(); RAISE EXCEPTION коды (INVALID_PAYLOAD / NOT_OWNED_OR_NOT_COMPLETED). Клиент `scheduleBulkComplete.ts` парсит error.message (rule 97-стиль) — пользователь не видит «HTTP …».
+- rule 10: diff TutorSchedule.tsx ОТ АВТОРА = только import + 1 mount-строка; complete/cancel/create-логику автор не трогал.
+- rule 60: pending/paid, без overdue, дата платежа = CURRENT_DATE (базовая RPC).
+- Safari rule 80: 16px суммовые inputs, touch-action:manipulation, parseISO (нет Array.at/lookbehind/structuredClone), числовой `new Date(ms)`. Design rule 90: один primary CTA «Подтвердить все», Lucide без эмодзи, socrat/accent (+amber статус = waiver), reuse Alert. Performance: React.memo (banner/sheet) + lazy sheet, нет framer-motion.
+- Anti-leak/scope creep: CC-B запрос tutor_lessons — column-list нужное, RLS-scoped по tutor_id; не тащит лишнего.
+- AC §7 (AC-1..AC-6): каждый PASS/FAIL.
+
+Формат: PASS / CONDITIONAL PASS / FAIL + нумерованные находки (blocker / major / minor) с файл:строка и предложением фикса.
 ```
 
 ---
