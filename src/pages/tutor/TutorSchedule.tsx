@@ -3635,6 +3635,20 @@ function TutorScheduleContent() {
         }
         setLessonDetailsOpen(false);
         refetchLessons();
+        // TASK-9 (schedule-materials P1, rule 98): non-blocking нудж после завершения.
+        // Логику завершения не трогаем — только подсказка, переоткрывающая тот же drawer.
+        const completedLesson =
+          selectedLesson && selectedLesson.id === lessonId ? selectedLesson : null;
+        if (completedLesson) {
+          toast('Добавить материалы к занятию?', {
+            description: 'Запись, конспект или домашку — ученик увидит во вкладке «Занятия».',
+            duration: 8000,
+            action: {
+              label: 'Добавить',
+              onClick: () => setMaterialsDrawerLesson(completedLesson),
+            },
+          });
+        }
       } else {
         toast.error('Не удалось завершить урок');
       }
@@ -3650,7 +3664,7 @@ function TutorScheduleContent() {
         return rest;
       });
     }
-  }, [refetchLessons]);
+  }, [refetchLessons, selectedLesson]);
 
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();

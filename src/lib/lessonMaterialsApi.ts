@@ -141,3 +141,28 @@ export async function deleteMaterial(materialId: string): Promise<void> {
     { method: 'DELETE' },
   );
 }
+
+/** Result of a notify-digest call (channel counters; rule 70 cascade). */
+export interface LessonNotifyResult {
+  ok: boolean;
+  notify: {
+    recipients: number;
+    sent_push: number;
+    sent_telegram: number;
+    sent_email: number;
+    failed: number;
+    failed_no_channel: number;
+  };
+}
+
+/**
+ * POST /lessons/:lessonId/materials/notify — one digest notification per call
+ * (push→telegram→email) to the lesson's student(s). Called once by the drawer
+ * on close when materials were added this session (client-idempotent).
+ */
+export async function notifyLessonMaterials(lessonId: string): Promise<LessonNotifyResult> {
+  return invokeLessonMaterials<LessonNotifyResult>(
+    `/lessons/${encodeURIComponent(lessonId)}/materials/notify`,
+    { method: 'POST' },
+  );
+}

@@ -28,7 +28,7 @@ P0 первым релизом (TASK-1..6), P1 — fast-follow через 1-2 д
 
 **Осознанные отклонения от SPEC §5.2:** `homework_assignment_id` FK = `ON DELETE CASCADE` (не `SET NULL` — иначе `chk_kind_payload` нарушается на cascade); видимость групповых занятий — через `tutor_lesson_participants` + SECURITY DEFINER `student_can_see_lesson`/`student_assigned_to_homework` (unified-группа = ОДНА строка `tutor_lessons` с `student_id IS NULL`, участники в junction-таблице).
 
-**P1 (TASK-7/8/9) — отложено (fast-follow):** notify-каскад (сейчас ownership-checked stub), «Создать ДЗ» из drawer, нудж после «Отметить проведённым».
+**P1 (TASK-7/8/9) — реализовано (2026-06-03):** TASK-7 notify-каскад push→telegram→email (`handleNotify` + шаблон `lesson-materials-notification.ts`, deep-link на занятие); TASK-8 «Создать ДЗ» из drawer (prefill `?subject&students&lesson_id` → auto-link `homework_ref`); TASK-9 нудж после «Отметить проведённым» (drawer). **Codex CONDITIONAL PASS → закрыто:** finding 2 (group-получатели fail-closed в drawer), finding 3-participants (recipient-set lookup → 503 для группы), 1a (URL-получатели валидируются против занятия, server-truth wins + fail-safe), 1b (attach-failure non-fatal + retry-action). Не делали (по разбору): finding 3-каналы (minor), finding 4 (`lesson_id` лог = не PII, конвенция telemetry), переименование `students`→`recipients` (косметика, продьюсер/консьюмер согласованы).
 
 **Open:** push ветки + PR · Lovable preview (применить миграции + задеплоить 2 функции) · `deploy-sokratai` (frontend) · ручная QA (Safari/iOS, anti-leak, one-hop) · анонс репетиторам **после** деплоя.
 

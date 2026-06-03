@@ -8,6 +8,7 @@
 // rule 90: Lucide icons (no emoji), accent/socrat tokens, one primary CTA, memo rows.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -16,6 +17,7 @@ import {
   ExternalLink,
   FileText,
   Loader2,
+  Plus,
   Upload,
   Video,
   X,
@@ -23,6 +25,7 @@ import {
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabaseClient';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { getSubjectLabel } from '@/types/homework';
 import { listTutorHomeworkAssignments } from '@/lib/tutorHomeworkApi';
@@ -32,6 +35,7 @@ import {
   attachHomework,
   deleteMaterial,
   listLessonMaterials,
+  notifyLessonMaterials,
   uploadLessonPdf,
   LessonMaterialsApiError,
   MAX_LESSON_PDF_BYTES,
@@ -116,6 +120,12 @@ const MaterialRow = memo(function MaterialRow({ material, label, deleting, onRem
 export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMaterialsDrawerProps) {
   const lessonId = lesson?.id ?? null;
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  // Notify-on-close (TASK-7): fire ONE digest when the drawer closes if a
+  // material was added this session. notifiedRef = client idempotency.
+  const materialsAddedRef = useRef(false);
+  const notifiedRef = useRef(false);
 
   const materialsQuery = useQuery({
     queryKey: ['tutor', 'lesson-materials', lessonId],
@@ -178,6 +188,8 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
       setRecordingUrl('');
       setRecordingTitle('');
       setPickerOpen(false);
+      materialsAddedRef.current = false;
+      notifiedRef.current = false;
     }
   }, [open, lessonId]);
 
@@ -194,6 +206,7 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
     setAddingRecording(true);
     try {
       await addRecording(lessonId, url, recordingTitle.trim() || null);
+      materialsAddedRef.current = true;
       setRecordingUrl('');
       setRecordingTitle('');
       await invalidate();
@@ -214,6 +227,7 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
       setPendingPdfs((prev) => [...prev, { id: pendingId, name: file.name, size: file.size, objectUrl }]);
       try {
         await uploadLessonPdf(file, lessonId);
+        materialsAddedRef.current = true;
         await invalidate();
       } catch (err) {
         toast.error(errMessage(err, 'Не удалось загрузить PDF'));
@@ -265,6 +279,7 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
       setAttachingId(assignmentId);
       try {
         await attachHomework(lessonId, assignmentId);
+        materialsAddedRef.current = true;
         setPickerOpen(false);
         await invalidate();
         toast.success('ДЗ привязано к занятию');
@@ -298,6 +313,63 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
     [invalidate],
   );
 
+  // TASK-7: close via «Готово» / overlay / Esc → one digest if materials added.
+  const handleClose = useCallback(() => {
+    if (lessonId && materialsAddedRef.current && !notifiedRef.current) {
+      notifiedRef.current = true;
+      notifyLessonMaterials(lessonId)
+        .then((res) => {
+          if (res?.notify && res.notify.recipients > 0) {
+            toast.success('Ученик получит уведомление о материалах');
+          }
+        })
+        .catch(() => {
+          toast.error('Не удалось отправить уведомление ученику');
+        });
+    }
+    onOpenChange(false);
+  }, [lessonId, onOpenChange]);
+
+  // TASK-8: open the homework constructor prefilled with this lesson's subject
+  // + recipients; on save the new ДЗ is auto-linked back (homework_ref). No
+  // notify here — navigating away ≠ «Готово».
+  const handleCreateHomework = useCallback(async () => {
+    if (!lesson) return;
+    const params = new URLSearchParams();
+    if (lesson.subject?.trim()) params.set('subject', lesson.subject.trim());
+    params.set('lesson_id', lesson.id);
+    const ids = new Set<string>();
+    if (lesson.student_id) ids.add(lesson.student_id);
+    // Group lessons: recipients come from participants (unified group has
+    // student_id IS NULL). FAIL CLOSED on query error — navigating with an
+    // empty recipient set would prefill a ДЗ for nobody (review fix #2).
+    if (!lesson.student_id || lesson.group_session_id) {
+      let parts: { student_id: string | null }[];
+      try {
+        const { data, error } = await supabase
+          .from('tutor_lesson_participants')
+          .select('student_id')
+          .eq('lesson_id', lesson.id);
+        if (error) throw error;
+        parts = data ?? [];
+      } catch (err) {
+        console.warn('lesson_participants_load_failed', err);
+        toast.error('Не удалось загрузить участников группы. Попробуйте снова.');
+        return;
+      }
+      for (const p of parts) {
+        if (p.student_id) ids.add(p.student_id);
+      }
+    }
+    if (ids.size === 0) {
+      toast.error('У занятия нет получателей для назначения ДЗ.');
+      return;
+    }
+    params.set('students', [...ids].join(','));
+    onOpenChange(false);
+    navigate(`/tutor/homework/create?${params.toString()}`);
+  }, [lesson, navigate, onOpenChange]);
+
   if (!lesson) return null;
 
   const lessonDate = (() => {
@@ -312,7 +384,7 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
   const recordingLimitReached = recordings.length >= MAX_LESSON_RECORDINGS;
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={(next) => { if (!next) handleClose(); }}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 bg-white p-0 sm:max-w-lg">
         <SheetTitle className="sr-only">Материалы занятия</SheetTitle>
         <SheetDescription className="sr-only">
@@ -508,14 +580,24 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
                 )}
               </div>
             ) : (
-              <button
-                type="button"
-                onClick={() => setPickerOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                style={{ touchAction: 'manipulation' }}
-              >
-                <BookOpen className="h-4 w-4" /> Выбрать ДЗ
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <BookOpen className="h-4 w-4" /> Выбрать ДЗ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateHomework}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Plus className="h-4 w-4" /> Создать ДЗ
+                </button>
+              </div>
             )}
           </section>
         </div>
@@ -524,7 +606,7 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
         <div className="border-t border-socrat-border px-5 py-4">
           <button
             type="button"
-            onClick={() => onOpenChange(false)}
+            onClick={handleClose}
             className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
             style={{ touchAction: 'manipulation' }}
           >

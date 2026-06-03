@@ -33,6 +33,18 @@ Unified mini-group = **ОДНА** строка `tutor_lessons` с `student_id IS
 ## Пост-логин лендинг ученика → `/student/schedule`
 Изменён дефолт лендинга студента с `/chat` на `/student/schedule` в 9 точках: `Login.tsx` (pre-check, post-login, OAuth `redirectPath`), `SignUp.tsx` (×3), `TelegramLoginButton.tsx` (×3). Tutor-ветки (`/tutor/home`) не тронуты. Легко откатить (pilot-scope).
 
+## P1 (2026-06-03) — notify-дайджест + «Создать ДЗ» из занятия + нудж
+
+P0 (вкладка «Занятия» + крепление материалов) дополнен тремя fast-follow задачами (TASK-7/8/9). Codex CONDITIONAL PASS → 2 блокера + 1a/1b закрыты.
+
+**TASK-7 — notify-дайджест (`lesson-materials-api` `POST /lessons/:id/materials/notify`):** ОДНО уведомление на вызов, каскад push→telegram→email (first-success-wins, reuse `_shared/push-sender.ts` + новый шаблон `_shared/transactional-email-templates/lesson-materials-notification.ts`), deep-link `/student/schedule/:lessonId`. Получатели = индивид (`tutor_lessons.student_id`) + участники unified-группы (`tutor_lesson_participants`). Drawer «Готово» вызывает notify ОДИН раз (idempotent на клиенте). `@temp.sokratai.ru` пропускается. **Recipient-set lookup invariant (review fix #3):** для ЧИСТОЙ группы (`student_id IS NULL`) сбой запроса участников → **503 `RECIPIENTS_LOOKUP_FAILED`** (flat рус, rule 97), НЕ тихий `ok:true` с нулём; для индивида (есть `student_id`) — мягкая деградация (warn-лог), без 503. Логи PII-free (`lesson_id` + счётчики — ок, конвенция telemetry rule 40, не PII).
+
+**TASK-8 — «Создать ДЗ» из drawer:** кнопка → navigate `/tutor/homework/create?subject&students&lesson_id`. Prefill в `TutorHomeworkCreate` — create-only, **ref-guarded** (`lessonPrefillRef`), не пересекается с edit-prefill (`editPrefilledRef`)/его reset-ordering (rule 40). **1a (server-truth wins):** при наличии `lesson_id` URL-получатели **валидируются против фактического student-set занятия** (`tutor_lessons.student_id` + participants); stale/tampered URL не подставит ученика не с занятия. Fail-safe: сбой валидации → НЕ префиллим получателей (тутор выбирает вручную), не верим URL вслепую. На сохранении — auto-link `homework_ref` через reuse `attachHomework` (idempotent; `HW_REF_EXISTS` = успех). **Attach-failure НЕ fatal** (ДЗ уже создано+назначено — нельзя бросать в outer «create failed»): `toast.error` + **retry-action «Повторить»** (1b). Drawer group-получатели резолвятся **fail-closed** (review fix #2): сбой запроса participants → toast + НЕ навигируем пустым набором.
+
+**TASK-9 — нудж после «Отметить проведённым» (`TutorSchedule.tsx::handleCompleteLesson`):** после УСПЕШНОГО завершения — non-blocking `toast` (action «Добавить», auto-dismiss 8с), переоткрывающий тот же `LessonMaterialsDrawer` (reuse `setMaterialsDrawerLesson`, гейт `selectedLesson.id === lessonId`). Completion-логика (`completeLessonAndCreatePayment`/оплата/конфетти/refetch) НЕ изменена (rule 10); `selectedLesson` добавлен в deps `useCallback`.
+
+**При расширении P1:** новый канал notify → расширить каскад в `handleNotify` (не дублировать); новый источник получателей — резолвить server-side (не из URL вслепую, 1a); любой URL-prefill в конструктор — create-only + ref-guard + валидация против server-truth; attach/link-failure из конструктора — никогда не fatal (ДЗ уже существует), только surface + retry.
+
 ## При расширении
 - Новый student-facing fetch материалов — только через service_role edge (column-whitelist), не прямой PostgREST с RLS.
 - Новый bucket для материалов — добавить в валидацию `lesson-materials-api` + bucket policy + (если уходит в браузер) signed-URL путь.

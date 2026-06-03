@@ -27,12 +27,20 @@ import {
   type CreateAssignmentTask,
   type UpdateAssignmentTask,
   type HomeworkTemplateListItem,
+  type HomeworkTemplate,
+  type HomeworkTemplateTask,
   type TutorHomeworkAssignmentDetails,
   HomeworkApiError,
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
-import { getSubjectLabel } from '@/types/homework';
+// `SUBJECTS` уже импортируется из homework-create/types ({value,label}[] для L0
+// селектора). Канонический массив (@/types/homework, {id,...}) нужен только для
+// валидации lesson-prefill по `.id` — импортируем под алиасом, иначе дубль
+// идентификатора `SUBJECTS` ломает dev-сервер (esbuild bundling его дедупит,
+// поэтому prod-build не падал, но это латентный баг).
+import { getSubjectLabel, SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
+import { attachHomework, LessonMaterialsApiError } from '@/lib/lessonMaterialsApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { detectCefrLevelFromText } from '@/lib/cefrDetect';
 
@@ -343,6 +351,60 @@ async function syncHomeworkKbLinks(
       throw singleErr;
     }
   }
+}
+
+// ─── Template load (field-parity fix 2026-06-03) ─────────────────────────────
+//
+// Shared by both load paths (URL-param ?template_id + picker sheet) so they never
+// drift. Templates now carry per-task check_format / task_kind / cefr_level and
+// assignment-level exam_type / feedback_language / disable_ai_bootstrap — раньше
+// формат проверки молча откатывался в «краткий», task_kind в numeric, а CEFR
+// заново угадывался из названия (баг #1).
+//
+// CEFR: explicit per-task уровень из шаблона побеждает; для старых шаблонов без
+// него — авто-детект из названия/текста (прежнее поведение). CEFR + язык
+// объяснений применяются ТОЛЬКО для языковых предметов (french/english/spanish);
+// для остальных предметов этих полей нет (Q2).
+function resolveTemplateLoad(tpl: HomeworkTemplate): {
+  meta: (m: MetaState) => Partial<MetaState>;
+  task: (t: HomeworkTemplateTask) => DraftTask;
+} {
+  const isLang = ['french', 'english', 'spanish'].includes(tpl.subject);
+  const autoCefr = isLang
+    ? detectCefrLevelFromText([tpl.title, ...tpl.tasks_json.map((t) => t.task_text)].join(' \n '))
+    : null;
+  const explicitTplCefr = isLang
+    ? (tpl.tasks_json.find((t) => t.cefr_level)?.cefr_level ?? null)
+    : null;
+  const resolvedCefr = isLang ? (explicitTplCefr ?? autoCefr) : null;
+
+  return {
+    meta: (m) => ({
+      title: tpl.title,
+      subject: tpl.subject,
+      cefr_level: resolvedCefr,
+      // exam_type / disable_ai_bootstrap — для всех предметов (старые шаблоны:
+      // exam_type null → keep current; disable_ai_bootstrap NOT NULL → false).
+      exam_type: tpl.exam_type ?? m.exam_type,
+      disable_ai_bootstrap: tpl.disable_ai_bootstrap ?? m.disable_ai_bootstrap,
+      // feedback_language — только для языковых; иначе сохраняем текущее значение.
+      feedback_language: isLang ? (tpl.feedback_language ?? 'auto') : m.feedback_language,
+    }),
+    task: (t) => ({
+      ...createEmptyTask(),
+      task_text: t.task_text,
+      task_image_path: t.task_image_url ?? null,
+      correct_answer: t.correct_answer ?? '',
+      rubric_text: t.rubric_text ?? '',
+      rubric_image_paths: t.rubric_image_urls ?? null,
+      solution_text: t.solution_text ?? '',
+      solution_image_paths: t.solution_image_urls ?? null,
+      max_score: t.max_score ?? 1,
+      check_format: t.check_format ?? 'short_answer',
+      task_kind: t.task_kind ?? undefined,
+      cefr_level: resolvedCefr,
+    }),
+  };
 }
 
 // ─── Main Single-Page Constructor ───────────────────────────────────────────
@@ -744,38 +806,76 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     getTutorHomeworkTemplate(templateId)
       .then((tpl) => {
-        // Phase 11 review fix R1 (2026-06-01): шаблон НЕ хранит cefr_level —
-        // нельзя оставлять старый meta.cefr_level (каскад загнал бы чужой уровень,
-        // напр. B2 на DELF A2 шаблон). Reset + авто-детект из названия/текста шаблона;
-        // нет маркера → null → required-валидация форсит выбор.
-        const tplCefr = ['french', 'english', 'spanish'].includes(tpl.subject)
-          ? detectCefrLevelFromText([tpl.title, ...tpl.tasks_json.map((t) => t.task_text)].join(' \n '))
-          : null;
-        setMeta((m) => ({
-          ...m,
-          title: tpl.title,
-          subject: tpl.subject,
-          cefr_level: tplCefr,
-        }));
-        setTasks(
-          tpl.tasks_json.map((t) => ({
-            ...createEmptyTask(),
-            task_text: t.task_text,
-            task_image_path: t.task_image_url ?? null,
-            correct_answer: t.correct_answer ?? '',
-            rubric_text: t.rubric_text ?? '',
-            rubric_image_paths: t.rubric_image_urls ?? null,
-            solution_text: t.solution_text ?? '',
-            solution_image_paths: t.solution_image_urls ?? null,
-            max_score: t.max_score ?? 1,
-            cefr_level: tplCefr,
-          })),
-        );
+        const resolved = resolveTemplateLoad(tpl);
+        setMeta((m) => ({ ...m, ...resolved.meta(m) }));
+        setTasks(tpl.tasks_json.map((t) => resolved.task(t)));
         toast.success(`Шаблон «${tpl.title}» загружен`);
       })
       .catch(() => toast.error('Не удалось загрузить шаблон'))
       .finally(() => setTemplateLoading(false));
   }, [templateId]);
+
+  // ── Prefill from a lesson (schedule-materials TASK-8) ──
+  // Arriving from the «Создать ДЗ» button in the lesson materials drawer:
+  // ?subject + ?students + ?lesson_id. Create-only + ref-guarded so it never
+  // collides with the edit-mode prefill (editPrefilledRef) or its reset/order.
+  // lesson_id is re-read at save time to auto-link the new ДЗ back to the lesson.
+  const lessonPrefillRef = useRef(false);
+  useEffect(() => {
+    if (isEditMode || lessonPrefillRef.current) return;
+    const subjParam = searchParams.get('subject');
+    const studentsParam = searchParams.get('students');
+    const lessonIdParam = searchParams.get('lesson_id');
+    if (!subjParam && !studentsParam && !lessonIdParam) return;
+    lessonPrefillRef.current = true;
+    if (subjParam && CANONICAL_SUBJECTS.some((s) => s.id === subjParam)) {
+      setMeta((m) => ({ ...m, subject: subjParam as HomeworkSubject }));
+    }
+    if (!studentsParam) return;
+    const urlIds = studentsParam.split(',').map((s) => s.trim()).filter(Boolean);
+    if (urlIds.length === 0) return;
+    // 1a hardening: trust the lesson, not the URL. With lesson_id present,
+    // validate URL recipients against the lesson's ACTUAL student set (server
+    // truth) so a stale/tampered URL can't prefill a student who isn't on the
+    // lesson. Without lesson_id keep URL ids as-is — the backend assign endpoint
+    // still whitelists to tutor-owned students (no cross-tutor leak).
+    if (!lessonIdParam) {
+      setSelectedStudentIds(new Set(urlIds));
+      setAssignTab('students');
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [lessonRes, partsRes] = await Promise.all([
+          supabase.from('tutor_lessons').select('student_id').eq('id', lessonIdParam).maybeSingle(),
+          supabase.from('tutor_lesson_participants').select('student_id').eq('lesson_id', lessonIdParam),
+        ]);
+        if (lessonRes.error) throw lessonRes.error;
+        if (partsRes.error) throw partsRes.error;
+        const allowed = new Set<string>();
+        if (lessonRes.data?.student_id) allowed.add(lessonRes.data.student_id as string);
+        for (const p of partsRes.data ?? []) {
+          if (p.student_id) allowed.add(p.student_id as string);
+        }
+        const valid = urlIds.filter((id) => allowed.has(id));
+        if (cancelled) return;
+        if (valid.length > 0) {
+          setSelectedStudentIds(new Set(valid));
+          setAssignTab('students');
+        }
+        if (valid.length < urlIds.length) {
+          toast.info('Получатели сверены с занятием');
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // Fail-safe: don't trust the URL — let the tutor pick recipients manually.
+        console.warn('lesson_prefill_recipient_validation_failed', err);
+        toast.info('Не удалось сверить получателей с занятием — выберите вручную.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isEditMode, searchParams]);
 
   // ── Apply template from picker sheet ──
   const handleApplyTemplate = useCallback(async (tpl: HomeworkTemplateListItem) => {
@@ -787,31 +887,11 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     try {
       const full = await getTutorHomeworkTemplate(tpl.id);
-      // Phase 11 review fix R1 (2026-06-01): см. URL-param путь выше — reset cefr +
-      // авто-детект из шаблона, чтобы каскад не загнал старый meta.cefr_level.
-      const tplCefr = ['french', 'english', 'spanish'].includes(full.subject)
-        ? detectCefrLevelFromText([full.title, ...full.tasks_json.map((t) => t.task_text)].join(' \n '))
-        : null;
-      setMeta((m) => ({
-        ...m,
-        title: full.title,
-        subject: full.subject,
-        cefr_level: tplCefr,
-      }));
-      setTasks(
-        full.tasks_json.map((t) => ({
-          ...createEmptyTask(),
-          task_text: t.task_text,
-          task_image_path: t.task_image_url ?? null,
-          correct_answer: t.correct_answer ?? '',
-          rubric_text: t.rubric_text ?? '',
-          rubric_image_paths: t.rubric_image_urls ?? null,
-          solution_text: t.solution_text ?? '',
-          solution_image_paths: t.solution_image_urls ?? null,
-          max_score: t.max_score ?? 1,
-          cefr_level: tplCefr,
-        })),
-      );
+      // Field-parity fix (2026-06-03): единый резолвер с URL-param путём —
+      // несёт check_format / task_kind / cefr_level + assignment-level настройки.
+      const resolved = resolveTemplateLoad(full);
+      setMeta((m) => ({ ...m, ...resolved.meta(m) }));
+      setTasks(full.tasks_json.map((t) => resolved.task(t)));
       toast.success(`Шаблон «${full.title}» применён`);
     } catch {
       toast.error('Не удалось загрузить шаблон');
@@ -1075,6 +1155,39 @@ function TutorHomeworkCreateContent() {
         null,
       );
 
+      // Phase 2.5: auto-link the new ДЗ back to the originating lesson
+      // (schedule-materials TASK-8). Only on create-from-lesson (?lesson_id),
+      // after assign so the backend per-student ownership check passes.
+      // Non-blocking: own try/catch — must never fall into the outer "create
+      // failed" handler (the ДЗ already exists). Idempotent on retry.
+      if (!isEditMode) {
+        const lessonIdParam = searchParams.get('lesson_id');
+        if (lessonIdParam && assignmentId) {
+          const linkAssignmentId = assignmentId;
+          // 1b: attach failure is non-fatal (ДЗ already created+assigned) but
+          // surfaced with a retry action so the tutor can re-link in one tap.
+          const attachToLesson = async (): Promise<void> => {
+            try {
+              await attachHomework(lessonIdParam, linkAssignmentId);
+              toast.success('ДЗ привязано к занятию');
+            } catch (linkErr) {
+              const code = linkErr instanceof LessonMaterialsApiError ? linkErr.code : null;
+              if (code === 'HW_REF_EXISTS') {
+                // Idempotent — already linked.
+                toast.success('ДЗ уже привязано к занятию');
+                return;
+              }
+              console.warn('lesson_homework_autolink_failed', code ?? String(linkErr));
+              toast.error('ДЗ создано, но не удалось привязать к занятию', {
+                action: { label: 'Повторить', onClick: () => { void attachToLesson(); } },
+                duration: 10000,
+              });
+            }
+          };
+          await attachToLesson();
+        }
+      }
+
       // Phase 3: notify (optional)
       let notifyResult: {
         sent: number;
@@ -1200,6 +1313,8 @@ function TutorHomeworkCreateContent() {
     queryClient,
     inviteWebLink,
     studentLoginLink,
+    isEditMode,
+    searchParams,
   ]);
 
   // ── Edit submit (PUT) ──

@@ -14,12 +14,25 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { parseAttachmentUrls, serializeAttachmentUrls } from "../_shared/attachment-refs.ts";
+import {
+  sendPushNotification,
+  type PushPayload,
+  type PushSubscriptionData,
+} from "../_shared/push-sender.ts";
+import { sendLessonMaterialsNotificationEmail } from "../_shared/email-sender.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+// Notify cascade (TASK-7) — mirror homework-reminder env names.
+const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
+const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
+const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
+const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
+const PUBLIC_APP_URL = (Deno.env.get("PUBLIC_APP_URL") ?? "https://sokratai.ru").trim().replace(/\/$/, "");
 
 const FALLBACK_ORIGINS = [
   "https://sokratai.ru",
@@ -435,11 +448,50 @@ async function handleDeleteMaterial(
   return jsonOk(cors, { ok: true });
 }
 
+// ─── Notify cascade (TASK-7) ────────────────────────────────────────────────────
+
+function escapeTelegramHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Send one Telegram message (retry 2× on 429/5xx). Mirror homework-reminder. */
+async function sendTelegramMessage(chatId: number, text: string): Promise<boolean> {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  const maxAttempts = 2;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const resp = await fetch(
+        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", disable_web_page_preview: false }),
+        },
+      );
+      if (resp.ok) return true;
+      if (attempt < maxAttempts - 1 && (resp.status === 429 || resp.status >= 500)) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      return false;
+    } catch {
+      if (attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+      return false;
+    }
+  }
+  return false;
+}
+
 /**
- * TASK-7 STUB: digest notify (push→telegram→email) is P1. This validates
- * ownership and returns a stable shape so the client wiring can land early.
+ * TASK-7: digest notify. ONE notification per call — for each student of the
+ * lesson, cascade push → telegram → email (first success wins; rule 70).
+ * Deep-links to /student/schedule/:lessonId. No DB persistence — the drawer
+ * guarantees "once per close"; returns channel counters only. PII-free logs.
  */
-async function handleNotifyStub(
+async function handleNotify(
   db: SupabaseClient,
   tutorPkId: string,
   lessonId: string,
@@ -450,8 +502,162 @@ async function handleNotifyStub(
   }
   const lesson = await loadOwnedLesson(db, lessonId, tutorPkId);
   if (!lesson) return jsonError(cors, 404, "NOT_FOUND", "Занятие не найдено.");
-  console.info("lesson_materials_notify_stub", { lesson_id: lessonId });
-  return jsonOk(cors, { ok: true, notify: { implemented: false } });
+
+  // Recipients: individual (student_id) + unified-group participants.
+  const studentIds = new Set<string>();
+  if (lesson.student_id) studentIds.add(lesson.student_id);
+  const { data: parts, error: partsErr } = await db
+    .from("tutor_lesson_participants")
+    .select("student_id")
+    .eq("lesson_id", lessonId);
+  if (partsErr) {
+    // For a pure group lesson (student_id IS NULL) participants ARE the whole
+    // recipient set → a failed lookup must NOT silently notify zero/subset
+    // (review fix #3). For an individual lesson we already have student_id →
+    // the participants query is supplementary, so degrade gracefully.
+    if (!lesson.student_id) {
+      console.error("lesson_materials_notify_participants_failed", { error: partsErr.message });
+      return jsonError(
+        cors,
+        503,
+        "RECIPIENTS_LOOKUP_FAILED",
+        "Не удалось определить получателей уведомления. Попробуйте ещё раз.",
+      );
+    }
+    console.warn("lesson_materials_notify_participants_degraded", { error: partsErr.message });
+  }
+  for (const p of parts ?? []) {
+    if (p.student_id) studentIds.add(p.student_id as string);
+  }
+
+  const emptyResult = {
+    recipients: 0,
+    sent_push: 0,
+    sent_telegram: 0,
+    sent_email: 0,
+    failed: 0,
+    failed_no_channel: 0,
+  };
+  if (studentIds.size === 0) {
+    console.info("lesson_materials_notify_no_recipients", { lesson_id: lessonId });
+    return jsonOk(cors, { ok: true, notify: emptyResult });
+  }
+  const ids = [...studentIds];
+
+  // Tutor name (sender label).
+  const { data: tutorRow } = await db.from("tutors").select("name").eq("id", tutorPkId).maybeSingle();
+  const tutorName = (tutorRow?.name as string | undefined)?.trim() || "Ваш репетитор";
+
+  const lessonUrl = `${PUBLIC_APP_URL}/student/schedule/${lessonId}`;
+
+  // ── Batch channel data ──
+  const pushSubsMap: Record<string, PushSubscriptionData[]> = {};
+  const { data: pushSubs } = await db
+    .from("push_subscriptions")
+    .select("user_id, endpoint, p256dh, auth")
+    .in("user_id", ids);
+  for (const s of pushSubs ?? []) {
+    const uid = s.user_id as string;
+    (pushSubsMap[uid] ??= []).push({
+      endpoint: s.endpoint as string,
+      p256dh: s.p256dh as string,
+      auth: s.auth as string,
+    });
+  }
+
+  const tgMap: Record<string, number> = {};
+  const { data: profiles } = await db.from("profiles").select("id, telegram_user_id").in("id", ids);
+  for (const p of profiles ?? []) {
+    if (p.telegram_user_id) tgMap[p.id as string] = p.telegram_user_id as number;
+  }
+  const { data: sessions } = await db
+    .from("telegram_sessions")
+    .select("user_id, telegram_user_id")
+    .in("user_id", ids);
+  for (const s of sessions ?? []) {
+    const uid = s.user_id as string;
+    if (s.telegram_user_id && tgMap[uid] === undefined) tgMap[uid] = s.telegram_user_id as number;
+  }
+
+  const emailMap: Record<string, string> = {};
+  for (const sid of ids) {
+    try {
+      const { data } = await db.auth.admin.getUserById(sid);
+      const email = data?.user?.email;
+      if (email && !email.endsWith("@temp.sokratai.ru")) emailMap[sid] = email;
+    } catch {
+      // no email fallback for this student
+    }
+  }
+
+  const pushPayload: PushPayload = {
+    title: "Новые материалы к занятию",
+    body: `${tutorName} добавил материалы к занятию`,
+    url: lessonUrl,
+  };
+  const tgText =
+    `<b>Новые материалы к занятию</b>\n\n${escapeTelegramHtml(tutorName)} добавил материалы к занятию.\n\n` +
+    `<a href="${lessonUrl}">Открыть занятие</a>`;
+
+  // ── Per-student cascade ──
+  let sentPush = 0, sentTelegram = 0, sentEmail = 0, failed = 0, failedNoChannel = 0;
+
+  for (const sid of ids) {
+    let delivered = false;
+    let channel: "push" | "telegram" | "email" | null = null;
+
+    const subs = pushSubsMap[sid] ?? [];
+    if (subs.length > 0 && VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+      for (const sub of subs) {
+        let r = await sendPushNotification(sub, pushPayload, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT);
+        if (r.success) { delivered = true; channel = "push"; break; }
+        if (r.gone) {
+          await db.from("push_subscriptions").delete().eq("endpoint", sub.endpoint).eq("user_id", sid);
+          continue;
+        }
+        if (r.status >= 500) {
+          r = await sendPushNotification(sub, pushPayload, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT);
+          if (r.success) { delivered = true; channel = "push"; break; }
+          if (r.gone) {
+            await db.from("push_subscriptions").delete().eq("endpoint", sub.endpoint).eq("user_id", sid);
+          }
+        }
+      }
+    }
+
+    const chatId = tgMap[sid];
+    if (!delivered && chatId) {
+      if (await sendTelegramMessage(chatId, tgText)) { delivered = true; channel = "telegram"; }
+    }
+
+    const email = emailMap[sid];
+    if (!delivered && email) {
+      const res = await sendLessonMaterialsNotificationEmail(
+        db,
+        email,
+        { tutorName, lessonUrl, lessonLabel: null },
+        lessonId,
+      );
+      if (res.success && !res.skipped) { delivered = true; channel = "email"; }
+    }
+
+    if (channel === "push") sentPush++;
+    else if (channel === "telegram") sentTelegram++;
+    else if (channel === "email") sentEmail++;
+    else if (subs.length > 0 || chatId || email) failed++;
+    else failedNoChannel++;
+  }
+
+  const notify = {
+    recipients: ids.length,
+    sent_push: sentPush,
+    sent_telegram: sentTelegram,
+    sent_email: sentEmail,
+    failed,
+    failed_no_channel: failedNoChannel,
+  };
+  console.info("lesson_materials_notify_sent", { lesson_id: lessonId, ...notify });
+  return jsonOk(cors, { ok: true, notify });
 }
 
 // ─── Entry point ────────────────────────────────────────────────────────────────
@@ -481,12 +687,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const seg = route.segments;
 
-    // POST /lessons/:lessonId/materials/notify  (STUB — TASK-7)
+    // POST /lessons/:lessonId/materials/notify  (TASK-7 digest cascade)
     if (
       seg.length === 4 && seg[0] === "lessons" && seg[2] === "materials" &&
       seg[3] === "notify" && route.method === "POST"
     ) {
-      return await handleNotifyStub(db, tutorPkId, seg[1], cors);
+      return await handleNotify(db, tutorPkId, seg[1], cors);
     }
 
     // GET /lessons/:lessonId/materials
