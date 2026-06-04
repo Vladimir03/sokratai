@@ -3973,7 +3973,7 @@ export type Database = {
       student_can_see_lesson: { Args: { _lesson_id: string }; Returns: boolean }
       tutor_add_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
-        Returns: Json
+        Returns: undefined
       }
       tutor_confirm_lessons: { Args: { p_lessons: Json }; Returns: Json }
       tutor_delete_lessons: {
@@ -3982,7 +3982,7 @@ export type Database = {
       }
       tutor_remove_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
-        Returns: Json
+        Returns: undefined
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
       update_group_participant_payment_status: {
