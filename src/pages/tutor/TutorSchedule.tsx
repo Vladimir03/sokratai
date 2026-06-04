@@ -53,6 +53,8 @@ import {
 import {
   createMiniGroupLesson,
   getLessonParticipants,
+  addLessonParticipant,
+  removeLessonParticipant,
   type MiniGroupCreateResult,
 } from '@/lib/tutorScheduleGroupCreate';
 import { updateGroupParticipantPaymentStatus } from '@/lib/tutorScheduleGroupPayments';
@@ -454,6 +456,7 @@ interface GroupDetailsDialogProps {
   onActionApplied?: () => void;
   onParticipantPaymentUpdated?: () => void;
   onOpenMaterials?: (lesson: TutorLessonWithStudent) => void;
+  students?: TutorStudentWithProfile[];
 }
 
 function GroupDetailsDialog({
@@ -463,6 +466,7 @@ function GroupDetailsDialog({
   onActionApplied,
   onParticipantPaymentUpdated,
   onOpenMaterials,
+  students = [],
 }: GroupDetailsDialogProps) {
   const [moveDateTimeValue, setMoveDateTimeValue] = useState('');
   const [isActionSaving, setIsActionSaving] = useState(false);
@@ -470,6 +474,8 @@ function GroupDetailsDialog({
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'complete' | null>(null);
   const [showGroupDelete, setShowGroupDelete] = useState(false);
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
+  const [isMutatingParticipants, setIsMutatingParticipants] = useState(false);
+  const [addParticipantId, setAddParticipantId] = useState('');
   const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
@@ -699,6 +705,59 @@ function GroupDetailsDialog({
       setShowGroupDelete(false);
     }
   }, [mainLesson, onActionApplied, onOpenChange]);
+
+  const reloadParticipants = useCallback(async () => {
+    if (!mainLesson) return;
+    const data = await getLessonParticipants(mainLesson.id);
+    setParticipants(data);
+  }, [mainLesson]);
+
+  const handleAddParticipant = useCallback(async () => {
+    if (!mainLesson || !addParticipantId || isMutatingParticipants) return;
+    setIsMutatingParticipants(true);
+    try {
+      const res = await addLessonParticipant(mainLesson.id, addParticipantId);
+      if (res.ok) {
+        toast.success('Ученик добавлен в занятие');
+        setAddParticipantId('');
+        await reloadParticipants();
+        onActionApplied?.();
+      } else {
+        toast.error(res.error || 'Не удалось добавить ученика');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при добавлении ученика');
+    } finally {
+      setIsMutatingParticipants(false);
+    }
+  }, [mainLesson, addParticipantId, isMutatingParticipants, reloadParticipants, onActionApplied]);
+
+  const handleRemoveParticipant = useCallback(async (tutorStudentId: string) => {
+    if (!mainLesson || isMutatingParticipants) return;
+    setIsMutatingParticipants(true);
+    try {
+      const res = await removeLessonParticipant(mainLesson.id, tutorStudentId);
+      if (res.ok) {
+        toast.success('Ученик убран из занятия');
+        await reloadParticipants();
+        onActionApplied?.();
+      } else {
+        toast.error(res.error || 'Не удалось убрать ученика');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при удалении ученика');
+    } finally {
+      setIsMutatingParticipants(false);
+    }
+  }, [mainLesson, isMutatingParticipants, reloadParticipants, onActionApplied]);
+
+  // Students of this tutor not already in the group (for the add picker).
+  const availableStudentsToAdd = useMemo(() => {
+    const present = new Set(participants.map((p) => p.tutor_student_id));
+    return students.filter((s) => !present.has(s.id));
+  }, [students, participants]);
 
   const openParticipantPaymentDialog = useCallback((participant: TutorLessonParticipantWithStudent) => {
     if (!canManageParticipantPayments) return;
@@ -990,6 +1049,60 @@ function GroupDetailsDialog({
                   Отметить проведено
                 </Button>
               </div>
+              {isUnifiedGroupLesson && mainLesson && lessonStatus === 'booked' && (
+                <div className="space-y-2 rounded-md border border-socrat-border p-3">
+                  <p className="text-sm font-medium text-slate-900">Состав группы</p>
+                  <div className="space-y-1.5">
+                    {participantsLoading ? (
+                      <p className="text-xs text-muted-foreground">Загрузка…</p>
+                    ) : participants.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">Пока нет участников</p>
+                    ) : (
+                      participants.map((p) => (
+                        <div key={p.id} className="flex items-center justify-between gap-2">
+                          <span className="text-sm truncate">{getParticipantName(p)}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                            style={{ touchAction: 'manipulation' }}
+                            disabled={isMutatingParticipants || participants.length <= 1}
+                            onClick={() => p.tutor_student_id && handleRemoveParticipant(p.tutor_student_id)}
+                            aria-label="Убрать ученика"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {availableStudentsToAdd.length > 0 && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <Select value={addParticipantId} onValueChange={setAddParticipantId}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Добавить ученика" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableStudentsToAdd.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.profiles?.username || s.profiles?.telegram_username || 'Ученик'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        style={{ touchAction: 'manipulation' }}
+                        disabled={!addParticipantId || isMutatingParticipants}
+                        onClick={handleAddParticipant}
+                      >
+                        Добавить
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
               {isUnifiedGroupLesson && mainLesson && (
                 <Button
                   variant="outline"
@@ -4334,6 +4447,7 @@ function TutorScheduleContent() {
             handleGroupDetailsOpenChange(false);
             setMaterialsDrawerLesson(lesson);
           }}
+          students={students}
         />
 
         <ReminderSettingsDialog

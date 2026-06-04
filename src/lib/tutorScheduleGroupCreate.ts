@@ -131,3 +131,50 @@ export async function getLessonParticipants(lessonId: string): Promise<TutorLess
 
   return (data ?? []) as unknown as TutorLessonParticipantWithStudent[];
 }
+
+export interface LessonParticipantMutationResult {
+  ok: boolean;
+  error?: string;
+  code?: string;
+}
+
+function mapParticipantError(message: string): { error: string; code?: string } {
+  if (message.includes('NOT_GROUP')) return { error: 'Добавлять участников можно только в групповое занятие.', code: 'NOT_GROUP' };
+  if (message.includes('NOT_BOOKED')) return { error: 'Менять состав можно только у запланированных занятий.', code: 'NOT_BOOKED' };
+  if (message.includes('LAST_PARTICIPANT')) return { error: 'Нельзя убрать последнего участника — удалите занятие целиком.', code: 'LAST_PARTICIPANT' };
+  if (message.includes('INVALID_STUDENT')) return { error: 'Ученик не найден.', code: 'INVALID_STUDENT' };
+  if (message.includes('NOT_OWNED')) return { error: 'Занятие не найдено.', code: 'NOT_OWNED' };
+  return { error: 'Не удалось изменить состав занятия.' };
+}
+
+/** Add a student to an existing GROUP lesson (booked). SECURITY DEFINER RPC. */
+export async function addLessonParticipant(
+  lessonId: string,
+  tutorStudentId: string,
+): Promise<LessonParticipantMutationResult> {
+  const { error } = await supabase.rpc('tutor_add_lesson_participant', {
+    _lesson_id: lessonId,
+    _tutor_student_id: tutorStudentId,
+  });
+  if (error) {
+    console.error('Error adding lesson participant:', error);
+    return { ok: false, ...mapParticipantError(error.message || '') };
+  }
+  return { ok: true };
+}
+
+/** Remove a student from an existing GROUP lesson (booked, not the last one). */
+export async function removeLessonParticipant(
+  lessonId: string,
+  tutorStudentId: string,
+): Promise<LessonParticipantMutationResult> {
+  const { error } = await supabase.rpc('tutor_remove_lesson_participant', {
+    _lesson_id: lessonId,
+    _tutor_student_id: tutorStudentId,
+  });
+  if (error) {
+    console.error('Error removing lesson participant:', error);
+    return { ok: false, ...mapParticipantError(error.message || '') };
+  }
+  return { ok: true };
+}
