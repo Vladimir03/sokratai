@@ -39,6 +39,13 @@ Endpoint hardening (`mock-exam-public`, `mock-exam-student-api`):
 - **Strict-only rounding tolerance:** `numericRoundingMatch` is a fallback in `check_mode='strict'` only; scale = decimals in `correct`; never widen `student` beyond `correct`'s scale.
 - **`score_source` enum** (`ocr` / `tutor` / `finalize_default` / `student_form`): every write to `mock_exam_attempt_part1_answers` must set it explicitly. The OCR re-run skip filter is `score_source === 'tutor'` only (never `earned_score IS NOT NULL`).
 - **`ai_part1_ocr_json` canonical shape** = `{ cells:{[kim]:{value,confidence}}, __meta:{status:'success'|'failed', …} }`. Read via `.cells[kim]` + `.__meta.status`. Legacy rows pass through `normalizePart1OCRJson` in `handleGetAttempt`.
+- **Tutor answer display resolves from BOTH sources (2026-06-02 fix):** the Часть 1 review must show the student answer as `student_answer ?? ai_part1_ocr_json.cells[kim].value` — typed/auto-saved first, else OCR-recognized. `TutorMockExamReview.tsx::resolvePart1StudentAnswer` is the single helper (used by `Part1SummaryCard` table, the counters, and both `Part1TaskDrillDownDialog` call-sites). Symptom of regressing this: tutor sees «без ответа» for a blank/OCR or NULL-`answer_method` attempt despite a real score (the form-card branch reads only `student_answer`). Counters: «верно/частично/неверно» from `earned_score`, «без ответа» = resolved value null — never gate `wrong` on `student_answer !== null` (drops OCR rows → all counts read 0).
+
+## Часть 2 bulk photos — upload + delete (single bulk pack)
+
+- **Model:** ONE bulk pack per attempt — `mock_exam_attempts.part2_bulk_photo_urls` (dual-format: single ref OR JSON-array), AI two-pass assigns photos→KIM. No per-task attach (removed Phase 5). Cap = `MAX_PART2_BULK_PHOTOS` (10), mirrored frontend (`StudentMockExam.tsx`) ↔ backend (`mock-exam-student-api`).
+- **Append-only + CAS:** upload appends `[...existing, ref]` under a 3-retry CAS (`UPDATE … WHERE part2_bulk_photo_urls = rawCurrent`) → indices 0..N-1 are STABLE under concurrent uploads. `handleDeleteBulkPhoto` (`POST /attempts/:id/photo/delete`, body `{kind:'part2_bulk', index}`) deletes by index with the SAME CAS, then `storage.remove()` the blob (best-effort, rule 50 order: clear DB ref first). Both gated to `status==='in_progress'`. Out-of-range index → 409 `PHOTO_ALREADY_REMOVED`.
+- **Student delete UX:** ✕ on each thumbnail must be always-visible (not hover — touch breaks, rule 80) + a confirm step; optimistic remove with restore-on-error + `toast.error`. Upload errors go to a toast too (tiny inline text was missed by pilot students).
 
 ## Pause / multi-session (AC-P10)
 

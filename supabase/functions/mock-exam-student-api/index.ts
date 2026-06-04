@@ -1321,6 +1321,130 @@ async function handleUploadPhoto(
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// POST /attempts/:id/photo/delete  — remove one bulk Часть 2 photo by index
+// ────────────────────────────────────────────────────────────────────────────
+//
+// 2026-06-02 (Вадим/Елена pilot): ученики не могли удалить лишнее фото Части 2 —
+// delete-функции не существовало вовсе. Удаление по ИНДЕКСУ безопасно: загрузка
+// append-only (`[...existing, ref]`), поэтому индексы 0..N-1 стабильны при
+// параллельных upload'ах; только параллельные delete (один ученик из двух
+// вкладок) теоретически сдвинули бы их — это покрывает CAS-guard (mirror upload).
+async function handleDeleteBulkPhoto(
+  db: SupabaseClient,
+  studentUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, studentUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const attempt = ownedOrErr;
+
+  // Mirror upload guard: модифицировать пакет можно только пока работа не сдана.
+  if (attempt.status !== "in_progress") {
+    return jsonError(cors, 409, "NOT_IN_PROGRESS",
+      "Удаление фото доступно только пока работа не сдана");
+  }
+
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  if (b.kind !== "part2_bulk") {
+    return jsonError(cors, 400, "VALIDATION", "kind must be 'part2_bulk'");
+  }
+  const index = b.index;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+    return jsonError(cors, 400, "VALIDATION", "index must be a non-negative integer");
+  }
+
+  const parseBulk = (raw: string | null): string[] => {
+    if (!raw) return [];
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+        }
+      } catch { /* corrupted → empty */ }
+      return [];
+    }
+    return [trimmed];
+  };
+
+  const MAX_CAS_RETRIES = 3;
+  let removedRef: string | null = null;
+  let remaining = 0;
+  let lastErr: string | null = null;
+  let success = false;
+
+  for (let attemptNo = 0; attemptNo < MAX_CAS_RETRIES; attemptNo++) {
+    const { data: cur, error: readErr } = await db
+      .from("mock_exam_attempts")
+      .select("part2_bulk_photo_urls")
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId)
+      .maybeSingle();
+    if (readErr) { lastErr = readErr.message; break; }
+
+    const rawCurrent = (cur?.part2_bulk_photo_urls as string | null) ?? null;
+    const existing = parseBulk(rawCurrent);
+    if (index >= existing.length) {
+      // Уже удалено (или never existed) — idempotent-friendly сигнал клиенту.
+      return jsonError(cors, 409, "PHOTO_ALREADY_REMOVED",
+        "Это фото уже удалено — обнови страницу");
+    }
+
+    const ref = existing[index];
+    const next = existing.filter((_, i) => i !== index);
+    const serialized = next.length === 0
+      ? null
+      : next.length === 1 ? next[0] : JSON.stringify(next);
+
+    // CAS: UPDATE только если колонка всё ещё равна rawCurrent (никакой
+    // конкурентный writer не вклинился между SELECT и UPDATE).
+    const updateQuery = db
+      .from("mock_exam_attempts")
+      .update({ part2_bulk_photo_urls: serialized })
+      .eq("id", attemptId)
+      .eq("student_id", studentUserId);
+    const casQuery = rawCurrent === null
+      ? updateQuery.is("part2_bulk_photo_urls", null)
+      : updateQuery.eq("part2_bulk_photo_urls", rawCurrent);
+    const { data: updated, error: updateErr } = await casQuery.select("id");
+    if (updateErr) { lastErr = updateErr.message; break; }
+    if (updated && updated.length > 0) {
+      removedRef = ref;
+      remaining = next.length;
+      success = true;
+      break;
+    }
+    // 0 rows → конкурентный writer изменил массив. Re-read и retry.
+    console.warn("mock_exam_bulk_delete_cas_retry", { attempt: attemptNo, attempt_id: attemptId });
+  }
+
+  if (!success) {
+    console.error("mock_exam_bulk_delete_failed", { last_error: lastErr });
+    return jsonError(cors, 500, "DB_ERROR",
+      "Не удалось удалить фото. Попробуй ещё раз.");
+  }
+
+  // Удаляем blob из storage — best-effort (как rollback в upload). Сбой не
+  // фатален: ссылка из БД уже убрана, ученик не увидит фото; orphan-blob
+  // вторичен (rule 50 order: сначала очищаем ref в БД, потом storage).
+  const parsed = parseStorageRef(removedRef);
+  if (parsed) {
+    await db.storage.from(parsed.bucket).remove([parsed.path]).catch(() => null);
+  }
+
+  return jsonOk(cors, {
+    ok: true,
+    attempt_id: attemptId,
+    removed_index: index,
+    remaining,
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // POST /attempts/:id/submit
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -1709,6 +1833,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "photo" && route.method === "POST"
     ) {
       return await handleUploadPhoto(db, userId, seg[1], req, cors);
+    }
+
+    // POST /attempts/:id/photo/delete  — remove one bulk Часть 2 photo by index
+    if (
+      seg.length === 4 && seg[0] === "attempts" &&
+      seg[2] === "photo" && seg[3] === "delete" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleDeleteBulkPhoto(db, userId, seg[1], body, cors);
     }
 
     // POST /attempts/:id/submit

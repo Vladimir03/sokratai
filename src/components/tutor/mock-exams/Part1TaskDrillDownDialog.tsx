@@ -46,6 +46,12 @@ interface Part1TaskDrillDownDialogProps {
   kimNumber: number;
   maxScore: number;
   studentAnswer: string | null;
+  /**
+   * Bug fix (2026-06-02): true когда `studentAnswer` пришёл из OCR-распознавания
+   * фото бланка ФИПИ (а не из typed/auto-saved). Показываем hint «распознано с
+   * фото» чтобы тутор знал что значение машинное и мог сверить с бланком.
+   */
+  answerFromOcr?: boolean;
   correctAnswer: string | null;
   currentScore: number | null;
   currentComment: string | null;
@@ -65,6 +71,7 @@ export function Part1TaskDrillDownDialog({
   kimNumber,
   maxScore,
   studentAnswer,
+  answerFromOcr = false,
   correctAnswer,
   currentScore,
   currentComment,
@@ -197,6 +204,11 @@ export function Part1TaskDrillDownDialog({
                   <span className="italic text-slate-400">не введён</span>
                 )}
               </div>
+              {studentAnswer !== null && answerFromOcr && (
+                <div className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                  распознано с фото бланка — сверь с оригиналом
+                </div>
+              )}
             </div>
             <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/30">
               <div className="text-xs uppercase tracking-wide text-emerald-700 dark:text-emerald-300 mb-1">

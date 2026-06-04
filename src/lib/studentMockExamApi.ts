@@ -441,6 +441,22 @@ export async function uploadMockExamPart2BulkPhoto(
 }
 
 /**
+ * Удалить одно фото из bulk-пакета Часть 2 по индексу (2026-06-02).
+ * Backend удаляет ссылку из `attempts.part2_bulk_photo_urls` (CAS) + blob из
+ * storage. Доступно только пока attempt `in_progress`. Индекс стабилен —
+ * загрузка append-only. 409 PHOTO_ALREADY_REMOVED если индекс вне диапазона.
+ */
+export async function deleteMockExamPart2BulkPhoto(
+  attemptId: string,
+  index: number,
+): Promise<{ ok: true; attempt_id: string; removed_index: number; remaining: number }> {
+  return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/photo/delete`, {
+    method: 'POST',
+    body: JSON.stringify({ kind: 'part2_bulk', index }),
+  });
+}
+
+/**
  * Persist student's per-attempt answer method choice. Idempotent. UI may
  * call repeatedly when user toggles back-and-forth — данные обоих режимов
  * (Часть 1 inputs + ФИПИ бланк photo) сохраняются параллельно.

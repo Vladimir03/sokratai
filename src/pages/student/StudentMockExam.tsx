@@ -33,6 +33,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { supabase } from '@/lib/supabaseClient';
 import {
+  deleteMockExamPart2BulkPhoto,
   getStudentMockExam,
   pauseMockExamAttempt,
   setMockExamAnswerMethod,
@@ -47,6 +48,7 @@ import {
 } from '@/lib/studentMockExamApi';
 import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
 import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
 import { AnswerMethodSelectModal } from '@/components/student/mock-exam/AnswerMethodSelectModal';
@@ -1134,11 +1136,41 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
         }
         setBulkUploadStatus('idle');
       } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Не удалось загрузить фото';
         setBulkUploadStatus('error');
-        setBulkUploadError(err instanceof Error ? err.message : 'Не удалось загрузить фото');
+        setBulkUploadError(msg);
+        // 2026-06-02: дублируем ошибку в toast — мелкий inline-текст ученики
+        // не замечали («непонятно, загрузилось ли»).
+        toast.error(msg);
       }
     },
     [data.attempt.id, part2BulkPhotos.length],
+  );
+
+  // 2026-06-02 (Вадим/Елена): удаление лишнего фото из bulk-пакета Часть 2.
+  // Optimistic — убираем из UI сразу, при ошибке восстанавливаем + toast.
+  const [bulkDeletingIdx, setBulkDeletingIdx] = useState<number | null>(null);
+  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState<number | null>(null);
+  const removePart2BulkPhoto = useCallback(
+    async (index: number) => {
+      const snapshot = part2BulkPhotos;
+      setBulkDeletingIdx(index);
+      setBulkUploadError(null);
+      // Optimistic remove.
+      setPart2BulkPhotos((prev) => prev.filter((_, i) => i !== index));
+      try {
+        await deleteMockExamPart2BulkPhoto(data.attempt.id, index);
+      } catch (err) {
+        // Restore on failure.
+        setPart2BulkPhotos(snapshot);
+        const msg = err instanceof Error ? err.message : 'Не удалось удалить фото';
+        setBulkUploadError(msg);
+        toast.error(msg);
+      } finally {
+        setBulkDeletingIdx(null);
+      }
+    },
+    [data.attempt.id, part2BulkPhotos],
   );
 
   const handleAnswerMethodSelect = useCallback(
@@ -1453,22 +1485,68 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 </div>
                 {part2BulkPhotos.length > 0 && (
                   <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-                    {part2BulkPhotos.map((url, idx) => (
-                      <div
-                        key={url}
-                        className="relative aspect-square overflow-hidden rounded-md border border-amber-200 bg-white"
-                      >
-                        <img
-                          src={url}
-                          alt={`Bulk фото ${idx + 1}`}
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                        <span className="absolute bottom-1 right-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
-                          {idx + 1}
-                        </span>
-                      </div>
-                    ))}
+                    {part2BulkPhotos.map((url, idx) => {
+                      const isDeleting = bulkDeletingIdx === idx;
+                      const isConfirming = confirmDeleteIdx === idx;
+                      return (
+                        <div
+                          key={url}
+                          className="relative aspect-square overflow-hidden rounded-md border border-amber-200 bg-white"
+                        >
+                          <img
+                            src={url}
+                            alt={`Bulk фото ${idx + 1}`}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                          <span className="absolute bottom-1 right-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
+                            {idx + 1}
+                          </span>
+                          {/* 2026-06-02: удаление фото. ✕ всегда видна (не hover —
+                              touch ломается на hover, rule 80). Тап → confirm-оверлей. */}
+                          {!isFinal && !isDeleting && !isConfirming && (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteIdx(idx)}
+                              className="absolute right-1 top-1 inline-flex min-h-7 min-w-7 touch-manipulation items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                              aria-label={`Удалить фото ${idx + 1}`}
+                              title="Удалить фото"
+                            >
+                              <X className="h-4 w-4" aria-hidden="true" />
+                            </button>
+                          )}
+                          {isDeleting && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+                              <Loader2 className="h-5 w-5 animate-spin text-rose-600" />
+                            </div>
+                          )}
+                          {isConfirming && (
+                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/70 p-1.5 text-center">
+                              <span className="text-[11px] font-medium text-white">Удалить?</span>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteIdx(null);
+                                    void removePart2BulkPhoto(idx);
+                                  }}
+                                  className="inline-flex min-h-7 touch-manipulation items-center rounded bg-rose-600 px-2 text-[11px] font-semibold text-white hover:bg-rose-700"
+                                >
+                                  Да
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteIdx(null)}
+                                  className="inline-flex min-h-7 touch-manipulation items-center rounded bg-white/90 px-2 text-[11px] font-semibold text-slate-800 hover:bg-white"
+                                >
+                                  Отмена
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 {part2BulkPhotos.length < MAX_BULK_PART2_PHOTOS && (
@@ -1504,6 +1582,11 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                       }}
                     />
                   </div>
+                )}
+                {part2BulkPhotos.length >= MAX_BULK_PART2_PHOTOS && !isFinal && (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Достигнут лимит {MAX_BULK_PART2_PHOTOS} фото — удалите лишнее, чтобы добавить новое.
+                  </p>
                 )}
                 {bulkUploadError && (
                   <p className="mt-2 text-sm text-rose-700">{bulkUploadError}</p>

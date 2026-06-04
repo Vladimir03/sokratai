@@ -83,8 +83,10 @@ import { cn } from '@/lib/utils';
 import { formatMockScore } from '@/components/tutor/mock-exams/mockHeatmapStyles';
 import type {
   MockExamAttemptDetail,
+  MockExamAttemptPart1Answer,
   MockExamAttemptPart2Solution,
   MockExamConfidence,
+  MockExamPart1OCRResult,
 } from '@/types/mockExam';
 
 // LaTeX рендеринг — lazy, см. .claude/rules/50-kb-module.md
@@ -109,6 +111,28 @@ function formatTime(minutes: number | null): string {
 
 function isAnonymous(attempt: MockExamAttemptDetail): boolean {
   return attempt.student_id === null && attempt.anonymous_id !== null;
+}
+
+/**
+ * Bug fix (2026-06-02): tutor видел «без ответа» по Части 1 несмотря на балл.
+ * Резолвит ответ ученика из ДВУХ источников: typed/auto-saved `student_answer`
+ * (form mode) → fallback на OCR-распознанное значение из фото бланка ФИПИ
+ * (`ai_part1_ocr_json.cells[kim].value`). Покрывает оба режима + legacy attempts
+ * с NULL `answer_method`, которые роутятся в Part1SummaryCard (form card),
+ * но реально содержат ответы только в OCR JSON.
+ */
+function resolvePart1StudentAnswer(
+  ans: Pick<MockExamAttemptPart1Answer, 'kim_number' | 'student_answer'>,
+  ocr: MockExamPart1OCRResult | null | undefined,
+): { value: string | null; fromOcr: boolean; confidence: MockExamConfidence | null } {
+  if (ans.student_answer != null && ans.student_answer !== '') {
+    return { value: ans.student_answer, fromOcr: false, confidence: null };
+  }
+  const cell = ocr?.cells?.[ans.kim_number];
+  if (cell?.value != null && cell.value !== '') {
+    return { value: cell.value, fromOcr: true, confidence: cell.confidence ?? null };
+  }
+  return { value: null, fromOcr: false, confidence: null };
 }
 
 function studentNameOrFallback(attempt: MockExamAttemptDetail): string {
@@ -984,6 +1008,7 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
       {drillDownKim !== null && (() => {
         const ans = attempt.part1_answers.find((a) => a.kim_number === drillDownKim);
         if (!ans) return null;
+        const resolved = resolvePart1StudentAnswer(ans, attempt.ai_part1_ocr_json);
         return (
           <Part1TaskDrillDownDialog
             open={drillDownKim !== null}
@@ -992,7 +1017,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
             }}
             kimNumber={ans.kim_number}
             maxScore={ans.max_score}
-            studentAnswer={ans.student_answer}
+            studentAnswer={resolved.value}
+            answerFromOcr={resolved.fromOcr}
             correctAnswer={ans.correct_answer}
             currentScore={ans.earned_score}
             currentComment={ans.tutor_comment ?? null}
@@ -1194,11 +1220,20 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
       (a.earned_score ?? 0) > 0 &&
       (a.earned_score ?? 0) < (a.max_score ?? 0),
   ).length;
+  // Bug fix (2026-06-02): wrong = есть ответ (typed ИЛИ распознанный с фото) И
+  // earned 0. Раньше гейт был `student_answer !== null` → для blank/legacy
+  // attempts (ответы в OCR JSON) все счётчики обнулялись («Верно 0 · неверно 0»
+  // при балле 18/28). noAnswerCount — отдельно, чтобы не врать тутору.
   const wrongCount = attempt.part1_answers.filter(
     (a) =>
-      a.student_answer !== null &&
+      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null &&
       (a.earned_score ?? 0) === 0 &&
       a.max_score > 0,
+  ).length;
+  const noAnswerCount = attempt.part1_answers.filter(
+    (a) =>
+      a.max_score > 0 &&
+      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value === null,
   ).length;
 
   // AC-P11 hotfix H3: approved тоже read-only — backend rejects manual_score
@@ -1263,6 +1298,9 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
   const drillDownAnswer = drillDownKim !== null
     ? attempt.part1_answers.find((a) => a.kim_number === drillDownKim) ?? null
     : null;
+  const drillDownResolved = drillDownAnswer
+    ? resolvePart1StudentAnswer(drillDownAnswer, attempt.ai_part1_ocr_json)
+    : null;
 
   return (
     <>
@@ -1281,7 +1319,8 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
                   Часть 1: {formatMockScore(part1Score)} из {formatMockScore(part1Max)} баллов
                 </p>
                 <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
-                  Auto-проверено. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}.
+                  Auto-проверено. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}
+                  {noAnswerCount > 0 ? ` · без ответа ${noAnswerCount}` : ''}.
                 </p>
               </div>
             </div>
@@ -1312,6 +1351,51 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
             )}
           </div>
 
+          {/* Bug fix (2026-06-02): показываем загруженный бланк/фото Часть 1 если
+              есть — для blank/legacy attempts, ошибочно отрисованных form-card'ой,
+              тутор может сверить распознанные ответы с оригиналом. Для чистого
+              form mode фото нет → блок не рендерится. */}
+          {(attempt.blank_photo_url || attempt.part1_blank_photo_url) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {attempt.blank_photo_url && (
+                <a
+                  href={attempt.blank_photo_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block"
+                >
+                  <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300 mb-1">
+                    ФИПИ-бланк (Часть 1) — открыть
+                  </div>
+                  <img
+                    src={attempt.blank_photo_url}
+                    alt="ФИПИ бланк"
+                    loading="lazy"
+                    className="w-full rounded-md border border-emerald-300 bg-white object-contain max-h-[320px]"
+                  />
+                </a>
+              )}
+              {attempt.part1_blank_photo_url && (
+                <a
+                  href={attempt.part1_blank_photo_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block"
+                >
+                  <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300 mb-1">
+                    Доп. фото Часть 1 (не на бланке) — открыть
+                  </div>
+                  <img
+                    src={attempt.part1_blank_photo_url}
+                    alt="Фото ответов Часть 1"
+                    loading="lazy"
+                    className="w-full rounded-md border border-emerald-300 bg-white object-contain max-h-[320px]"
+                  />
+                </a>
+              )}
+            </div>
+          )}
+
           {/* AC-P11: collapsible rows list — click row → drill-down dialog */}
           <details className="rounded-md border border-emerald-200 dark:border-emerald-900 bg-white/60 dark:bg-emerald-950/10">
             <summary className="cursor-pointer touch-manipulation px-3 py-2 text-xs font-medium text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 flex items-center gap-1.5">
@@ -1333,9 +1417,14 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
                   {attempt.part1_answers.map((row) => {
                     const earned = row.earned_score ?? 0;
                     const hasScore = row.earned_score !== null;
+                    // Bug fix (2026-06-02): resolve answer из student_answer ?? OCR cell.
+                    const resolved = resolvePart1StudentAnswer(
+                      row,
+                      attempt.ai_part1_ocr_json,
+                    );
                     const isCorrect = hasScore && earned > 0 && earned === row.max_score;
                     const isPartial = hasScore && earned > 0 && earned < row.max_score;
-                    const isWrong = hasScore && earned === 0 && row.student_answer !== null;
+                    const isWrong = hasScore && earned === 0 && resolved.value !== null;
                     const hasComment = (row.tutor_comment ?? '').trim().length > 0;
                     return (
                       <tr
@@ -1356,19 +1445,39 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
                           №{row.kim_number}
                         </td>
                         <td className="px-2 py-1.5 break-words max-w-[120px]">
-                          {row.student_answer ? (
-                            <span
-                              className={cn(
-                                'inline-flex items-center gap-1',
-                                isCorrect && 'text-emerald-700 dark:text-emerald-300',
-                                isPartial && 'text-amber-700 dark:text-amber-300',
-                                isWrong && 'text-rose-700 dark:text-rose-300',
+                          {resolved.value !== null ? (
+                            <span className="inline-flex flex-col gap-0.5">
+                              <span
+                                className={cn(
+                                  'inline-flex items-center gap-1',
+                                  isCorrect && 'text-emerald-700 dark:text-emerald-300',
+                                  isPartial && 'text-amber-700 dark:text-amber-300',
+                                  isWrong && 'text-rose-700 dark:text-rose-300',
+                                )}
+                              >
+                                {isCorrect && <CheckCircle2 className="h-3 w-3" />}
+                                {isPartial && <Check className="h-3 w-3" />}
+                                {isWrong && <X className="h-3 w-3" />}
+                                {resolved.value}
+                              </span>
+                              {resolved.fromOcr && (
+                                <span
+                                  className={cn(
+                                    'inline-flex items-center gap-0.5 text-[10px]',
+                                    resolved.confidence === 'low'
+                                      ? 'text-amber-600 dark:text-amber-400'
+                                      : 'text-slate-400 dark:text-slate-500',
+                                  )}
+                                  title={
+                                    resolved.confidence === 'low'
+                                      ? 'Распознано с фото бланка, низкая уверенность — сверь с бланком'
+                                      : 'Распознано с фото бланка ФИПИ'
+                                  }
+                                >
+                                  <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
+                                  распознано{resolved.confidence === 'low' ? ' · проверь' : ''}
+                                </span>
                               )}
-                            >
-                              {isCorrect && <CheckCircle2 className="h-3 w-3" />}
-                              {isPartial && <Check className="h-3 w-3" />}
-                              {isWrong && <X className="h-3 w-3" />}
-                              {row.student_answer}
                             </span>
                           ) : (
                             <span className="italic text-slate-400">без ответа</span>
@@ -1422,7 +1531,8 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
           }}
           kimNumber={drillDownAnswer.kim_number}
           maxScore={drillDownAnswer.max_score}
-          studentAnswer={drillDownAnswer.student_answer}
+          studentAnswer={drillDownResolved?.value ?? null}
+          answerFromOcr={drillDownResolved?.fromOcr ?? false}
           correctAnswer={drillDownAnswer.correct_answer}
           currentScore={drillDownAnswer.earned_score}
           currentComment={drillDownAnswer.tutor_comment ?? null}
