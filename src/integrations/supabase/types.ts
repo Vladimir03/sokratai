@@ -3996,6 +3996,7 @@ export type Database = {
       update_lesson_series: {
         Args: {
           _apply_time_shift?: boolean
+          _duration_min?: number
           _from_start_at: string
           _lesson_type?: string
           _notes?: string

@@ -1964,6 +1964,7 @@ function LessonDetailsDialog({
   const [editDate, setEditDate] = useState<Date | undefined>();
   const [editHour, setEditHour] = useState('');
   const [editMinute, setEditMinute] = useState('00');
+  const [editDuration, setEditDuration] = useState('60');
   // Series confirmation state
   const [seriesAction, setSeriesAction] = useState<'save' | 'cancel' | null>(null);
   const [isActualSeries, setIsActualSeries] = useState(false);
@@ -1983,6 +1984,7 @@ function LessonDetailsDialog({
       setEditDate(lessonStart);
       setEditHour(lessonStart.getHours().toString());
       setEditMinute(lessonStart.getMinutes().toString().padStart(2, '0'));
+      setEditDuration((lesson.duration_min ?? 60).toString());
       setSeriesAction(null);
     }
   }, [open, lesson]);
@@ -2143,6 +2145,7 @@ function LessonDetailsDialog({
           lesson_type: editLessonType,
           subject: editSubject || undefined,
           notes: editNotes || undefined,
+          duration_min: Number.parseInt(editDuration, 10),
           applyTimeShift,
           shiftMinutes,
           scope,
@@ -2162,6 +2165,7 @@ function LessonDetailsDialog({
       } else {
         const result = await updateLesson(lesson.id, {
           start_at: newStart.toISOString(),
+          duration_min: Number.parseInt(editDuration, 10),
           student_id: actualStudentId || undefined,
           tutor_student_id: tutorStudent?.id || undefined,
           lesson_type: editLessonType,
@@ -2316,6 +2320,21 @@ function LessonDetailsDialog({
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <Label className="text-xs">Длительность</Label>
+                <Select value={editDuration} onValueChange={setEditDuration}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="30">30 мин</SelectItem>
+                    <SelectItem value="45">45 мин</SelectItem>
+                    <SelectItem value="60">60 мин</SelectItem>
+                    <SelectItem value="90">90 мин</SelectItem>
+                    <SelectItem value="120">120 мин</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Ученик</Label>
                 <Select value={editStudentId} onValueChange={setEditStudentId}>

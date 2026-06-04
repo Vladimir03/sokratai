@@ -329,6 +329,7 @@ export async function createLessonSeries(
 interface UpdateLessonInput {
   status?: 'booked' | 'completed' | 'cancelled';
   start_at?: string;
+  duration_min?: number;
   group_session_id?: string | null;
   group_source_tutor_group_id?: string | null;
   group_title_snapshot?: string | null;
@@ -469,6 +470,7 @@ export async function updateLessonSeries(
     notes?: string;
     student_id?: string;
     tutor_student_id?: string;
+    duration_min?: number;
     applyTimeShift?: boolean;
     shiftMinutes?: number;
     /** 'this_and_following' (default) = selected + future; 'all' = whole series. */
@@ -492,6 +494,7 @@ export async function updateLessonSeries(
     ...(input.notes !== undefined && { _notes: input.notes }),
     ...(input.student_id !== undefined && { _student_id: input.student_id }),
     ...(input.tutor_student_id !== undefined && { _tutor_student_id: input.tutor_student_id }),
+    ...(input.duration_min !== undefined && { _duration_min: input.duration_min }),
   };
 
   const { data, error } = await supabase.rpc('update_lesson_series', rpcArgs);
