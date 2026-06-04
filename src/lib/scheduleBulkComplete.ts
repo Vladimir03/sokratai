@@ -33,7 +33,9 @@ export interface ConfirmLessonsResult {
 
 /** POST tutor_confirm_lessons — bulk confirm (individual + group), per-lesson atomic. */
 export async function confirmLessons(payload: ConfirmLessonItem[]): Promise<ConfirmLessonsResult> {
-  const { data, error } = await supabase.rpc('tutor_confirm_lessons', { p_lessons: payload });
+  const { data, error } = await supabase.rpc('tutor_confirm_lessons', {
+    p_lessons: payload as unknown as never,
+  });
   if (error) {
     console.error('confirmLessons error:', error.message);
     return {
