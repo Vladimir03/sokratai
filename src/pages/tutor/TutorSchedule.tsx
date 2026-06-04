@@ -476,6 +476,12 @@ function GroupDetailsDialog({
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
   const [isMutatingParticipants, setIsMutatingParticipants] = useState(false);
   const [addParticipantId, setAddParticipantId] = useState('');
+  const [showGroupEdit, setShowGroupEdit] = useState(false);
+  const [editGroupSubject, setEditGroupSubject] = useState('');
+  const [editGroupNotes, setEditGroupNotes] = useState('');
+  const [editGroupDuration, setEditGroupDuration] = useState('60');
+  const [groupSeriesAction, setGroupSeriesAction] = useState<'save' | 'cancel' | null>(null);
+  const [isGroupSaving, setIsGroupSaving] = useState(false);
   const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
@@ -576,6 +582,12 @@ function GroupDetailsDialog({
     setSelectedParticipantId(null);
     setParticipantPaymentError(null);
     setLastParticipantActionStatus(null);
+    const ml = bucket.lessons[0];
+    setEditGroupSubject(ml?.subject || '');
+    setEditGroupNotes(ml?.notes || '');
+    setEditGroupDuration((ml?.duration_min ?? 60).toString());
+    setShowGroupEdit(false);
+    setGroupSeriesAction(null);
   }, [open, bucket?.key, bucket?.startAt]);
 
   const runAction = useCallback(async (
@@ -758,6 +770,79 @@ function GroupDetailsDialog({
     const present = new Set(participants.map((p) => p.tutor_student_id));
     return students.filter((s) => !present.has(s.id));
   }, [students, participants]);
+
+  const doSaveGroupEdit = useCallback(async (scope: DeleteLessonScope) => {
+    if (!mainLesson) return;
+    setIsGroupSaving(true);
+    try {
+      const duration = Number.parseInt(editGroupDuration, 10);
+      if (scope === 'this') {
+        const result = await updateLesson(mainLesson.id, {
+          subject: editGroupSubject || undefined,
+          notes: editGroupNotes || undefined,
+          duration_min: duration,
+        });
+        if (result) {
+          toast.success('Занятие обновлено');
+          setShowGroupEdit(false);
+          onActionApplied?.();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось обновить');
+        }
+      } else {
+        const result = await updateLessonSeries(mainLesson, {
+          subject: editGroupSubject || undefined,
+          notes: editGroupNotes || undefined,
+          duration_min: duration,
+          scope,
+        });
+        if (result.ok) {
+          toast.success(`Серия обновлена (${result.updatedCount})`);
+          setShowGroupEdit(false);
+          onActionApplied?.();
+          onOpenChange(false);
+        } else {
+          toast.error(result.error || 'Не удалось обновить серию');
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при обновлении');
+    } finally {
+      setIsGroupSaving(false);
+      setGroupSeriesAction(null);
+    }
+  }, [mainLesson, editGroupSubject, editGroupNotes, editGroupDuration, onActionApplied, onOpenChange]);
+
+  const handleGroupEditSaveClick = useCallback(() => {
+    if (groupIsRecurring) {
+      setGroupSeriesAction('save');
+    } else {
+      doSaveGroupEdit('this');
+    }
+  }, [groupIsRecurring, doSaveGroupEdit]);
+
+  const doCancelGroupSeries = useCallback(async (scope: 'this_and_following' | 'all') => {
+    if (!mainLesson) return;
+    setIsActionSaving(true);
+    try {
+      const ok = await cancelLessonSeries(mainLesson, scope);
+      if (ok) {
+        toast.success(scope === 'all' ? 'Серия занятий отменена' : 'Занятия отменены');
+        onActionApplied?.();
+        onOpenChange(false);
+      } else {
+        toast.error('Не удалось отменить');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при отмене');
+    } finally {
+      setIsActionSaving(false);
+      setConfirmAction(null);
+    }
+  }, [mainLesson, onActionApplied, onOpenChange]);
 
   const openParticipantPaymentDialog = useCallback((participant: TutorLessonParticipantWithStudent) => {
     if (!canManageParticipantPayments) return;
@@ -1103,6 +1188,63 @@ function GroupDetailsDialog({
                   )}
                 </div>
               )}
+              {isUnifiedGroupLesson && mainLesson && lessonStatus === 'booked' && (
+                showGroupEdit ? (
+                  <div className="space-y-3 rounded-md border border-socrat-border p-3">
+                    <p className="text-sm font-medium text-slate-900">Изменить детали</p>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Длительность</Label>
+                      <Select value={editGroupDuration} onValueChange={setEditGroupDuration}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="30">30 мин</SelectItem>
+                          <SelectItem value="45">45 мин</SelectItem>
+                          <SelectItem value="60">60 мин</SelectItem>
+                          <SelectItem value="90">90 мин</SelectItem>
+                          <SelectItem value="120">120 мин</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Предмет</Label>
+                      <Input
+                        value={editGroupSubject}
+                        onChange={(e) => setEditGroupSubject(e.target.value)}
+                        placeholder="Предмет"
+                        className="text-base"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Заметки</Label>
+                      <Textarea
+                        value={editGroupNotes}
+                        onChange={(e) => setEditGroupNotes(e.target.value)}
+                        placeholder="Заметки"
+                        rows={2}
+                        className="text-base"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" className="flex-1" onClick={() => setShowGroupEdit(false)} disabled={isGroupSaving}>
+                        Отмена
+                      </Button>
+                      <Button className="flex-1" onClick={handleGroupEditSaveClick} disabled={isGroupSaving}>
+                        {isGroupSaving ? 'Сохранение...' : 'Сохранить'}
+                      </Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Время занятия меняется через «Перенести группу» выше.</p>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    style={{ touchAction: 'manipulation' }}
+                    onClick={() => setShowGroupEdit(true)}
+                  >
+                    Изменить детали
+                  </Button>
+                )
+              )}
               {isUnifiedGroupLesson && mainLesson && (
                 <Button
                   variant="outline"
@@ -1257,18 +1399,32 @@ function GroupDetailsDialog({
                   : `Будет попытка завершить уроки, которые уже завершились по времени: ${completeEligibleCount}. Остальные уроки будут пропущены.`)}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <AlertDialogFooter>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
           <AlertDialogCancel disabled={isActionSaving}>Назад</AlertDialogCancel>
-          <AlertDialogAction
-            disabled={isActionSaving}
-            onClick={(event) => {
-              event.preventDefault();
-              if (!confirmAction) return;
-              void runAction(confirmAction);
-            }}
-          >
-            {isActionSaving ? 'Выполняем...' : 'Подтвердить'}
-          </AlertDialogAction>
+          {confirmAction === 'cancel' && groupIsRecurring ? (
+            <>
+              <Button variant="destructive" disabled={isActionSaving} onClick={() => void runAction('cancel')}>
+                Только это
+              </Button>
+              <Button variant="destructive" disabled={isActionSaving} onClick={() => void doCancelGroupSeries('this_and_following')}>
+                Это и последующие
+              </Button>
+              <Button variant="destructive" disabled={isActionSaving} onClick={() => void doCancelGroupSeries('all')}>
+                Всю серию
+              </Button>
+            </>
+          ) : (
+            <AlertDialogAction
+              disabled={isActionSaving}
+              onClick={(event) => {
+                event.preventDefault();
+                if (!confirmAction) return;
+                void runAction(confirmAction);
+              }}
+            >
+              {isActionSaving ? 'Выполняем...' : 'Подтвердить'}
+            </AlertDialogAction>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1303,6 +1459,24 @@ function GroupDetailsDialog({
               {isDeletingGroup ? 'Удаление...' : 'Удалить'}
             </Button>
           )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Group edit — series 3-way save */}
+    <AlertDialog open={groupSeriesAction === 'save'} onOpenChange={(open) => { if (!open) setGroupSeriesAction(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Сохранить изменения</AlertDialogTitle>
+          <AlertDialogDescription>
+            Это занятие — часть серии. Применить только к этому занятию, к этому и последующим, или ко всей серии?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setGroupSeriesAction(null)}>Назад</AlertDialogCancel>
+          <Button onClick={() => doSaveGroupEdit('this')} disabled={isGroupSaving}>Только это</Button>
+          <Button onClick={() => doSaveGroupEdit('this_and_following')} disabled={isGroupSaving}>Это и последующие</Button>
+          <Button onClick={() => doSaveGroupEdit('all')} disabled={isGroupSaving}>Вся серия</Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
