@@ -1157,7 +1157,6 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const removePart2BulkPhoto = useCallback(
     async (url: string) => {
       if (deletingUrl !== null) return; // single-flight guard
-      const snapshot = part2BulkPhotos;
       setDeletingUrl(url);
       setBulkUploadError(null);
       // Optimistic remove by identity.
@@ -1165,8 +1164,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       try {
         await deleteMockExamPart2BulkPhoto(data.attempt.id, url);
       } catch (err) {
-        // Restore on failure.
-        setPart2BulkPhotos(snapshot);
+        // Review fix (P2): restore via FUNCTIONAL re-add, не stale snapshot —
+        // иначе затрём concurrent upload, добавленный пока delete был в полёте.
+        // (Upload также заблокирован при deletingUrl !== null — defense-in-depth.)
+        setPart2BulkPhotos((prev) => (prev.includes(url) ? prev : [...prev, url]));
         const msg = err instanceof Error ? err.message : 'Не удалось удалить фото';
         setBulkUploadError(msg);
         toast.error(msg);
@@ -1174,7 +1175,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
         setDeletingUrl(null);
       }
     },
-    [data.attempt.id, deletingUrl, part2BulkPhotos],
+    [data.attempt.id, deletingUrl],
   );
 
   const handleAnswerMethodSelect = useCallback(
@@ -1561,7 +1562,9 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                       htmlFor={`bulk-upload-${data.attempt.id}`}
                       className={cn(
                         'inline-flex min-h-11 cursor-pointer touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-50',
-                        (bulkUploadStatus === 'uploading' || isFinal) && 'pointer-events-none opacity-60',
+                        // Review fix (P2): блокируем upload пока удаление в полёте —
+                        // single-flight на ВСЕ мутации пакета (не только delete↔delete).
+                        (bulkUploadStatus === 'uploading' || isFinal || deletingUrl !== null) && 'pointer-events-none opacity-60',
                       )}
                     >
                       {bulkUploadStatus === 'uploading' ? (
@@ -1580,7 +1583,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                       // matches backend.
                       accept="image/*"
                       className="sr-only"
-                      disabled={isFinal || bulkUploadStatus === 'uploading'}
+                      disabled={isFinal || bulkUploadStatus === 'uploading' || deletingUrl !== null}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) void uploadPart2Bulk(file);
