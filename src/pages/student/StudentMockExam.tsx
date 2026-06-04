@@ -1148,18 +1148,22 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   );
 
   // 2026-06-02 (Вадим/Елена): удаление лишнего фото из bulk-пакета Часть 2.
-  // Optimistic — убираем из UI сразу, при ошибке восстанавливаем + toast.
-  const [bulkDeletingIdx, setBulkDeletingIdx] = useState<number | null>(null);
-  const [confirmDeleteIdx, setConfirmDeleteIdx] = useState<number | null>(null);
+  // Review fix: по ИДЕНТИЧНОСТИ (url), не по индексу — устойчиво к сдвигам.
+  // Single-flight: пока одно удаление в полёте (`deletingUrl`), остальные ✕
+  // заблокированы — нет гонок сдвинутых индексов / clobber'а snapshot'а.
+  // Optimistic: убираем из UI сразу, при ошибке восстанавливаем + toast.
+  const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
+  const [confirmDeleteUrl, setConfirmDeleteUrl] = useState<string | null>(null);
   const removePart2BulkPhoto = useCallback(
-    async (index: number) => {
+    async (url: string) => {
+      if (deletingUrl !== null) return; // single-flight guard
       const snapshot = part2BulkPhotos;
-      setBulkDeletingIdx(index);
+      setDeletingUrl(url);
       setBulkUploadError(null);
-      // Optimistic remove.
-      setPart2BulkPhotos((prev) => prev.filter((_, i) => i !== index));
+      // Optimistic remove by identity.
+      setPart2BulkPhotos((prev) => prev.filter((u) => u !== url));
       try {
-        await deleteMockExamPart2BulkPhoto(data.attempt.id, index);
+        await deleteMockExamPart2BulkPhoto(data.attempt.id, url);
       } catch (err) {
         // Restore on failure.
         setPart2BulkPhotos(snapshot);
@@ -1167,10 +1171,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
         setBulkUploadError(msg);
         toast.error(msg);
       } finally {
-        setBulkDeletingIdx(null);
+        setDeletingUrl(null);
       }
     },
-    [data.attempt.id, part2BulkPhotos],
+    [data.attempt.id, deletingUrl, part2BulkPhotos],
   );
 
   const handleAnswerMethodSelect = useCallback(
@@ -1486,8 +1490,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 {part2BulkPhotos.length > 0 && (
                   <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
                     {part2BulkPhotos.map((url, idx) => {
-                      const isDeleting = bulkDeletingIdx === idx;
-                      const isConfirming = confirmDeleteIdx === idx;
+                      const isDeleting = deletingUrl === url;
+                      const isConfirming = confirmDeleteUrl === url;
+                      // Single-flight: пока любое удаление в полёте — прячем все ✕.
+                      const deleteBusy = deletingUrl !== null;
                       return (
                         <div
                           key={url}
@@ -1504,10 +1510,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                           </span>
                           {/* 2026-06-02: удаление фото. ✕ всегда видна (не hover —
                               touch ломается на hover, rule 80). Тап → confirm-оверлей. */}
-                          {!isFinal && !isDeleting && !isConfirming && (
+                          {!isFinal && !isConfirming && !deleteBusy && (
                             <button
                               type="button"
-                              onClick={() => setConfirmDeleteIdx(idx)}
+                              onClick={() => setConfirmDeleteUrl(url)}
                               className="absolute right-1 top-1 inline-flex min-h-7 min-w-7 touch-manipulation items-center justify-center rounded-full bg-black/55 text-white transition-colors hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                               aria-label={`Удалить фото ${idx + 1}`}
                               title="Удалить фото"
@@ -1527,8 +1533,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    setConfirmDeleteIdx(null);
-                                    void removePart2BulkPhoto(idx);
+                                    setConfirmDeleteUrl(null);
+                                    void removePart2BulkPhoto(url);
                                   }}
                                   className="inline-flex min-h-7 touch-manipulation items-center rounded bg-rose-600 px-2 text-[11px] font-semibold text-white hover:bg-rose-700"
                                 >
@@ -1536,7 +1542,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => setConfirmDeleteIdx(null)}
+                                  onClick={() => setConfirmDeleteUrl(null)}
                                   className="inline-flex min-h-7 touch-manipulation items-center rounded bg-white/90 px-2 text-[11px] font-semibold text-slate-800 hover:bg-white"
                                 >
                                   Отмена

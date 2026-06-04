@@ -1221,14 +1221,23 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
       (a.earned_score ?? 0) < (a.max_score ?? 0),
   ).length;
   // Bug fix (2026-06-02): wrong = есть ответ (typed ИЛИ распознанный с фото) И
-  // earned 0. Раньше гейт был `student_answer !== null` → для blank/legacy
+  // earned СТРОГО 0. Раньше гейт был `student_answer !== null` → для blank/legacy
   // attempts (ответы в OCR JSON) все счётчики обнулялись («Верно 0 · неверно 0»
-  // при балле 18/28). noAnswerCount — отдельно, чтобы не врать тутору.
+  // при балле 18/28). Review fix: `=== 0` строго (не `?? 0`) — иначе ungraded
+  // (earned_score=null) с распознанным ответом фолбэчился в «неверно».
   const wrongCount = attempt.part1_answers.filter(
     (a) =>
-      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null &&
-      (a.earned_score ?? 0) === 0 &&
-      a.max_score > 0,
+      a.earned_score === 0 &&
+      a.max_score > 0 &&
+      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null,
+  ).length;
+  // Ответ есть, но per-task балл не проставлен (legacy/anomaly: total есть, per-KIM
+  // earned_score=null). Отдельный бакет — честнее чем silent zeros или ложное «неверно».
+  const ungradedCount = attempt.part1_answers.filter(
+    (a) =>
+      a.earned_score === null &&
+      a.max_score > 0 &&
+      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null,
   ).length;
   const noAnswerCount = attempt.part1_answers.filter(
     (a) =>
@@ -1320,6 +1329,7 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
                 </p>
                 <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
                   Auto-проверено. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}
+                  {ungradedCount > 0 ? ` · не проверено ${ungradedCount}` : ''}
                   {noAnswerCount > 0 ? ` · без ответа ${noAnswerCount}` : ''}.
                 </p>
               </div>
@@ -1352,10 +1362,12 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
           </div>
 
           {/* Bug fix (2026-06-02): показываем загруженный бланк/фото Часть 1 если
-              есть — для blank/legacy attempts, ошибочно отрисованных form-card'ой,
-              тутор может сверить распознанные ответы с оригиналом. Для чистого
-              form mode фото нет → блок не рендерится. */}
-          {(attempt.blank_photo_url || attempt.part1_blank_photo_url) && (
+              есть — для blank/legacy attempts (answer_method=null), ошибочно
+              отрисованных form-card'ой, тутор может сверить распознанные ответы
+              с оригиналом. Review fix: для ЯВНОГО form mode прячем (фото — это
+              остаточный бланк после переключения режима, к проверке не относится). */}
+          {attempt.answer_method !== 'form' &&
+            (attempt.blank_photo_url || attempt.part1_blank_photo_url) && (
             <div className="grid gap-3 sm:grid-cols-2">
               {attempt.blank_photo_url && (
                 <a

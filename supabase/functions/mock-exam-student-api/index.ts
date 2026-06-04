@@ -1328,7 +1328,11 @@ async function handleUploadPhoto(
 // delete-функции не существовало вовсе. Удаление по ИНДЕКСУ безопасно: загрузка
 // append-only (`[...existing, ref]`), поэтому индексы 0..N-1 стабильны при
 // параллельных upload'ах; только параллельные delete (один ученик из двух
-// вкладок) теоретически сдвинули бы их — это покрывает CAS-guard (mirror upload).
+// вкладок). Удаление по ИДЕНТИЧНОСТИ (storage path), не по индексу:
+// (1) индекс небезопасен при параллельных delete (retry применил бы устаревший
+//     индекс к изменившемуся массиву); (2) GET фильтрует не-подписавшиеся URL,
+//     поэтому UI-индекс может не совпадать со stored-индексом. Match по path
+//     устойчив к обоим. CAS-цикл re-матчит по path на каждой итерации.
 async function handleDeleteBulkPhoto(
   db: SupabaseClient,
   studentUserId: string,
@@ -1338,22 +1342,36 @@ async function handleDeleteBulkPhoto(
 ): Promise<Response> {
   const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, studentUserId, cors);
   if (ownedOrErr instanceof Response) return ownedOrErr;
-  const attempt = ownedOrErr;
-
-  // Mirror upload guard: модифицировать пакет можно только пока работа не сдана.
-  if (attempt.status !== "in_progress") {
-    return jsonError(cors, 409, "NOT_IN_PROGRESS",
-      "Удаление фото доступно только пока работа не сдана");
-  }
 
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   if (b.kind !== "part2_bulk") {
     return jsonError(cors, 400, "VALIDATION", "kind must be 'part2_bulk'");
   }
-  const index = b.index;
-  if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
-    return jsonError(cors, 400, "VALIDATION", "index must be a non-negative integer");
+  // Клиент шлёт `photo_url` — подписанный URL который он рендерит (или сырой
+  // `storage://` ref из upload-ответа). Нормализуем обе формы к {bucket, path}.
+  const photoUrl = b.photo_url;
+  if (typeof photoUrl !== "string" || photoUrl.trim() === "") {
+    return jsonError(cors, 400, "VALIDATION", "photo_url must be a non-empty string");
   }
+  const target = (() => {
+    const direct = parseStorageRef(photoUrl);
+    if (direct) return direct;
+    // .../storage/v1/object/sign/<bucket>/<path>?token=...
+    const m = photoUrl.match(/\/storage\/v1\/object\/sign\/([^/]+)\/([^?]+)/);
+    if (!m) return null;
+    try {
+      return { bucket: m[1], path: decodeURIComponent(m[2]) };
+    } catch {
+      return { bucket: m[1], path: m[2] };
+    }
+  })();
+  if (!target) {
+    return jsonError(cors, 400, "VALIDATION", "photo_url is not a recognizable storage URL");
+  }
+  const sameRef = (ref: string): boolean => {
+    const p = parseStorageRef(ref);
+    return !!p && p.bucket === target.bucket && p.path === target.path;
+  };
 
   const parseBulk = (raw: string | null): string[] => {
     if (!raw) return [];
@@ -1380,33 +1398,44 @@ async function handleDeleteBulkPhoto(
   for (let attemptNo = 0; attemptNo < MAX_CAS_RETRIES; attemptNo++) {
     const { data: cur, error: readErr } = await db
       .from("mock_exam_attempts")
-      .select("part2_bulk_photo_urls")
+      .select("part2_bulk_photo_urls, status")
       .eq("id", attemptId)
       .eq("student_id", studentUserId)
       .maybeSingle();
     if (readErr) { lastErr = readErr.message; break; }
 
+    // Status drift guard (P1 fix): submit может перевести attempt в 'submitted'
+    // между ownership-check и UPDATE. Удалять из сданной работы нельзя (грейдер
+    // уже стартовал по этим фото) → 409. Также явный guard в CAS ниже.
+    const curStatus = (cur?.status as string | null) ?? null;
+    if (curStatus !== "in_progress") {
+      return jsonError(cors, 409, "NOT_IN_PROGRESS",
+        "Удаление фото доступно только пока работа не сдана");
+    }
+
     const rawCurrent = (cur?.part2_bulk_photo_urls as string | null) ?? null;
     const existing = parseBulk(rawCurrent);
-    if (index >= existing.length) {
-      // Уже удалено (или never existed) — idempotent-friendly сигнал клиенту.
+    const matchIdx = existing.findIndex(sameRef);
+    if (matchIdx === -1) {
+      // Фото уже удалено (или never existed) — idempotent-friendly сигнал.
       return jsonError(cors, 409, "PHOTO_ALREADY_REMOVED",
         "Это фото уже удалено — обнови страницу");
     }
 
-    const ref = existing[index];
-    const next = existing.filter((_, i) => i !== index);
+    const ref = existing[matchIdx];
+    const next = existing.filter((_, i) => i !== matchIdx);
     const serialized = next.length === 0
       ? null
       : next.length === 1 ? next[0] : JSON.stringify(next);
 
-    // CAS: UPDATE только если колонка всё ещё равна rawCurrent (никакой
-    // конкурентный writer не вклинился между SELECT и UPDATE).
+    // CAS: UPDATE только если колонка всё ещё равна rawCurrent И статус всё ещё
+    // in_progress (никакой concurrent writer / submit не вклинился).
     const updateQuery = db
       .from("mock_exam_attempts")
       .update({ part2_bulk_photo_urls: serialized })
       .eq("id", attemptId)
-      .eq("student_id", studentUserId);
+      .eq("student_id", studentUserId)
+      .eq("status", "in_progress");
     const casQuery = rawCurrent === null
       ? updateQuery.is("part2_bulk_photo_urls", null)
       : updateQuery.eq("part2_bulk_photo_urls", rawCurrent);
@@ -1418,7 +1447,8 @@ async function handleDeleteBulkPhoto(
       success = true;
       break;
     }
-    // 0 rows → конкурентный writer изменил массив. Re-read и retry.
+    // 0 rows → concurrent writer изменил массив ИЛИ статус сдвинулся. Re-read:
+    // следующая итерация поймает status drift (→ 409) или re-матчит ref.
     console.warn("mock_exam_bulk_delete_cas_retry", { attempt: attemptNo, attempt_id: attemptId });
   }
 
@@ -1439,7 +1469,7 @@ async function handleDeleteBulkPhoto(
   return jsonOk(cors, {
     ok: true,
     attempt_id: attemptId,
-    removed_index: index,
+    removed_ref: removedRef,
     remaining,
   });
 }

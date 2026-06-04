@@ -441,18 +441,20 @@ export async function uploadMockExamPart2BulkPhoto(
 }
 
 /**
- * Удалить одно фото из bulk-пакета Часть 2 по индексу (2026-06-02).
- * Backend удаляет ссылку из `attempts.part2_bulk_photo_urls` (CAS) + blob из
- * storage. Доступно только пока attempt `in_progress`. Индекс стабилен —
- * загрузка append-only. 409 PHOTO_ALREADY_REMOVED если индекс вне диапазона.
+ * Удалить одно фото из bulk-пакета Часть 2 по ИДЕНТИЧНОСТИ (2026-06-02, review
+ * fix). Шлём `photo_url` (подписанный URL который рендерим) — backend матчит по
+ * storage-path, удаляет ссылку из `attempts.part2_bulk_photo_urls` (CAS) + blob.
+ * Доступно только пока attempt `in_progress`. Идентичность вместо индекса —
+ * устойчиво к параллельным delete и к фильтрации не-подписавшихся URL на GET.
+ * 409 PHOTO_ALREADY_REMOVED если фото уже удалено; 409 NOT_IN_PROGRESS если сдано.
  */
 export async function deleteMockExamPart2BulkPhoto(
   attemptId: string,
-  index: number,
-): Promise<{ ok: true; attempt_id: string; removed_index: number; remaining: number }> {
+  photoUrl: string,
+): Promise<{ ok: true; attempt_id: string; removed_ref: string | null; remaining: number }> {
   return requestStudent(`/attempts/${encodeURIComponent(attemptId)}/photo/delete`, {
     method: 'POST',
-    body: JSON.stringify({ kind: 'part2_bulk', index }),
+    body: JSON.stringify({ kind: 'part2_bulk', photo_url: photoUrl }),
   });
 }
 
