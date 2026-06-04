@@ -59,7 +59,6 @@ const TutorHome = lazy(() => import("./pages/tutor/TutorHome"));
 const TutorSchedule = lazy(() => import("./pages/tutor/TutorSchedule"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
-const StudentProgressPage = lazy(() => import("./pages/tutor/StudentProgressPage"));
 const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
 const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
@@ -80,6 +79,12 @@ const AppFrame = lazy(() =>
 function RedirectHomeworkResultsToDetail() {
   const { id } = useParams<{ id: string }>();
   return <Navigate to={`/tutor/homework/${id ?? ''}`} replace />;
+}
+// student-progress: «Прогресс» переехал во вкладку карточки ученика (UX-fix).
+// Старый /progress deep-link → карточка (Прогресс — первая вкладка по умолчанию).
+function RedirectStudentProgressToCard() {
+  const { tutorStudentId } = useParams<{ tutorStudentId: string }>();
+  return <Navigate to={`/tutor/students/${tutorStudentId ?? ''}`} replace />;
 }
 const RedirectTutorAssistant = lazy(() => import("./pages/RedirectTutorAssistant"));
 const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
@@ -396,7 +401,7 @@ const App = () => (
               <Route path="dashboard" element={<Navigate to="/tutor/home" replace />} />
               <Route path="schedule" element={<TutorSchedule />} />
               <Route path="students" element={<TutorStudents />} />
-              <Route path="students/:tutorStudentId/progress" element={<StudentProgressPage />} />
+              <Route path="students/:tutorStudentId/progress" element={<RedirectStudentProgressToCard />} />
               <Route path="students/:tutorStudentId" element={<TutorStudentProfile />} />
               <Route path="payments" element={<TutorPayments />} />
               <Route path="profile" element={<TutorProfile />} />

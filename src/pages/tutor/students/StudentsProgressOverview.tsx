@@ -210,7 +210,8 @@ export function StudentsProgressOverview() {
   }, [sorted, sort]);
 
   const handleOpen = (tutorStudentId: string) => {
-    navigate(`/tutor/students/${tutorStudentId}/progress`);
+    // → карточка ученика (вкладка «Прогресс» открывается по умолчанию).
+    navigate(`/tutor/students/${tutorStudentId}`);
   };
 
   if (query.isLoading) {

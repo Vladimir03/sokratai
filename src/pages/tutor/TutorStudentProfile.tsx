@@ -5,6 +5,7 @@ import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import StudentProgressPanel from '@/components/tutor/students/StudentProgressPanel';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -592,16 +593,23 @@ function TutorStudentProfileContent() {
           </CardContent>
         </Card>
         
-        {/* Вкладки */}
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="overview">Обзор</TabsTrigger>
+        {/* Вкладки. «Прогресс» — первая и по умолчанию (UX-fix: репетитор кликает
+            ученика и сразу видит задания/работы, а не пустой профиль — фидбэк Эмилии). */}
+        <Tabs defaultValue="progress" className="w-full">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="progress">Прогресс</TabsTrigger>
+            <TabsTrigger value="overview">Профиль</TabsTrigger>
             <TabsTrigger value="notes">Заметки</TabsTrigger>
             <TabsTrigger value="mockexams">Пробники</TabsTrigger>
             <TabsTrigger value="dialogs">AI-диалоги</TabsTrigger>
           </TabsList>
-          
-          {/* Вкладка: Обзор */}
+
+          {/* Вкладка: Прогресс (агрегат работ + цель + «требует проверки») */}
+          <TabsContent value="progress" className="space-y-4">
+            <StudentProgressPanel tutorStudentId={student.id} />
+          </TabsContent>
+
+          {/* Вкладка: Профиль (бывш. «Обзор») */}
           <TabsContent value="overview" className="space-y-4">
             <Card>
               <CardHeader>

@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, BadgeCheck, BookOpen, ClipboardCheck, Clock, Loader2, Pencil, SquarePen,
+  BadgeCheck, BookOpen, CheckCircle2, ClipboardCheck, Clock, Loader2, Pencil, SquarePen,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -24,13 +24,12 @@ import {
   rollupByScoreKind, formatScoreNumber, goalScaleForTrack, type ScoreKind,
 } from '@/lib/scoreScales';
 
-// ─── Страница ученика «Прогресс» (student-progress R2, TASK-7) ────────────────
+// ─── StudentProgressPanel — содержимое «Прогресса» ученика (R2, UX-fix 2026-06-04) ─
 //
-// Агрегат всех работ в РОДНОЙ шкале (score_kind), цвет ячеек = % от max. Цель в
-// родной единице по треку. Drill-down работы → существующий /tutor/homework/:id
-// (?student=) — переиспользует R1 HeatmapGrid + подтверждение. Mock → mock detail.
-
-const TRACK_LABEL: Record<string, string> = { ege: 'ЕГЭ', oge: 'ОГЭ', school: 'Школа' };
+// Контент-only (без page-header) — встраивается ПЕРВОЙ вкладкой в карточку ученика
+// `TutorStudentProfile` (фидбэк Эмилии: открыла карточку → не нашла задания). Порядок
+// сверху (фикс Q3): «Требует моей проверки сейчас» → цель → метрики → работы.
+// Drill-down работы → существующий /tutor/homework/:id (?student=) — реюз R1.
 
 function WorkCard({ work, onOpen }: { work: ProgressWork; onOpen: (w: ProgressWork) => void }) {
   const rollup = rollupByScoreKind(work.score_kind as ScoreKind, work.raw, work.raw_max);
@@ -79,7 +78,6 @@ function WorkCard({ work, onOpen }: { work: ProgressWork; onOpen: (w: ProgressWo
               {work.kind === 'mock' ? 'Пробник' : 'ДЗ'}
             </span>
           </div>
-          {/* mini-map cells — цвет = score/max */}
           {work.cells.length > 0 ? (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {work.cells.map((c, i) => {
@@ -109,9 +107,7 @@ function WorkCard({ work, onOpen }: { work: ProgressWork; onOpen: (w: ProgressWo
   );
 }
 
-function GoalCard({
-  data, onEdit,
-}: { data: StudentProgress; onEdit: () => void }) {
+function GoalCard({ data, onEdit }: { data: StudentProgress; onEdit: () => void }) {
   const track = data.target.track;
   const scale = goalScaleForTrack(track);
   const current = data.summary.current_level;
@@ -148,7 +144,6 @@ function GoalCard({
         </div>
       </div>
 
-      {/* progress bar with threshold ticks (ЕГЭ — 36 аттестат / 39 вуз) */}
       <div className="relative mt-4 h-2 rounded-full bg-slate-100">
         {target != null ? (
           <div className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: pos(current ?? scale.floor) }} />
@@ -240,18 +235,15 @@ function EditTargetDialog({
   );
 }
 
-export default function StudentProgressPage() {
-  const { tutorStudentId } = useParams<{ tutorStudentId: string }>();
+export default function StudentProgressPanel({ tutorStudentId }: { tutorStudentId: string }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tab = searchParams.get('tab') === 'report' ? 'report' : 'progress';
   const [editOpen, setEditOpen] = useState(false);
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ['tutor', 'students', 'progress', tutorStudentId],
-    queryFn: () => getStudentProgress(tutorStudentId as string),
+    queryFn: () => getStudentProgress(tutorStudentId),
     enabled: Boolean(tutorStudentId),
     refetchOnWindowFocus: false,
     staleTime: 10 * 60 * 1000,
@@ -259,7 +251,6 @@ export default function StudentProgressPage() {
 
   const data = query.data;
 
-  // bulk «Подтвердить всё, что AI проверил» — Σ pending по ДЗ-работам.
   const pendingTotal = useMemo(
     () => (data?.works ?? [])
       .filter((w) => w.kind === 'homework')
@@ -273,8 +264,6 @@ export default function StudentProgressPage() {
       const targets = (data?.works ?? []).filter((w) => w.kind === 'homework' && (w.pending_review_count ?? 0) > 0);
       let reviewed = 0;
       let lastErr: unknown = null;
-      // Loop per assignment — best-effort. 409 NOTHING_TO_REVIEW/ALREADY_REVIEWED на
-      // отдельной работе (кто-то подтвердил параллельно) = пропускаем, не валим весь bulk.
       for (const w of targets) {
         try {
           const res = await reviewAllAi({ assignmentId: w.id, studentId });
@@ -307,111 +296,84 @@ export default function StudentProgressPage() {
 
   if (query.isLoading) {
     return (
-      <div className="flex items-center justify-center py-20 text-slate-400">
+      <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="h-5 w-5 animate-spin" />
       </div>
     );
   }
   if (query.isError || !data) {
     return (
-      <div className="mx-auto max-w-2xl p-6">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/tutor/students')} className="mb-4">
-          <ArrowLeft className="mr-1 h-4 w-4" /> К ученикам
-        </Button>
-        <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
-          Не удалось загрузить прогресс ученика.
-        </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+        Не удалось загрузить прогресс ученика.
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5 p-4 md:p-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 touch-manipulation" onClick={() => navigate('/tutor/students')} aria-label="Назад к ученикам">
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-xl font-bold text-slate-900">{data.student.name}</h1>
-          <p className="text-xs text-slate-500">
-            {TRACK_LABEL[data.student.track] ?? data.student.track}
-            {data.student.grade_class ? ` · ${data.student.grade_class}` : ''}
-          </p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div role="tablist" aria-label="Разделы ученика" className="flex gap-1 border-b border-slate-200">
-        {([{ key: 'progress', label: 'Прогресс' }, { key: 'report', label: 'Отчёт' }] as const).map((t) => (
-          <button
-            key={t.key}
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setSearchParams(t.key === 'progress' ? {} : { tab: 'report' }, { replace: true })}
-            className={cn(
-              'min-h-[40px] px-4 text-sm font-medium transition-colors touch-manipulation border-b-2 -mb-px',
-              tab === t.key ? 'border-accent text-accent' : 'border-transparent text-slate-500 hover:text-slate-700',
-            )}
+    <div className="space-y-4">
+      {/* Q3: «Требует моей проверки сейчас» — ПЕРВЫМ (actionable). */}
+      {pendingTotal > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+              <Clock className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-amber-900">Требует вашей проверки сейчас</p>
+              <p className="text-xs text-amber-700">
+                AI проверил {pendingTotal} {pendingTotal === 1 ? 'задачу' : 'задач'} — подтвердите, чтобы ученик увидел баллы.
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => setBulkConfirmOpen(true)}
+            disabled={bulkReview.isPending}
+            className="mt-3 w-full bg-emerald-600 text-white hover:bg-emerald-700 touch-manipulation"
           >
-            {t.label}
-          </button>
-        ))}
+            {bulkReview.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
+            Подтвердить всё, что AI проверил ({pendingTotal})
+          </Button>
+        </div>
+      ) : data.works.some((w) => w.status !== 'none') ? (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Всё проверено — новых работ на проверке нет.
+        </div>
+      ) : null}
+
+      <GoalCard data={data} onEdit={() => setEditOpen(true)} />
+
+      {/* Metrics */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-center">
+          <div className="text-lg font-bold tabular-nums text-slate-900">{data.summary.done}/{data.summary.total}</div>
+          <div className="text-[11px] text-slate-500">Сдано</div>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white p-3 text-center">
+          <div className="text-lg font-bold tabular-nums text-slate-900">{data.summary.reviewed_pct != null ? `${data.summary.reviewed_pct}%` : '—'}</div>
+          <div className="text-[11px] text-slate-500">Проверено</div>
+        </div>
+        <div className={cn('rounded-xl border p-3 text-center', data.summary.needs_attention ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white')}>
+          <div className={cn('text-lg font-bold', data.summary.needs_attention ? 'text-amber-700' : 'text-slate-900')}>
+            {data.summary.needs_attention ? 'Да' : 'Нет'}
+          </div>
+          <div className="text-[11px] text-slate-500">Внимание</div>
+        </div>
       </div>
 
-      {tab === 'report' ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-sm text-slate-500">
-          Отчёт родителю появится в следующей версии (v1.1).
-        </div>
-      ) : (
-        <>
-          <GoalCard data={data} onEdit={() => setEditOpen(true)} />
+      {/* Works */}
+      <div className="space-y-2">
+        <h2 className="text-sm font-semibold text-slate-700">Работы</h2>
+        {data.works.length === 0 ? (
+          <p className="py-8 text-center text-sm text-slate-400">Пока нет работ — назначьте ДЗ или пробник.</p>
+        ) : (
+          data.works.map((w) => (
+            <WorkCard key={`${w.kind}-${w.id}`} work={w} onOpen={handleOpenWork} />
+          ))
+        )}
+      </div>
 
-          {/* Metrics */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-center">
-              <div className="text-lg font-bold tabular-nums text-slate-900">{data.summary.done}/{data.summary.total}</div>
-              <div className="text-[11px] text-slate-500">Сдано</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-center">
-              <div className="text-lg font-bold tabular-nums text-slate-900">{data.summary.reviewed_pct != null ? `${data.summary.reviewed_pct}%` : '—'}</div>
-              <div className="text-[11px] text-slate-500">Проверено</div>
-            </div>
-            <div className={cn('rounded-xl border p-3 text-center', data.summary.needs_attention ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white')}>
-              <div className={cn('text-lg font-bold', data.summary.needs_attention ? 'text-amber-700' : 'text-slate-900')}>
-                {data.summary.needs_attention ? 'Да' : 'Нет'}
-              </div>
-              <div className="text-[11px] text-slate-500">Внимание</div>
-            </div>
-          </div>
-
-          {/* Bulk review CTA — с подтверждением (spec §4.3: «AI-баллы остаются как есть»). */}
-          {pendingTotal > 0 ? (
-            <Button
-              onClick={() => setBulkConfirmOpen(true)}
-              disabled={bulkReview.isPending}
-              className="w-full bg-emerald-600 text-white hover:bg-emerald-700 touch-manipulation"
-            >
-              {bulkReview.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
-              Подтвердить всё, что AI проверил ({pendingTotal})
-            </Button>
-          ) : null}
-
-          {/* Works */}
-          <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-slate-700">Работы</h2>
-            {data.works.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-400">Пока нет работ.</p>
-            ) : (
-              data.works.map((w) => (
-                <WorkCard key={`${w.kind}-${w.id}`} work={w} onOpen={handleOpenWork} />
-              ))
-            )}
-          </div>
-        </>
-      )}
-
-      <EditTargetDialog open={editOpen} onOpenChange={setEditOpen} data={data} tutorStudentId={tutorStudentId as string} />
+      <EditTargetDialog open={editOpen} onOpenChange={setEditOpen} data={data} tutorStudentId={tutorStudentId} />
 
       <AlertDialog open={bulkConfirmOpen} onOpenChange={(o) => (!bulkReview.isPending ? setBulkConfirmOpen(o) : null)}>
         <AlertDialogContent>
