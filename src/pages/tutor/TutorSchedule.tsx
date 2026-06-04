@@ -350,13 +350,24 @@ interface GroupLessonBlockProps {
   bucket: GroupLessonBucket;
   workDayStart: number;
   onClick: () => void;
+  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd?: () => void;
 }
 
 function GroupLessonBlock({
   bucket,
   workDayStart,
   onClick,
+  onDragStart,
+  onDragEnd,
 }: GroupLessonBlockProps) {
+  // Draggable only for a unified group (single tutor_lessons row + group_session_id)
+  // that is still booked — moving that one row carries all participants. Legacy
+  // multi-row groups stay click-only (would need N row moves).
+  const isDraggable = !bucket.isLegacyFallback
+    && !!bucket.groupSessionId
+    && bucket.lessons.length === 1
+    && bucket.lessons[0].status === 'booked';
   const startDate = new Date(bucket.startAt);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   const offsetMinutes = startMinutes - (workDayStart * 60);
@@ -400,6 +411,9 @@ function GroupLessonBlock({
         statusClasses,
       )}
       style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
+      draggable={isDraggable}
+      onDragStart={isDraggable ? onDragStart : undefined}
+      onDragEnd={isDraggable ? onDragEnd : undefined}
       onClick={(e) => {
         e.stopPropagation();
         onClick();
@@ -4217,6 +4231,8 @@ function TutorScheduleContent() {
                                 bucket={item.bucket}
                                 workDayStart={scheduleSettings.workDayStart}
                                 onClick={() => handleGroupBucketClick(item.bucket)}
+                                onDragStart={(event) => handleLessonDragStart(item.bucket.lessons[0].id, item.bucket.durationMin, event)}
+                                onDragEnd={handleLessonDragEnd}
                               />
                             );
                           })}
