@@ -479,7 +479,6 @@ function GroupDetailsDialog({
   const [showGroupEdit, setShowGroupEdit] = useState(false);
   const [editGroupSubject, setEditGroupSubject] = useState('');
   const [editGroupNotes, setEditGroupNotes] = useState('');
-  const [editGroupDuration, setEditGroupDuration] = useState('60');
   const [groupSeriesAction, setGroupSeriesAction] = useState<'save' | 'cancel' | null>(null);
   const [isGroupSaving, setIsGroupSaving] = useState(false);
   const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
@@ -585,7 +584,6 @@ function GroupDetailsDialog({
     const ml = bucket.lessons[0];
     setEditGroupSubject(ml?.subject || '');
     setEditGroupNotes(ml?.notes || '');
-    setEditGroupDuration((ml?.duration_min ?? 60).toString());
     setShowGroupEdit(false);
     setGroupSeriesAction(null);
   }, [open, bucket?.key, bucket?.startAt]);
@@ -775,12 +773,10 @@ function GroupDetailsDialog({
     if (!mainLesson) return;
     setIsGroupSaving(true);
     try {
-      const duration = Number.parseInt(editGroupDuration, 10);
       if (scope === 'this') {
         const result = await updateLesson(mainLesson.id, {
           subject: editGroupSubject || undefined,
           notes: editGroupNotes || undefined,
-          duration_min: duration,
         });
         if (result) {
           toast.success('Занятие обновлено');
@@ -794,7 +790,6 @@ function GroupDetailsDialog({
         const result = await updateLessonSeries(mainLesson, {
           subject: editGroupSubject || undefined,
           notes: editGroupNotes || undefined,
-          duration_min: duration,
           scope,
         });
         if (result.ok) {
@@ -813,7 +808,7 @@ function GroupDetailsDialog({
       setIsGroupSaving(false);
       setGroupSeriesAction(null);
     }
-  }, [mainLesson, editGroupSubject, editGroupNotes, editGroupDuration, onActionApplied, onOpenChange]);
+  }, [mainLesson, editGroupSubject, editGroupNotes, onActionApplied, onOpenChange]);
 
   const handleGroupEditSaveClick = useCallback(() => {
     if (groupIsRecurring) {
@@ -1193,19 +1188,6 @@ function GroupDetailsDialog({
                   <div className="space-y-3 rounded-md border border-socrat-border p-3">
                     <p className="text-sm font-medium text-slate-900">Изменить детали</p>
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Длительность</Label>
-                      <Select value={editGroupDuration} onValueChange={setEditGroupDuration}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="30">30 мин</SelectItem>
-                          <SelectItem value="45">45 мин</SelectItem>
-                          <SelectItem value="60">60 мин</SelectItem>
-                          <SelectItem value="90">90 мин</SelectItem>
-                          <SelectItem value="120">120 мин</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
                       <Label className="text-xs">Предмет</Label>
                       <Input
                         value={editGroupSubject}
@@ -1232,7 +1214,7 @@ function GroupDetailsDialog({
                         {isGroupSaving ? 'Сохранение...' : 'Сохранить'}
                       </Button>
                     </div>
-                    <p className="text-[11px] text-muted-foreground">Время занятия меняется через «Перенести группу» выше.</p>
+                    <p className="text-[11px] text-muted-foreground">Время — через «Перенести группу» выше. Длительность группы задаётся при создании.</p>
                   </div>
                 ) : (
                   <Button
