@@ -365,18 +365,59 @@ export async function updateLesson(
   return data as unknown as TutorLessonWithStudent;
 }
 
-export async function deleteLesson(id: string): Promise<boolean> {
-  const { error } = await supabase
-    .from('tutor_lessons')
-    .delete()
-    .eq('id', id);
+export type DeleteLessonScope = 'this' | 'this_and_following' | 'all';
+
+export interface DeleteLessonResult {
+  ok: boolean;
+  deleted: number;
+  /** Stable code for UI branching: 'HAS_PAID_PAYMENT' | 'NOT_OWNED' | undefined. */
+  code?: string;
+  error?: string;
+}
+
+/**
+ * Safe hard-delete of a lesson (and optionally its series) via the
+ * `tutor_delete_lessons` RPC. NEVER use a raw `.delete()` on tutor_lessons —
+ * that orphans payments (FK SET NULL) and breaks the series. The RPC reverses
+ * pending/overdue payments, refuses if a PAID payment exists, and re-parents
+ * the series when the root is removed.
+ */
+export async function deleteLessonsScoped(
+  lessonId: string,
+  scope: DeleteLessonScope = 'this'
+): Promise<DeleteLessonResult> {
+  const { data, error } = await supabase.rpc('tutor_delete_lessons', {
+    _lesson_id: lessonId,
+    _scope: scope,
+  });
 
   if (error) {
-    console.error('Error deleting lesson:', error);
-    return false;
+    const msg = error.message || '';
+    if (msg.includes('HAS_PAID_PAYMENT')) {
+      return {
+        ok: false,
+        deleted: 0,
+        code: 'HAS_PAID_PAYMENT',
+        error: 'У занятия есть оплата — сначала отмените оплату или откатите занятие.',
+      };
+    }
+    if (msg.includes('NOT_OWNED')) {
+      return { ok: false, deleted: 0, code: 'NOT_OWNED', error: 'Занятие не найдено.' };
+    }
+    console.error('Error deleting lesson(s):', error);
+    return { ok: false, deleted: 0, error: 'Не удалось удалить занятие.' };
   }
 
-  return true;
+  const deleted = typeof data === 'object' && data !== null && 'deleted' in data
+    ? Number((data as { deleted?: number }).deleted ?? 0)
+    : 0;
+  return { ok: true, deleted };
+}
+
+/** Backward-compatible single-lesson delete (scope='this'). */
+export async function deleteLesson(id: string): Promise<boolean> {
+  const res = await deleteLessonsScoped(id, 'this');
+  return res.ok;
 }
 
 export async function cancelLesson(

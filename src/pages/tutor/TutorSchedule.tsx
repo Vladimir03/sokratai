@@ -46,7 +46,9 @@ import {
   completeLessonAndCreatePayment,
   getLessonSeriesCount,
   updateLessonSeries,
-  cancelLessonSeries
+  cancelLessonSeries,
+  deleteLessonsScoped,
+  type DeleteLessonScope
 } from '@/lib/tutorSchedule';
 import {
   createMiniGroupLesson,
@@ -450,6 +452,8 @@ function GroupDetailsDialog({
   const [isActionSaving, setIsActionSaving] = useState(false);
   const [actionSummary, setActionSummary] = useState<GroupActionSummary | null>(null);
   const [confirmAction, setConfirmAction] = useState<'cancel' | 'complete' | null>(null);
+  const [showGroupDelete, setShowGroupDelete] = useState(false);
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false);
   const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
@@ -650,6 +654,35 @@ function GroupDetailsDialog({
       retryableFailedItems.map((item) => item.lessonId),
     );
   }, [actionSummary, retryableFailedItems, runAction]);
+
+  const groupIsRecurring = !!mainLesson?.is_recurring;
+
+  const doDeleteGroup = useCallback(async (scope: DeleteLessonScope) => {
+    if (!mainLesson) return;
+    setIsDeletingGroup(true);
+    try {
+      const res = await deleteLessonsScoped(mainLesson.id, scope);
+      if (res.ok) {
+        toast.success(
+          scope === 'all'
+            ? 'Серия групповых занятий удалена'
+            : scope === 'this_and_following'
+              ? 'Групповые занятия удалены'
+              : 'Групповое занятие удалено',
+        );
+        onActionApplied?.();
+        onOpenChange(false);
+      } else {
+        toast.error(res.error || 'Не удалось удалить занятие');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при удалении');
+    } finally {
+      setIsDeletingGroup(false);
+      setShowGroupDelete(false);
+    }
+  }, [mainLesson, onActionApplied, onOpenChange]);
 
   const openParticipantPaymentDialog = useCallback((participant: TutorLessonParticipantWithStudent) => {
     if (!canManageParticipantPayments) return;
@@ -941,6 +974,18 @@ function GroupDetailsDialog({
                   Отметить проведено
                 </Button>
               </div>
+              {isUnifiedGroupLesson && (
+                <Button
+                  variant="ghost"
+                  className="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
+                  style={{ touchAction: 'manipulation' }}
+                  disabled={isActionSaving || isDeletingGroup}
+                  onClick={() => setShowGroupDelete(true)}
+                >
+                  <Trash2 className="mr-1.5 h-4 w-4" />
+                  {isDeletingGroup ? 'Удаление...' : 'Удалить занятие'}
+                </Button>
+              )}
               <p className="text-xs text-muted-foreground">
                 {isUnifiedGroupLesson
                   ? (completeEligibleCount > 0 ? 'Занятие завершилось по времени, можно отметить проведенным' : 'Занятие еще не завершилось по времени')
@@ -1084,6 +1129,40 @@ function GroupDetailsDialog({
           >
             {isActionSaving ? 'Выполняем...' : 'Подтвердить'}
           </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Group delete — 3-way for a recurring series, simple for a single occurrence */}
+    <AlertDialog open={showGroupDelete} onOpenChange={(open) => { if (!open) setShowGroupDelete(false); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Удалить групповое занятие?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {groupIsRecurring
+              ? 'Это занятие — часть серии. Что удалить? Действие необратимо.'
+              : 'Занятие будет удалено для всех участников без возможности восстановления.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setShowGroupDelete(false)}>Назад</AlertDialogCancel>
+          {groupIsRecurring ? (
+            <>
+              <Button variant="destructive" onClick={() => doDeleteGroup('this')} disabled={isDeletingGroup}>
+                Только это
+              </Button>
+              <Button variant="destructive" onClick={() => doDeleteGroup('this_and_following')} disabled={isDeletingGroup}>
+                Это и последующие
+              </Button>
+              <Button variant="destructive" onClick={() => doDeleteGroup('all')} disabled={isDeletingGroup}>
+                Всю серию
+              </Button>
+            </>
+          ) : (
+            <Button variant="destructive" onClick={() => doDeleteGroup('this')} disabled={isDeletingGroup}>
+              {isDeletingGroup ? 'Удаление...' : 'Удалить'}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1862,6 +1941,8 @@ function LessonDetailsDialog({
   const [seriesAction, setSeriesAction] = useState<'save' | 'cancel' | null>(null);
   const [isActualSeries, setIsActualSeries] = useState(false);
   const [isSeriesCheckLoading, setIsSeriesCheckLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Reset edit state when dialog opens with a new lesson
   useEffect(() => {
@@ -1974,6 +2055,14 @@ function LessonDetailsDialog({
     }
   };
 
+  const handleDeleteClick = () => {
+    if (isSeriesCheckLoading) {
+      toast.info('Проверяем серию занятий...');
+      return;
+    }
+    setShowDeleteConfirm(true);
+  };
+
   const doCancel = async (wholeSeries: boolean) => {
     setIsCancelling(true);
     try {
@@ -2060,6 +2149,32 @@ function LessonDetailsDialog({
     } finally {
       setIsSaving(false);
       setSeriesAction(null);
+    }
+  };
+
+  const doDelete = async (scope: DeleteLessonScope) => {
+    setIsDeleting(true);
+    try {
+      const res = await deleteLessonsScoped(lesson.id, scope);
+      if (res.ok) {
+        toast.success(
+          scope === 'all'
+            ? 'Серия занятий удалена'
+            : scope === 'this_and_following'
+              ? 'Занятия удалены'
+              : 'Занятие удалено',
+        );
+        onCancel();
+        onOpenChange(false);
+      } else {
+        toast.error(res.error || 'Не удалось удалить занятие');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Ошибка при удалении');
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -2237,6 +2352,16 @@ function LessonDetailsDialog({
                 <FileText className="mr-1.5 h-4 w-4" />
                 Материалы
               </Button>
+              <Button
+                variant="ghost"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                style={{ touchAction: 'manipulation' }}
+                onClick={handleDeleteClick}
+                disabled={isDeleting || isSeriesCheckLoading}
+              >
+                <Trash2 className="mr-1.5 h-4 w-4" />
+                {isDeleting ? 'Удаление...' : 'Удалить'}
+              </Button>
               {lesson.status === 'booked' && (
               isPast ? (
                 /* Past booked lesson — 3 action buttons matching Telegram bot UX */
@@ -2318,6 +2443,40 @@ function LessonDetailsDialog({
           >
             Вся серия
           </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Delete confirmation — 3-way for a series, simple for a single lesson */}
+    <AlertDialog open={showDeleteConfirm} onOpenChange={(open) => { if (!open) setShowDeleteConfirm(false); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Удалить занятие?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {isActualSeries
+              ? 'Это занятие — часть серии. Что удалить? Действие необратимо.'
+              : 'Занятие будет удалено без возможности восстановления.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setShowDeleteConfirm(false)}>Назад</AlertDialogCancel>
+          {isActualSeries ? (
+            <>
+              <Button variant="destructive" onClick={() => doDelete('this')} disabled={isDeleting}>
+                Только это
+              </Button>
+              <Button variant="destructive" onClick={() => doDelete('this_and_following')} disabled={isDeleting}>
+                Это и последующие
+              </Button>
+              <Button variant="destructive" onClick={() => doDelete('all')} disabled={isDeleting}>
+                Всю серию
+              </Button>
+            </>
+          ) : (
+            <Button variant="destructive" onClick={() => doDelete('this')} disabled={isDeleting}>
+              {isDeleting ? 'Удаление...' : 'Удалить'}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
