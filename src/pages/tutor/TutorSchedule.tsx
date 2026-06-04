@@ -439,6 +439,7 @@ interface GroupDetailsDialogProps {
   bucket: GroupLessonBucket | null;
   onActionApplied?: () => void;
   onParticipantPaymentUpdated?: () => void;
+  onOpenMaterials?: (lesson: TutorLessonWithStudent) => void;
 }
 
 function GroupDetailsDialog({
@@ -447,6 +448,7 @@ function GroupDetailsDialog({
   bucket,
   onActionApplied,
   onParticipantPaymentUpdated,
+  onOpenMaterials,
 }: GroupDetailsDialogProps) {
   const [moveDateTimeValue, setMoveDateTimeValue] = useState('');
   const [isActionSaving, setIsActionSaving] = useState(false);
@@ -974,6 +976,17 @@ function GroupDetailsDialog({
                   Отметить проведено
                 </Button>
               </div>
+              {isUnifiedGroupLesson && mainLesson && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  style={{ touchAction: 'manipulation' }}
+                  onClick={() => onOpenMaterials?.(mainLesson)}
+                >
+                  <FileText className="mr-1.5 h-4 w-4" />
+                  Материалы
+                </Button>
+              )}
               {isUnifiedGroupLesson && (
                 <Button
                   variant="ghost"
@@ -2029,7 +2042,7 @@ function LessonDetailsDialog({
     if (isActualSeries) {
       setSeriesAction('cancel');
     } else {
-      doCancel(false);
+      doCancel('this');
     }
   };
 
@@ -2051,7 +2064,7 @@ function LessonDetailsDialog({
     if (isActualSeries) {
       setSeriesAction('save');
     } else {
-      doSave(false);
+      doSave('this');
     }
   };
 
@@ -2063,17 +2076,23 @@ function LessonDetailsDialog({
     setShowDeleteConfirm(true);
   };
 
-  const doCancel = async (wholeSeries: boolean) => {
+  const doCancel = async (scope: DeleteLessonScope) => {
     setIsCancelling(true);
     try {
       let result: boolean;
-      if (wholeSeries) {
-        result = await cancelLessonSeries(lesson);
-      } else {
+      if (scope === 'this') {
         result = !!(await cancelLesson(lesson.id));
+      } else {
+        result = await cancelLessonSeries(lesson, scope);
       }
       if (result) {
-        toast.success(wholeSeries ? 'Серия занятий отменена' : 'Занятие отменено');
+        toast.success(
+          scope === 'this'
+            ? 'Занятие отменено'
+            : scope === 'all'
+              ? 'Серия занятий отменена'
+              : 'Занятия отменены',
+        );
         onCancel();
         onOpenChange(false);
       } else {
@@ -2088,7 +2107,7 @@ function LessonDetailsDialog({
     }
   };
 
-  const doSave = async (wholeSeries: boolean) => {
+  const doSave = async (scope: DeleteLessonScope) => {
     setIsSaving(true);
     try {
       const newStart = new Date(editDate!);
@@ -2099,7 +2118,7 @@ function LessonDetailsDialog({
         ? students.find(s => s.student_id === actualStudentId)
         : null;
 
-      if (wholeSeries) {
+      if (scope !== 'this') {
         const oldStart = new Date(lesson.start_at);
         const shiftMinutes = Math.round((newStart.getTime() - oldStart.getTime()) / 60000);
         const applyTimeShift = shiftMinutes !== 0;
@@ -2112,6 +2131,7 @@ function LessonDetailsDialog({
           notes: editNotes || undefined,
           applyTimeShift,
           shiftMinutes,
+          scope,
         });
         if (result.ok) {
           toast.success(`Серия обновлена (${result.updatedCount})`);
@@ -2431,14 +2451,21 @@ function LessonDetailsDialog({
           <AlertDialogCancel onClick={() => setSeriesAction(null)}>Назад</AlertDialogCancel>
           <Button
             variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
-            onClick={() => seriesAction === 'cancel' ? doCancel(false) : doSave(false)}
+            onClick={() => seriesAction === 'cancel' ? doCancel('this') : doSave('this')}
             disabled={isCancelling || isSaving}
           >
-            Только это занятие
+            Только это
           </Button>
           <Button
             variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
-            onClick={() => seriesAction === 'cancel' ? doCancel(true) : doSave(true)}
+            onClick={() => seriesAction === 'cancel' ? doCancel('this_and_following') : doSave('this_and_following')}
+            disabled={isCancelling || isSaving}
+          >
+            Это и последующие
+          </Button>
+          <Button
+            variant={seriesAction === 'cancel' ? 'destructive' : 'default'}
+            onClick={() => seriesAction === 'cancel' ? doCancel('all') : doSave('all')}
             disabled={isCancelling || isSaving}
           >
             Вся серия
@@ -4268,6 +4295,10 @@ function TutorScheduleContent() {
           bucket={selectedGroupBucket}
           onActionApplied={() => refetchLessons()}
           onParticipantPaymentUpdated={scheduleParticipantPaymentRefresh}
+          onOpenMaterials={(lesson) => {
+            handleGroupDetailsOpenChange(false);
+            setMaterialsDrawerLesson(lesson);
+          }}
         />
 
         <ReminderSettingsDialog

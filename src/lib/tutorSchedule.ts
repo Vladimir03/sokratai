@@ -471,13 +471,20 @@ export async function updateLessonSeries(
     tutor_student_id?: string;
     applyTimeShift?: boolean;
     shiftMinutes?: number;
+    /** 'this_and_following' (default) = selected + future; 'all' = whole series. */
+    scope?: 'this_and_following' | 'all';
   }
 ): Promise<UpdateLessonSeriesResult> {
   const rootId = getSeriesRootId(lesson);
+  // 'all' widens the RPC's (id=selected OR start_at>=from) filter to every booked
+  // occurrence by passing an epoch lower bound; 'this_and_following' keeps from=selected.
+  const fromStartAt = input.scope === 'all'
+    ? '1970-01-01T00:00:00.000Z'
+    : lesson.start_at;
   const rpcArgs = {
     _root_lesson_id: rootId,
     _selected_lesson_id: lesson.id,
-    _from_start_at: lesson.start_at,
+    _from_start_at: fromStartAt,
     _apply_time_shift: input.applyTimeShift ?? false,
     _shift_minutes: input.shiftMinutes ?? 0,
     ...(input.lesson_type !== undefined && { _lesson_type: input.lesson_type }),
@@ -503,11 +510,12 @@ export async function updateLessonSeries(
 }
 
 export async function cancelLessonSeries(
-  lesson: { id: string; parent_lesson_id?: string | null }
+  lesson: { id: string; parent_lesson_id?: string | null; start_at?: string },
+  scope: 'this_and_following' | 'all' = 'all'
 ): Promise<boolean> {
   const rootId = getSeriesRootId(lesson);
 
-  const { error } = await supabase
+  let query = supabase
     .from('tutor_lessons')
     .update({
       status: 'cancelled',
@@ -516,6 +524,13 @@ export async function cancelLessonSeries(
     })
     .or(`id.eq.${rootId},parent_lesson_id.eq.${rootId}`)
     .eq('status', 'booked');
+
+  // 'this_and_following' = selected occurrence + future ones; 'all' = whole series.
+  if (scope === 'this_and_following' && lesson.start_at) {
+    query = query.gte('start_at', lesson.start_at);
+  }
+
+  const { error } = await query;
 
   if (error) {
     console.error('Error cancelling lesson series:', error);
