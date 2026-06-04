@@ -1161,6 +1161,9 @@ export type Database = {
       homework_tutor_templates: {
         Row: {
           created_at: string
+          disable_ai_bootstrap: boolean
+          exam_type: string | null
+          feedback_language: string | null
           id: string
           subject: string
           tags: string[]
@@ -1171,6 +1174,9 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          disable_ai_bootstrap?: boolean
+          exam_type?: string | null
+          feedback_language?: string | null
           id?: string
           subject: string
           tags?: string[]
@@ -1181,6 +1187,9 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          disable_ai_bootstrap?: boolean
+          exam_type?: string | null
+          feedback_language?: string | null
           id?: string
           subject?: string
           tags?: string[]
@@ -1506,6 +1515,8 @@ export type Database = {
           published_at: string | null
           published_by: string | null
           published_task_id: string | null
+          rubric_image_urls: string | null
+          rubric_text: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
@@ -1532,6 +1543,8 @@ export type Database = {
           published_at?: string | null
           published_by?: string | null
           published_task_id?: string | null
+          rubric_image_urls?: string | null
+          rubric_text?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
@@ -1558,6 +1571,8 @@ export type Database = {
           published_at?: string | null
           published_by?: string | null
           published_task_id?: string | null
+          rubric_image_urls?: string | null
+          rubric_text?: string | null
           solution?: string | null
           solution_attachment_url?: string | null
           source_label?: string | null
@@ -3631,6 +3646,8 @@ export type Database = {
           published_at: string | null
           published_by: string | null
           published_task_id: string | null
+          rubric_image_urls: string | null
+          rubric_text: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
@@ -3666,6 +3683,8 @@ export type Database = {
           published_at: string | null
           published_by: string | null
           published_task_id: string | null
+          rubric_image_urls: string | null
+          rubric_text: string | null
           solution: string | null
           solution_attachment_url: string | null
           source_label: string | null
