@@ -398,6 +398,47 @@ function Part2BulkPhotosGallery({
   );
 }
 
+// 2026-06-05 (item 5): эталонное решение (текст + фото) под общим collapsible.
+function Part2ReferenceSolution({
+  solutionText,
+  solutionImages,
+  kimNumber,
+}: {
+  solutionText: string | null | undefined;
+  solutionImages: string[] | undefined;
+  kimNumber: number;
+}) {
+  const hasText = Boolean(solutionText && solutionText.trim().length > 0);
+  const images = solutionImages ?? [];
+  if (!hasText && images.length === 0) return null;
+  return (
+    <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+      <summary className="cursor-pointer touch-manipulation font-medium text-slate-900">
+        Эталонное решение
+      </summary>
+      {hasText && (
+        <div className="mt-2 leading-6">
+          <MathBlock text={solutionText ?? ''} className="whitespace-pre-wrap" />
+        </div>
+      )}
+      {images.length > 0 && (
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {images.map((url, idx) => (
+            <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
+              <img
+                src={url}
+                alt={`Эталон решения №${kimNumber} — фото ${idx + 1}`}
+                loading="lazy"
+                className="aspect-[3/4] w-full rounded-md border border-slate-200 bg-white object-cover"
+              />
+            </a>
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
 // 2026-06-02 (item 2): preliminary AI Part 2 result shown to the student
 // immediately post-submit, clearly labelled «предварительно — репетитор подтвердит».
 function Part2PreliminaryCard({
@@ -407,9 +448,6 @@ function Part2PreliminaryCard({
 }) {
   const aiScore = solution.ai_suggested_score ?? null;
   const aiFeedback = (solution.ai_feedback ?? '').trim();
-  const hasSolutionText = Boolean(
-    solution.solution_text && solution.solution_text.trim().length > 0,
-  );
   // AI ещё не проверил эту задачу (нет балла и нет разбора).
   const aiPending = aiScore === null && aiFeedback.length === 0;
 
@@ -477,19 +515,11 @@ function Part2PreliminaryCard({
           </div>
         )}
 
-        {hasSolutionText && (
-          <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
-            <summary className="cursor-pointer touch-manipulation font-medium text-slate-900">
-              Эталонное решение
-            </summary>
-            <div className="mt-2 leading-6">
-              <MathBlock
-                text={solution.solution_text ?? ''}
-                className="whitespace-pre-wrap"
-              />
-            </div>
-          </details>
-        )}
+        <Part2ReferenceSolution
+          solutionText={solution.solution_text}
+          solutionImages={solution.solution_image_urls}
+          kimNumber={solution.kim_number}
+        />
       </CardContent>
     </Card>
   );
@@ -537,9 +567,6 @@ function Part2SolutionCard({
   const score = solution.tutor_score ?? null;
   const hasComment = Boolean(
     solution.tutor_comment && solution.tutor_comment.trim().length > 0,
-  );
-  const hasSolutionText = Boolean(
-    solution.solution_text && solution.solution_text.trim().length > 0,
   );
 
   return (
@@ -597,19 +624,11 @@ function Part2SolutionCard({
           </div>
         )}
 
-        {hasSolutionText && (
-          <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
-            <summary className="cursor-pointer touch-manipulation font-medium text-slate-900">
-              Эталонное решение
-            </summary>
-            <div className="mt-2 leading-6">
-              <MathBlock
-                text={solution.solution_text ?? ''}
-                className="whitespace-pre-wrap"
-              />
-            </div>
-          </details>
-        )}
+        <Part2ReferenceSolution
+          solutionText={solution.solution_text}
+          solutionImages={solution.solution_image_urls}
+          kimNumber={solution.kim_number}
+        />
       </CardContent>
     </Card>
   );

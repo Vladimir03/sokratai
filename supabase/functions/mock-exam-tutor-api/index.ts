@@ -28,6 +28,7 @@ import {
 } from "../_shared/push-sender.ts";
 import { rewriteToProxy } from "../_shared/proxy-url.ts";
 import { checkPart1, type CheckMode } from "../_shared/mock-exam-part1-checker.ts";
+import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1232,6 +1233,7 @@ async function handleGetAttempt(
     check_mode: string | null;
     max_score: number;
     solution_text: string | null;
+    solution_image_urls: string | null;
     part: number;
   }> = {};
   let examType: string | null = null;
@@ -1240,7 +1242,7 @@ async function handleGetAttempt(
   if (assignment.variant_id) {
     const { data: tasks } = await db
       .from("mock_exam_variant_tasks")
-      .select("kim_number, part, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text")
+      .select("kim_number, part, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls")
       .eq("variant_id", assignment.variant_id as string);
     for (const t of tasks ?? []) {
       variantTasks[t.kim_number as number] = {
@@ -1250,6 +1252,7 @@ async function handleGetAttempt(
         check_mode: t.check_mode as string | null,
         max_score: t.max_score as number,
         solution_text: t.solution_text as string | null,
+        solution_image_urls: t.solution_image_urls as string | null,
         part: t.part as number,
       };
     }
@@ -1328,6 +1331,11 @@ async function handleGetAttempt(
     (part2Rows ?? []).map(async (row) => {
       const variant = variantTasks[row.kim_number as number];
       const signed = await resolveSignedUrl(db, row.photo_url as string | null);
+      // 2026-06-05 (item 5): solution images (dual-format) → signed URL array.
+      const solutionImageRefs = parseAttachmentUrls(variant?.solution_image_urls ?? null);
+      const solutionImagesSigned = (
+        await Promise.all(solutionImageRefs.map((r) => resolveSignedUrl(db, r)))
+      ).filter((u): u is string => typeof u === "string");
       return {
         kim_number: row.kim_number,
         photo_url: signed,
@@ -1339,6 +1347,7 @@ async function handleGetAttempt(
         task_image_url: variant?.task_image_url ?? null,
         max_score: variant?.max_score ?? 0,
         solution_text: variant?.solution_text ?? null,
+        solution_image_urls: solutionImagesSigned,
       };
     }),
   );

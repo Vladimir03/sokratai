@@ -381,6 +381,8 @@ export interface MockExamAttemptPart2Solution {
   task_image_url: string | null;
   max_score: number;
   solution_text: string | null;
+  /** 2026-06-05 (item 5): фото эталонного решения (signed URLs). */
+  solution_image_urls?: string[];
 }
 
 export interface MockExamAttemptDetail {

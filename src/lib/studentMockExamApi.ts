@@ -280,6 +280,8 @@ export interface StudentMockExamResultPart2Solution {
   task_image_url?: string | null;
   /** Populated post-submit — item 2 (эталонное решение, revealed после сдачи). */
   solution_text?: string | null;
+  /** Populated post-submit — item 5 (фото эталонного решения, signed URLs). */
+  solution_image_urls?: string[];
   /** Populated post-submit — item 2. */
   topic?: string | null;
 }

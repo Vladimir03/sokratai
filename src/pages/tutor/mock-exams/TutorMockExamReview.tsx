@@ -1833,16 +1833,33 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
             не leak'ается ученику до approval). Tutor открывает collapsible
             при необходимости сверить ход решения. По дефолту свёрнуто
             чтобы не загромождать карточку (AI комментарий ниже даёт основу). */}
-        {solution.solution_text ? (
+        {(solution.solution_text || (solution.solution_image_urls?.length ?? 0) > 0) ? (
           <details className="rounded-md border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/50">
             <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5 hover:bg-slate-100 dark:hover:bg-slate-800/50 rounded-md transition-colors">
               <Info className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-              Показать эталон решения (видно только репетитору)
+              Показать эталон решения (видит и ученик)
             </summary>
-            <div className="px-3 py-2.5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-200 leading-relaxed">
-              <Suspense fallback={<div>{solution.solution_text}</div>}>
-                <MathText text={solution.solution_text} />
-              </Suspense>
+            <div className="px-3 py-2.5 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-200 leading-relaxed space-y-2">
+              {solution.solution_text ? (
+                <Suspense fallback={<div>{solution.solution_text}</div>}>
+                  <MathText text={solution.solution_text} />
+                </Suspense>
+              ) : null}
+              {/* 2026-06-05 (item 5): фото эталонного решения */}
+              {(solution.solution_image_urls?.length ?? 0) > 0 && (
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {(solution.solution_image_urls ?? []).map((url, idx) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
+                      <img
+                        src={url}
+                        alt={`Эталон решения №${solution.kim_number} — фото ${idx + 1}`}
+                        loading="lazy"
+                        className="aspect-[3/4] w-full rounded-md border border-slate-200 bg-white object-cover dark:border-slate-700"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           </details>
         ) : null}

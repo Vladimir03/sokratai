@@ -210,6 +210,7 @@ import {
   checkPart1,
   type CheckMode,
 } from "../_shared/mock-exam-part1-checker.ts";
+import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
 
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
@@ -597,7 +598,7 @@ async function handleGetResult(
     // Pre-SUBMIT (in_progress/paused) сюда не доходит — early-reject 409 выше.
     const taskSelect = isPostSubmit
       ? "kim_number, part, order_num, task_text, task_image_url, " +
-        "correct_answer, check_mode, max_score, solution_text, topic"
+        "correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic"
       : "kim_number, part, correct_answer, check_mode, max_score";
     const { data: variantTasks } = await db
       .from("mock_exam_variant_tasks")
@@ -666,6 +667,11 @@ async function handleGetResult(
         if (taskImageRef) {
           taskImageSigned = await resolveSignedUrl(db, taskImageRef);
         }
+        // 2026-06-05 (item 5): solution images (dual-format) → signed URL array.
+        const solutionImageRefs = parseAttachmentUrls((v?.solution_image_urls as string | null) ?? null);
+        const solutionImagesSigned = (
+          await Promise.all(solutionImageRefs.map((r) => resolveSignedUrl(db, r)))
+        ).filter((u): u is string => typeof u === "string");
         if (isApproved) {
           return {
             kim_number: row.kim_number,
@@ -677,6 +683,7 @@ async function handleGetResult(
             task_text: (v?.task_text as string | null) ?? null,
             task_image_url: taskImageSigned,
             solution_text: (v?.solution_text as string | null) ?? null,
+            solution_image_urls: solutionImagesSigned,
             topic: (v?.topic as string | null) ?? null,
           };
         }
@@ -697,6 +704,7 @@ async function handleGetResult(
           task_text: (v?.task_text as string | null) ?? null,
           task_image_url: taskImageSigned,
           solution_text: (v?.solution_text as string | null) ?? null,
+          solution_image_urls: solutionImagesSigned,
           topic: (v?.topic as string | null) ?? null,
         };
       }),
