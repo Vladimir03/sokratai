@@ -392,18 +392,31 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
     return set;
   }, [drafts, existingScores, variantPart1Tasks]);
 
+    // 2026-06-02 review fix (P2b): снять «touched» когда правка НЕ сохраняется
+    // (пусто / невалидно / no-op) — иначе OCR-авто-балл навсегда заглушён для
+    // этого kim (sync пропускает touched). «touched» = тутор владеет СОХРАНЁННЫМ
+    // баллом, а не «трогал поле».
+    const untouch = (k: number) =>
+      setTouchedKims((s) => {
+        if (!s.has(k)) return s;
+        const next = new Set(s);
+        next.delete(k);
+        return next;
+      });
+
   const handleScoreBlur = async (kim: number, maxScore: number) => {
     const raw = drafts[kim] ?? '';
-    if (raw.trim() === '') return; // пусто — не сохраняем
+    if (raw.trim() === '') { untouch(kim); return; } // пусто — не сохраняем, вернуть авто-fill
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxScore) {
       toast.error(`Балл для KIM ${kim}: 0..${maxScore}`);
-      // restore previous
+      // restore previous + untouch (авто-fill восстановится)
       const prev = existingScores.get(kim);
       setDrafts((d) => ({ ...d, [kim]: prev !== null && prev !== undefined ? String(prev) : '' }));
+      untouch(kim);
       return;
     }
-    if (existingScores.get(kim) === parsed) return; // no change
+    if (existingScores.get(kim) === parsed) { untouch(kim); return; } // no change → авто-fill ок
     setSavingKims((prev) => {
       const next = new Set(prev);
       next.add(kim);

@@ -692,7 +692,17 @@ async function handleGetResult(
           ? row.ai_draft_json as Record<string, unknown>
           : null;
         const aiScore = typeof draft?.suggested_score === "number" ? draft.suggested_score : null;
-        const aiFeedback = typeof draft?.feedback === "string" ? draft.feedback : null;
+        let aiFeedback = (typeof draft?.feedback === "string" && draft.feedback.trim() !== "")
+          ? draft.feedback
+          : null;
+        // 2026-06-02 review fix (P2a): graceful default — если AI УЖЕ отработал
+        // (draft есть), но балл null И feedback пуст (legacy до feedback-поля,
+        // или фото нечитаемо / переназначено), НЕ оставляем карточку в «AI
+        // проверяет…» навсегда. Genuinely-pending = draft отсутствует (AI ещё
+        // не запускался) → aiFeedback остаётся null → клиент крутит спиннер.
+        if (draft !== null && aiFeedback === null && aiScore === null) {
+          aiFeedback = "Предварительная проверка по этой задаче недоступна — репетитор оценит вручную.";
+        }
         return {
           kim_number: row.kim_number,
           photo_url: photoSigned,

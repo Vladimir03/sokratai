@@ -333,6 +333,27 @@ async function resolveSignedUrl(
   return rewriteToProxy(data.signedUrl);
 }
 
+// 2026-06-05 (review P1): atomic totals resync. Recomputes total_part1_score
+// (always) + total_part2_score/total_score (only when finalized) from child
+// tables in ONE statement → last-writer-correct под concurrent правками.
+// Вызывать ПОСЛЕ любой записи per-task балла (approve-task / part1 manual /
+// finalize / recheck). Non-fatal: child score уже сохранён, следующий resync
+// исправит при сбое.
+async function resyncAttemptTotals(
+  db: SupabaseClient,
+  attemptId: string,
+): Promise<void> {
+  const { error } = await db.rpc("mock_exam_resync_attempt_totals", {
+    _attempt_id: attemptId,
+  });
+  if (error) {
+    console.warn("mock_exam_resync_totals_failed", {
+      attempt_id: attemptId,
+      error: error.message,
+    });
+  }
+}
+
 // ─── Helpers: student display name ───────────────────────────────────────────
 
 const AUTO_USERNAME_RE = /^(telegram_|user_)\d+$/i;
@@ -1529,33 +1550,11 @@ async function handleApproveTask(
     return jsonError(cors, 500, "DB_ERROR", "Failed to approve task");
   }
 
-  // 2026-06-02 (item 4): if the attempt is ALREADY finalized (total_score !== null),
-  // a post-approval Part 2 edit must resync total_part2_score + total_score —
-  // иначе ИТОГО в heatmap + балл ученика на result page дрейфует (как в
-  // total_score-баге 2026-06-01). Mirror handleApproveAll totals. Pre-approval
-  // (total_score===null) totals остаются null до approve-all.
-  if (attempt.total_score !== null) {
-    const { data: allP2 } = await db
-      .from("mock_exam_attempt_part2_solutions")
-      .select("tutor_score")
-      .eq("attempt_id", attemptId);
-    const totalPart2 = (allP2 ?? []).reduce(
-      (sum, r) => sum + (typeof r.tutor_score === "number" ? r.tutor_score : 0),
-      0,
-    );
-    const totalPart1 = (attempt.total_part1_score as number | null) ?? 0;
-    const { error: totalsErr } = await db
-      .from("mock_exam_attempts")
-      .update({ total_part2_score: totalPart2, total_score: totalPart1 + totalPart2 })
-      .eq("id", attemptId);
-    if (totalsErr) {
-      console.warn("mock_exam_approve_task_totals_resync_failed", {
-        attempt_id: attemptId,
-        error: totalsErr.message,
-      });
-      // Non-fatal — per-task tutor_score уже сохранён.
-    }
-  }
+  // 2026-06-05 (review P1): atomic resync через RPC — пересчитывает обе части из
+  // дочерних таблиц одним UPDATE (last-writer-correct под concurrent post-approval
+  // правками). Заменил JS read-sum-update (был подвержен stale-snapshot гонке).
+  // RPC сам гейтит total_part2_score/total_score на «уже finalized».
+  await resyncAttemptTotals(db, attemptId);
 
   return jsonOk(cors, upserted);
 }
@@ -1995,51 +1994,18 @@ async function handlePart1ManualScore(
     return jsonError(cors, 500, "DB_ERROR", "Failed to persist manual score");
   }
 
-  // AC-P11 hotfix H5: recompute total_part1_score server-side. Раньше клиент
-  // звал /part1-finalize отдельным best-effort try/catch — на network drop /
-  // page reload totals оставались stale (silent failure). Теперь каждый
-  // manual_score call атомарно обновляет totals в той же DB сессии. Mirror
-  // handlePart1Finalize aggregation pattern (line 2019-2032). Non-fatal:
-  // если recompute fails — manual save уже succeeded, totals дойдут на
-  // следующем save или через /part1-finalize.
-  const { data: allRows, error: selectErr } = await db
-    .from("mock_exam_attempt_part1_answers")
-    .select("earned_score")
-    .eq("attempt_id", attemptId);
-  let totalPart1: number | null = null;
-  if (selectErr) {
-    console.warn("mock_exam_part1_manual_score_totals_select_failed", {
-      attempt_id: attemptId,
-      error: selectErr.message,
-    });
-  } else {
-    totalPart1 = (allRows ?? []).reduce(
-      (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
-      0,
-    );
-    // Bug fix (2026-06-01): keep ИТОГО (total_score) in sync — never let stored
-    // total_score drift from its components. Only when already finalized
-    // (total_score !== null); pre-approval total_score stays null. Этот handler
-    // 409'ит на approved/manually_entered, поэтому здесь total_score обычно null
-    // (no-op) — но guard защищает от любого будущего «reopen approved» пути.
-    const attemptUpdate: Record<string, unknown> = { total_part1_score: totalPart1 };
-    if (attempt.total_score !== null) {
-      attemptUpdate.total_score =
-        totalPart1 + ((attempt.total_part2_score as number | null) ?? 0);
-    }
-    const { error: totalsErr } = await db
-      .from("mock_exam_attempts")
-      .update(attemptUpdate)
-      .eq("id", attemptId);
-    if (totalsErr) {
-      console.warn("mock_exam_part1_manual_score_totals_update_failed", {
-        attempt_id: attemptId,
-        total: totalPart1,
-        error: totalsErr.message,
-      });
-      // Не fail'им весь handler — manual save уже succeeded.
-    }
-  }
+  // 2026-06-05 (review P1): atomic resync через RPC — пересчитывает total_part1_score
+  // (always) + total_score (когда finalized) из дочерней таблицы одним UPDATE,
+  // last-writer-correct под concurrent правками. Заменил прежний JS read-sum-update
+  // (H5), который был подвержен stale-snapshot гонке.
+  await resyncAttemptTotals(db, attemptId);
+  // Read back recomputed total_part1_score для ответа (frontend показывает свежее «X/28»).
+  const { data: refreshed } = await db
+    .from("mock_exam_attempts")
+    .select("total_part1_score")
+    .eq("id", attemptId)
+    .maybeSingle();
+  const totalPart1 = (refreshed?.total_part1_score as number | null) ?? null;
 
   return jsonOk(cors, {
     ok: true,
@@ -2144,32 +2110,16 @@ async function handlePart1Finalize(
     }
   }
 
-  const { data: rows } = await db
-    .from("mock_exam_attempt_part1_answers")
-    .select("earned_score")
-    .eq("attempt_id", attemptId);
-
-  const totalPart1 = (rows ?? []).reduce(
-    (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
-    0,
-  );
-
-  // Bug fix (2026-06-01): resync total_score when attempt уже finalized (invariant
-  // total_score = part1 + part2). Этот handler 409'ит на approved (line ~1947),
-  // поэтому total_score обычно null здесь — guard защищает от future reopen path.
-  const finalizeUpdate: Record<string, unknown> = { total_part1_score: totalPart1 };
-  if (attempt.total_score !== null) {
-    finalizeUpdate.total_score =
-      totalPart1 + ((attempt.total_part2_score as number | null) ?? 0);
-  }
-  const { error: updateErr } = await db
+  // 2026-06-05 (review P1): atomic resync via RPC (last-writer-correct). После
+  // missing-kim инсертов выше — пересчёт total_part1_score (always) + total_score
+  // (когда finalized) из дочерней таблицы одним UPDATE.
+  await resyncAttemptTotals(db, attemptId);
+  const { data: refreshed } = await db
     .from("mock_exam_attempts")
-    .update(finalizeUpdate)
-    .eq("id", attemptId);
-  if (updateErr) {
-    console.error("mock_exam_part1_finalize_failed", { error: updateErr.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to finalize Part 1 score");
-  }
+    .select("total_part1_score")
+    .eq("id", attemptId)
+    .maybeSingle();
+  const totalPart1 = (refreshed?.total_part1_score as number | null) ?? 0;
 
   return jsonOk(cors, {
     ok: true,
@@ -2428,45 +2378,12 @@ async function handleRecheckPart1(
       return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить обновлённые баллы");
     }
 
-    // Recompute total_part1_score
-    const { data: allRows, error: sumErr } = await db
-      .from("mock_exam_attempt_part1_answers")
-      .select("earned_score")
-      .eq("attempt_id", attemptId);
-    if (sumErr) {
-      console.warn("mock_exam_recheck_part1_sum_failed", {
-        attempt_id: attemptId,
-        error: sumErr.message,
-      });
-      // Non-fatal — updates persisted, totals will lag until next finalize
-    } else {
-      const newTotal = (allRows ?? []).reduce(
-        (sum, r) => sum + (typeof r.earned_score === "number" ? r.earned_score : 0),
-        0,
-      );
-      // Bug fix (2026-06-01) — THE drift culprit: handleRecheckPart1 allows
-      // approved attempts (Егор пересчитывает старые binary-scored пробники
-      // кнопкой «Применить критерии ФИПИ»). Раньше обновлялся ТОЛЬКО
-      // total_part1_score → total_score (ИТОГО в heatmap + балл ученика на
-      // result page) застывал: part1 рос на partial credit, итог нет.
-      // Инвариант: total_score (non-null) = part1 + part2.
-      const recheckUpdate: Record<string, unknown> = { total_part1_score: newTotal };
-      if (attempt.total_score !== null) {
-        recheckUpdate.total_score =
-          newTotal + ((attempt.total_part2_score as number | null) ?? 0);
-      }
-      const { error: attemptUpdateErr } = await db
-        .from("mock_exam_attempts")
-        .update(recheckUpdate)
-        .eq("id", attemptId);
-      if (attemptUpdateErr) {
-        console.warn("mock_exam_recheck_part1_total_update_failed", {
-          attempt_id: attemptId,
-          new_total: newTotal,
-          error: attemptUpdateErr.message,
-        });
-      }
-    }
+    // 2026-06-05 (review P1): atomic resync via RPC. handleRecheckPart1 allows
+    // approved attempts (Егор пересчитывает старые binary-scored пробники
+    // кнопкой «Применить критерии ФИПИ») — пересчёт total_part1_score (always)
+    // + total_score (когда finalized) из дочерней таблицы одним UPDATE,
+    // last-writer-correct. Заменил JS read-sum-update (был the drift culprit).
+    await resyncAttemptTotals(db, attemptId);
   }
 
   console.info(JSON.stringify({
@@ -2601,6 +2518,9 @@ async function handleAssignPart2Photos(
       confidence: "low",
       elements_check: { I: false, II: false, III: false, IV: false },
       comment_for_tutor: "Назначено tutor'ом — AI ещё не пересчитал баллы.",
+      // 2026-06-02 review fix (P2a): feedback (shared student+tutor) обязателен,
+      // иначе ученик увидит «AI проверяет…» навсегда. Нейтральная фраза.
+      feedback: "Репетитор пересчитывает баллы по этой задаче.",
       flags: ["awaiting_regrade"],
     };
 
