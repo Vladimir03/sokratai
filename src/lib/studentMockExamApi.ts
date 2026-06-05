@@ -261,17 +261,26 @@ export interface StudentMockExamResultPart2Solution {
   photo_url: string | null;
   status: MockExamPart2SolutionStatus;
   max_score: number;
-  /** Populated only when attempt.status === 'approved'. */
+  /** Populated only when attempt.status === 'approved' (final tutor grade). */
   tutor_score?: number | null;
   /** Populated only when attempt.status === 'approved'. */
   tutor_comment?: string | null;
-  /** Populated only when attempt.status === 'approved'. */
+  /**
+   * 2026-06-02 (item 2): PRELIMINARY AI результат, отдаётся PRE-approval
+   * (submitted/ai_checking/awaiting_review). null пока AI не проверил эту задачу.
+   * Помечается «предварительно — репетитор подтвердит». Post-approval — undefined
+   * (используется tutor_score).
+   */
+  ai_suggested_score?: number | null;
+  /** 2026-06-02 (item 2): shared AI разбор «что верно/неверно», pre-approval. */
+  ai_feedback?: string | null;
+  /** Populated post-submit (pre- and post-approval) — item 2. */
   task_text?: string | null;
-  /** Populated only when attempt.status === 'approved'. */
+  /** Populated post-submit — item 2 (signed URL). */
   task_image_url?: string | null;
-  /** Populated only when attempt.status === 'approved'. */
+  /** Populated post-submit — item 2 (эталонное решение, revealed после сдачи). */
   solution_text?: string | null;
-  /** Populated only when attempt.status === 'approved'. */
+  /** Populated post-submit — item 2. */
   topic?: string | null;
 }
 

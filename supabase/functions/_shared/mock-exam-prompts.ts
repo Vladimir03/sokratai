@@ -65,8 +65,14 @@ export interface MockExamPart2Draft {
    * скрывать чекбоксы для №21.
    */
   elements_check: { I: boolean; II: boolean; III: boolean; IV: boolean };
-  /** 1-3 предложения tutor-only обоснования. Может содержать ссылки на эталон. */
+  /** 1-3 предложения tutor-only операт. заметки. Может содержать ссылки на эталон. */
   comment_for_tutor: string;
+  /**
+   * 2026-06-02 (item 2): детальный разбор «что верно/неверно», видят И УЧЕНИК,
+   * И репетитор. Дружелюбный обучающий тон, anti-spoiler (без дословного эталона).
+   * Default "" для backward-compat со старыми attempts (re-grade заполнит).
+   */
+  feedback: string;
   /** Структурированные сигналы: photo_unreadable, kim21_qualitative, etc. */
   flags: string[];
   /**
@@ -269,14 +275,21 @@ export function buildMockExamPart2Prompt(
     "",
     "Дополнительные flags (используй когда применимо): \"low_handwriting\", \"missing_units\", \"incomplete_solution\", \"calculation_error\", \"ambiguous_grading\".",
     "",
-    "ВАЖНО (anti-spoiler): comment_for_tutor читает только репетитор, но всё равно держи его кратким (1-3 предложения). Не цитируй эталонное решение дословно — пиши собственными словами.",
+    "ВАЖНО (anti-spoiler): comment_for_tutor читает только репетитор — краткая операт. заметка (1-3 предложения).",
+    "",
+    "ПОЛЕ feedback (видят И УЧЕНИК, И репетитор) — это главный разбор. Требования:",
+    "- Детальный, но дружелюбный разбор: что в решении ВЕРНО, что НЕВЕРНО/упущено, на что обратить внимание (2-5 предложений).",
+    "- Тон поддерживающий и обучающий (обращение к ученику на «ты»), без сухих инструкций репетитору вроде «снизь балл».",
+    "- anti-spoiler: НЕ цитируй эталонное решение дословно и не выдавай готовый ответ целиком — указывай на шаги и идеи своими словами.",
+    "- Если фото нечитаемо / решения нет — мягко скажи об этом и попроси перезагрузить фото.",
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста:",
     "{",
     "  \"suggested_score\": null | <int 0..max_score>,",
     "  \"confidence\": \"low\" | \"medium\" | \"high\",",
     "  \"elements_check\": { \"I\": bool, \"II\": bool, \"III\": bool, \"IV\": bool },",
-    "  \"comment_for_tutor\": \"1-3 коротких предложения почему такой балл\",",
+    "  \"comment_for_tutor\": \"1-3 коротких предложения почему такой балл (только репетитор)\",",
+    "  \"feedback\": \"детальный разбор что верно/неверно для ученика и репетитора (2-5 предложений)\",",
     "  \"flags\": [\"...\"]",
     "}",
   ].filter(Boolean).join("\n");
@@ -390,6 +403,17 @@ function sanitizeComment(value: unknown): string {
   return softTruncate(cleaned, MAX_COMMENT_LENGTH);
 }
 
+// 2026-06-02 (item 2): shared student+tutor разбор — длиннее tutor-комментария.
+const MAX_FEEDBACK_LENGTH = 1200;
+function sanitizeFeedback(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const cleaned = value
+    .replace(CONTROL_CHARS_RE, "")
+    .replace(/`{3,}/g, "")
+    .trim();
+  return softTruncate(cleaned, MAX_FEEDBACK_LENGTH);
+}
+
 /**
  * Convert a raw model JSON response into a strict MockExamPart2Draft.
  * Defensive: any malformed field falls back to a low-confidence placeholder
@@ -435,11 +459,21 @@ export function sanitizeMockExamPart2Draft(
       : "AI вернул некорректный JSON — проверь решение вручную."
   );
 
+  // 2026-06-02 (item 2): shared student+tutor разбор. Default при photo-fail /
+  // пустом ответе модели — дружелюбная подсказка ученику (не сухая tutor-фраза).
+  const feedbackRaw = sanitizeFeedback(parsed.feedback);
+  const feedback = feedbackRaw || (
+    photoFlag !== undefined
+      ? "Фото решения не распозналось. Перезагрузи более чёткое фото — и я разберу решение."
+      : ""
+  );
+
   return {
     suggested_score: suggestedScore,
     confidence,
     elements_check: elementsCheck,
     comment_for_tutor: comment,
+    feedback,
     flags,
   };
 }
@@ -473,6 +507,14 @@ export function buildFallbackDraft(
     no_photo: "Ученик не загрузил фото решения по этой задаче.",
     image_inline_failed: "Не удалось загрузить фото решения для AI — оцени вручную.",
   };
+  // 2026-06-02 (item 2): student+tutor-facing fallback — мягкий тон для ученика.
+  const feedbackByReason: Record<MockExamFallbackReason, string> = {
+    timeout: "AI не успел проверить за отведённое время. Репетитор проверит решение вручную.",
+    invalid_json: "Автопроверка не сработала. Репетитор проверит решение вручную.",
+    gateway_error: "Автопроверка временно недоступна. Репетитор проверит решение вручную.",
+    no_photo: "Не вижу фото решения по этой задаче — загрузи фото, чтобы получить разбор.",
+    image_inline_failed: "Не удалось загрузить фото решения. Перезагрузи более чёткое фото.",
+  };
 
   const flags = [...flagsByReason[reason]];
   if (params.kimNumber === 21) flags.unshift("kim21_qualitative");
@@ -482,6 +524,7 @@ export function buildFallbackDraft(
     confidence: "low",
     elements_check: { I: false, II: false, III: false, IV: false },
     comment_for_tutor: commentByReason[reason],
+    feedback: feedbackByReason[reason],
     flags,
   };
 }

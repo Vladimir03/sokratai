@@ -587,16 +587,15 @@ async function handleGetResult(
       .maybeSingle();
     variant = variantRow;
 
-    // State-aware task SELECT (TASK-15 anti-leak hardening, ChatGPT-5.5 review):
-    //   Pre-approval — only Часть 1 columns (kim_number, correct_answer,
-    //     check_mode, max_score) AND no task_text/solution_text/topic in memory.
-    //     `correct_answer` permitted because Часть 1 is auto-revealed post-submit.
-    //   Post-approval — full set including task_text + solution_text + topic
-    //     (Часть 2 разбор — value-proposition после tutor approval).
-    // Защитный layer: даже если кто-то добавит новое поле в response shape,
-    // pre-approval SELECT не загрузит solution_text в process memory — нечего
-    // случайно сериализовать.
-    const taskSelect = isApproved
+    // State-aware task SELECT.
+    //   2026-06-02 (item 2): post-submit (submitted/ai_checking/awaiting_review/
+    //     approved) теперь грузит ПОЛНЫЙ набор, т.к. ученик видит предварительный
+    //     разбор Части 2 (solution_text + task_text) сразу после сдачи — продуктовое
+    //     решение Vladimir (one-shot exam, без пересдач). `correct_answer` (Часть 1)
+    //     остаётся revealed post-submit как раньше.
+    //   manually_entered — нет per-task rows, минимальный select.
+    // Pre-SUBMIT (in_progress/paused) сюда не доходит — early-reject 409 выше.
+    const taskSelect = isPostSubmit
       ? "kim_number, part, order_num, task_text, task_image_url, " +
         "correct_answer, check_mode, max_score, solution_text, topic"
       : "kim_number, part, correct_answer, check_mode, max_score";
@@ -636,9 +635,12 @@ async function handleGetResult(
     });
   }
 
-  // Part 2 — reveal ONLY when approved. Pre-approval: photo only (own upload),
-  // no tutor_score / tutor_comment / solution_text / task_text. ai_draft_json
-  // never exposed (tutor-only artifact).
+  // Part 2 reveal (2026-06-02, item 2 — state-aware, see rule 45):
+  //   approved          → FINAL: tutor_score + tutor_comment + solution + task.
+  //   pre-approval       → PRELIMINARY: AI suggested_score + AI feedback (из
+  //     ai_draft_json — ТОЛЬКО эти два поля) + solution + task. Помечается
+  //     «предварительно — репетитор подтвердит». НИКОГДА не отдаём ученику
+  //     comment_for_tutor / flags / elements_check.
   let part2Solutions: unknown[] = [];
   if (isPostSubmit) {
     const { data: part2Rows } = await db
@@ -646,7 +648,7 @@ async function handleGetResult(
       .select(
         isApproved
           ? "kim_number, photo_url, tutor_score, tutor_comment, status"
-          : "kim_number, photo_url, status",
+          : "kim_number, photo_url, status, ai_draft_json",
       )
       .eq("attempt_id", attempt.id)
       .order("kim_number", { ascending: true });
@@ -658,15 +660,13 @@ async function handleGetResult(
           db,
           row.photo_url as string | null,
         );
+        // Task image (signed) — shown for context both pre- and post-approval.
+        let taskImageSigned: string | null = null;
+        const taskImageRef = (v?.task_image_url as string | null) ?? null;
+        if (taskImageRef) {
+          taskImageSigned = await resolveSignedUrl(db, taskImageRef);
+        }
         if (isApproved) {
-          // Resolve task image too — student sees task context post-approval.
-          let taskImageSigned: string | null = null;
-          const taskImageRef = (v?.task_image_url as string | null) ?? null;
-          if (taskImageRef) {
-            // Variant task images live in mock-exam-variant-tasks bucket;
-            // use parseStorageRef which honours bucket prefix from ref.
-            taskImageSigned = await resolveSignedUrl(db, taskImageRef);
-          }
           return {
             kim_number: row.kim_number,
             photo_url: photoSigned,
@@ -680,11 +680,24 @@ async function handleGetResult(
             topic: (v?.topic as string | null) ?? null,
           };
         }
+        // Pre-approval — extract ONLY suggested_score + feedback from ai_draft_json.
+        const draft = (row.ai_draft_json && typeof row.ai_draft_json === "object")
+          ? row.ai_draft_json as Record<string, unknown>
+          : null;
+        const aiScore = typeof draft?.suggested_score === "number" ? draft.suggested_score : null;
+        const aiFeedback = typeof draft?.feedback === "string" ? draft.feedback : null;
         return {
           kim_number: row.kim_number,
           photo_url: photoSigned,
           status: row.status,
           max_score: (v?.max_score as number | undefined) ?? 0,
+          // PRELIMINARY AI result — клиент помечает «предварительно».
+          ai_suggested_score: aiScore,
+          ai_feedback: aiFeedback,
+          task_text: (v?.task_text as string | null) ?? null,
+          task_image_url: taskImageSigned,
+          solution_text: (v?.solution_text as string | null) ?? null,
+          topic: (v?.topic as string | null) ?? null,
         };
       }),
     );

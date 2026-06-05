@@ -21,10 +21,12 @@ Endpoint hardening (`mock-exam-public`, `mock-exam-student-api`):
 
 ## AI graders — frozen contract, never auto-publish
 
-`mock-exam-grade` runs as a background, fire-and-forget job from submit. Tutor approval stays mandatory; AI never publishes to the student.
+`mock-exam-grade` runs as a background, fire-and-forget job from submit. Tutor approval stays mandatory; AI never AUTO-publishes the FINAL grade — but a **preliminary** AI result IS shown to the student post-submit (2026-06-02, item 2), clearly labelled, and the tutor still confirms/corrects.
 
-- **Frozen JSON shape** (mirror in `src/types/mockExam.ts::MockExamPart2Draft`): `{ suggested_score: number|null, confidence: 'low'|'medium'|'high', elements_check:{I,II,III,IV}, comment_for_tutor, flags[], assigned_photo_indices?[] }`. Extend additively only.
-- Endpoint responses carry counters only — never `ai_draft_json` / `suggested_score`.
+- **Frozen JSON shape** (mirror in `src/types/mockExam.ts::MockExamPart2Draft`): `{ suggested_score: number|null, confidence: 'low'|'medium'|'high', elements_check:{I,II,III,IV}, comment_for_tutor, feedback, flags[], assigned_photo_indices?[] }`. Extend additively only.
+- **`feedback` (2026-06-02, item 2)** — detailed «что верно/неверно» разбор shown to BOTH student and tutor (friendly, anti-spoiler). It is the ONLY `ai_draft_json` field besides `suggested_score` that may reach the student; `comment_for_tutor`/`flags`/`elements_check` stay tutor-only. Default `""` for pre-2026-06-02 attempts (re-grade to backfill).
+- **Pre-approval Part 2 reveal (2026-06-02, item 2)** — `handleGetResult` now exposes, per task, `suggested_score` + `feedback` (extracted from `ai_draft_json`) + `solution_text`/`solution_image_urls` + `task_text`/`task_image_url` + `max_score`, labelled «предварительно — репетитор подтвердит». Reference solution revealed post-submit is intentional (one-shot exam, no retakes). `tutor_score`/`tutor_comment` still post-approval. NEVER expose `comment_for_tutor`/`flags`/`elements_check` to the student.
+- Endpoint responses carry counters only for the **tutor list** — never raw `ai_draft_json`.
 - **State machine:** `in_progress → submitted → ai_checking → awaiting_review → approved`. Submit leaves status `submitted`; the grader CAS-claims `submitted → ai_checking → awaiting_review`. Never set `ai_checking` directly in the submit handler.
 - **Stale-lock = 120s** in all 3 callsites (grader CAS, `retry-part1-ocr`, `regrade-part2`). `retry` / `regrade` reject a fresh `ai_checking` (409 GRADING_IN_PROGRESS) unless stale.
 - **Bulk Часть 2** = two-pass: Pass 1 assigns photos→KIM (`buildBulkAssignmentPrompt`), Pass 2 grades per-KIM in parallel. Persisted tutor `assigned_photo_indices` are NOT overwritten on regrade.

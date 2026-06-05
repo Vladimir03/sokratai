@@ -1871,9 +1871,23 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           </div>
         ) : null}
 
-        {/* AI комментарий */}
+        {/* 2026-06-02 (item 2): shared AI разбор — видит И ученик, И ты. Главный фидбэк. */}
+        {aiDraft?.feedback ? (
+          <div className="rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Разбор AI · видит ученик
+            </p>
+            <Suspense fallback={<span>{aiDraft.feedback}</span>}>
+              <MathText text={aiDraft.feedback} />
+            </Suspense>
+          </div>
+        ) : null}
+
+        {/* AI операт. заметка — только репетитор (де-эмфасис). */}
         {aiDraft?.comment_for_tutor ? (
-          <div className="text-sm text-slate-700 border-l-2 border-amber-300 pl-3 py-1 dark:text-slate-300">
+          <div className="text-xs text-slate-500 border-l-2 border-amber-300 pl-3 py-1 dark:text-slate-400">
+            <span className="font-medium">Заметка AI (только ты): </span>
             <Suspense fallback={<span>{aiDraft.comment_for_tutor}</span>}>
               <MathText text={aiDraft.comment_for_tutor} />
             </Suspense>

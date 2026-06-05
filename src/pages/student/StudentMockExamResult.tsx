@@ -398,30 +398,134 @@ function Part2BulkPhotosGallery({
   );
 }
 
-function Part2PendingCard({ tutorName }: { tutorName: string | null }) {
+// 2026-06-02 (item 2): preliminary AI Part 2 result shown to the student
+// immediately post-submit, clearly labelled «предварительно — репетитор подтвердит».
+function Part2PreliminaryCard({
+  solution,
+}: {
+  solution: StudentMockExamResultPart2Solution;
+}) {
+  const aiScore = solution.ai_suggested_score ?? null;
+  const aiFeedback = (solution.ai_feedback ?? '').trim();
+  const hasSolutionText = Boolean(
+    solution.solution_text && solution.solution_text.trim().length > 0,
+  );
+  // AI ещё не проверил эту задачу (нет балла и нет разбора).
+  const aiPending = aiScore === null && aiFeedback.length === 0;
+
   return (
-    <Card className="mb-3 border-2 border-amber-300 bg-amber-50 shadow-none">
-      <CardContent className="p-5">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h2 className="text-base font-semibold text-slate-900">
-            Часть 2 · ждёт проверки репетитора
-          </h2>
-          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
-            В обработке
+    <Card className="shadow-none">
+      <CardContent className="p-4 sm:p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="rounded bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-900">
+            №{solution.kim_number}
+            {solution.topic ? ` · ${solution.topic}` : ''}
           </span>
+          {aiPending ? (
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              AI проверяет…
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-sm tabular-nums text-slate-700">
+              <span className="inline-flex items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-violet-700">
+                <Sparkles className="h-3 w-3" aria-hidden="true" /> AI
+              </span>
+              {typeof aiScore === 'number' ? `${aiScore}` : '—'}
+              <span className="text-slate-400"> / {solution.max_score}</span>
+            </span>
+          )}
         </div>
-        <p className="mb-3 text-sm text-slate-700">
-          {tutorName
-            ? `Репетитор ${tutorName} проверяет твои решения 21–26.`
-            : 'Репетитор проверяет твои решения 21–26.'}{' '}
-          Результат придёт в Telegram в течение 24 часов.
-        </p>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <Clock className="h-4 w-4" aria-hidden="true" />
-          <span>Обычно занимает 6–24 часа</span>
-        </div>
+
+        {solution.task_text && (
+          <MathBlock
+            text={solution.task_text}
+            className="text-sm leading-6 text-slate-700"
+          />
+        )}
+
+        {solution.task_image_url && (
+          <img
+            src={solution.task_image_url}
+            alt={`Условие задания №${solution.kim_number}`}
+            loading="lazy"
+            className="mt-3 max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+          />
+        )}
+
+        {solution.photo_url && (
+          <div className="mt-3">
+            <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">
+              Твоё решение
+            </p>
+            <img
+              src={solution.photo_url}
+              alt={`Твоё решение задания №${solution.kim_number}`}
+              loading="lazy"
+              className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+            />
+          </div>
+        )}
+
+        {aiFeedback.length > 0 && (
+          <div className="mt-3 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Разбор AI · предварительно
+            </p>
+            <p className="whitespace-pre-wrap leading-6">{aiFeedback}</p>
+          </div>
+        )}
+
+        {hasSolutionText && (
+          <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+            <summary className="cursor-pointer touch-manipulation font-medium text-slate-900">
+              Эталонное решение
+            </summary>
+            <div className="mt-2 leading-6">
+              <MathBlock
+                text={solution.solution_text ?? ''}
+                className="whitespace-pre-wrap"
+              />
+            </div>
+          </details>
+        )}
       </CardContent>
     </Card>
+  );
+}
+
+function Part2PreliminarySection({
+  solutions,
+  tutorName,
+}: {
+  solutions: StudentMockExamResultPart2Solution[];
+  tutorName: string | null;
+}) {
+  return (
+    <section className="mb-3">
+      <Card className="mb-3 border-2 border-violet-200 bg-violet-50/60 shadow-none">
+        <CardContent className="p-4 sm:p-5">
+          <div className="mb-1.5 flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-violet-600" aria-hidden="true" />
+            <h2 className="text-base font-semibold text-slate-900">
+              Часть 2 · предварительная проверка AI
+            </h2>
+          </div>
+          <p className="text-sm text-slate-700">
+            Это предварительный разбор от AI. {tutorName ? `Репетитор ${tutorName}` : 'Репетитор'}{' '}
+            подтвердит результат и может скорректировать баллы. Окончательный балл придёт в Telegram.
+          </p>
+        </CardContent>
+      </Card>
+      {solutions.length > 0 && (
+        <div className="space-y-3">
+          {solutions.map((solution) => (
+            <Part2PreliminaryCard key={solution.kim_number} solution={solution} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -834,7 +938,12 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
                 />
               )}
 
-              {isPending && <Part2PendingCard tutorName={tutorFirstName} />}
+              {isPending && (
+                <Part2PreliminarySection
+                  solutions={view.part2_solutions}
+                  tutorName={tutorFirstName}
+                />
+              )}
 
               {/* TASK-15: bulk Часть 2 photos. Pending — collapsed (ученик
                   knows what он uploaded, не нужно занимать viewport).

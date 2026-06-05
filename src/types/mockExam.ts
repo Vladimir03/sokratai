@@ -122,6 +122,12 @@ export interface MockExamPart2Draft {
     IV: boolean;
   };
   comment_for_tutor: string;
+  /**
+   * 2026-06-02 (item 2): shared student+tutor разбор «что верно/неверно».
+   * Виден ученику pre-approval (с пометкой «предварительно AI»). Additive —
+   * default "" для старых attempts (до re-grade). Mirror backend frozen shape.
+   */
+  feedback?: string;
   flags: string[];
   /**
    * Phase 6 (2026-05-15): additive поле для bulk path. Список индексов фото
