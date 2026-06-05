@@ -789,9 +789,46 @@ async function handleCreateAssignment(
     });
   }
 
+  // 2026-06-02 (item 3): notify initially-assigned students «как по ДЗ». Раньше
+  // уведомление слал только `assign-students` (добавление в существующий пробник),
+  // а CREATE-flow — нет. Mirror тот же push→telegram cascade (email отложен, rule 45).
+  // Best-effort: сбой уведомления НЕ валит создание пробника.
+  const notifyOnCreate = b.notify === undefined || b.notify === true;
+  let createNotify = { sent_push: 0, sent_telegram: 0, failed: 0, failed_no_channel: 0 };
+  if (notifyOnCreate && studentIds.length > 0) {
+    try {
+      const [{ data: tutorRow }, { data: variantRow }] = await Promise.all([
+        db.from("tutors").select("name").eq("user_id", tutorUserId).maybeSingle(),
+        db.from("mock_exam_variants").select("title").eq("id", b.variant_id as string).maybeSingle(),
+      ]);
+      const tutorName = (tutorRow?.name as string | null) ?? null;
+      const variantTitle = (variantRow?.title as string | null) ?? "пробник";
+      const assignmentTitle = (b.title as string).trim();
+      const deadlineStr = (b.deadline as string | null | undefined) ?? null;
+      const results = await Promise.all(
+        studentIds.map((sid) =>
+          notifyStudentAssigned(
+            db, sid, assignment.id as string, assignmentTitle, variantTitle, deadlineStr, tutorName,
+          ).catch((err): CascadeResult => {
+            console.warn("mock_exam_create_notify_student_failed", { student_id: sid, error: String(err) });
+            return { channel: null, failed_reason: "exception" };
+          })
+        ),
+      );
+      for (const r of results) {
+        if (r.channel === "push") createNotify.sent_push += 1;
+        else if (r.channel === "telegram") createNotify.sent_telegram += 1;
+        else if (r.failed_reason === "no_channels_available") createNotify.failed_no_channel += 1;
+        else createNotify.failed += 1;
+      }
+    } catch (err) {
+      console.warn("mock_exam_create_notify_cascade_failed", { error: String(err) });
+    }
+  }
+
   return jsonOk(
     cors,
-    { assignment_id: assignment.id, attempts_created: studentIds.length },
+    { assignment_id: assignment.id, attempts_created: studentIds.length, notify: createNotify },
     201,
   );
 }
@@ -1405,9 +1442,9 @@ async function handleApproveTask(
   if (ownedOrErr instanceof Response) return ownedOrErr;
   const { attempt, assignment } = ownedOrErr;
 
-  if (attempt.status === "approved") {
-    return jsonError(cors, 409, "ALREADY_APPROVED", "Attempt is already approved");
-  }
+  // 2026-06-02 (item 4): allow re-editing a Part 2 score AFTER approval — тутор
+  // правит баллы после обсуждения с учеником. totals ресинкаются ниже. Только
+  // manually_entered терминален (нет per-task AI данных).
   if (attempt.status === "manually_entered") {
     return jsonError(cors, 409, "MANUALLY_ENTERED", "Manual entry attempts cannot be approved");
   }
@@ -1481,6 +1518,34 @@ async function handleApproveTask(
   if (upsertErr || !upserted) {
     console.error("mock_exam_approve_task_failed", { error: upsertErr?.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to approve task");
+  }
+
+  // 2026-06-02 (item 4): if the attempt is ALREADY finalized (total_score !== null),
+  // a post-approval Part 2 edit must resync total_part2_score + total_score —
+  // иначе ИТОГО в heatmap + балл ученика на result page дрейфует (как в
+  // total_score-баге 2026-06-01). Mirror handleApproveAll totals. Pre-approval
+  // (total_score===null) totals остаются null до approve-all.
+  if (attempt.total_score !== null) {
+    const { data: allP2 } = await db
+      .from("mock_exam_attempt_part2_solutions")
+      .select("tutor_score")
+      .eq("attempt_id", attemptId);
+    const totalPart2 = (allP2 ?? []).reduce(
+      (sum, r) => sum + (typeof r.tutor_score === "number" ? r.tutor_score : 0),
+      0,
+    );
+    const totalPart1 = (attempt.total_part1_score as number | null) ?? 0;
+    const { error: totalsErr } = await db
+      .from("mock_exam_attempts")
+      .update({ total_part2_score: totalPart2, total_score: totalPart1 + totalPart2 })
+      .eq("id", attemptId);
+    if (totalsErr) {
+      console.warn("mock_exam_approve_task_totals_resync_failed", {
+        attempt_id: attemptId,
+        error: totalsErr.message,
+      });
+      // Non-fatal — per-task tutor_score уже сохранён.
+    }
   }
 
   return jsonOk(cors, upserted);
@@ -1820,9 +1885,12 @@ async function handlePart1ManualScore(
   if (ownedOrErr instanceof Response) return ownedOrErr;
   const { attempt, assignment } = ownedOrErr;
 
-  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+  // 2026-06-02 (item 4): allow editing Part 1 score AFTER approval — тутор правит
+  // баллы после обсуждения с учеником. Только manually_entered терминален (нет
+  // per-task данных). total_score ресинкается ниже (invariant part1+part2).
+  if (attempt.status === "manually_entered") {
     return jsonError(cors, 409, "ALREADY_FINALIZED",
-      `Cannot edit Part 1 manual score after status=${attempt.status}`);
+      "Внесённый вручную пробник нельзя редактировать по задачам");
   }
   if (attempt.status === "in_progress") {
     return jsonError(cors, 409, "NOT_SUBMITTED",
@@ -1993,9 +2061,11 @@ async function handlePart1Finalize(
   if (ownedOrErr instanceof Response) return ownedOrErr;
   const { attempt, assignment } = ownedOrErr;
 
-  if (attempt.status === "approved" || attempt.status === "manually_entered") {
+  // 2026-06-02 (item 4): allow finalize/re-edit Part 1 AFTER approval. total_score
+  // ресинкается в этом handler'е (invariant). Только manually_entered терминален.
+  if (attempt.status === "manually_entered") {
     return jsonError(cors, 409, "ALREADY_FINALIZED",
-      `Cannot finalize Part 1 after status=${attempt.status}`);
+      "Внесённый вручную пробник нельзя финализировать по задачам");
   }
   if (attempt.status === "in_progress") {
     return jsonError(cors, 409, "NOT_SUBMITTED",

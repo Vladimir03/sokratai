@@ -339,41 +339,32 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   // быстром tab-через-поля). Используется для disable confirm + flush before finalize.
   const [savingKims, setSavingKims] = useState<Set<number>>(new Set());
 
-  // TASK-OCR Round 5 (2026-05-21) — drafts sync bug fix.
-  //
-  // Pre-existing bug: useState(initializer) runs ONCE on mount. Когда OCR
-  // завершается в фоне (status: ai_checking → awaiting_review, polling 5s),
-  // attempt.part1_answers получают earned_score values от backend. existingScores
-  // useMemo пересчитывается, но drafts state остаётся со старыми пустыми
-  // значениями («—» в input).
-  //
-  // Fix: useEffect sync'ит drafts из existingScores ТОЛЬКО для kims где tutor
-  // ещё не редактировал (current draft empty И saving не в полёте). Не
-  // перезаписывает kims где tutor типит — иначе collision при редактировании.
-  // Также не overwrite'ит когда saving в полёте — иначе race с onBlur save.
+  // 2026-06-02 (item 6): kims, которые тутор явно правил. Нетронутые kims ВСЕГДА
+  // показывают авто-балл (earned_score / OCR-checker) — это убирает race
+  // «useState-once: drafts пустые, хотя earned_score уже посчитан» (раньше поля
+  // были пустые при «сохранено: 13»). Решение Vladimir = просто авто-подстановка.
+  const [touchedKims, setTouchedKims] = useState<Set<number>>(new Set());
+
+  // Sync: для НЕтронутых kims подставляем авто-балл из existingScores (earned_score).
+  // OCR завершается в фоне (polling) → existingScores пересчитывается → нетронутые
+  // поля синхронизируются. Тронутые тутором kims сохраняют ввод (не перетираем).
   useEffect(() => {
     setDrafts((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const t of variantPart1Tasks) {
         const kim = t.kim_number;
+        if (touchedKims.has(kim)) continue; // tutor edited → keep their value
         const dbValue = existingScores.get(kim);
-        const dbStr =
-          dbValue !== null && dbValue !== undefined ? String(dbValue) : '';
-        const currentDraft = next[kim] ?? '';
-        // Sync условия:
-        //  - draft empty AND saving НЕ в полёте → write DB value
-        //  - draft != DB value AND draft == previous existing → DB обновился
-        //    (e.g. tutor другую сессию открыл) → sync (но это уже UX edge case,
-        //    пока ограничимся empty case чтобы не мешать tutor typing).
-        if (currentDraft === '' && dbStr !== '' && !savingKims.has(kim)) {
+        const dbStr = dbValue !== null && dbValue !== undefined ? String(dbValue) : '';
+        if ((next[kim] ?? '') !== dbStr) {
           next[kim] = dbStr;
           changed = true;
         }
       }
       return changed ? next : prev;
     });
-  }, [existingScores, variantPart1Tasks, savingKims]);
+  }, [existingScores, variantPart1Tasks, touchedKims]);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [confirmFinalizeOpen, setConfirmFinalizeOpen] = useState(false);
   const [isRetryingOCR, setIsRetryingOCR] = useState(false);
@@ -382,8 +373,10 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   // AC-P11 (2026-05-26): drill-down state для click 🔍 на cell.
   const [drillDownKim, setDrillDownKim] = useState<number | null>(null);
 
-  const isReadOnly =
-    attempt.status === 'approved' || attempt.status === 'manually_entered';
+  // 2026-06-02 (item 4): редактирование Часть 1 доступно ПОСЛЕ подтверждения —
+  // тутор правит баллы после обсуждения с учеником. Терминален только
+  // manually_entered (backend ресинкает total_score при правке approved).
+  const isReadOnly = attempt.status === 'manually_entered';
 
   // TASK-16-R2 fix #3: derive «dirty» kims (local draft ≠ saved value).
   // На finalize click мы их flush'им перед SUM, чтобы избежать stale DB read.
@@ -820,9 +813,10 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                   step={1}
                   disabled={isReadOnly || savingKims.has(t.kim_number)}
                   value={drafts[t.kim_number] ?? ''}
-                  onChange={(e) =>
-                    setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setTouchedKims((s) => (s.has(t.kim_number) ? s : new Set(s).add(t.kim_number)));
+                    setDrafts((d) => ({ ...d, [t.kim_number]: e.target.value }));
+                  }}
                   onBlur={() => void handleScoreBlur(t.kim_number, t.max_score)}
                   className="text-base"
                   placeholder="—"
@@ -1031,7 +1025,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 earned_score: payload.score,
                 comment: payload.comment,
               });
-              // Sync inline grid draft со score из dialog
+              // Sync inline grid draft со score из dialog + mark touched
+              setTouchedKims((s) => (s.has(ans.kim_number) ? s : new Set(s).add(ans.kim_number)));
               setDrafts((d) => ({
                 ...d,
                 [ans.kim_number]: String(payload.score),
@@ -1245,10 +1240,10 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
       resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value === null,
   ).length;
 
-  // AC-P11 hotfix H3: approved тоже read-only — backend rejects manual_score
-  // на approved + tutor-comment edit не имеет смысла после tutor-approval (final state).
-  const isReadOnly =
-    attempt.status === 'approved' || attempt.status === 'manually_entered';
+  // 2026-06-02 (item 4): редактирование доступно ПОСЛЕ подтверждения — тутор
+  // правит баллы после обсуждения с учеником (backend ресинкает total_score).
+  // Терминален только manually_entered.
+  const isReadOnly = attempt.status === 'manually_entered';
 
   // AC-P11: universal recheck handler — mirror Part1BlankReviewPanel.
   const handleRecheckPart1 = async () => {
@@ -1332,6 +1327,12 @@ function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
                   {ungradedCount > 0 ? ` · не проверено ${ungradedCount}` : ''}
                   {noAnswerCount > 0 ? ` · без ответа ${noAnswerCount}` : ''}.
                 </p>
+                {/* 2026-06-02 (item 4): пробник уже отправлен ученику, но правки разрешены. */}
+                {attempt.status === 'approved' && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+                    Уже отправлено ученику — правки баллов обновят его результат сразу.
+                  </p>
+                )}
               </div>
             </div>
             {/* AC-P11: universal recheck button + read-only badge для manually_entered */}
@@ -1614,8 +1615,9 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
 
   const isApproved =
     solution.status === 'tutor_approved' || solution.status === 'tutor_modified';
-  const isReadOnlyAttempt =
-    attemptStatus === 'approved' || attemptStatus === 'manually_entered';
+  // 2026-06-02 (item 4): Часть 2 «Изменить балл» доступно ПОСЛЕ подтверждения
+  // (backend resync total_part2_score+total_score). Терминален только manually_entered.
+  const isReadOnlyAttempt = attemptStatus === 'manually_entered';
 
   const aiDraft = solution.ai_draft;
   const confidence = aiDraft?.confidence ?? 'low';

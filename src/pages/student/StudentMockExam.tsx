@@ -1737,7 +1737,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                     )}
                   </div>
                   <div className="text-xs text-slate-600 mt-1 leading-relaxed">
-                    {durationMinutes} минут wall-clock без пауз. Закрыл вкладку —
+                    {durationMinutes} минут реального времени без пауз. Закрыл вкладку —
                     таймер не остановится. Как реальный экзамен.
                   </div>
                 </div>
