@@ -2026,6 +2026,7 @@ export type Database = {
           max_score: number
           order_num: number
           part: number
+          solution_image_urls: string | null
           solution_text: string | null
           task_image_url: string | null
           task_text: string
@@ -2040,6 +2041,7 @@ export type Database = {
           max_score: number
           order_num: number
           part: number
+          solution_image_urls?: string | null
           solution_text?: string | null
           task_image_url?: string | null
           task_text: string
@@ -2054,6 +2056,7 @@ export type Database = {
           max_score?: number
           order_num?: number
           part?: number
+          solution_image_urls?: string | null
           solution_text?: string | null
           task_image_url?: string | null
           task_text?: string
@@ -3929,6 +3932,10 @@ export type Database = {
       }
       mark_payment_reminder_sent: {
         Args: { _lesson_id: string }
+        Returns: undefined
+      }
+      mock_exam_resync_attempt_totals: {
+        Args: { _attempt_id: string }
         Returns: undefined
       }
       move_to_dlq: {
