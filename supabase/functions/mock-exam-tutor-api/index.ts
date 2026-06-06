@@ -1295,25 +1295,44 @@ async function handleGetAttempt(
   // AC-P11 (2026-05-26): + tutor_comment в SELECT для drill-down dialog.
   const { data: part1Rows } = await db
     .from("mock_exam_attempt_part1_answers")
-    .select("kim_number, student_answer, earned_score, tutor_comment")
+    .select("kim_number, student_answer, earned_score, tutor_comment, score_source")
     .eq("attempt_id", attemptId)
     .order("kim_number", { ascending: true });
   const answersByKim = new Map<number, {
     student_answer: string | null;
     earned_score: number | null;
     tutor_comment: string | null;
+    score_source: string | null;
   }>();
   for (const row of part1Rows ?? []) {
     answersByKim.set(row.kim_number as number, {
       student_answer: row.student_answer as string | null,
       earned_score: row.earned_score as number | null,
       tutor_comment: row.tutor_comment as string | null,
+      score_source: row.score_source as string | null,
     });
   }
   const part1VariantTasks = Object.entries(variantTasks)
     .filter(([, t]) => t.part === 1)
     .map(([kimStr, t]) => ({ kim: Number(kimStr), variant: t }))
     .sort((a, b) => a.kim - b.kim);
+
+  // Derive-on-read fallback (2026-06-06): для blank/OCR-попыток, оценённых до
+  // редеплоя per-KIM персистинга, строки могут не иметь earned_score, хотя
+  // ai_part1_ocr_json.cells заполнен → у тутора поле балла пустое («—») и он не
+  // видит, сколько назначил ИИ. Восстанавливаем earned_score ТОЛЬКО для
+  // отображения (подстановка в инпут + строка «Балл AI»): recognized value →
+  // checkPart1. Stored row всегда в приоритете; персист по-прежнему на действие
+  // тутора (save / finalize / recheck).
+  const normalizedOcr = normalizePart1OCRJson(attempt.ai_part1_ocr_json);
+  const ocrCells = ((normalizedOcr as Record<string, unknown> | null)?.cells ?? null) as
+    Record<string, { value?: string | null }> | null;
+  const ocrValueForKim = (kim: number): string | null => {
+    const cell = ocrCells?.[kim] ?? ocrCells?.[String(kim)] ?? null;
+    const v = cell && typeof cell.value === "string" ? cell.value.trim() : "";
+    return v !== "" ? v : null;
+  };
+
   // AC-P11 hotfix H4: resolve task_image_url to signed URL для drill-down dialog.
   // variant.task_image_url хранится как `storage://mock-exam-variant-tasks/...` ref;
   // frontend `<img src={taskImageUrl}>` ожидает direct URL. Mirror student-api
@@ -1326,10 +1345,28 @@ async function handleGetAttempt(
         db,
         (variant.task_image_url as string | null) ?? null,
       );
+      // earned_score: stored wins; иначе derive из OCR-распознанного value.
+      // score_source отличает балл AI ('ocr'/'student_form'/'finalize_default')
+      // от ручного балла тутора ('tutor') — фронт по нему подписывает строку
+      // «Балл AI» vs «Ваш балл».
+      let earnedScore = ans?.earned_score ?? null;
+      let scoreSource = ans?.score_source ?? null;
+      const ocrValue = ocrValueForKim(kim);
+      if (earnedScore === null && ocrValue !== null) {
+        earnedScore = checkPart1(
+          variant.correct_answer,
+          ocrValue,
+          (variant.check_mode as CheckMode | null) ?? null,
+          variant.max_score,
+          kim,
+        ).earned;
+        scoreSource = "ocr"; // derived из OCR — это балл AI.
+      }
       return {
         kim_number: kim,
         student_answer: ans?.student_answer ?? null,
-        earned_score: ans?.earned_score ?? null,
+        earned_score: earnedScore,
+        score_source: scoreSource,
         tutor_comment: ans?.tutor_comment ?? null,
         correct_answer: variant.correct_answer,
         max_score: variant.max_score,
@@ -1442,7 +1479,7 @@ async function handleGetAttempt(
     // могут содержать legacy success (top-level numeric keys) или legacy
     // failure ({cells:{}, error, raw_response, ...}) — оба варианта
     // нормализуются. Already-canonical → no-op.
-    ai_part1_ocr_json: normalizePart1OCRJson(attempt.ai_part1_ocr_json) ?? null,
+    ai_part1_ocr_json: normalizedOcr ?? null,
     // AC-P10 Phase 2 (PAUSE-8): expose pause/session fields для tutor review.
     // - exam_mode: final mode после student override (immutable после первого start)
     // - default_exam_mode: assignment-level tutor recommendation; UI показывает
@@ -2048,13 +2085,18 @@ async function handlePart1Finalize(
   }
 
   // TASK-16 (2026-05-15): для каждого Часть 1 KIM в variant'е, у которого
-  // нет row в mock_exam_attempt_part1_answers → INSERT с earned_score=0.
+  // нет row в mock_exam_attempt_part1_answers → INSERT.
   // Vladimir UX: «если репетитор ничего не ввёл — поставить 0». Result page
   // теперь покажет «0/max» вместо «—» для пропущенных KIM.
+  // 2026-06-06: OCR-aware finalize — если у пропущенного KIM есть распознанный
+  // ответ в ai_part1_ocr_json.cells, ставим балл checkPart1 (= балл AI, который
+  // тутор УЖЕ видит через derive-on-read), а не 0. Иначе «finalize» молча
+  // обнулил бы видимый балл AI на старых попытках без per-KIM строк. 0 остаётся
+  // только для реально нераспознанных клеток (score_source='finalize_default').
   if (assignment.variant_id) {
     const { data: variantPart1Tasks } = await db
       .from("mock_exam_variant_tasks")
-      .select("kim_number, max_score")
+      .select("kim_number, max_score, correct_answer, check_mode")
       .eq("variant_id", assignment.variant_id as string)
       .eq("part", 1)
       .order("kim_number", { ascending: true });
@@ -2067,28 +2109,57 @@ async function handlePart1Finalize(
       (existingAnswers ?? []).map((r) => r.kim_number as number),
     );
 
+    const finalizeOcr = normalizePart1OCRJson(attempt.ai_part1_ocr_json);
+    const finalizeOcrCells = ((finalizeOcr as Record<string, unknown> | null)?.cells ?? null) as
+      Record<string, { value?: string | null }> | null;
+    const finalizeOcrValue = (kim: number): string | null => {
+      const cell = finalizeOcrCells?.[kim] ?? finalizeOcrCells?.[String(kim)] ?? null;
+      const v = cell && typeof cell.value === "string" ? cell.value.trim() : "";
+      return v !== "" ? v : null;
+    };
+
     const missingInserts: Array<{
       attempt_id: string;
       kim_number: number;
-      student_answer: null;
+      student_answer: string | null;
       earned_score: number;
-      score_source: "finalize_default";
+      score_source: "finalize_default" | "ocr";
     }> = [];
     for (const t of (variantPart1Tasks ?? []) as Array<{
       kim_number: number;
       max_score: number;
+      correct_answer: string | null;
+      check_mode: string | null;
     }>) {
       if (!existingKims.has(t.kim_number)) {
-        missingInserts.push({
-          attempt_id: attemptId,
-          kim_number: t.kim_number,
-          student_answer: null,
-          earned_score: 0,
-          // TASK-16-R2 fix #1: provenance — finalize_default = "tutor не ввёл,
-          // ставим 0 чтобы result page показал '0/max', не '—'". runPart1OCR
-          // retry будет перезаписывать эти rows (только score_source='tutor' preserved).
-          score_source: "finalize_default",
-        });
+        const ocrValue = finalizeOcrValue(t.kim_number);
+        if (ocrValue !== null) {
+          // Распознан ответ → балл AI (consistent с runPart1OCR + derive-on-read).
+          missingInserts.push({
+            attempt_id: attemptId,
+            kim_number: t.kim_number,
+            student_answer: ocrValue,
+            earned_score: checkPart1(
+              t.correct_answer,
+              ocrValue,
+              (t.check_mode as CheckMode | null) ?? null,
+              t.max_score,
+              t.kim_number,
+            ).earned,
+            score_source: "ocr",
+          });
+        } else {
+          missingInserts.push({
+            attempt_id: attemptId,
+            kim_number: t.kim_number,
+            student_answer: null,
+            earned_score: 0,
+            // TASK-16-R2 fix #1: provenance — finalize_default = "tutor не ввёл,
+            // ставим 0 чтобы result page показал '0/max', не '—'". runPart1OCR
+            // retry будет перезаписывать эти rows (только score_source='tutor' preserved).
+            score_source: "finalize_default",
+          });
+        }
       }
     }
     if (missingInserts.length > 0) {

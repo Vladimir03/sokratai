@@ -482,7 +482,7 @@ async function handleGetResult(
     "id, assignment_id, status, started_at, submitted_at, " +
     "total_time_minutes, blank_photo_url, part2_bulk_photo_urls, " +
     "total_part1_score, total_part2_score, total_score, " +
-    "manual_entered_date, manual_comment";
+    "manual_entered_date, manual_comment, ai_part1_ocr_json";
   let attempt: Record<string, unknown> | null = null;
   {
     const byAssignment = await db
@@ -622,18 +622,90 @@ async function handleGetResult(
       .eq("attempt_id", attempt.id)
       .order("kim_number", { ascending: true });
 
-    part1Answers = (part1Rows ?? []).map((row) => {
-      const v = variantTasksByKim[row.kim_number as number];
-      return {
-        kim_number: row.kim_number,
-        student_answer: row.student_answer,
-        earned_score: row.earned_score,
-        tutor_comment: row.tutor_comment,
-        correct_answer: (v?.correct_answer as string | null) ?? null,
-        max_score: (v?.max_score as number | undefined) ?? 0,
-        check_mode: (v?.check_mode as string | null) ?? null,
-      };
-    });
+    const rowsByKim = new Map<number, Record<string, unknown>>();
+    for (const r of part1Rows ?? []) {
+      rowsByKim.set(r.kim_number as number, r as Record<string, unknown>);
+    }
+
+    // Derive-on-read fallback (2026-06-06): для blank/OCR-попыток, оценённых до
+    // редеплоя per-KIM персистинга, строки в mock_exam_attempt_part1_answers
+    // могут отсутствовать / иметь earned_score=null, хотя ai_part1_ocr_json.cells
+    // заполнен → ученик видел бы только итог без разбалловки. Восстанавливаем
+    // разбалловку ТОЛЬКО для отображения: recognized value (= ответ ученика на
+    // бланке) + детерминированный earned_score через checkPart1. Stored row всегда
+    // в приоритете. `ai_part1_ocr_json` НЕ возвращается ученику (tutor-only
+    // artifact, rule 45) — читаем server-side, наружу отдаём только value+score.
+    const ocrCells = ((attempt.ai_part1_ocr_json as Record<string, unknown> | null)
+      ?.cells ?? null) as Record<string, { value?: string | null }> | null;
+    const ocrValueForKim = (kim: number): string | null => {
+      const cell = ocrCells?.[kim] ?? ocrCells?.[String(kim)] ?? null;
+      const v = cell && typeof cell.value === "string" ? cell.value.trim() : "";
+      return v !== "" ? v : null;
+    };
+
+    const part1VariantTasks = Object.values(variantTasksByKim)
+      .filter((v) => (v.part as number | undefined) === 1)
+      .sort((a, b) => ((a.kim_number as number) ?? 0) - ((b.kim_number as number) ?? 0));
+
+    if (part1VariantTasks.length > 0) {
+      const out: unknown[] = [];
+      for (const v of part1VariantTasks) {
+        const kim = v.kim_number as number;
+        const row = rowsByKim.get(kim) ?? null;
+        const hasStoredScore =
+          row != null && row.earned_score !== null && row.earned_score !== undefined;
+        const ocrValue = ocrValueForKim(kim);
+
+        // Нет ни строки, ни распознанного ответа → не фабрикуем пустую строку.
+        if (!row && ocrValue === null) continue;
+
+        let studentAnswer: string | null;
+        let earnedScore: number | null;
+        if (hasStoredScore) {
+          studentAnswer = (row!.student_answer as string | null) ?? null;
+          earnedScore = row!.earned_score as number;
+        } else if (ocrValue !== null) {
+          studentAnswer = ocrValue;
+          earnedScore = checkPart1(
+            (v.correct_answer as string | null) ?? null,
+            ocrValue,
+            (v.check_mode as CheckMode | null) ?? null,
+            (v.max_score as number | undefined) ?? 0,
+            kim,
+          ).earned;
+        } else {
+          // строка есть, но earned_score=null и OCR нет → отдаём как есть.
+          studentAnswer = (row!.student_answer as string | null) ?? null;
+          earnedScore = (row!.earned_score as number | null) ?? null;
+        }
+
+        out.push({
+          kim_number: kim,
+          student_answer: studentAnswer,
+          earned_score: earnedScore,
+          tutor_comment: (row?.tutor_comment as string | null) ?? null,
+          correct_answer: (v.correct_answer as string | null) ?? null,
+          max_score: (v.max_score as number | undefined) ?? 0,
+          check_mode: (v.check_mode as string | null) ?? null,
+        });
+      }
+      part1Answers = out;
+    } else {
+      // Defensive: variant tasks не загрузились (нет variant_id) → старое
+      // row-based поведение без regression.
+      part1Answers = (part1Rows ?? []).map((row) => {
+        const v = variantTasksByKim[row.kim_number as number];
+        return {
+          kim_number: row.kim_number,
+          student_answer: row.student_answer,
+          earned_score: row.earned_score,
+          tutor_comment: row.tutor_comment,
+          correct_answer: (v?.correct_answer as string | null) ?? null,
+          max_score: (v?.max_score as number | undefined) ?? 0,
+          check_mode: (v?.check_mode as string | null) ?? null,
+        };
+      });
+    }
   }
 
   // Part 2 reveal (2026-06-02, item 2 — state-aware, see rule 45):

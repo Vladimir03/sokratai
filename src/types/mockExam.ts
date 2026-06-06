@@ -366,6 +366,13 @@ export interface MockExamAttemptPart1Answer {
    * Frontend resolves через signed URL helper при render.
    */
   task_image_url?: string | null;
+  /**
+   * 2026-06-06: провенанс балла — 'ocr'/'student_form'/'finalize_default' = балл
+   * AI (авто), 'tutor' = ручной балл репетитора. Используется в
+   * Part1BlankReviewPanel для подписи строки «Балл AI» vs «Ваш балл». Optional —
+   * backward compat (derive-on-read проставляет 'ocr' для восстановленных).
+   */
+  score_source?: string | null;
 }
 
 export interface MockExamAttemptPart2Solution {

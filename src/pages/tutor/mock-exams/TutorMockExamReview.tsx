@@ -602,8 +602,9 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                 <div className="flex-1 min-w-0 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-900 dark:text-emerald-200">
                   <strong>AI распознал бланк</strong> (
                   {recognizedCount}/20 клеток
-                  ) и выставил баллы. Проверь клетки с amber-обводкой (AI не уверен)
-                  — при необходимости поправь.
+                  ) и выставил баллы. Цвет карточки = балл: зелёный — полный,
+                  жёлтый — частичный, красный — 0. Клетки с amber-обводкой — AI не
+                  уверен в распознавании, сверь по фото и при необходимости поправь.
                 </div>
               )}
               {!isReadOnly && (
@@ -644,6 +645,9 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
             const correctAnswer = answerRow?.correct_answer ?? null;
             const earnedScore = answerRow?.earned_score ?? null;
             const studentAnswer = answerRow?.student_answer ?? null;
+            // 2026-06-06: балл AI (авто) vs ручной балл тутора. Если тутор уже
+            // переопределил (score_source==='tutor') — подписываем «Ваш балл».
+            const isTutorScore = answerRow?.score_source === 'tutor';
 
             type CellStatus = 'correct' | 'partial' | 'wrong' | 'no_answer' | 'unknown';
             let status: CellStatus = 'unknown';
@@ -694,6 +698,28 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                   ? 'border-rose-200 dark:border-rose-900'
                   : 'border-amber-200 dark:border-amber-900';
 
+            // 2026-06-06: подсветка ФОНА карточки по верности (фикс «непонятно,
+            // сколько назначил ИИ» — балл виден с одного взгляда). Сигнал низкой
+            // уверенности OCR остаётся ОТДЕЛЬНО через amber-рамку/ring выше
+            // (isLowConf) — не смешиваем «AI не уверен в распознавании» с
+            // «ответ неверный». Палитра emerald/amber/rose — waiver rule 90.
+            const bgClass =
+              status === 'correct'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40'
+                : status === 'partial'
+                  ? 'bg-amber-50 dark:bg-amber-950/40'
+                  : status === 'wrong'
+                    ? 'bg-rose-50 dark:bg-rose-950/40'
+                    : 'bg-white dark:bg-slate-900';
+            const scoreLineClass =
+              status === 'correct'
+                ? 'text-emerald-700 dark:text-emerald-300'
+                : status === 'partial'
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : status === 'wrong'
+                    ? 'text-rose-700 dark:text-rose-300'
+                    : 'text-slate-500 dark:text-slate-400';
+
             // TASK-OCR Round 3.1 (2026-05-21): убран отдельный «⚠ AI?» бейдж
             // (визуальный шум рядом со status icon). Состояние «AI не уверен»
             // выражается через amber рамку клетки + tooltip на ячейке. Tutor
@@ -707,7 +733,8 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
               <label
                 key={t.kim_number}
                 className={cn(
-                  'flex flex-col gap-1 p-2 rounded-md bg-white border dark:bg-slate-900',
+                  'flex flex-col gap-1 p-2 rounded-md border',
+                  bgClass,
                   borderClass,
                 )}
                 title={lowConfTitle}
@@ -747,15 +774,17 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                     <Search className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                   </button>
                 </span>
-                {/* AI recognized + correct_answer row. Только если что-то есть. */}
+                {/* Распознанный (OCR) ответ ученика + верный ответ. Переименовано
+                    «AI:»→«Распознано:» (2026-06-06), т.к. ниже добавлена строка
+                    «Балл AI» — два ярлыка «AI» путали бы. */}
                 {(hasRecognition || correctAnswer) && (
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug flex flex-wrap gap-x-1.5">
                     {hasRecognition && (
                       <span
                         className="truncate"
-                        title={`AI распознал: «${ocrCell.value}»`}
+                        title={`AI распознал ответ ученика: «${ocrCell.value}»`}
                       >
-                        AI: <strong className="font-medium text-slate-700 dark:text-slate-300">{ocrCell.value || '—'}</strong>
+                        Распознано: <strong className="font-medium text-slate-700 dark:text-slate-300">{ocrCell.value || '—'}</strong>
                       </span>
                     )}
                     {correctAnswer && (
@@ -763,11 +792,18 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                         className="truncate"
                         title={`Правильный ответ: «${correctAnswer}»`}
                       >
-                        Верно: <strong className="font-medium text-emerald-700 dark:text-emerald-400">{correctAnswer}</strong>
+                        Верный: <strong className="font-medium text-emerald-700 dark:text-emerald-400">{correctAnswer}</strong>
                       </span>
                     )}
                   </span>
                 )}
+                {/* 2026-06-06: явная строка балла — тутор видит, сколько назначил
+                    ИИ (раньше балл был только в инпуте, который мог быть пуст).
+                    «Балл AI» пока авто, «Ваш балл» после ручной правки. */}
+                <span className={cn('text-[11px] font-semibold leading-snug', scoreLineClass)}>
+                  {isTutorScore ? 'Ваш балл' : 'Балл AI'}:{' '}
+                  {earnedScore !== null ? earnedScore : '—'} / {t.max_score}
+                </span>
                 <Input
                   type="number"
                   inputMode="numeric"
