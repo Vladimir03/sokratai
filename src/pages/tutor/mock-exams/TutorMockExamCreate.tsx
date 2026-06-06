@@ -76,6 +76,17 @@ const VARIANT_LIBRARY = [
     badge: 'Новый',
   },
   {
+    // uuid5(NS, "mock-exam-variant-5-egor-physics-2026").
+    // Микс: Часть 1 из Варианта 4, №21/22/24 из Варианта 2, №23 из Варианта 4,
+    // №25 из присланного скриншота, №26 из Варианта 1.
+    id: '03660fb4-5247-5376-a0e9-2eb5faae844e',
+    title: 'Тренировочный 5 (физика ЕГЭ-2026)',
+    attribution: 'Источник: репетитор Егор Блинов',
+    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
+    isAvailable: true,
+    badge: 'Новый',
+  },
+  {
     id: 'fipi-demo-2026-placeholder',
     title: 'Демоверсия ФИПИ-2026',
     attribution: 'Источник: ФИПИ',
@@ -92,6 +103,7 @@ const DEFAULT_VARIANT_ID = VARIANT_LIBRARY[0].id;
 const VARIANT_DEFAULT_TITLES: Record<string, string> = {
   '36cebc45-e2e8-5603-a753-01c818bba131': 'Пробник Тренировочный 1',
   'b3d8a2f2-c831-5b85-976f-fe50ba64d393': 'Пробник Тренировочный 2',
+  '03660fb4-5247-5376-a0e9-2eb5faae844e': 'Пробник Тренировочный 5',
 };
 const DEFAULT_TITLE = VARIANT_DEFAULT_TITLES[DEFAULT_VARIANT_ID] ?? 'Пробник';
 const DEFAULT_TITLE_VALUES = new Set(Object.values(VARIANT_DEFAULT_TITLES));

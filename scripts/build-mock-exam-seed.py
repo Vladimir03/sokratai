@@ -193,6 +193,8 @@ def build_sql(tasks_data: dict) -> str:
         task_text = re.sub(r"\n{3,}", "\n\n", task_text).strip()
         correct_answer = t.get("expected_answer") if part == 1 else None
         solution_text = t.get("solution_text") if part == 2 else None
+        # 2026-06-06: фото эталонного решения Части 2 (dual-format, как task images).
+        solution_images = t.get("solution_images", []) if part == 2 else []
         images = t.get("images", [])
         anom_fixed = t.get("_layout_anomaly_fixed")
         review_imgs = t.get("_review_images")
@@ -206,7 +208,7 @@ def build_sql(tasks_data: dict) -> str:
         lines.append(f"INSERT INTO public.mock_exam_variant_tasks (")
         lines.append(f"  id, variant_id, kim_number, part, order_num,")
         lines.append(f"  task_text, task_image_url, correct_answer, check_mode, max_score,")
-        lines.append(f"  solution_text, topic")
+        lines.append(f"  solution_text, solution_image_urls, topic")
         lines.append(f") VALUES (")
         lines.append(f"  '{tid}'::uuid,")
         lines.append(f"  '{vid}'::uuid,")
@@ -217,6 +219,7 @@ def build_sql(tasks_data: dict) -> str:
         lines.append(f"  '{check_mode}',")
         lines.append(f"  {max_score},")
         lines.append(f"  {sql_or_null(solution_text)},")
+        lines.append(f"  {serialize_task_image_url(solution_images)},")
         lines.append(f"  {sql_str(topic)}")
         lines.append(f") ON CONFLICT (id) DO NOTHING;")
         lines.append("")

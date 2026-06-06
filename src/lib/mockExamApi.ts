@@ -324,6 +324,12 @@ export async function retryMockExamPart1OCR(
  * Preserves manual tutor edits (`score_source='tutor'`).
  * После пересчёта обновляет `total_part1_score`.
  *
+ * 2026-06-06: UI больше НЕ дёргает эту функцию — кнопка «По критериям ФИПИ»
+ * убрана из TutorMockExamReview.tsx (Часть 1 авто-проверяется по ФИПИ 2026
+ * partial credit на сабмите, handleSubmitAttempt). Экспорт оставлен для
+ * retroactive re-grade старых pilot-attempts через SQL / dev tools. Бэкенд-роут
+ * `POST /attempts/:id/recheck-part1` (handleRecheckPart1) тоже сохранён.
+ *
  * Spec: docs/delivery/features/mock-exams-v1-pilot-polish/spec.md AC-P4
  */
 export async function recheckMockExamPart1(
