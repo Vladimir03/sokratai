@@ -36,6 +36,11 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import {
+  primaryToSecondary,
+  getEgePhysicsBenchmarks,
+  MAX_PRIMARY_EGE_PHYSICS_2025,
+} from '@/lib/mockExamScaleEge2025';
+import {
   fetchPublicMockResult,
   type PublicMockResultData,
   type PublicMockResultPart1Answer,
@@ -62,19 +67,16 @@ function formatRussianDate(iso: string | null): string | null {
 
 // ─── EGE physics canonical thresholds ────────────────────────────────────────
 //
-// ФИПИ-published 2025 thresholds. Phase 1 uses these only when variant
-// total_max_score === 54 (canonical EGE physics). Phase 2 will replace
-// with proper lookup table per CLAUDE.md spec.
-
-const EGE_PHYSICS_MAX = 54;
-const EGE_PHYSICS_PASSING = 22;
-const EGE_PHYSICS_GOOD = 36;
+// Единый источник со студенческим экраном — mockExamScaleEge2025 (ФИПИ-таблица
+// 45 первичных → 100 тестовых). Порог 8 (= 36 тестовых), хорошо 27 (≈ 68 тестовых).
+// Применяется, когда максимум варианта = 45 (канон ЕГЭ физика). Иначе — только
+// первичный балл, без меток и тестового балла.
 
 interface ScaleConfig {
   max: number;
   passingPrimary: number | null;
   goodPrimary: number | null;
-  /** Predicted test score (out of 100). null = no Phase 1 conversion. */
+  /** Predicted test score (out of 100). null = no conversion. */
   testScore: number | null;
 }
 
@@ -83,20 +85,15 @@ function buildScaleConfig(
   variantMax: number | null,
   examType: string | null,
 ): ScaleConfig {
-  const max = variantMax && variantMax > 0 ? variantMax : EGE_PHYSICS_MAX;
-  // Phase 1: only EGE physics canonical scale. Other exams (OGE / future
-  // variants with different totals) — only show primary, no test predict.
-  if (max === EGE_PHYSICS_MAX && examType === 'ege_physics') {
-    const score = totalScore ?? 0;
-    // Naive linear mapping (ChatGPT review note: this is a placeholder for
-    // the Phase 2 lookup table). Stays prefixed «~» + «предварительно»
-    // wording to set expectation correctly.
-    const test = Math.round((score / EGE_PHYSICS_MAX) * 100);
+  const max =
+    variantMax && variantMax > 0 ? variantMax : MAX_PRIMARY_EGE_PHYSICS_2025;
+  const benchmarks = getEgePhysicsBenchmarks({ totalMax: max, examType });
+  if (benchmarks) {
     return {
       max,
-      passingPrimary: EGE_PHYSICS_PASSING,
-      goodPrimary: EGE_PHYSICS_GOOD,
-      testScore: Math.min(100, Math.max(0, test)),
+      passingPrimary: benchmarks.pass,
+      goodPrimary: benchmarks.good,
+      testScore: primaryToSecondary(totalScore ?? 0),
     };
   }
   return {
@@ -228,7 +225,7 @@ function ScorePanel({
 
       <div className="my-5">
         <div
-          className="relative h-3 overflow-hidden rounded-full bg-slate-100"
+          className="relative h-3 rounded-full bg-slate-100"
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={scale.max}
@@ -236,22 +233,47 @@ function ScorePanel({
           aria-label="Шкала первичных баллов"
         >
           <div
-            className={`h-full rounded-full transition-[width] duration-500 ${barColour}`}
+            className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ${barColour}`}
             style={{ width: widthPct }}
           />
-        </div>
-        <div className="mt-1.5 flex justify-between text-xs text-slate-400">
-          <span>0</span>
-          {scale.passingPrimary !== null ? (
-            <span className="text-amber-600">{scale.passingPrimary}&nbsp;порог</span>
+          {scale.passingPrimary !== null && scale.max > 0 ? (
+            <span
+              className="absolute top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-amber-500"
+              style={{ left: `${(scale.passingPrimary / scale.max) * 100}%` }}
+              aria-hidden="true"
+            />
           ) : null}
-          {scale.goodPrimary !== null ? (
-            <span className="text-emerald-700">
-              {scale.goodPrimary}&nbsp;«хорошо»
+          {scale.goodPrimary !== null && scale.max > 0 ? (
+            <span
+              className="absolute top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-emerald-700"
+              style={{ left: `${(scale.goodPrimary / scale.max) * 100}%` }}
+              aria-hidden="true"
+            />
+          ) : null}
+        </div>
+        {scale.passingPrimary !== null && scale.goodPrimary !== null && scale.max > 0 ? (
+          <div className="relative mt-1.5 h-4 text-xs tabular-nums text-slate-400">
+            <span className="absolute left-0">0</span>
+            <span
+              className="absolute -translate-x-1/2 whitespace-nowrap text-amber-600"
+              style={{ left: `${(scale.passingPrimary / scale.max) * 100}%` }}
+            >
+              {scale.passingPrimary} порог
             </span>
-          ) : null}
-          <span>{scale.max}</span>
-        </div>
+            <span
+              className="absolute -translate-x-1/2 whitespace-nowrap text-emerald-700"
+              style={{ left: `${(scale.goodPrimary / scale.max) * 100}%` }}
+            >
+              {scale.goodPrimary} «хорошо»
+            </span>
+            <span className="absolute right-0">{scale.max}</span>
+          </div>
+        ) : (
+          <div className="mt-1.5 flex justify-between text-xs tabular-nums text-slate-400">
+            <span>0</span>
+            <span>{scale.max}</span>
+          </div>
+        )}
       </div>
 
       {part1Score !== null || part2Score !== null ? (

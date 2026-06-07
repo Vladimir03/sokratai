@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-qr-code';
 import {
   Dialog,
@@ -28,11 +28,36 @@ import {
 } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Copy, Check, Link, UserPlus } from 'lucide-react';
+import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import { manualAddTutorStudent } from '@/lib/tutors';
+import { supabase } from '@/lib/supabaseClient';
+import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import type { ManualAddTutorStudentInput, TutorGroup } from '@/types/tutor';
+
+/**
+ * Lightweight, RU-DPI-resilient fetch of the tutor's invite code.
+ * Uses the dedicated SECURITY DEFINER RPC (generates the code if missing) with
+ * a hard ~10s timeout — independent of the heavy ['tutor','profile'] query that
+ * can stall for minutes and used to hang the «По ссылке» tab on «Загрузка…».
+ */
+async function fetchTutorInviteCode(): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const { data, error } = await supabase
+      .rpc('tutor_get_invite_code')
+      .abortSignal(controller.signal);
+    if (error) throw error;
+    if (!data || typeof data !== 'string') {
+      throw new Error('Пустой код приглашения');
+    }
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 interface AddStudentDialogProps {
   open: boolean;
@@ -66,6 +91,25 @@ export function AddStudentDialog({
 }: AddStudentDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Resilient invite-code fetch (decoupled from the slow tutor-profile query).
+  // Seeds instantly from the prop on the happy path; falls back to the RPC
+  // (with timeout + retry + error UI) when the profile is still stalled.
+  const seededCode = inviteCode && inviteCode.trim() ? inviteCode : undefined;
+  const inviteQuery = useQuery({
+    queryKey: ['tutor', 'invite-code'],
+    queryFn: fetchTutorInviteCode,
+    enabled: open,
+    initialData: seededCode,
+    staleTime: 5 * 60 * 1000,
+    retry: 2,
+    refetchOnWindowFocus: false,
+  });
+  const resolvedInviteCode = inviteQuery.data ?? seededCode;
+  const resolvedInviteWebLink = resolvedInviteCode
+    ? getTutorInviteWebLink(resolvedInviteCode)
+    : inviteWebLink;
+
   const [copied, setCopied] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
@@ -153,7 +197,7 @@ export function AddStudentDialog({
 
   const handleCopyLink = async () => {
     try {
-      await navigator.clipboard.writeText(inviteWebLink);
+      await navigator.clipboard.writeText(resolvedInviteWebLink);
       setCopied(true);
       toast({
         title: 'Ссылка скопирована',
@@ -229,22 +273,16 @@ export function AddStudentDialog({
       toast({ title: 'Некорректный формат email', variant: 'destructive' });
       return;
     }
-    if (!learningGoal.trim()) {
-      toast({ title: 'Выберите цель занятий', variant: 'destructive' });
-      return;
-    }
+    // Цель занятий и часовая ставка теперь необязательны (решение Vladimir
+    // 2026-06-07). Обязательны только имя + один контакт (email/telegram, выше).
     if (learningGoalPreset === 'other' && !learningGoalOther.trim()) {
       toast({ title: 'Опишите цель занятий', variant: 'destructive' });
-      return;
-    }
-    if (!formData.hourly_rate_cents) {
-      toast({ title: 'Укажите часовую ставку', variant: 'destructive' });
       return;
     }
     if (miniGroupsEnabled && isInMiniGroup && !selectedGroupId) {
       toast({
         title: 'Выберите мини-группу',
-        description: 'При включенном тумблере нужно выбрать или создать группу',
+        description: 'Чтобы добавить ученика в группу, выберите или создайте её',
         variant: 'destructive',
       });
       return;
@@ -331,21 +369,21 @@ export function AddStudentDialog({
           
           {/* Tab: By Link */}
           <TabsContent value="link" className="space-y-4 mt-4">
-            {inviteCode ? (
+            {resolvedInviteCode ? (
               <>
                 <div className="flex justify-center p-4 bg-white rounded-lg">
-                  <QRCode value={inviteWebLink} size={180} />
+                  <QRCode value={resolvedInviteWebLink} size={180} />
                 </div>
-                
+
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-2">
                     Код приглашения
                   </p>
                   <p className="text-xl font-mono font-bold tracking-wider">
-                    {inviteCode}
+                    {resolvedInviteCode}
                   </p>
                 </div>
-                
+
                 <Button
                   variant="outline"
                   className="w-full"
@@ -358,14 +396,33 @@ export function AddStudentDialog({
                   )}
                   {copied ? 'Скопировано!' : 'Копировать ссылку'}
                 </Button>
-                
+
                 <p className="text-xs text-muted-foreground text-center">
                   Ученик перейдёт по ссылке и автоматически привяжется к вам
                 </p>
               </>
+            ) : inviteQuery.isError ? (
+              <div className="flex flex-col items-center gap-3 py-8 text-center">
+                <AlertCircle className="h-8 w-8 text-amber-500" aria-hidden="true" />
+                <p className="text-sm text-muted-foreground">
+                  Не удалось загрузить ссылку-приглашение. Проверьте соединение и попробуйте ещё раз.
+                </p>
+                <Button
+                  variant="outline"
+                  onClick={() => void inviteQuery.refetch()}
+                  disabled={inviteQuery.isFetching}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <RefreshCw
+                    className={`mr-2 h-4 w-4 ${inviteQuery.isFetching ? 'animate-spin' : ''}`}
+                  />
+                  Повторить
+                </Button>
+              </div>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                Загрузка кода приглашения...
+              <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+                <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+                <span className="text-sm">Загрузка кода приглашения…</span>
               </div>
             )}
           </TabsContent>
@@ -373,7 +430,7 @@ export function AddStudentDialog({
           {/* Tab: Manual */}
           <TabsContent value="manual" className="mt-4">
             <DialogDescription className="mb-4">
-              Заполните данные ученика. Обязательные поля отмечены.
+              Обязательно — имя и хотя бы один контакт (email или Telegram). Остальное можно заполнить позже.
             </DialogDescription>
 
             <ScrollArea className="h-[60vh] pr-4">
@@ -418,93 +475,10 @@ export function AddStudentDialog({
                     />
                   </div>
 
-                  {/* Phase 8.1 (2026-05-20) — gender select для AI grammar
-                      conjugation. Mirror TutorStudentProfile (Phase 8). Полезно
-                      особенно для иностранных имён (Anastasiia, Marie), где AI
-                      guess по имени fails. Save в tutor_students.gender через
-                      tutor-manual-add-student edge function. */}
-                  <div className="space-y-2">
-                    <Label htmlFor="manual_student_gender">Пол ученика</Label>
-                    <select
-                      id="manual_student_gender"
-                      value={formData.gender ?? ''}
-                      onChange={(e) =>
-                        handleFormChange(
-                          'gender',
-                          (e.target.value === 'male' || e.target.value === 'female')
-                            ? e.target.value
-                            : null,
-                        )
-                      }
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <option value="">Не указано</option>
-                      <option value="female">Женский</option>
-                      <option value="male">Мужской</option>
-                    </select>
-                  </div>
-
                   <p className="text-xs text-muted-foreground md:col-span-2">
-                    Заполните email или Telegram (или оба). Рекомендуем указать email — Telegram может быть недоступен.
-                    Пол ученика — необязательно, но помогает AI правильно склонять глаголы («ты подставила» / «ты подставил»).
+                    Укажите хотя бы один контакт: email или Telegram. Рекомендуем email — Telegram может быть недоступен.
+                    Без email и Telegram ученик не сможет войти в Сократ и получать уведомления — добавьте позже.
                   </p>
-
-                  <div className="space-y-2">
-                    <Label>Цель занятий</Label>
-                    <Select
-                      value={learningGoalPreset || undefined}
-                      onValueChange={(value) => setLearningGoalPreset(value)}
-                    >
-                      <SelectTrigger className="text-base">
-                        <SelectValue placeholder="Выберите цель" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
-                        <SelectItem value="ОГЭ">ОГЭ</SelectItem>
-                        <SelectItem value="Школьная программа">
-                          Школьная программа
-                        </SelectItem>
-                        <SelectItem value="Олимпиада">Олимпиада</SelectItem>
-                        <SelectItem value="other">Другое</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {learningGoalPreset === 'other' && (
-                    <div className="space-y-2">
-                      <Label htmlFor="learningGoalOther">Опишите цель</Label>
-                      <Input
-                        id="learningGoalOther"
-                        value={learningGoalOther}
-                        onChange={(e) => setLearningGoalOther(e.target.value)}
-                        placeholder="Например, подготовка к олимпиаде"
-                        required
-                        onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
-                        onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
-                      />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label htmlFor="hourly_rate_top">Часовая ставка (₽/ч)</Label>
-                    <Input
-                      id="hourly_rate_top"
-                      type="number"
-                      min={0}
-                      value={formData.hourly_rate_cents ? formData.hourly_rate_cents / 100 : ''}
-                      onChange={(e) =>
-                        handleFormChange(
-                          'hourly_rate_cents',
-                          e.target.value ? parseInt(e.target.value) * 100 : undefined
-                        )
-                      }
-                      placeholder="например, 1500"
-                      required
-                      onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
-                      onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
-                    />
-                    <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
-                  </div>
 
                   {miniGroupsEnabled && (
                     <div className="space-y-3 rounded-md border p-3 md:col-span-2">
@@ -576,9 +550,90 @@ export function AddStudentDialog({
 
                 <Accordion type="single" collapsible>
                   <AccordionItem value="optional">
-                    <AccordionTrigger>Дополнительные данные</AccordionTrigger>
+                    <AccordionTrigger>Дополнительно</AccordionTrigger>
                     <AccordionContent>
                       <div className="grid gap-4 md:grid-cols-2">
+                        {/* Цель занятий — опционально */}
+                        <div className="space-y-2">
+                          <Label>Цель занятий</Label>
+                          <Select
+                            value={learningGoalPreset || undefined}
+                            onValueChange={(value) => setLearningGoalPreset(value)}
+                          >
+                            <SelectTrigger className="text-base">
+                              <SelectValue placeholder="Выберите цель" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
+                              <SelectItem value="ОГЭ">ОГЭ</SelectItem>
+                              <SelectItem value="Школьная программа">
+                                Школьная программа
+                              </SelectItem>
+                              <SelectItem value="Олимпиада">Олимпиада</SelectItem>
+                              <SelectItem value="other">Другое</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {learningGoalPreset === 'other' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="learningGoalOther">Опишите цель</Label>
+                            <Input
+                              id="learningGoalOther"
+                              value={learningGoalOther}
+                              onChange={(e) => setLearningGoalOther(e.target.value)}
+                              placeholder="Например, подготовка к олимпиаде"
+                              className="text-base"
+                            />
+                          </div>
+                        )}
+
+                        {/* Часовая ставка — опционально (для расписания/оплат) */}
+                        <div className="space-y-2">
+                          <Label htmlFor="hourly_rate_top">Часовая ставка (₽/ч)</Label>
+                          <Input
+                            id="hourly_rate_top"
+                            type="number"
+                            min={0}
+                            value={formData.hourly_rate_cents ? formData.hourly_rate_cents / 100 : ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'hourly_rate_cents',
+                                e.target.value ? parseInt(e.target.value) * 100 : undefined,
+                              )
+                            }
+                            placeholder="например, 1500"
+                            className="text-base"
+                          />
+                          <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
+                        </div>
+
+                        {/* Пол ученика (Phase 8.1) — для AI grammar conjugation.
+                            Полезно для иностранных имён (Anastasiia, Marie). */}
+                        <div className="space-y-2">
+                          <Label htmlFor="manual_student_gender">Пол ученика</Label>
+                          <select
+                            id="manual_student_gender"
+                            value={formData.gender ?? ''}
+                            onChange={(e) =>
+                              handleFormChange(
+                                'gender',
+                                (e.target.value === 'male' || e.target.value === 'female')
+                                  ? e.target.value
+                                  : null,
+                              )
+                            }
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            <option value="">Не указано</option>
+                            <option value="female">Женский</option>
+                            <option value="male">Мужской</option>
+                          </select>
+                          <p className="text-xs text-muted-foreground">
+                            Помогает AI правильно склонять глаголы («ты подставила» / «ты подставил»).
+                          </p>
+                        </div>
+
                         <div className="space-y-2">
                           <Label htmlFor="parent_contact">Контакт родителя</Label>
                           <Input

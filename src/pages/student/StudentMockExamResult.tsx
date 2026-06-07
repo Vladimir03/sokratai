@@ -42,7 +42,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useStudentMockExamResult } from '@/hooks/useStudentMockExamResult';
 import { StudentMockExamApiError } from '@/lib/studentMockExamApi';
-import { primaryToSecondary } from '@/lib/mockExamScaleEge2025';
+import { primaryToSecondary, getEgePhysicsBenchmarks } from '@/lib/mockExamScaleEge2025';
 import type {
   StudentMockExamResultPart1Answer,
   StudentMockExamResultPart2Solution,
@@ -693,6 +693,7 @@ function Part2ApprovedSection({
 function FinalSummary({
   totalScore,
   totalMax,
+  examType,
   part1Score,
   part1Max,
   part2Score,
@@ -700,6 +701,7 @@ function FinalSummary({
 }: {
   totalScore: number | null;
   totalMax: number | null;
+  examType: string | null;
   part1Score: number | null;
   part1Max: number | null;
   part2Score: number | null;
@@ -715,15 +717,15 @@ function FinalSummary({
 
   const ratio = Math.max(0, Math.min(1, totalScore / totalMax));
   const percent = Math.round(ratio * 100);
-  // Pilot benchmark anchors (mockup): 22 порог / 36 «хорошо» / 54 max.
-  // We avoid hardcoded test-score conversion (Phase 2) — show только бенчмарк.
-  const passThreshold = Math.round(totalMax * 0.4); // 22/54 ≈ 0.4
-  const goodThreshold = Math.round(totalMax * 0.66); // 36/54 ≈ 0.66
+  // Бенчмарки «порог» / «хорошо» — единый источник (mockExamScaleEge2025).
+  // ЕГЭ физика (max 45 + exam_type='ege_physics'): порог 8 (= 36 тестовых,
+  // ФИПИ), хорошо 27 (≈ 68 тестовых). Не-физика / ОГЭ → null → метки скрыты.
+  const benchmarks = getEgePhysicsBenchmarks({ totalMax, examType });
 
-  // TASK-16: ФИПИ 2025 шкала — primary → secondary. Только для ЕГЭ физика
-  // (max primary = 45 в variant1). Phase 2: добавить per-subject lookup.
-  const secondaryScore =
-    totalMax === 45 ? primaryToSecondary(totalScore) : null;
+  // ФИПИ 2025 шкала primary → secondary — только когда применимы бенчмарки
+  // (ЕГЭ физика, max 45). Тот же гейт, чтобы тестовый балл не показывался для
+  // ОГЭ / других предметов.
+  const secondaryScore = benchmarks ? primaryToSecondary(totalScore) : null;
 
   return (
     <Card className="mb-3 shadow-none">
@@ -749,19 +751,50 @@ function FinalSummary({
         </p>
 
         <div className="mb-4 mt-5">
-          <div className="relative h-3 overflow-hidden rounded-full bg-slate-100">
+          <div className="relative h-3 rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-emerald-500 transition-[width]"
+              className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width]"
               style={{ width: `${percent}%` }}
               aria-label={`Прогресс ${percent}%`}
             />
+            {benchmarks ? (
+              <>
+                <span
+                  className="absolute top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-amber-500"
+                  style={{ left: `${(benchmarks.pass / totalMax) * 100}%` }}
+                  aria-hidden="true"
+                />
+                <span
+                  className="absolute top-1/2 h-4 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded bg-emerald-700"
+                  style={{ left: `${(benchmarks.good / totalMax) * 100}%` }}
+                  aria-hidden="true"
+                />
+              </>
+            ) : null}
           </div>
-          <div className="mt-1.5 flex justify-between text-xs tabular-nums text-slate-400">
-            <span>0</span>
-            <span className="text-amber-600">{passThreshold} порог</span>
-            <span className="text-emerald-700">{goodThreshold} хорошо</span>
-            <span>{totalMax}</span>
-          </div>
+          {benchmarks ? (
+            <div className="relative mt-1.5 h-4 text-xs tabular-nums text-slate-400">
+              <span className="absolute left-0">0</span>
+              <span
+                className="absolute -translate-x-1/2 whitespace-nowrap text-amber-600"
+                style={{ left: `${(benchmarks.pass / totalMax) * 100}%` }}
+              >
+                {benchmarks.pass} порог
+              </span>
+              <span
+                className="absolute -translate-x-1/2 whitespace-nowrap text-emerald-700"
+                style={{ left: `${(benchmarks.good / totalMax) * 100}%` }}
+              >
+                {benchmarks.good} хорошо
+              </span>
+              <span className="absolute right-0">{totalMax}</span>
+            </div>
+          ) : (
+            <div className="mt-1.5 flex justify-between text-xs tabular-nums text-slate-400">
+              <span>0</span>
+              <span>{totalMax}</span>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-center gap-6 text-sm">
@@ -986,6 +1019,7 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
                 <FinalSummary
                   totalScore={view.attempt.total_score}
                   totalMax={totalMax}
+                  examType={view.variant?.exam_type ?? null}
                   part1Score={view.attempt.total_part1_score}
                   part1Max={part1Max}
                   part2Score={view.attempt.total_part2_score}

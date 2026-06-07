@@ -1,9 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
-import { 
+import {
   Pagination, 
   PaginationContent, 
   PaginationItem, 
@@ -33,7 +31,6 @@ import {
   createTutorGroup,
   deactivateTutorGroupMembership,
   resetStudentPassword,
-  setTutorMiniGroupsEnabled,
   upsertTutorGroupMembership,
 } from '@/lib/tutors';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
@@ -82,8 +79,9 @@ function TutorStudentsContent() {
     isRecovering,
     failureCount,
   } = useTutorStudents();
-  const [miniGroupsEnabled, setMiniGroupsEnabled] = useState(false);
-  const [isSavingMiniGroupsToggle, setIsSavingMiniGroupsToggle] = useState(false);
+  // Формат занятий теперь задаётся в профиле (/tutor/profile), по умолчанию ВКЛ
+  // (миграция 20260607120100). Здесь read-only — самовыключающийся тумблер убран.
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled ?? true);
   const {
     groups,
     loading: groupsLoading,
@@ -127,10 +125,6 @@ function TutorStudentsContent() {
   const inviteWebLink = inviteCode ? getTutorInviteWebLink(inviteCode) : '';
   const inviteTelegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
 
-  useEffect(() => {
-    if (!tutor) return;
-    setMiniGroupsEnabled(Boolean(tutor.mini_groups_enabled));
-  }, [tutor?.id, tutor?.mini_groups_enabled]);
 
   useEffect(() => {
     if (miniGroupsEnabled) return;
@@ -270,29 +264,6 @@ function TutorStudentsContent() {
   const handleFilterChange = useCallback((newFilters: FilterValues) => {
     setFilters(newFilters);
   }, []);
-
-  const handleMiniGroupsToggle = useCallback(
-    async (nextEnabled: boolean) => {
-      const previousEnabled = miniGroupsEnabled;
-      setMiniGroupsEnabled(nextEnabled);
-      setIsSavingMiniGroupsToggle(true);
-
-      try {
-        const updatedTutor = await setTutorMiniGroupsEnabled(nextEnabled);
-        if (!updatedTutor) {
-          throw new Error('Не удалось сохранить настройку мини-групп');
-        }
-        refetchTutor();
-      } catch (toggleError) {
-        console.error('Error updating mini groups feature toggle:', toggleError);
-        setMiniGroupsEnabled(previousEnabled);
-        toast.error('Не удалось сохранить переключатель "Мини-группы"');
-      } finally {
-        setIsSavingMiniGroupsToggle(false);
-      }
-    },
-    [miniGroupsEnabled, refetchTutor]
-  );
 
   const handleCreateGroup = useCallback(async (name: string) => {
     const createdGroup = await createTutorGroup({ name });
@@ -454,21 +425,10 @@ function TutorStudentsContent() {
           <div className="space-y-1">
             <h1 className="text-2xl font-bold">👥 Мои ученики</h1>
             <p className="text-sm text-muted-foreground">
-              Mixed-mode: можно вести и мини-группы, и индивидуальные занятия одновременно.
+              Все ваши ученики, мини-группы и индивидуальные занятия в одном месте.
             </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-              <Label htmlFor="miniGroupsGlobalToggle" className="text-sm font-medium">
-                Мини-группы
-              </Label>
-              <Switch
-                id="miniGroupsGlobalToggle"
-                checked={miniGroupsEnabled}
-                disabled={isSavingMiniGroupsToggle}
-                onCheckedChange={handleMiniGroupsToggle}
-              />
-            </div>
             <Button onClick={() => setInviteModalOpen(true)}>
               <UserPlus className="h-4 w-4 mr-2" />
               Добавить ученика

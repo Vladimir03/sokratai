@@ -147,31 +147,28 @@ Deno.serve(async (req) => {
 
     if (!name) {
       return new Response(
-        JSON.stringify({ error: "Name is required" }),
+        JSON.stringify({ code: "VALIDATION", error: "Укажите имя ученика." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     if (!telegramUsernameRaw.trim() && !emailRaw) {
       return new Response(
-        JSON.stringify({ error: "Email or Telegram username is required" }),
+        JSON.stringify({ code: "VALIDATION", error: "Укажите хотя бы один контакт — email или Telegram." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
       return new Response(
-        JSON.stringify({ error: "Invalid email format" }),
+        JSON.stringify({ code: "VALIDATION", error: "Некорректный формат email." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    if (!learningGoal) {
-      return new Response(
-        JSON.stringify({ error: "Learning goal is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    // Цель занятий — опциональна (решение Vladimir 2026-06-07): убрана из
+    // обязательных, чтобы быстрый add не требовал лишних полей. Имя + 1 контакт
+    // (email ИЛИ telegram, проверено выше) — единственный gate.
 
     let studentId: string | null = null;
     let profileRegistrationSource: string | null = null;
@@ -389,7 +386,10 @@ Deno.serve(async (req) => {
     if (typeof body.grade === "number") {
       profileUpdates.grade = body.grade;
     }
-    profileUpdates.learning_goal = learningGoal;
+    // Цель опциональна — пишем только если заполнена (не затираем существующую/null).
+    if (learningGoal) {
+      profileUpdates.learning_goal = learningGoal;
+    }
 
     const { error: profileUpdateError } = await supabaseAdmin
       .from("profiles")

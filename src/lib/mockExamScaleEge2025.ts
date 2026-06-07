@@ -77,8 +77,41 @@ export const MAX_PRIMARY_EGE_PHYSICS_2025 = 45;
 export const MAX_SECONDARY_EGE_PHYSICS_2025 = 100;
 /** Минимальный порог сдачи ЕГЭ для поступления в ВУЗ (secondary). */
 export const PASS_THRESHOLD_SECONDARY_EGE_PHYSICS_2025 = 36;
-/** Минимальный первичный для порога сдачи. */
+/** Минимальный первичный для порога сдачи (8 первичных → 36 тестовых). */
 export const PASS_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = 8;
+/**
+ * «Хорошо» — граница школьной оценки «5» (27 первичных ≈ 68 тестовых).
+ * Vladimir подтвердил 2026-06-07.
+ */
+export const GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = 27;
+
+/**
+ * Бенчмарки «порог» / «хорошо» (в первичных баллах) для прогресс-бара результата.
+ * Шкала применяется ТОЛЬКО для ЕГЭ физика (max 45). Возвращает null, если:
+ *   - `totalMax !== 45`, ИЛИ
+ *   - `examType` явно НЕ `'ege_physics'` (напр. `'oge_physics'` — у него другая
+ *     шкала и оценка 2–5, не 100-балльная).
+ * `examType` null/undefined трактуется пермиссивно (legacy / по max) — чтобы не
+ * спрятать бар, если поле не прокинуто. Single source of truth для обоих
+ * result-экранов (StudentMockExamResult + PublicMockResult), чтобы не разъезжались.
+ *
+ * @example
+ *   getEgePhysicsBenchmarks({ totalMax: 45, examType: 'ege_physics' }) // → { pass: 8, good: 27 }
+ *   getEgePhysicsBenchmarks({ totalMax: 45, examType: 'oge_physics' }) // → null
+ *   getEgePhysicsBenchmarks({ totalMax: 20 }) // → null
+ */
+export function getEgePhysicsBenchmarks(params: {
+  totalMax: number | null | undefined;
+  examType?: string | null;
+}): { pass: number; good: number } | null {
+  const { totalMax, examType } = params;
+  if (totalMax !== MAX_PRIMARY_EGE_PHYSICS_2025) return null;
+  if (examType != null && examType !== 'ege_physics') return null;
+  return {
+    pass: PASS_THRESHOLD_PRIMARY_EGE_PHYSICS_2025,
+    good: GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025,
+  };
+}
 
 /**
  * Convert primary score (0..45) → secondary score (0..100).

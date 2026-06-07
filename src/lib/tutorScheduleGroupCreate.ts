@@ -24,6 +24,11 @@ export interface MiniGroupCreateLessonInput {
   group_source_tutor_group_id?: string;
   group_title_snapshot?: string;
   group_size_snapshot?: number;
+  // Recurring series support (group lessons, 2026-06-07). Mirrors the
+  // individual createLessonSeries fields — passed straight to createLesson.
+  is_recurring?: boolean;
+  recurrence_rule?: string;
+  parent_lesson_id?: string;
 }
 
 export interface MiniGroupCreateResult {
@@ -61,6 +66,9 @@ export async function createMiniGroupLesson({
     group_source_tutor_group_id: lessonInput.group_source_tutor_group_id,
     group_title_snapshot: lessonInput.group_title_snapshot,
     group_size_snapshot: lessonInput.group_size_snapshot ?? members.length,
+    is_recurring: lessonInput.is_recurring,
+    recurrence_rule: lessonInput.recurrence_rule,
+    parent_lesson_id: lessonInput.parent_lesson_id,
     // No tutor_student_id / student_id — this is a group lesson
   });
 
@@ -100,6 +108,120 @@ export async function createMiniGroupLesson({
     lesson,
     participantsInserted: insertedParticipants?.length ?? members.length,
   };
+}
+
+export interface MiniGroupCreateSeriesResult {
+  ok: boolean;
+  /** Первое занятие серии (корень, parent_lesson_id = null). */
+  root?: TutorLessonWithStudent;
+  /** Сколько занятий реально создано (root + успешные дочерние). */
+  count: number;
+  /** Сколько занятий ПЛАНИРОВАЛОСЬ создать (по сетке дат). */
+  expected: number;
+  /** Сколько повторов НЕ удалось создать (для предупреждения «N из M»). */
+  failedCount: number;
+  errorMessage?: string;
+}
+
+interface CreateMiniGroupLessonSeriesParams {
+  members: MiniGroupCreateMember[];
+  /** Параметры первого занятия (group_session_id уже задан вызывающим). */
+  lessonInput: MiniGroupCreateLessonInput;
+  /** ISO-дата окончания серии (включительно). */
+  repeatUntil: string;
+  /** Фабрика уникальных group_session_id (Safari-safe) для каждого повтора. */
+  makeGroupSessionId: () => string;
+}
+
+/**
+ * Создаёт еженедельную СЕРИЮ групповых занятий. Зеркалит individual
+ * `createLessonSeries` (tutorSchedule.ts): MAX 60 экземпляров, неизменяемое
+ * прибавление календарных дней (DST-safe), parent_lesson_id связывает серию.
+ *
+ * Каждый повтор — отдельный unified group lesson (student_id NULL) со СВОИМ
+ * group_session_id + полным набором участников. Существующая логика
+ * правки/отмены/удаления серий групп (rule 60 B-round) ключуется на
+ * parent_lesson_id, поэтому созданная серия сразу управляема.
+ *
+ * Per-occurrence loop (1 lesson + N participants на повтор) — приемлемо для
+ * ≤60 недель; падение одного повтора не валит остальные (best-effort).
+ */
+export async function createMiniGroupLessonSeries({
+  members,
+  lessonInput,
+  repeatUntil,
+  makeGroupSessionId,
+}: CreateMiniGroupLessonSeriesParams): Promise<MiniGroupCreateSeriesResult> {
+  if (members.length === 0) {
+    return { ok: false, count: 0, expected: 0, failedCount: 0, errorMessage: 'Нет участников' };
+  }
+
+  const MAX_INSTANCES = 60;
+  const startDate = new Date(lessonInput.start_at);
+  const untilDate = new Date(new Date(repeatUntil).setHours(23, 59, 59, 999));
+
+  const dates: Date[] = [];
+  for (let week = 0; dates.length < MAX_INSTANCES; week++) {
+    const d = new Date(startDate);
+    d.setDate(startDate.getDate() + week * 7);
+    if (d > untilDate) break;
+    dates.push(d);
+  }
+
+  if (dates.length === 0) {
+    return { ok: false, count: 0, expected: 0, failedCount: 0, errorMessage: 'Нет дат для серии занятий' };
+  }
+
+  const expected = dates.length;
+
+  const isSeries = dates.length > 1;
+
+  // Root (first occurrence). Keeps its caller-supplied group_session_id.
+  const rootResult = await createMiniGroupLesson({
+    members,
+    lessonInput: {
+      ...lessonInput,
+      start_at: dates[0].toISOString(),
+      is_recurring: isSeries,
+      recurrence_rule: isSeries ? 'weekly' : undefined,
+      parent_lesson_id: undefined,
+    },
+  });
+
+  if (!rootResult.ok || !rootResult.lesson) {
+    return {
+      ok: false,
+      count: 0,
+      expected,
+      failedCount: expected,
+      errorMessage: rootResult.errorMessage ?? 'Не удалось создать первое занятие серии',
+    };
+  }
+
+  const rootLesson = rootResult.lesson;
+  let created = 1;
+
+  // Remaining weekly occurrences — each its own session + participants.
+  for (let i = 1; i < dates.length; i++) {
+    const occurrence = await createMiniGroupLesson({
+      members,
+      lessonInput: {
+        ...lessonInput,
+        start_at: dates[i].toISOString(),
+        group_session_id: makeGroupSessionId(),
+        is_recurring: true,
+        recurrence_rule: 'weekly',
+        parent_lesson_id: rootLesson.id,
+      },
+    });
+    if (occurrence.ok) {
+      created += 1;
+    } else {
+      console.error('Mini-group series occurrence failed:', occurrence.errorMessage);
+    }
+  }
+
+  return { ok: true, root: rootLesson, count: created, expected, failedCount: expected - created };
 }
 
 /**

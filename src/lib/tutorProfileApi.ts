@@ -8,9 +8,10 @@ import { supabase } from '@/lib/supabaseClient';
  * RLS:     migration 20260506150000_tutor_profile_infrastructure.sql
  *          (own row INSERT/UPDATE; broad SELECT for authenticated)
  *
- * Single source of truth for `['tutor','profile']` query — see
- * useTutorProfile.ts. All callers go through there, never call these
- * functions directly from a component.
+ * Single source of truth for the `['tutor','profile','card']` query — see
+ * useTutorProfile.ts (этот ключ отдельно от `['tutor','profile']`, который
+ * принадлежит useTutor()/getCurrentTutor(), полная строка tutors). All callers
+ * go through the hook, never call these functions directly from a component.
  */
 
 export class TutorProfileApiError extends Error {
@@ -29,6 +30,8 @@ export interface TutorProfile {
   avatar_url: string | null;
   subjects: string[];
   gender: TutorGender;
+  /** Формат занятий: true = индивидуальные + мини-группы, false = только индивидуальные. */
+  mini_groups_enabled: boolean;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -41,7 +44,7 @@ export interface UpsertTutorProfileInput {
 
 const AVATARS_BUCKET = 'avatars';
 const TUTOR_PROFILE_FIELDS =
-  'id, user_id, name, avatar_url, subjects, gender, created_at, updated_at';
+  'id, user_id, name, avatar_url, subjects, gender, mini_groups_enabled, created_at, updated_at';
 
 // Matches the public URL Supabase generates for objects in our 'avatars' bucket.
 // Used to recover the storage object path from a stored avatar_url so we can
@@ -112,6 +115,8 @@ function normalizeProfile(raw: Record<string, unknown>): TutorProfile {
       typeof raw.avatar_url === 'string' && raw.avatar_url.length > 0 ? raw.avatar_url : null,
     subjects,
     gender: normalizeGender(raw.gender),
+    // По умолчанию ВКЛ (миграция 20260607120100) — defensive default true.
+    mini_groups_enabled: raw.mini_groups_enabled !== false,
     created_at: typeof raw.created_at === 'string' ? raw.created_at : null,
     updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : null,
   };

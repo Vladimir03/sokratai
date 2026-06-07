@@ -322,18 +322,11 @@ function TutorStudentProfileContent() {
       return;
     }
 
-    if (!telegramUsername) {
-      toast.error('Укажите Telegram username');
-      return;
-    }
-
-    if (!learningGoal) {
-      toast.error('Укажите цель занятий');
-      return;
-    }
-
-    if (!editHourlyRate || !editHourlyRate.trim()) {
-      toast.error('Укажите часовую ставку');
+    // Решение Vladimir (2026-06-07): Telegram, цель и ставка на редактировании
+    // больше НЕ обязательны (ученик уже существует, у части нет Telegram).
+    // Обязательно только имя.
+    if (editLearningGoalPreset === 'other' && !editLearningGoalOther.trim()) {
+      toast.error('Опишите цель занятий');
       return;
     }
     if (miniGroupsEnabled && editIsInMiniGroup && !editSelectedGroupId) {
@@ -888,7 +881,7 @@ function TutorStudentProfileContent() {
             <DialogHeader>
               <DialogTitle>Редактировать ученика</DialogTitle>
               <DialogDescription>
-                Обновите данные ученика. Обязательные поля отмечены.
+                Обязательно только имя. Остальное можно заполнить позже.
               </DialogDescription>
             </DialogHeader>
 
@@ -955,54 +948,10 @@ function TutorStudentProfileContent() {
                       value={editTelegram}
                       onChange={(e) => setEditTelegram(e.target.value)}
                       placeholder="@username"
-                      required
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Цель занятий</Label>
-                    <Select
-                      value={editLearningGoalPreset || undefined}
-                      onValueChange={(value) => setEditLearningGoalPreset(value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Выберите цель" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
-                        <SelectItem value="ОГЭ">ОГЭ</SelectItem>
-                        <SelectItem value="Школьная программа">Школьная программа</SelectItem>
-                        <SelectItem value="Олимпиада">Олимпиада</SelectItem>
-                        <SelectItem value="other">Другое</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {editLearningGoalPreset === 'other' && (
-                    <div className="space-y-2">
-                      <Label htmlFor="editLearningGoalOther">Опишите цель</Label>
-                      <Input
-                        id="editLearningGoalOther"
-                        value={editLearningGoalOther}
-                        onChange={(e) => setEditLearningGoalOther(e.target.value)}
-                        placeholder="Например, подготовка к ЕГЭ"
-                        required
-                      />
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <Label htmlFor="editHourlyRate">Часовая ставка (₽/ч)</Label>
-                    <Input
-                      id="editHourlyRate"
-                      type="number"
-                      min={0}
-                      value={editHourlyRate}
-                      onChange={(e) => setEditHourlyRate(e.target.value)}
-                      placeholder="например, 1500"
-                      required
-                    />
-                    <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
+                    <p className="text-xs text-slate-500">
+                      Необязательно. Если у ученика нет Telegram — оставьте пустым.
+                    </p>
                   </div>
 
                   {miniGroupsEnabled && (
@@ -1081,9 +1030,53 @@ function TutorStudentProfileContent() {
 
                 <Accordion type="single" collapsible>
                   <AccordionItem value="optional">
-                    <AccordionTrigger>Дополнительные данные</AccordionTrigger>
+                    <AccordionTrigger>Дополнительно</AccordionTrigger>
                     <AccordionContent>
                       <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Цель занятий</Label>
+                          <Select
+                            value={editLearningGoalPreset || undefined}
+                            onValueChange={(value) => setEditLearningGoalPreset(value)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Выберите цель" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="ЕГЭ">ЕГЭ</SelectItem>
+                              <SelectItem value="ОГЭ">ОГЭ</SelectItem>
+                              <SelectItem value="Школьная программа">Школьная программа</SelectItem>
+                              <SelectItem value="Олимпиада">Олимпиада</SelectItem>
+                              <SelectItem value="other">Другое</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        {editLearningGoalPreset === 'other' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="editLearningGoalOther">Опишите цель</Label>
+                            <Input
+                              id="editLearningGoalOther"
+                              value={editLearningGoalOther}
+                              onChange={(e) => setEditLearningGoalOther(e.target.value)}
+                              placeholder="Например, подготовка к ЕГЭ"
+                            />
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <Label htmlFor="editHourlyRate">Часовая ставка (₽/ч)</Label>
+                          <Input
+                            id="editHourlyRate"
+                            type="number"
+                            min={0}
+                            value={editHourlyRate}
+                            onChange={(e) => setEditHourlyRate(e.target.value)}
+                            placeholder="например, 1500"
+                          />
+                          <p className="text-xs text-muted-foreground">Ставка за 60 минут. Используется в расписании.</p>
+                        </div>
+
                         <div className="space-y-2">
                           <Label htmlFor="editParentContact">Контакт родителя</Label>
                           <Input

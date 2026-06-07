@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,11 @@ import { LoginProvidersSection } from '@/components/tutor/profile/LoginProviders
 import { SecuritySection } from '@/components/tutor/profile/SecuritySection';
 import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
-import { useTutorProfile, useUpsertTutorProfile } from '@/hooks/useTutorProfile';
+import {
+  useSetTutorMiniGroupsEnabled,
+  useTutorProfile,
+  useUpsertTutorProfile,
+} from '@/hooks/useTutorProfile';
 import type { TutorProfile as TutorProfileModel } from '@/lib/tutorProfileApi';
 import { SUBJECTS } from '@/types/homework';
 
@@ -49,6 +53,8 @@ export default function TutorProfile() {
           <TutorIdentitySection profile={profile} />
 
           <TutorSubjectsSection profile={profile} />
+
+          <WorkModeSection profile={profile} />
 
           <SecuritySection />
 
@@ -119,6 +125,113 @@ function TutorSubjectsSection({ profile }: TutorSubjectsSectionProps) {
         </Button>
       </div>
     </section>
+  );
+}
+
+interface WorkModeSectionProps {
+  profile: TutorProfileModel | null;
+}
+
+/**
+ * «Формат занятий» — выбор режима работы (только индивидуальные / + мини-группы).
+ * Заменяет самовыключающийся тумблер из шапки /tutor/students (2026-06-07).
+ * По умолчанию ВКЛ для всех (миграция 20260607120100); тутор может выключить.
+ */
+function WorkModeSection({ profile }: WorkModeSectionProps) {
+  const mutation = useSetTutorMiniGroupsEnabled();
+  const saved = profile?.mini_groups_enabled ?? true;
+  const [value, setValue] = useState<boolean>(saved);
+
+  useEffect(() => {
+    setValue(saved);
+  }, [saved]);
+
+  const isSaving = mutation.isPending;
+
+  const handleSelect = async (next: boolean) => {
+    if (next === value || isSaving) return;
+    const previous = value;
+    setValue(next); // optimistic
+    try {
+      const result = await mutation.mutateAsync(next);
+      if (!result) {
+        throw new Error('Не удалось сохранить настройку');
+      }
+      toast.success(next ? 'Мини-группы включены' : 'Только индивидуальные занятия');
+    } catch (err) {
+      setValue(previous);
+      toast.error(err instanceof Error ? err.message : 'Не удалось сохранить настройку');
+    }
+  };
+
+  return (
+    <section
+      aria-label="Формат занятий"
+      className="rounded-lg border border-border bg-card p-4 sm:p-6"
+    >
+      <h2 className="text-sm font-medium text-slate-900">Формат занятий</h2>
+      <p className="mb-4 mt-1 text-sm text-slate-500">
+        Влияет на расписание, ДЗ и пробники: показывать ли инструменты мини-групп.
+      </p>
+      <div role="radiogroup" aria-label="Формат занятий" className="grid gap-2 sm:grid-cols-2">
+        <WorkModeOption
+          selected={!value}
+          disabled={isSaving}
+          title="Только индивидуальные"
+          description="Самый простой интерфейс, без групповых инструментов."
+          onSelect={() => handleSelect(false)}
+        />
+        <WorkModeOption
+          selected={value}
+          disabled={isSaving}
+          title="Индивидуальные + мини-группы"
+          description="Можно вести и группы, и индивидуальные занятия."
+          onSelect={() => handleSelect(true)}
+        />
+      </div>
+    </section>
+  );
+}
+
+interface WorkModeOptionProps {
+  selected: boolean;
+  disabled: boolean;
+  title: string;
+  description: string;
+  onSelect: () => void;
+}
+
+function WorkModeOption({
+  selected,
+  disabled,
+  title,
+  description,
+  onSelect,
+}: WorkModeOptionProps) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      disabled={disabled}
+      onClick={onSelect}
+      style={{ touchAction: 'manipulation' }}
+      className={`flex min-h-[44px] flex-col items-start gap-1 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-60 ${
+        selected
+          ? 'border-accent bg-accent/5 ring-1 ring-accent/30'
+          : 'border-border bg-white hover:bg-slate-50'
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-medium text-slate-900">
+        {selected ? (
+          <Check className="h-4 w-4 text-accent" aria-hidden="true" />
+        ) : (
+          <span className="h-4 w-4" aria-hidden="true" />
+        )}
+        {title}
+      </span>
+      <span className="text-xs text-slate-500">{description}</span>
+    </button>
   );
 }
 

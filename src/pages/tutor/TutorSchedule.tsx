@@ -52,6 +52,7 @@ import {
 } from '@/lib/tutorSchedule';
 import {
   createMiniGroupLesson,
+  createMiniGroupLessonSeries,
   getLessonParticipants,
   addLessonParticipant,
   removeLessonParticipant,
@@ -1755,6 +1756,10 @@ function AddLessonDialog({
         toast.error('Часть участников группы не найдена в списке учеников');
         return;
       }
+      if (isRecurring && !repeatUntil) {
+        toast.error('Выберите дату окончания повторений');
+        return;
+      }
 
       const sessionId = generateGroupSessionId();
 
@@ -1766,24 +1771,48 @@ function AddLessonDialog({
         group_size_snapshot: miniGroupMembersForCreate.length,
       };
 
+      const groupMembers = miniGroupMembersForCreate.map((m) => ({
+        ...m,
+        hourlyRateCents: resolvedGroupMembers.find(
+          (rm) => rm.student?.id === m.tutorStudentId
+        )?.student?.hourly_rate_cents ?? null,
+      }));
+
       setIsSaving(true);
       try {
-        const result = await createMiniGroupLesson({
-          members: miniGroupMembersForCreate.map((m) => ({
-            ...m,
-            hourlyRateCents: resolvedGroupMembers.find(
-              (rm) => rm.student?.id === m.tutorStudentId
-            )?.student?.hourly_rate_cents ?? null,
-          })),
-          lessonInput: groupLessonInput,
-        });
-
-        if (result.ok) {
-          toast.success(`Занятие для мини-группы создано (${result.participantsInserted} уч.)`);
-          onSuccess();
-          onOpenChange(false);
+        if (isRecurring && repeatUntil) {
+          const result = await createMiniGroupLessonSeries({
+            members: groupMembers,
+            lessonInput: groupLessonInput,
+            repeatUntil: repeatUntil.toISOString(),
+            makeGroupSessionId: generateGroupSessionId,
+          });
+          if (result.ok && result.root) {
+            if (result.failedCount > 0) {
+              // Частичный успех: часть повторов не создалась — НЕ скрываем это.
+              toast.warning(
+                `Создано ${result.count} из ${result.expected} занятий. ${result.failedCount} не удалось — проверьте расписание и при необходимости добавьте вручную.`,
+              );
+            } else {
+              toast.success(`Создано ${result.count} занятий для мини-группы (еженедельно)`);
+            }
+            onSuccess();
+            onOpenChange(false);
+          } else {
+            toast.error(result.errorMessage || 'Не удалось создать серию занятий');
+          }
         } else {
-          toast.error(result.errorMessage || 'Не удалось создать занятие');
+          const result = await createMiniGroupLesson({
+            members: groupMembers,
+            lessonInput: groupLessonInput,
+          });
+          if (result.ok) {
+            toast.success(`Занятие для мини-группы создано (${result.participantsInserted} уч.)`);
+            onSuccess();
+            onOpenChange(false);
+          } else {
+            toast.error(result.errorMessage || 'Не удалось создать занятие');
+          }
         }
       } catch (err) {
         console.error(err);
@@ -1974,7 +2003,7 @@ function AddLessonDialog({
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Для мини-группы в MVP создаются отдельные занятия по каждому участнику.
+                  Будет создано одно групповое занятие с участниками выбранной мини-группы.
                 </p>
               </div>
 
@@ -2106,13 +2135,16 @@ function AddLessonDialog({
             />
           </div>
 
-          {/* Recurring lesson */}
-          {!isMiniGroupMode && (
-            <div className="space-y-3 border-t pt-3">
+          {/* Recurring lesson — individual + mini-group (2026-06-07) */}
+          <div className="space-y-3 border-t pt-3">
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-sm">Повторять еженедельно</Label>
-                  <p className="text-xs text-muted-foreground">Создать серию занятий каждую неделю</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isMiniGroupMode
+                      ? 'Создать серию занятий для группы каждую неделю'
+                      : 'Создать серию занятий каждую неделю'}
+                  </p>
                 </div>
                 <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
               </div>
@@ -2152,7 +2184,6 @@ function AddLessonDialog({
                 </div>
               )}
             </div>
-          )}
 
           <div className="space-y-2">
             <Label>Заметка (опц.)</Label>
@@ -2185,9 +2216,11 @@ function AddLessonDialog({
             }
           >
             {isSaving
-              ? (isMiniGroupMode ? 'Создаем занятие для группы...' : 'Сохранение...')
+              ? (isMiniGroupMode
+                  ? (isRecurring ? 'Создаем серию для группы...' : 'Создаем занятие для группы...')
+                  : 'Сохранение...')
               : isMiniGroupMode
-                ? 'Создать занятие'
+                ? (isRecurring ? 'Создать серию для группы' : 'Создать занятие')
                 : (isRecurring ? 'Создать серию' : 'Создать')}
           </Button>
         </DialogFooter>

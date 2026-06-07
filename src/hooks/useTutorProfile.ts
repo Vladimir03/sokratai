@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import {
   getTutorProfile,
   removeAvatar,
@@ -7,20 +12,37 @@ import {
   type TutorProfile,
   type UpsertTutorProfileInput,
 } from '@/lib/tutorProfileApi';
+import { setTutorMiniGroupsEnabled } from '@/lib/tutors';
 
 /**
- * React Query bindings for the tutor profile API.
+ * React Query bindings for the tutor profile API (profile-card view).
  *
  * Spec:    docs/delivery/features/tutor-profile/spec.md (v0.2)
- * Tasks:   docs/delivery/features/tutor-profile/tasks.md TASK-2
  *
- * Query key convention: `['tutor', 'profile']` — see CLAUDE.md performance.md
- * §2c. tutorStudentCacheSync.ts and other tutor-side invalidators rely on the
- * `'tutor'` prefix; do not deviate.
+ * Query keys (P1 fix, 2026-06-07): этот хук использует СВОЙ ключ
+ * `['tutor','profile','card']`, отдельный от `['tutor','profile']`, который
+ * принадлежит `useTutor()`/`getCurrentTutor()` (полная строка `tutors`). Раньше
+ * оба делили `['tutor','profile']` с РАЗНЫМИ shape (полный `Tutor` vs урезанный
+ * `TutorProfile`): после захода на `/tutor/profile` (а tutor-chrome SideNav/
+ * MobileTopBar монтируют этот хук на каждой странице) кэш мог содержать урезанный
+ * объект без `invite_code`/`booking_link`, и `useTutor()` на других страницах
+ * получал его как `Tutor` с undefined-полями. Теперь ключи разведены; мутации
+ * профиля инвалидируют ОБА, чтобы и карточка, и app-wide `useTutor()`-консьюмеры
+ * обновились. Оба ключа под префиксом `['tutor']` — prefix-инвалидации
+ * tutorStudentCacheSync их видят.
  */
 
-const TUTOR_PROFILE_QUERY_KEY = ['tutor', 'profile'] as const;
+/** Ключ этого хука: профиль-карточка (имя/аватар/предметы/пол/mini_groups). */
+const TUTOR_PROFILE_CARD_KEY = ['tutor', 'profile', 'card'] as const;
+/** Ключ `useTutor()`/`getCurrentTutor()` — полная строка `tutors` (app-wide). */
+const FULL_TUTOR_QUERY_KEY = ['tutor', 'profile'] as const;
 const TUTOR_PROFILE_STALE_TIME_MS = 5 * 60_000; // 5 minutes per spec.
+
+/** Инвалидирует ОБА профиль-ключа (карточка + полная строка `useTutor`). */
+function invalidateTutorProfileEverywhere(queryClient: QueryClient): void {
+  void queryClient.invalidateQueries({ queryKey: TUTOR_PROFILE_CARD_KEY });
+  void queryClient.invalidateQueries({ queryKey: FULL_TUTOR_QUERY_KEY });
+}
 
 /**
  * Fetches the current user's tutor profile.
@@ -30,7 +52,7 @@ const TUTOR_PROFILE_STALE_TIME_MS = 5 * 60_000; // 5 minutes per spec.
  */
 export function useTutorProfile() {
   return useQuery<TutorProfile | null>({
-    queryKey: TUTOR_PROFILE_QUERY_KEY,
+    queryKey: TUTOR_PROFILE_CARD_KEY,
     queryFn: getTutorProfile,
     staleTime: TUTOR_PROFILE_STALE_TIME_MS,
   });
@@ -45,11 +67,26 @@ export function useUpsertTutorProfile() {
   return useMutation<TutorProfile, Error, UpsertTutorProfileInput>({
     mutationFn: upsertTutorProfile,
     onSuccess: (data) => {
-      // Optimistically populate the cache with the server's view so any
-      // surface that already mounted (Navigation avatar, profile page) re-
-      // renders without waiting for the refetch round-trip.
-      queryClient.setQueryData(TUTOR_PROFILE_QUERY_KEY, data);
-      void queryClient.invalidateQueries({ queryKey: TUTOR_PROFILE_QUERY_KEY });
+      // Seed only the CARD key (data — TutorProfile-shape; класть его на полный
+      // ключ нельзя, иначе затрём Tutor-shape для useTutor-консьюмеров).
+      queryClient.setQueryData(TUTOR_PROFILE_CARD_KEY, data);
+      invalidateTutorProfileEverywhere(queryClient);
+    },
+  });
+}
+
+/**
+ * Sets the tutor's work mode (mini-groups on/off → `tutors.mini_groups_enabled`).
+ * Инвалидирует оба профиль-ключа, чтобы и карточка профиля, и read-sites
+ * (students/schedule/homework/mock-exam через `useTutor`) подхватили изменение.
+ * Заменяет самовыключавшийся тумблер из шапки /tutor/students (2026-06-07).
+ */
+export function useSetTutorMiniGroupsEnabled() {
+  const queryClient = useQueryClient();
+  return useMutation<TutorProfile | null, Error, boolean>({
+    mutationFn: (enabled) => setTutorMiniGroupsEnabled(enabled),
+    onSuccess: () => {
+      invalidateTutorProfileEverywhere(queryClient);
     },
   });
 }
@@ -64,7 +101,7 @@ export function useUploadAvatar() {
   return useMutation<string, Error, Blob>({
     mutationFn: uploadAvatar,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: TUTOR_PROFILE_QUERY_KEY });
+      invalidateTutorProfileEverywhere(queryClient);
     },
   });
 }
@@ -77,7 +114,7 @@ export function useRemoveAvatar() {
   return useMutation<void, Error, void>({
     mutationFn: removeAvatar,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: TUTOR_PROFILE_QUERY_KEY });
+      invalidateTutorProfileEverywhere(queryClient);
     },
   });
 }

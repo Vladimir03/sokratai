@@ -56,33 +56,25 @@ Deno.serve(async (req) => {
 
     if (!tutorStudentId) {
       return new Response(
-        JSON.stringify({ error: "tutor_student_id is required" }),
+        JSON.stringify({ code: "VALIDATION", error: "Не передан идентификатор ученика. Обновите страницу и попробуйте снова." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
     if (!name) {
       return new Response(
-        JSON.stringify({ error: "Name is required" }),
+        JSON.stringify({ code: "VALIDATION", error: "Укажите имя ученика." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
-    if (!telegramUsernameRaw.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Telegram username is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    if (!learningGoalRaw.trim()) {
-      return new Response(
-        JSON.stringify({ error: "Learning goal is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    const telegramUsername = normalizeUsername(telegramUsernameRaw);
+    // Решение Vladimir (2026-06-07): Telegram и цель занятий на РЕДАКТИРОВАНИИ
+    // больше НЕ обязательны. Ученик уже существует (у него есть логин-email);
+    // навязывать контакт повторно — лишний барьер (у части учеников нет Telegram).
+    // Имя — единственное обязательное поле.
+    const telegramUsername = telegramUsernameRaw.trim()
+      ? normalizeUsername(telegramUsernameRaw)
+      : "";
     const learningGoal = learningGoalRaw.trim();
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -99,7 +91,7 @@ Deno.serve(async (req) => {
     if (tutorError || !tutor) {
       console.error("Tutor not found:", tutorError);
       return new Response(
-        JSON.stringify({ error: "Tutor profile not found" }),
+        JSON.stringify({ code: "TUTOR_NOT_FOUND", error: "Профиль репетитора не найден. Войдите заново." }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -115,7 +107,7 @@ Deno.serve(async (req) => {
     if (tsError || !tutorStudent) {
       console.error("Tutor student not found or access denied:", tsError);
       return new Response(
-        JSON.stringify({ error: "Student not found or access denied" }),
+        JSON.stringify({ code: "STUDENT_NOT_FOUND", error: "Ученик не найден или у вас нет к нему доступа." }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -125,9 +117,14 @@ Deno.serve(async (req) => {
     // Update profiles table (via service_role)
     const profileUpdates: Record<string, unknown> = {
       username: name,
-      telegram_username: telegramUsername,
-      learning_goal: learningGoal,
+      // Пустой Telegram → null (очистка), не "" — поле опционально.
+      telegram_username: telegramUsername || null,
     };
+
+    // Цель — опциональна: обновляем только если заполнена (не затираем существующую).
+    if (learningGoal) {
+      profileUpdates.learning_goal = learningGoal;
+    }
 
     if (typeof body.grade === "number") {
       profileUpdates.grade = body.grade;
@@ -141,7 +138,7 @@ Deno.serve(async (req) => {
     if (profileUpdateError) {
       console.error("Failed to update profile:", profileUpdateError);
       return new Response(
-        JSON.stringify({ error: "Failed to update profile" }),
+        JSON.stringify({ code: "PROFILE_UPDATE_FAILED", error: "Не удалось сохранить данные ученика. Попробуйте ещё раз." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -170,6 +167,11 @@ Deno.serve(async (req) => {
     if (body.hourly_rate_cents !== undefined) {
       tutorStudentUpdates.hourly_rate_cents = typeof body.hourly_rate_cents === "number" ? body.hourly_rate_cents : null;
     }
+    // Пол ученика (Phase 8.1) — для AI grammar conjugation. Validated against
+    // enum check constraint в tutor_students.gender. "" / прочее → не трогаем.
+    if (body.gender === "male" || body.gender === "female") {
+      tutorStudentUpdates.gender = body.gender;
+    }
 
     if (Object.keys(tutorStudentUpdates).length > 0) {
       const { error: tsUpdateError } = await supabaseAdmin
@@ -190,8 +192,9 @@ Deno.serve(async (req) => {
     );
   } catch (error) {
     console.error("Error in tutor-update-student:", error);
+    const message = error instanceof Error ? error.message : String(error);
     return new Response(
-      JSON.stringify({ error: "Internal server error" }),
+      JSON.stringify({ code: "INTERNAL_ERROR", error: "Не удалось обновить ученика: " + message }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
