@@ -954,6 +954,9 @@ export type Database = {
           notified: boolean
           notified_at: string | null
           student_id: string
+          tutor_overall_comment: string | null
+          tutor_overall_comment_at: string | null
+          tutor_overall_comment_by: string | null
         }
         Insert: {
           assignment_id: string
@@ -964,6 +967,9 @@ export type Database = {
           notified?: boolean
           notified_at?: string | null
           student_id: string
+          tutor_overall_comment?: string | null
+          tutor_overall_comment_at?: string | null
+          tutor_overall_comment_by?: string | null
         }
         Update: {
           assignment_id?: string
@@ -974,6 +980,9 @@ export type Database = {
           notified?: boolean
           notified_at?: string | null
           student_id?: string
+          tutor_overall_comment?: string | null
+          tutor_overall_comment_at?: string | null
+          tutor_overall_comment_by?: string | null
         }
         Relationships: [
           {
