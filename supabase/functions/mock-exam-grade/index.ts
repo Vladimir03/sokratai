@@ -1439,6 +1439,36 @@ async function handleGrade(
         previous_lock_age_ms: ageMs,
       }));
     }
+  } else if (attemptRow.status === "awaiting_review") {
+    // P0 #2 (mock-exam-grading-v2): regrade тоже атомарно клеймит
+    // awaiting_review → ai_checking. Без этого два конкурентных regrade
+    // (multi-tab / ручной+авто) пишут ai_draft_json last-writer-wins, и старший
+    // runner восстанавливает stale привязку. Финальный переход
+    // ai_checking → awaiting_review (ниже) round-trip'ит обратно.
+    const { data: claimedRegrade, error: claimErr } = await db
+      .from("mock_exam_attempts")
+      .update({ status: "ai_checking", updated_at: new Date().toISOString() })
+      .eq("id", attemptId)
+      .eq("status", "awaiting_review") // CAS guard
+      .select("id");
+    if (claimErr) {
+      console.warn("mock_exam_grade_regrade_claim_failed", {
+        attempt_id: attemptId,
+        error: claimErr.message,
+      });
+    } else if (!claimedRegrade || claimedRegrade.length === 0) {
+      console.info(JSON.stringify({
+        event: "mock_exam_grade_regrade_already_running",
+        attempt_id: attemptId,
+      }));
+      return jsonError(
+        cors,
+        202,
+        "ALREADY_GRADING",
+        "Another grader is already processing this attempt — retry shortly",
+      );
+    }
+    // Claim won → proceed (status now ai_checking).
   }
 
   // Fetch Часть 2 variant tasks (kim_number → row) for this variant.
@@ -1536,6 +1566,15 @@ async function handleGrade(
             };
           });
           const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos);
+          // P1 (mock-exam-grading-v2): Pass-1 router может транзиентно упасть
+          // (битый JSON модели). Полагаемся на ВНУТРЕННИЙ ретрай callLovableJson
+          // (35с timeout + 1 retry) — внешний ретрай убран, иначе суммарный
+          // Pass-1 мог превысить 120с stale-lock (review P1 #1). На сбой —
+          // over-include fallback вместо «никому» (раньше: один сорванный вызов
+          // → photo_missing на всю Часть 2, baseline 29/55). Q1-решение: раздаём
+          // все фото только НЕ-tutor-locked КИМ (rule 45 — tutor_approved/
+          // tutor_modified не перезаписываем); Pass 2 отсеет нерелевантные через
+          // существующий photo_off_topic.
           try {
             const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign");
             bulkAssignment = sanitizeBulkAssignmentResult(
@@ -1557,11 +1596,23 @@ async function handleGrade(
               attempt_id: attemptId,
               error: err instanceof Error ? err.message : String(err),
             }));
-            // Bulk assign failed → fall back to empty assignment.
-            // Pass 2 видит photo_missing для всех; tutor вручную через select dropdown
-            // + «Перепроверить AI» trigger.
-            bulkAssignment = { unassigned: bulkPhotoRefs.map((_, i) => i) };
-            for (const kim of allKimNumbers) bulkAssignment[kim] = [];
+            // over-include fallback: все фото → каждой НЕ-tutor-locked КИМ.
+            const allIdx = inlinedBulkPhotos.map((_, i) => i);
+            const fallback: BulkAssignmentResult = { unassigned: [] };
+            let overIncludedKims = 0;
+            for (const kim of allKimNumbers) {
+              const st = solutionsByKim.get(kim)?.status;
+              const tutorLocked = st === "tutor_approved" || st === "tutor_modified";
+              fallback[kim] = tutorLocked ? [] : allIdx.slice();
+              if (!tutorLocked) overIncludedKims += 1;
+            }
+            bulkAssignment = fallback;
+            console.warn(JSON.stringify({
+              event: "mock_exam_grade_bulk_assign_over_include_fallback",
+              attempt_id: attemptId,
+              bulk_photo_count: inlinedBulkPhotos.length,
+              over_included_kims: overIncludedKims,
+            }));
           }
         }
       }

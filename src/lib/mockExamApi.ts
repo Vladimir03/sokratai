@@ -219,8 +219,9 @@ export async function approveMockExamAll(
  * Body: `{ assignments: { kim: [photo_indices], ... } }`. Backend
  * persistит в `ai_draft_json.assigned_photo_indices` per kim.
  *
- * После изменений tutor нажимает «Перепроверить AI» (regradeMockExamPart2)
- * чтобы AI пересчитал баллы с новой привязкой.
+ * Чистый persist привязки фото→КИМ. Пересчёт баллов запускается отдельно: фронт
+ * после idle гоняет единый pipeline save→regrade (regradeMockExamPart2). Здесь —
+ * только сохранение assigned_photo_indices (Variant A, mock-exam-grading-v2).
  */
 export async function assignMockExamPart2Photos(
   attemptId: string,
@@ -244,8 +245,9 @@ export async function regradeMockExamPart2(
 ): Promise<{
   attempt_id: string;
   regraded: boolean;
-  latency_ms: number;
-  grade_response: unknown;
+  busy?: boolean;
+  latency_ms?: number;
+  grade_response?: unknown;
 }> {
   return requestTutorMockExamApi(
     `/attempts/${encodeURIComponent(attemptId)}/regrade-part2`,

@@ -17,7 +17,7 @@
 //   • MathText для condition + comment (ЕГЭ задачи содержат LaTeX-формулы)
 //   • Score override read-only с явным «Изменить» (nuance #3)
 
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -1591,6 +1591,16 @@ function BulkPhotosAssignmentGallery({
     setDirty(false);
   }, [initialAssignments]);
 
+  // Variant A pipeline helpers (mock-exam-grading-v2): assignmentsRef — всегда
+  // последняя привязка (для save внутри pipeline); editVersionRef — счётчик
+  // локальных правок, чтобы снимать dirty только если с момента старта pipeline
+  // ничего не меняли (review P0 #1).
+  const assignmentsRef = useRef(assignments);
+  useEffect(() => {
+    assignmentsRef.current = assignments;
+  }, [assignments]);
+  const editVersionRef = useRef(0);
+
   const saveMutation = useMutation({
     mutationFn: async (newAssignments: Map<number, Set<number>>) => {
       // Сгруппировать фото-индексы по kim_number (server format).
@@ -1605,8 +1615,8 @@ function BulkPhotosAssignmentGallery({
       return await assignMockExamPart2Photos(attemptId, { assignments: grouped });
     },
     onSuccess: () => {
-      // Не invalidate тут — assignment без AI regrade всё ещё dirty. Только
-      // local state помечается как сохранённое.
+      // Persist-only. Пересчёт делает единый pipeline (regradeMutation) после
+      // idle — здесь dirty не трогаем (Variant A, mock-exam-grading-v2).
     },
     onError: (err) => {
       toast.error(`Не удалось сохранить привязку: ${err instanceof Error ? err.message : String(err)}`);
@@ -1615,18 +1625,33 @@ function BulkPhotosAssignmentGallery({
 
   const regradeMutation = useMutation({
     mutationFn: async () => {
-      // Phase 6 review-fix P2 #2: flush pending debounced save перед regrade.
-      // Иначе 500ms timer ещё не выстрелил → AI пересчитывает по stale
-      // assignment, tutor's правка теряется.
+      // Variant A pipeline (mock-exam-grading-v2): flush latest привязки → regrade.
+      // startVersion фиксирует версию правок на старте — dirty снимаем только
+      // если с тех пор ничего не меняли (review P0 #1). Phase 6 review-fix P2 #2:
+      // flush обязателен, иначе AI пересчитывает по stale assignment.
+      const startVersion = editVersionRef.current;
       if (dirty) {
-        await saveMutation.mutateAsync(assignments);
+        await saveMutation.mutateAsync(assignmentsRef.current);
       }
-      return await regradeMockExamPart2(attemptId);
+      const res = await regradeMockExamPart2(attemptId);
+      return { res, startVersion };
     },
-    onSuccess: () => {
-      toast.success('AI пересчитал баллы — обнови карточки ниже');
-      queryClient.invalidateQueries({ queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId) });
-      setDirty(false);
+    onSuccess: ({ res, startVersion }) => {
+      // review P0 #2: regrade мог вернуть busy (другой grader уже считает —
+      // multi-tab/перекрытие). Привязка сохранена, но пересчёт сейчас НЕ
+      // выполнен → не снимаем dirty и НЕ invalidate (refetch сбросил бы правку).
+      if (res?.busy) {
+        toast.info('AI уже проверяет этот пробник — новая привязка сохранена, пересчёт применится после.');
+        return;
+      }
+      toast.success('AI пересчитал баллы — карточки обновятся');
+      // review P0 #1: снимаем dirty + refetch только если привязку не меняли с
+      // момента старта pipeline. Иначе pipeline сам перезапустится для новой
+      // версии (isPending-gated debounce ниже) и обновит тогда.
+      if (editVersionRef.current === startVersion) {
+        setDirty(false);
+        queryClient.invalidateQueries({ queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId) });
+      }
     },
     onError: (err) => {
       toast.error(`AI grader не успел: ${err instanceof Error ? err.message : String(err)}`);
@@ -1649,6 +1674,7 @@ function BulkPhotosAssignmentGallery({
         return next;
       });
       setDirty(true);
+      editVersionRef.current += 1;
     },
     [],
   );
@@ -1665,19 +1691,24 @@ function BulkPhotosAssignmentGallery({
         return next;
       });
       setDirty(true);
+      editVersionRef.current += 1;
     },
     [],
   );
 
-  // Debounced save: trigger 500ms после последнего изменения.
+  // Variant A (mock-exam-grading-v2): единый debounced pipeline после idle —
+  // save → regrade → invalidate → setDirty(false). isPending-gate сериализует
+  // прогоны в одной вкладке: правка во время regrade подождёт его конца, затем
+  // эффект сам перезапустится для последней версии. Отдельного авто-save больше
+  // нет (review Variant A).
   useEffect(() => {
-    if (!dirty || isReadOnly) return;
+    if (!dirty || isReadOnly || regradeMutation.isPending) return;
     const timer = window.setTimeout(() => {
-      saveMutation.mutate(assignments);
-    }, 500);
+      regradeMutation.mutate();
+    }, 800);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assignments, dirty, isReadOnly]);
+  }, [assignments, dirty, isReadOnly, regradeMutation.isPending]);
 
   return (
     <section className="space-y-3">

@@ -2716,6 +2716,10 @@ async function handleAssignPart2Photos(
     }
   }
 
+  // Persist-only. Пересчёт баллов запускает фронт единым pipeline (save→regrade)
+  // после idle — Variant A (mock-exam-grading-v2). Здесь авто-fire НЕ делаем
+  // (review: backend fire-and-forget на каждый save + ручной dirty создавали
+  // гонки — P0 #1/#2).
   return jsonOk(cors, {
     attempt_id: attemptId,
     updated_kim_count: upserts.length,
@@ -2813,6 +2817,14 @@ async function handleRegradePart2(
       body: JSON.stringify({ attempt_id: attemptId }),
     });
     const latency = Date.now() - startTime;
+    // P0 #2 (mock-exam-grading-v2): grader атомарно клеймит awaiting_review →
+    // ai_checking. 202 = другой runner уже грейдит (multi-tab / ручной+авто).
+    // Привязка сохранена (save прошёл раньше), но пересчёт сейчас не выполнен →
+    // сообщаем busy, чтобы UI не делал вид, что всё пересчитано.
+    if (resp.status === 202) {
+      console.info(JSON.stringify({ event: "mock_exam_regrade_busy", attempt_id: attemptId }));
+      return jsonOk(cors, { attempt_id: attemptId, regraded: false, busy: true });
+    }
     if (!resp.ok) {
       const errText = await resp.text();
       console.error("mock_exam_regrade_failed", {
@@ -2827,6 +2839,7 @@ async function handleRegradePart2(
     return jsonOk(cors, {
       attempt_id: attemptId,
       regraded: true,
+      busy: false,
       latency_ms: latency,
       grade_response: body,
     });
