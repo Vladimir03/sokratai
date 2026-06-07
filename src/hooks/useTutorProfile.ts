@@ -13,6 +13,7 @@ import {
   type UpsertTutorProfileInput,
 } from '@/lib/tutorProfileApi';
 import { setTutorMiniGroupsEnabled } from '@/lib/tutors';
+import type { Tutor } from '@/types/tutor';
 
 /**
  * React Query bindings for the tutor profile API (profile-card view).
@@ -83,7 +84,7 @@ export function useUpsertTutorProfile() {
  */
 export function useSetTutorMiniGroupsEnabled() {
   const queryClient = useQueryClient();
-  return useMutation<TutorProfile | null, Error, boolean>({
+  return useMutation<Tutor | null, Error, boolean>({
     mutationFn: (enabled) => setTutorMiniGroupsEnabled(enabled),
     onSuccess: () => {
       invalidateTutorProfileEverywhere(queryClient);

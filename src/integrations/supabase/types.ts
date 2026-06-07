@@ -3706,7 +3706,6 @@ export type Database = {
       }
       find_auth_user_id_by_email: { Args: { p_email: string }; Returns: string }
       generate_invite_code: { Args: never; Returns: string }
-      tutor_get_invite_code: { Args: never; Returns: string }
       get_available_booking_slots: {
         Args: { _booking_link: string; _days_ahead?: number }
         Returns: {
@@ -3988,6 +3987,7 @@ export type Database = {
         Args: { _lesson_id: string; _scope?: string }
         Returns: Json
       }
+      tutor_get_invite_code: { Args: never; Returns: string }
       tutor_remove_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
