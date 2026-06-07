@@ -275,10 +275,14 @@ export function gradeOrdered(
 }
 
 /**
- * ЕГЭ физика №20 — установление соответствия. correct_answer — строка из
- * digits, по позиции = столбец Б. Например "31" значит «А → 3, Б → 1».
- * Принимаем строки без разделителей ("31") и с разделителями ("3,1" / "3 1").
- * Tolerance к whitespace, требуется точное совпадение after digits-only.
+ * ЕГЭ физика №20 — «выберите два номера» (множество индексов, порядок НЕ важен):
+ * «13»=«31» → полный балл; любой промах хотя бы по одной цифре → 0 (binary).
+ * Чувствительно к длине/дубликатам («133»≠«13»). Принимаем строки без
+ * разделителей ("31") и с разделителями ("3,1" / "3 1").
+ * 2026-06-07: раньше было строковое равенство (`c === s`) → «31» при верном
+ * «13» считалось неверным. Все task20-задачи в сидах — «номера выбранных …»
+ * (выбор N схем/конденсаторов/маятников), поэтому порядок-независимо. Deno-mirror:
+ * supabase/functions/_shared/mock-exam-part1-checker.ts::checkTask20.
  */
 export function checkTask20(correct: string, student: string): boolean {
   const digitsOnly = (raw: string): string =>
@@ -287,7 +291,8 @@ export function checkTask20(correct: string, student: string): boolean {
   const s = digitsOnly(student);
   if (!c || !s) return false;
   if (!/^\d+$/.test(c) || !/^\d+$/.test(s)) return false;
-  return c === s;
+  const sortDigits = (x: string): string => [...x].sort().join('');
+  return sortDigits(c) === sortDigits(s);
 }
 
 /**

@@ -158,12 +158,18 @@ export function gradeOrdered(
   return 0;
 }
 
+// ЕГЭ физика №20 — «выберите два номера» (множество индексов, порядок НЕ важен):
+// «13»=«31» → полный балл; любой промах хотя бы по одной цифре → 0 (binary).
+// Чувствительно к длине/дубликатам («133»≠«13»). 2026-06-07: было строковое
+// равенство (`ac === as`), из-за чего «31» при верном «13» считалось неверным.
+// ВСЕ task20-задачи в сидах — «номера выбранных …», поэтому порядок-независимо.
 export function checkTask20(c: string, s: string): boolean {
   const onlyDigits = (r: string) => normalizeBasic(r).replace(/[,;.\s]/g, "").toLowerCase();
   const ac = onlyDigits(c), as = onlyDigits(s);
   if (!ac || !as) return false;
   if (!/^\d+$/.test(ac) || !/^\d+$/.test(as)) return false;
-  return ac === as;
+  const sortDigits = (x: string) => [...x].sort().join("");
+  return sortDigits(ac) === sortDigits(as);
 }
 
 export function checkPair(c: string, s: string): boolean {

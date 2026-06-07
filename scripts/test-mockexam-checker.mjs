@@ -93,14 +93,20 @@ test("checkMultiChoice: subset match", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// task20 — mapping
+// task20 — «выберите два номера» (порядок НЕ важен, binary). 2026-06-07: было
+// строковое равенство (order-dependent), репортнут Vladimir («13» верно, но «31»
+// считалось неверным). Все task20-задачи в сидах — «номера выбранных …».
 // ────────────────────────────────────────────────────────────────────────────
 
-test("checkTask20: exact digit-mapping", () => {
-  assert.equal(checkTask20("31", "31"), true);
+test("checkTask20: order-independent set match", () => {
+  assert.equal(checkTask20("13", "13"), true);
+  assert.equal(checkTask20("13", "31"), true, "ПОРЯДОК НЕ ВАЖЕН (13=31)");
   assert.equal(checkTask20("312", "3,1,2"), true, "separators stripped");
   assert.equal(checkTask20("312", "3 1 2"), true, "whitespace stripped");
-  assert.equal(checkTask20("312", "321"), false, "different mapping");
+  assert.equal(checkTask20("312", "321"), true, "order-independent (same set)");
+  assert.equal(checkTask20("13", "23"), false, "одна цифра не совпала → 0");
+  assert.equal(checkTask20("13", "14"), false, "одна цифра не совпала → 0");
+  assert.equal(checkTask20("13", "133"), false, "длина/дубликаты учитываются");
   assert.equal(checkTask20("312", "abc"), false, "non-digits rejected");
 });
 

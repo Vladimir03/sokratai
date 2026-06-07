@@ -29,7 +29,6 @@ import {
   ChevronRight,
   Clock,
   Info,
-  Lock,
   Pencil,
   RotateCcw,
   Search,
@@ -79,7 +78,6 @@ import {
 } from '@/lib/mockExamApi';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { formatMockScore } from '@/components/tutor/mock-exams/mockHeatmapStyles';
 import type {
   MockExamAttemptDetail,
   MockExamAttemptPart1Answer,
@@ -115,10 +113,10 @@ function isAnonymous(attempt: MockExamAttemptDetail): boolean {
 /**
  * Bug fix (2026-06-02): tutor видел «без ответа» по Части 1 несмотря на балл.
  * Резолвит ответ ученика из ДВУХ источников: typed/auto-saved `student_answer`
- * (form mode) → fallback на OCR-распознанное значение из фото бланка ФИПИ
+ * (цифровой ввод) → fallback на OCR-распознанное значение из фото бланка ФИПИ
  * (`ai_part1_ocr_json.cells[kim].value`). Покрывает оба режима + legacy attempts
- * с NULL `answer_method`, которые роутятся в Part1SummaryCard (form card),
- * но реально содержат ответы только в OCR JSON.
+ * с NULL `answer_method`. 2026-06-07: единственный источник ответа в едином
+ * гриде Part1ReviewPanel (form+blank); fromOcr различает «Распознано»/«Ответ».
  */
 function resolvePart1StudentAnswer(
   ans: Pick<MockExamAttemptPart1Answer, 'kim_number' | 'student_answer'>,
@@ -306,7 +304,13 @@ const ElementChip = memo(function ElementChip({ label, passed }: ElementChipProp
 // `finalizeMockExamPart1` (button «Часть 1 проверена» / on-blur от последнего
 // edit'а).
 
-function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
+// 2026-06-07: единый грид проверки Части 1 для ОБОИХ режимов (цифровой ввод
+// `form` + бланк ФИПИ `blank`). Раньше form-режим рендерил отдельную таблицу
+// Part1SummaryCard (удалена). OCR-only UI (фото бланка, баннер «AI распознал
+// N/20», «Перезапустить AI», low-confidence обводка) гейтится по
+// attempt.answer_method === 'blank'. Ответ ученика резолвится через
+// resolvePart1StudentAnswer (typed `student_answer` ?? OCR cell).
+function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
   attempt: MockExamAttemptDetail;
   variantPart1Tasks: { kim_number: number; max_score: number }[];
 }) {
@@ -523,6 +527,27 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
   }, [drafts, variantPart1Tasks]);
   const part1Max = variantPart1Tasks.reduce((a, t) => a + t.max_score, 0);
 
+  // 2026-06-07: единый грид для обоих режимов. isBlank гейтит OCR-only UI
+  // (фото бланка, баннер «AI распознал N/20», «Перезапустить AI», low-conf
+  // обводка). Цифровой ввод (form) использует тот же грид, но без OCR-битов.
+  const isBlank = attempt.answer_method === 'blank';
+
+  // Счётчики верно/частично/неверно/без ответа — для обоих режимов, через
+  // resolvePart1StudentAnswer (typed ?? OCR). Показываем в шапке.
+  const counters = useMemo(() => {
+    let correct = 0, partial = 0, wrong = 0, ungraded = 0, noAnswer = 0;
+    for (const a of attempt.part1_answers) {
+      if (a.max_score <= 0) continue;
+      const value = resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value;
+      if (value === null) { noAnswer++; continue; }
+      if (a.earned_score === null) { ungraded++; continue; }
+      if (a.earned_score === a.max_score) correct++;
+      else if (a.earned_score === 0) wrong++;
+      else partial++;
+    }
+    return { correct, partial, wrong, ungraded, noAnswer };
+  }, [attempt.part1_answers, attempt.ai_part1_ocr_json]);
+
   return (
     <Card animate={false} className="border-amber-200 bg-amber-50/40 dark:bg-amber-950/10 dark:border-amber-900">
       <CardContent className="p-4 sm:p-5 space-y-4">
@@ -530,16 +555,22 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
           <div className="flex items-center gap-2">
             <Pencil className="h-4 w-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />
             <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-              Часть 1: ручная проверка по ФИПИ-бланку
+              {isBlank ? 'Часть 1: проверка по бланку ФИПИ' : 'Часть 1: авто-проверка'}
             </h2>
           </div>
           <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
-            Ученик заполнял бланк от руки (выбран режим «бланк ФИПИ»).
-            Сверь ответы с фото ниже и поставь баллы по каждой задаче 1–20.
+            {isBlank
+              ? 'Ученик заполнял бланк от руки. Сверь ответы с фото ниже и при необходимости поправь баллы 1–20.'
+              : 'Ученик вводил ответы цифрой — авто-проверены по ФИПИ 2026. Проверь и при необходимости поправь баллы.'}
+          </p>
+          <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+            Верно {counters.correct} · частично {counters.partial} · неверно {counters.wrong}
+            {counters.ungraded > 0 ? ` · не проверено ${counters.ungraded}` : ''}
+            {counters.noAnswer > 0 ? ` · без ответа ${counters.noAnswer}` : ''}
           </p>
         </div>
 
-        {(blankPhotoUrl || fallbackPhotoUrl) && (
+        {isBlank && (blankPhotoUrl || fallbackPhotoUrl) && (
           <div className="grid gap-3 sm:grid-cols-2">
             {blankPhotoUrl && (
               <a href={blankPhotoUrl} target="_blank" rel="noreferrer" className="block">
@@ -575,7 +606,7 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
               - 'failed'                              → rose warning + retry CTA
               - 'success' + recognized_cells === 0    → amber soft warning
               - 'success' + recognized_cells > 0      → emerald success */}
-        {(() => {
+        {isBlank && (() => {
           const ocrJson = attempt.ai_part1_ocr_json;
           const meta = ocrJson?.__meta ?? null;
           const isFailed = meta?.status === 'failed';
@@ -631,20 +662,22 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
           {variantPart1Tasks.map((t) => {
-            // TASK-16-R2 fix #4: cells under .cells namespace (was top-level).
-            const ocrCell = attempt.ai_part1_ocr_json?.cells?.[t.kim_number];
-            const isLowConf = ocrCell && ocrCell.confidence === 'low';
-            const hasRecognition = ocrCell?.value !== undefined && ocrCell.value !== null;
-
-            // TASK-OCR Round 3 (2026-05-21): correct_answer + status icon row.
-            // Tutor видит «AI: 250 · Правильный: 250 ✓» — мгновенно понимает
-            // правильно ли ответил ученик ИЛИ AI ошибся в распознавании.
             const answerRow = attempt.part1_answers.find(
               (a) => a.kim_number === t.kim_number,
             );
+            // 2026-06-07 (unified form+blank): единый источник ответа ученика —
+            // resolvePart1StudentAnswer: typed `student_answer` (цифровой ввод)
+            // ?? OCR-распознанное (бланк). fromOcr различает ярлык «Распознано»
+            // (бланк) vs «Ответ ученика» (форма). isLowConf — только для OCR.
+            const resolved = resolvePart1StudentAnswer(
+              answerRow ?? { kim_number: t.kim_number, student_answer: null },
+              attempt.ai_part1_ocr_json,
+            );
+            const isLowConf = resolved.fromOcr && resolved.confidence === 'low';
+            const hasRecognition = resolved.value !== null;
             const correctAnswer = answerRow?.correct_answer ?? null;
             const earnedScore = answerRow?.earned_score ?? null;
-            const studentAnswer = answerRow?.student_answer ?? null;
+            const studentAnswer = resolved.value;
             // 2026-06-06: балл AI (авто) vs ручной балл тутора. Если тутор уже
             // переопределил (score_source==='tutor') — подписываем «Ваш балл».
             const isTutorScore = answerRow?.score_source === 'tutor';
@@ -774,17 +807,17 @@ function Part1BlankReviewPanel({ attempt, variantPart1Tasks }: {
                     <Search className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
                   </button>
                 </span>
-                {/* Распознанный (OCR) ответ ученика + верный ответ. Переименовано
-                    «AI:»→«Распознано:» (2026-06-06), т.к. ниже добавлена строка
-                    «Балл AI» — два ярлыка «AI» путали бы. */}
+                {/* Ответ ученика + верный ответ. Ярлык: «Распознано» (OCR-бланк)
+                    vs «Ответ ученика» (цифровой ввод) — fromOcr. Строка «Балл AI»
+                    ниже, поэтому не «AI:» (два ярлыка «AI» путали бы). */}
                 {(hasRecognition || correctAnswer) && (
                   <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug flex flex-wrap gap-x-1.5">
                     {hasRecognition && (
                       <span
                         className="truncate"
-                        title={`AI распознал ответ ученика: «${ocrCell.value}»`}
+                        title={`${resolved.fromOcr ? 'AI распознал' : 'Ученик ввёл'} ответ: «${resolved.value}»`}
                       >
-                        Распознано: <strong className="font-medium text-slate-700 dark:text-slate-300">{ocrCell.value || '—'}</strong>
+                        {resolved.fromOcr ? 'Распознано' : 'Ответ ученика'}: <strong className="font-medium text-slate-700 dark:text-slate-300">{resolved.value || '—'}</strong>
                       </span>
                     )}
                     {correctAnswer && (
@@ -1142,331 +1175,6 @@ function ExamModeAndSessionsBadge({ attempt }: { attempt: MockExamAttemptDetail 
         )}
       </CardContent>
     </Card>
-  );
-}
-
-// ─── Part 1 summary card ─────────────────────────────────────────────────────
-
-// AC-P11 (2026-05-26): карточка для form mode имеет:
-// - Collapsible per-KIM rows list с click → drill-down dialog
-// - Score override + tutor_comment через Part1TaskDrillDownDialog
-// 2026-06-06: кнопка «По критериям ФИПИ» убрана — Часть 1 авто-проверяется по
-// ФИПИ 2026 partial credit на сабмите (handleSubmitAttempt). Не возрождать.
-
-function Part1SummaryCard({ attempt }: { attempt: MockExamAttemptDetail }) {
-  const queryClient = useQueryClient();
-  const [drillDownKim, setDrillDownKim] = useState<number | null>(null);
-
-  const part1Max = attempt.part1_answers.reduce(
-    (acc, a) => acc + (a.max_score ?? 0),
-    0,
-  );
-  const part1Score = attempt.total_part1_score ?? 0;
-  const correctCount = attempt.part1_answers.filter(
-    (a) => (a.earned_score ?? 0) === (a.max_score ?? 0) && a.max_score > 0,
-  ).length;
-  const partialCount = attempt.part1_answers.filter(
-    (a) =>
-      (a.earned_score ?? 0) > 0 &&
-      (a.earned_score ?? 0) < (a.max_score ?? 0),
-  ).length;
-  // Bug fix (2026-06-02): wrong = есть ответ (typed ИЛИ распознанный с фото) И
-  // earned СТРОГО 0. Раньше гейт был `student_answer !== null` → для blank/legacy
-  // attempts (ответы в OCR JSON) все счётчики обнулялись («Верно 0 · неверно 0»
-  // при балле 18/28). Review fix: `=== 0` строго (не `?? 0`) — иначе ungraded
-  // (earned_score=null) с распознанным ответом фолбэчился в «неверно».
-  const wrongCount = attempt.part1_answers.filter(
-    (a) =>
-      a.earned_score === 0 &&
-      a.max_score > 0 &&
-      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null,
-  ).length;
-  // Ответ есть, но per-task балл не проставлен (legacy/anomaly: total есть, per-KIM
-  // earned_score=null). Отдельный бакет — честнее чем silent zeros или ложное «неверно».
-  const ungradedCount = attempt.part1_answers.filter(
-    (a) =>
-      a.earned_score === null &&
-      a.max_score > 0 &&
-      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value !== null,
-  ).length;
-  const noAnswerCount = attempt.part1_answers.filter(
-    (a) =>
-      a.max_score > 0 &&
-      resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value === null,
-  ).length;
-
-  // 2026-06-02 (item 4): редактирование доступно ПОСЛЕ подтверждения — тутор
-  // правит баллы после обсуждения с учеником (backend ресинкает total_score).
-  // Терминален только manually_entered.
-  const isReadOnly = attempt.status === 'manually_entered';
-
-  // AC-P11: drill-down save handler — invokes setMockExamPart1ManualScore с
-  // score + optional comment. Backend preserves student_answer (existing form
-  // mode value не теряется).
-  const handleDrillDownSave = async (
-    kim: number,
-    payload: { score: number; comment: string | null },
-  ) => {
-    await setMockExamPart1ManualScore(attempt.id, {
-      kim_number: kim,
-      earned_score: payload.score,
-      comment: payload.comment,
-    });
-    // Recompute total_part1_score через finalize endpoint (idempotent SUM).
-    try {
-      await finalizeMockExamPart1(attempt.id);
-    } catch {
-      // Non-fatal — totals can lag until next finalize
-    }
-    void queryClient.invalidateQueries({
-      queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attempt.id),
-    });
-  };
-
-  const drillDownAnswer = drillDownKim !== null
-    ? attempt.part1_answers.find((a) => a.kim_number === drillDownKim) ?? null
-    : null;
-  const drillDownResolved = drillDownAnswer
-    ? resolvePart1StudentAnswer(drillDownAnswer, attempt.ai_part1_ocr_json)
-    : null;
-
-  return (
-    <>
-      <Card animate={false} className="bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900">
-        <CardContent className="p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
-            <div className="flex items-start gap-3">
-              <div
-                className="h-9 w-9 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300 flex items-center justify-center flex-shrink-0"
-                aria-hidden="true"
-              >
-                <Lock className="h-4 w-4" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-emerald-900 dark:text-emerald-200">
-                  Часть 1: {formatMockScore(part1Score)} из {formatMockScore(part1Max)} баллов
-                </p>
-                <p className="text-xs text-emerald-800 dark:text-emerald-300/90 mt-0.5">
-                  Auto-проверено. Верно {correctCount} · частично {partialCount} · неверно {wrongCount}
-                  {ungradedCount > 0 ? ` · не проверено ${ungradedCount}` : ''}
-                  {noAnswerCount > 0 ? ` · без ответа ${noAnswerCount}` : ''}.
-                </p>
-                {/* 2026-06-02 (item 4): пробник уже отправлен ученику, но правки разрешены. */}
-                {attempt.status === 'approved' && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
-                    Уже отправлено ученику — правки баллов обновят его результат сразу.
-                  </p>
-                )}
-              </div>
-            </div>
-            {/* 2026-06-06: кнопка «По критериям ФИПИ» убрана — Часть 1
-                авто-проверяется по ФИПИ 2026 partial credit на сабмите.
-                Manual recheck возможен через SQL при необходимости. */}
-            {isReadOnly && (
-              <Badge
-                variant="outline"
-                className="border-emerald-300 text-emerald-800 bg-white/60 self-start sm:self-center"
-              >
-                Не редактируется
-              </Badge>
-            )}
-          </div>
-
-          {/* Bug fix (2026-06-02): показываем загруженный бланк/фото Часть 1 если
-              есть — для blank/legacy attempts (answer_method=null), ошибочно
-              отрисованных form-card'ой, тутор может сверить распознанные ответы
-              с оригиналом. Review fix: для ЯВНОГО form mode прячем (фото — это
-              остаточный бланк после переключения режима, к проверке не относится). */}
-          {attempt.answer_method !== 'form' &&
-            (attempt.blank_photo_url || attempt.part1_blank_photo_url) && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {attempt.blank_photo_url && (
-                <a
-                  href={attempt.blank_photo_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block"
-                >
-                  <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300 mb-1">
-                    ФИПИ-бланк (Часть 1) — открыть
-                  </div>
-                  <img
-                    src={attempt.blank_photo_url}
-                    alt="ФИПИ бланк"
-                    loading="lazy"
-                    className="w-full rounded-md border border-emerald-300 bg-white object-contain max-h-[320px]"
-                  />
-                </a>
-              )}
-              {attempt.part1_blank_photo_url && (
-                <a
-                  href={attempt.part1_blank_photo_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block"
-                >
-                  <div className="text-xs font-medium text-emerald-800 dark:text-emerald-300 mb-1">
-                    Доп. фото Часть 1 (не на бланке) — открыть
-                  </div>
-                  <img
-                    src={attempt.part1_blank_photo_url}
-                    alt="Фото ответов Часть 1"
-                    loading="lazy"
-                    className="w-full rounded-md border border-emerald-300 bg-white object-contain max-h-[320px]"
-                  />
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* AC-P11: collapsible rows list — click row → drill-down dialog */}
-          <details className="rounded-md border border-emerald-200 dark:border-emerald-900 bg-white/60 dark:bg-emerald-950/10">
-            <summary className="cursor-pointer touch-manipulation px-3 py-2 text-xs font-medium text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100/40 dark:hover:bg-emerald-900/20 flex items-center gap-1.5">
-              <ChevronDown className="h-3.5 w-3.5 transition-transform" aria-hidden="true" />
-              Показать ответы по задачам ({attempt.part1_answers.length})
-            </summary>
-            <div className="border-t border-emerald-200 dark:border-emerald-900 max-h-[400px] overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-emerald-50 dark:bg-emerald-950/30 text-xs uppercase text-emerald-800 dark:text-emerald-300 sticky top-0">
-                  <tr>
-                    <th className="px-2 py-1.5 text-left font-medium">№</th>
-                    <th className="px-2 py-1.5 text-left font-medium">Ответ</th>
-                    <th className="px-2 py-1.5 text-left font-medium">Правильный</th>
-                    <th className="px-2 py-1.5 text-right font-medium">Балл</th>
-                    <th className="px-2 py-1.5 text-right font-medium">Коммент</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {attempt.part1_answers.map((row) => {
-                    const earned = row.earned_score ?? 0;
-                    const hasScore = row.earned_score !== null;
-                    // Bug fix (2026-06-02): resolve answer из student_answer ?? OCR cell.
-                    const resolved = resolvePart1StudentAnswer(
-                      row,
-                      attempt.ai_part1_ocr_json,
-                    );
-                    const isCorrect = hasScore && earned > 0 && earned === row.max_score;
-                    const isPartial = hasScore && earned > 0 && earned < row.max_score;
-                    const isWrong = hasScore && earned === 0 && resolved.value !== null;
-                    const hasComment = (row.tutor_comment ?? '').trim().length > 0;
-                    return (
-                      <tr
-                        key={row.kim_number}
-                        className="border-t border-emerald-100 dark:border-emerald-900/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 cursor-pointer touch-manipulation"
-                        onClick={() => setDrillDownKim(row.kim_number)}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Открыть детали KIM ${row.kim_number}`}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            setDrillDownKim(row.kim_number);
-                          }
-                        }}
-                      >
-                        <td className="px-2 py-1.5 font-medium tabular-nums text-slate-800 dark:text-slate-200">
-                          №{row.kim_number}
-                        </td>
-                        <td className="px-2 py-1.5 break-words max-w-[120px]">
-                          {resolved.value !== null ? (
-                            <span className="inline-flex flex-col gap-0.5">
-                              <span
-                                className={cn(
-                                  'inline-flex items-center gap-1',
-                                  isCorrect && 'text-emerald-700 dark:text-emerald-300',
-                                  isPartial && 'text-amber-700 dark:text-amber-300',
-                                  isWrong && 'text-rose-700 dark:text-rose-300',
-                                )}
-                              >
-                                {isCorrect && <CheckCircle2 className="h-3 w-3" />}
-                                {isPartial && <Check className="h-3 w-3" />}
-                                {isWrong && <X className="h-3 w-3" />}
-                                {resolved.value}
-                              </span>
-                              {resolved.fromOcr && (
-                                <span
-                                  className={cn(
-                                    'inline-flex items-center gap-0.5 text-[10px]',
-                                    resolved.confidence === 'low'
-                                      ? 'text-amber-600 dark:text-amber-400'
-                                      : 'text-slate-400 dark:text-slate-500',
-                                  )}
-                                  title={
-                                    resolved.confidence === 'low'
-                                      ? 'Распознано с фото бланка, низкая уверенность — сверь с бланком'
-                                      : 'Распознано с фото бланка ФИПИ'
-                                  }
-                                >
-                                  <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
-                                  распознано{resolved.confidence === 'low' ? ' · проверь' : ''}
-                                </span>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="italic text-slate-400">без ответа</span>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 break-words max-w-[120px] text-slate-700 dark:text-slate-300">
-                          {row.correct_answer ?? '—'}
-                        </td>
-                        <td
-                          className={cn(
-                            'px-2 py-1.5 text-right tabular-nums font-semibold',
-                            isCorrect && 'text-emerald-700 dark:text-emerald-300',
-                            isPartial && 'text-amber-700 dark:text-amber-300',
-                            isWrong && 'text-rose-700 dark:text-rose-300',
-                            !hasScore && 'text-slate-400',
-                          )}
-                        >
-                          {hasScore ? `${earned}/${row.max_score}` : '—'}
-                        </td>
-                        <td className="px-2 py-1.5 text-right">
-                          {hasComment ? (
-                            <span
-                              className="inline-flex items-center text-sky-700 dark:text-sky-300"
-                              title="Комментарий есть"
-                            >
-                              💬
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <p className="text-[11px] text-emerald-700 dark:text-emerald-400 px-3 py-2 bg-emerald-50/50 dark:bg-emerald-950/30 border-t border-emerald-200 dark:border-emerald-900">
-                💡 Click на строку → откроется детальная карточка с условием и редактированием
-              </p>
-            </div>
-          </details>
-        </CardContent>
-      </Card>
-
-      {/* AC-P11: drill-down dialog */}
-      {drillDownAnswer && (
-        <Part1TaskDrillDownDialog
-          open={drillDownKim !== null}
-          onOpenChange={(open) => {
-            if (!open) setDrillDownKim(null);
-          }}
-          kimNumber={drillDownAnswer.kim_number}
-          maxScore={drillDownAnswer.max_score}
-          studentAnswer={drillDownResolved?.value ?? null}
-          answerFromOcr={drillDownResolved?.fromOcr ?? false}
-          correctAnswer={drillDownAnswer.correct_answer}
-          currentScore={drillDownAnswer.earned_score}
-          currentComment={drillDownAnswer.tutor_comment ?? null}
-          taskText={drillDownAnswer.task_text ?? null}
-          taskImageUrl={drillDownAnswer.task_image_url ?? null}
-          isReadOnly={isReadOnly}
-          onSave={(payload) => handleDrillDownSave(drillDownAnswer.kim_number, payload)}
-        />
-      )}
-
-    </>
   );
 }
 
@@ -2501,18 +2209,16 @@ function TutorMockExamReviewContent() {
         onRetry={refetchAttempt}
       />
 
-      {/* Часть 1 — read-only summary (form mode) или manual scoring (blank mode, TASK-11) */}
-      {attempt.answer_method === 'blank' ? (
-        <Part1BlankReviewPanel
-          attempt={attempt}
-          variantPart1Tasks={attempt.part1_answers.map((a) => ({
-            kim_number: a.kim_number,
-            max_score: a.max_score,
-          }))}
-        />
-      ) : (
-        <Part1SummaryCard attempt={attempt} />
-      )}
+      {/* Часть 1 — единый редактируемый грид для обоих режимов (2026-06-07):
+          цифровой ввод (form) + бланк ФИПИ (blank). OCR-only UI гейтится внутри
+          по attempt.answer_method. */}
+      <Part1ReviewPanel
+        attempt={attempt}
+        variantPart1Tasks={attempt.part1_answers.map((a) => ({
+          kim_number: a.kim_number,
+          max_score: a.max_score,
+        }))}
+      />
 
       {/* Часть 2 banner — context for AI draft */}
       {!isAlreadyApproved && part2Solutions.length > 0 ? (

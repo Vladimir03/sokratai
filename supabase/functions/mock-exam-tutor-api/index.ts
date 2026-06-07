@@ -1345,22 +1345,26 @@ async function handleGetAttempt(
         db,
         (variant.task_image_url as string | null) ?? null,
       );
-      // earned_score: stored wins; иначе derive из OCR-распознанного value.
+      // earned_score: stored wins; иначе derive из ответа ученика.
+      // value = typed `student_answer` (form) ?? OCR-распознанное (blank).
       // score_source отличает балл AI ('ocr'/'student_form'/'finalize_default')
       // от ручного балла тутора ('tutor') — фронт по нему подписывает строку
       // «Балл AI» vs «Ваш балл».
       let earnedScore = ans?.earned_score ?? null;
       let scoreSource = ans?.score_source ?? null;
-      const ocrValue = ocrValueForKim(kim);
-      if (earnedScore === null && ocrValue !== null) {
+      const typed =
+        ans?.student_answer && ans.student_answer.trim() !== "" ? ans.student_answer : null;
+      const resolvedValue = typed ?? ocrValueForKim(kim);
+      if (earnedScore === null && resolvedValue !== null) {
         earnedScore = checkPart1(
           variant.correct_answer,
-          ocrValue,
+          resolvedValue,
           (variant.check_mode as CheckMode | null) ?? null,
           variant.max_score,
           kim,
         ).earned;
-        scoreSource = "ocr"; // derived из OCR — это балл AI.
+        // derived → балл AI (не tutor): form → 'student_form', blank → 'ocr'.
+        scoreSource = scoreSource ?? (typed !== null ? "student_form" : "ocr");
       }
       return {
         kim_number: kim,
@@ -2103,11 +2107,19 @@ async function handlePart1Finalize(
 
     const { data: existingAnswers } = await db
       .from("mock_exam_attempt_part1_answers")
-      .select("kim_number")
+      .select("kim_number, student_answer, earned_score, score_source")
       .eq("attempt_id", attemptId);
-    const existingKims = new Set(
-      (existingAnswers ?? []).map((r) => r.kim_number as number),
-    );
+    const existingByKim = new Map<
+      number,
+      { student_answer: string | null; earned_score: number | null; score_source: string | null }
+    >();
+    for (const r of existingAnswers ?? []) {
+      existingByKim.set(r.kim_number as number, {
+        student_answer: r.student_answer as string | null,
+        earned_score: r.earned_score as number | null,
+        score_source: r.score_source as string | null,
+      });
+    }
 
     const finalizeOcr = normalizePart1OCRJson(attempt.ai_part1_ocr_json);
     const finalizeOcrCells = ((finalizeOcr as Record<string, unknown> | null)?.cells ?? null) as
@@ -2123,7 +2135,18 @@ async function handlePart1Finalize(
       kim_number: number;
       student_answer: string | null;
       earned_score: number;
-      score_source: "finalize_default" | "ocr";
+      score_source: "finalize_default" | "ocr" | "student_form";
+    }> = [];
+    // 2026-06-07: пересчёт СУЩЕСТВУЮЩИХ строк с earned_score=null И score_source !=
+    // 'tutor' (типично form-режим: autosave писал student_answer + earned_score=null).
+    // Иначе approve/итог по дочерней таблице был бы неверен. Ручные баллы тутора
+    // ('tutor') не трогаем. Payload без student_answer → upsert обновит только
+    // earned_score + score_source, остальные колонки строки сохранятся.
+    const recomputeUpdates: Array<{
+      attempt_id: string;
+      kim_number: number;
+      earned_score: number;
+      score_source: "ocr" | "student_form";
     }> = [];
     for (const t of (variantPart1Tasks ?? []) as Array<{
       kim_number: number;
@@ -2131,10 +2154,11 @@ async function handlePart1Finalize(
       correct_answer: string | null;
       check_mode: string | null;
     }>) {
-      if (!existingKims.has(t.kim_number)) {
+      const existing = existingByKim.get(t.kim_number);
+      if (!existing) {
+        // Нет строки → INSERT (OCR-aware: распознанный ответ → балл AI, иначе 0).
         const ocrValue = finalizeOcrValue(t.kim_number);
         if (ocrValue !== null) {
-          // Распознан ответ → балл AI (consistent с runPart1OCR + derive-on-read).
           missingInserts.push({
             attempt_id: attemptId,
             kim_number: t.kim_number,
@@ -2160,6 +2184,31 @@ async function handlePart1Finalize(
             score_source: "finalize_default",
           });
         }
+      } else if (existing.earned_score === null && existing.score_source !== "tutor") {
+        // Строка есть, но не оценена и НЕ ручная правка → пересчитать из
+        // ответа ученика (typed student_answer ?? OCR-распознанное).
+        const typed =
+          existing.student_answer && existing.student_answer.trim() !== ""
+            ? existing.student_answer
+            : null;
+        const value = typed ?? finalizeOcrValue(t.kim_number);
+        if (value !== null) {
+          recomputeUpdates.push({
+            attempt_id: attemptId,
+            kim_number: t.kim_number,
+            earned_score: checkPart1(
+              t.correct_answer,
+              value,
+              (t.check_mode as CheckMode | null) ?? null,
+              t.max_score,
+              t.kim_number,
+            ).earned,
+            score_source: (existing.score_source as "ocr" | "student_form" | null) ??
+              (typed !== null ? "student_form" : "ocr"),
+          });
+        }
+        // value === null (нет ответа) → оставляем earned_score=null; resync
+        // трактует null как 0.
       }
     }
     if (missingInserts.length > 0) {
@@ -2177,6 +2226,21 @@ async function handlePart1Finalize(
           error: insertErr.message,
         });
         // Non-fatal — продолжаем с aggregation. Sum может быть partial.
+      }
+    }
+    if (recomputeUpdates.length > 0) {
+      // onConflict MERGE — обновляет earned_score + score_source у существующих
+      // (payload без student_answer → та колонка сохраняется).
+      const { error: updateErr } = await db
+        .from("mock_exam_attempt_part1_answers")
+        .upsert(recomputeUpdates, { onConflict: "attempt_id,kim_number" });
+      if (updateErr) {
+        console.warn("mock_exam_part1_finalize_recompute_failed", {
+          attempt_id: attemptId,
+          recompute_count: recomputeUpdates.length,
+          error: updateErr.message,
+        });
+        // Non-fatal — продолжаем с aggregation.
       }
     }
   }

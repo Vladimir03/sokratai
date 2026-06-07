@@ -627,13 +627,15 @@ async function handleGetResult(
       rowsByKim.set(r.kim_number as number, r as Record<string, unknown>);
     }
 
-    // Derive-on-read fallback (2026-06-06): для blank/OCR-попыток, оценённых до
-    // редеплоя per-KIM персистинга, строки в mock_exam_attempt_part1_answers
-    // могут отсутствовать / иметь earned_score=null, хотя ai_part1_ocr_json.cells
-    // заполнен → ученик видел бы только итог без разбалловки. Восстанавливаем
-    // разбалловку ТОЛЬКО для отображения: recognized value (= ответ ученика на
-    // бланке) + детерминированный earned_score через checkPart1. Stored row всегда
-    // в приоритете. `ai_part1_ocr_json` НЕ возвращается ученику (tutor-only
+    // Derive-on-read fallback (2026-06-06/07): строки могут отсутствовать /
+    // иметь earned_score=null (попытки до редеплоя per-KIM персистинга, обе
+    // режима). Восстанавливаем разбалловку ТОЛЬКО для отображения:
+    //   value  = ответ ученика: typed `student_answer` (form) ?? OCR-распознанное
+    //            (blank) — единый источник через resolve.
+    //   earned = stored ?? checkPart1(value) ?? null.
+    // Stored row всегда в приоритете. Итерируем ВСЕ Part-1 задачи варианта (даже
+    // без ответа) → ученик всегда видит полную таблицу разбалловки в обоих
+    // режимах (form/blank). `ai_part1_ocr_json` НЕ возвращается ученику (tutor-only
     // artifact, rule 45) — читаем server-side, наружу отдаём только value+score.
     const ocrCells = ((attempt.ai_part1_ocr_json as Record<string, unknown> | null)
       ?.cells ?? null) as Record<string, { value?: string | null }> | null;
@@ -652,36 +654,35 @@ async function handleGetResult(
       for (const v of part1VariantTasks) {
         const kim = v.kim_number as number;
         const row = rowsByKim.get(kim) ?? null;
-        const hasStoredScore =
-          row != null && row.earned_score !== null && row.earned_score !== undefined;
-        const ocrValue = ocrValueForKim(kim);
+        const storedScore =
+          row != null && row.earned_score !== null && row.earned_score !== undefined
+            ? (row.earned_score as number)
+            : null;
+        const typed =
+          row && typeof row.student_answer === "string" && row.student_answer.trim() !== ""
+            ? (row.student_answer as string)
+            : null;
+        // value = ответ ученика: typed (form) ?? OCR-распознанное (blank).
+        const value = typed ?? ocrValueForKim(kim);
 
-        // Нет ни строки, ни распознанного ответа → не фабрикуем пустую строку.
-        if (!row && ocrValue === null) continue;
-
-        let studentAnswer: string | null;
         let earnedScore: number | null;
-        if (hasStoredScore) {
-          studentAnswer = (row!.student_answer as string | null) ?? null;
-          earnedScore = row!.earned_score as number;
-        } else if (ocrValue !== null) {
-          studentAnswer = ocrValue;
+        if (storedScore !== null) {
+          earnedScore = storedScore;
+        } else if (value !== null) {
           earnedScore = checkPart1(
             (v.correct_answer as string | null) ?? null,
-            ocrValue,
+            value,
             (v.check_mode as CheckMode | null) ?? null,
             (v.max_score as number | undefined) ?? 0,
             kim,
           ).earned;
         } else {
-          // строка есть, но earned_score=null и OCR нет → отдаём как есть.
-          studentAnswer = (row!.student_answer as string | null) ?? null;
-          earnedScore = (row!.earned_score as number | null) ?? null;
+          earnedScore = null;
         }
 
         out.push({
           kim_number: kim,
-          student_answer: studentAnswer,
+          student_answer: value,
           earned_score: earnedScore,
           tutor_comment: (row?.tutor_comment as string | null) ?? null,
           correct_answer: (v.correct_answer as string | null) ?? null,

@@ -86,6 +86,9 @@ interface VariantTaskRow {
   task_image_url: string | null;
   correct_answer: string | null;
   solution_text: string | null;
+  // 2026-06-07: фото эталонного решения Части 2 (dual-format: single ref OR
+  // JSON-array). Tutor-only превью ДО выдачи — рядом с solution_text.
+  solution_image_urls: string | null;
   check_mode: string | null;
   max_score: number;
   topic: string | null;
@@ -124,35 +127,40 @@ function parseStorageRef(
   };
 }
 
-async function resolveTaskImages(
+async function resolveRefsToSignedUrls(refs: string[]): Promise<string[]> {
+  const urls: string[] = [];
+  for (const ref of refs) {
+    if (ref.startsWith('http://') || ref.startsWith('https://')) {
+      urls.push(ref);
+      continue;
+    }
+    const parsed = parseStorageRef(ref);
+    if (!parsed) continue;
+    try {
+      const { data, error } = await supabase.storage
+        .from(parsed.bucket)
+        .createSignedUrl(parsed.path, 60 * 60);
+      if (!error && data?.signedUrl) {
+        urls.push(data.signedUrl);
+      }
+    } catch {
+      // Best-effort — пропускаем сломанный ref, остальные грузим.
+    }
+  }
+  return urls;
+}
+
+// Резолвит refs из одного поля (task_image_url ИЛИ solution_image_urls) в signed
+// URLs, keyed by kim_number. Sequential — ~13 картинок на вариант, не критично.
+async function resolveImagesByKim(
   tasks: VariantTaskRow[],
+  pick: (task: VariantTaskRow) => string | null,
 ): Promise<Record<number, string[]>> {
   const result: Record<number, string[]> = {};
-  // Sequential resolution — only ~13 images per variant, не критично для перфа.
-  // Параллелить через Promise.all не помешает, но добавит обработку ошибок
-  // на каждый ref. Phase 1 — оставляем sequential.
   for (const task of tasks) {
-    const refs = parseTaskImageRefs(task.task_image_url);
+    const refs = parseTaskImageRefs(pick(task));
     if (refs.length === 0) continue;
-    const urls: string[] = [];
-    for (const ref of refs) {
-      if (ref.startsWith('http://') || ref.startsWith('https://')) {
-        urls.push(ref);
-        continue;
-      }
-      const parsed = parseStorageRef(ref);
-      if (!parsed) continue;
-      try {
-        const { data, error } = await supabase.storage
-          .from(parsed.bucket)
-          .createSignedUrl(parsed.path, 60 * 60);
-        if (!error && data?.signedUrl) {
-          urls.push(data.signedUrl);
-        }
-      } catch {
-        // Best-effort — пропускаем сломанный ref, остальные грузим.
-      }
-    }
+    const urls = await resolveRefsToSignedUrls(refs);
     if (urls.length > 0) {
       result[task.kim_number] = urls;
     }
@@ -240,9 +248,10 @@ function Collapsible({ title, children, tone = 'default' }: CollapsibleProps) {
 interface PreviewTaskCardProps {
   task: VariantTaskRow;
   imageUrls: string[];
+  solutionImageUrls: string[];
 }
 
-function PreviewTaskCard({ task, imageUrls }: PreviewTaskCardProps) {
+function PreviewTaskCard({ task, imageUrls, solutionImageUrls }: PreviewTaskCardProps) {
   const isPart1 = task.part === 1;
   return (
     <Card animate={false} className="border-slate-200">
@@ -314,12 +323,34 @@ function PreviewTaskCard({ task, imageUrls }: PreviewTaskCardProps) {
             <span className="font-mono tabular-nums">{task.correct_answer}</span>
           </Collapsible>
         ) : null}
-        {!isPart1 && task.solution_text ? (
+        {!isPart1 && (task.solution_text || solutionImageUrls.length > 0) ? (
           <Collapsible title="Эталонное решение (видно только тебе)" tone="amber">
-            <MathBlock
-              text={task.solution_text}
-              className="text-sm leading-6"
-            />
+            {task.solution_text ? (
+              <MathBlock
+                text={task.solution_text}
+                className="text-sm leading-6"
+              />
+            ) : null}
+            {solutionImageUrls.length > 0 ? (
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {solutionImageUrls.map((url, idx) => (
+                  <a
+                    key={`${task.id}-sol-${idx}`}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block overflow-hidden rounded-md border border-amber-200 bg-white"
+                  >
+                    <img
+                      src={url}
+                      alt={`Эталон решения №${task.kim_number} — фото ${idx + 1}`}
+                      className="aspect-[3/4] w-full object-cover"
+                      loading="lazy"
+                    />
+                  </a>
+                ))}
+              </div>
+            ) : null}
           </Collapsible>
         ) : null}
       </CardContent>
@@ -331,6 +362,7 @@ interface PreviewBodyProps {
   variant: VariantSummaryRow | null;
   tasks: VariantTaskRow[];
   imagesByKim: Record<number, string[]>;
+  solutionImagesByKim: Record<number, string[]>;
   loading: boolean;
   error: string | null;
 }
@@ -339,6 +371,7 @@ function PreviewBody({
   variant,
   tasks,
   imagesByKim,
+  solutionImagesByKim,
   loading,
   error,
 }: PreviewBodyProps) {
@@ -420,6 +453,7 @@ function PreviewBody({
                 key={task.id}
                 task={task}
                 imageUrls={imagesByKim[task.kim_number] ?? []}
+                solutionImageUrls={solutionImagesByKim[task.kim_number] ?? []}
               />
             ))}
           </div>
@@ -441,6 +475,7 @@ function PreviewBody({
                 key={task.id}
                 task={task}
                 imageUrls={imagesByKim[task.kim_number] ?? []}
+                solutionImageUrls={solutionImagesByKim[task.kim_number] ?? []}
               />
             ))}
           </div>
@@ -464,6 +499,9 @@ export function MockExamVariantPreviewSheet({
   const [variant, setVariant] = useState<VariantSummaryRow | null>(null);
   const [tasks, setTasks] = useState<VariantTaskRow[]>([]);
   const [imagesByKim, setImagesByKim] = useState<Record<number, string[]>>({});
+  const [solutionImagesByKim, setSolutionImagesByKim] = useState<
+    Record<number, string[]>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -474,6 +512,10 @@ export function MockExamVariantPreviewSheet({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // Сброс картинок при смене варианта — иначе старые эталоны/иллюстрации
+    // мелькнут на новом варианте до завершения async-резолва.
+    setImagesByKim({});
+    setSolutionImagesByKim({});
 
     (async () => {
       try {
@@ -494,7 +536,7 @@ export function MockExamVariantPreviewSheet({
         const tasksQ = await supabase
           .from('mock_exam_variant_tasks')
           .select(
-            'id, kim_number, part, order_num, task_text, task_image_url, correct_answer, solution_text, check_mode, max_score, topic',
+            'id, kim_number, part, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, check_mode, max_score, topic',
           )
           .eq('variant_id', variantId)
           .order('order_num', { ascending: true });
@@ -514,9 +556,13 @@ export function MockExamVariantPreviewSheet({
 
         // Resolve images асинхронно — body уже отрисуется без них, картинки
         // подтянутся когда будут готовы. Не блокируем основной paint.
-        const resolved = await resolveTaskImages(taskRows);
+        const [taskImgs, solutionImgs] = await Promise.all([
+          resolveImagesByKim(taskRows, (t) => t.task_image_url),
+          resolveImagesByKim(taskRows, (t) => t.solution_image_urls),
+        ]);
         if (!cancelled) {
-          setImagesByKim(resolved);
+          setImagesByKim(taskImgs);
+          setSolutionImagesByKim(solutionImgs);
         }
       } catch (err) {
         if (cancelled) return;
@@ -568,6 +614,7 @@ export function MockExamVariantPreviewSheet({
             variant={variant}
             tasks={tasks}
             imagesByKim={imagesByKim}
+            solutionImagesByKim={solutionImagesByKim}
             loading={loading}
             error={error}
           />
