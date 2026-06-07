@@ -3987,6 +3987,7 @@ export type Database = {
         Args: { _lesson_id: string; _scope?: string }
         Returns: Json
       }
+      tutor_get_invite_code: { Args: never; Returns: string }
       tutor_remove_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
