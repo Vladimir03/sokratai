@@ -527,10 +527,15 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
   }, [drafts, variantPart1Tasks]);
   const part1Max = variantPart1Tasks.reduce((a, t) => a + t.max_score, 0);
 
-  // 2026-06-07: единый грид для обоих режимов. isBlank гейтит OCR-only UI
+  // 2026-06-07: единый грид для обоих режимов. isOcrMode гейтит OCR-only UI
   // (фото бланка, баннер «AI распознал N/20», «Перезапустить AI», low-conf
-  // обводка). Цифровой ввод (form) использует тот же грид, но без OCR-битов.
-  const isBlank = attempt.answer_method === 'blank';
+  // обводка) И сам OCR-fallback ответа. `!== 'form'` (а не `=== 'blank'`),
+  // чтобы legacy-попытки с NULL answer_method (реальные blank до появления
+  // поля) тоже резолвили ответ из OCR + показывали фото; explicit form НИКОГДА
+  // не трогает OCR (review fix P2 — иначе stale OCR показал бы «Распознано» без
+  // бланк-контекста на цифровой попытке).
+  const isOcrMode = attempt.answer_method !== 'form';
+  const ocrForResolve = isOcrMode ? attempt.ai_part1_ocr_json : null;
 
   // Счётчики верно/частично/неверно/без ответа — для обоих режимов, через
   // resolvePart1StudentAnswer (typed ?? OCR). Показываем в шапке.
@@ -538,7 +543,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
     let correct = 0, partial = 0, wrong = 0, ungraded = 0, noAnswer = 0;
     for (const a of attempt.part1_answers) {
       if (a.max_score <= 0) continue;
-      const value = resolvePart1StudentAnswer(a, attempt.ai_part1_ocr_json).value;
+      const value = resolvePart1StudentAnswer(a, ocrForResolve).value;
       if (value === null) { noAnswer++; continue; }
       if (a.earned_score === null) { ungraded++; continue; }
       if (a.earned_score === a.max_score) correct++;
@@ -546,7 +551,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
       else partial++;
     }
     return { correct, partial, wrong, ungraded, noAnswer };
-  }, [attempt.part1_answers, attempt.ai_part1_ocr_json]);
+  }, [attempt.part1_answers, ocrForResolve]);
 
   return (
     <Card animate={false} className="border-amber-200 bg-amber-50/40 dark:bg-amber-950/10 dark:border-amber-900">
@@ -555,11 +560,11 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
           <div className="flex items-center gap-2">
             <Pencil className="h-4 w-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />
             <h2 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-              {isBlank ? 'Часть 1: проверка по бланку ФИПИ' : 'Часть 1: авто-проверка'}
+              {isOcrMode ? 'Часть 1: проверка по бланку ФИПИ' : 'Часть 1: авто-проверка'}
             </h2>
           </div>
           <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
-            {isBlank
+            {isOcrMode
               ? 'Ученик заполнял бланк от руки. Сверь ответы с фото ниже и при необходимости поправь баллы 1–20.'
               : 'Ученик вводил ответы цифрой — авто-проверены по ФИПИ 2026. Проверь и при необходимости поправь баллы.'}
           </p>
@@ -570,7 +575,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
           </p>
         </div>
 
-        {isBlank && (blankPhotoUrl || fallbackPhotoUrl) && (
+        {isOcrMode && (blankPhotoUrl || fallbackPhotoUrl) && (
           <div className="grid gap-3 sm:grid-cols-2">
             {blankPhotoUrl && (
               <a href={blankPhotoUrl} target="_blank" rel="noreferrer" className="block">
@@ -606,7 +611,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
               - 'failed'                              → rose warning + retry CTA
               - 'success' + recognized_cells === 0    → amber soft warning
               - 'success' + recognized_cells > 0      → emerald success */}
-        {isBlank && (() => {
+        {isOcrMode && (() => {
           const ocrJson = attempt.ai_part1_ocr_json;
           const meta = ocrJson?.__meta ?? null;
           const isFailed = meta?.status === 'failed';
@@ -671,7 +676,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
             // (бланк) vs «Ответ ученика» (форма). isLowConf — только для OCR.
             const resolved = resolvePart1StudentAnswer(
               answerRow ?? { kim_number: t.kim_number, student_answer: null },
-              attempt.ai_part1_ocr_json,
+              ocrForResolve,
             );
             const isLowConf = resolved.fromOcr && resolved.confidence === 'low';
             const hasRecognition = resolved.value !== null;
@@ -991,7 +996,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
       {drillDownKim !== null && (() => {
         const ans = attempt.part1_answers.find((a) => a.kim_number === drillDownKim);
         if (!ans) return null;
-        const resolved = resolvePart1StudentAnswer(ans, attempt.ai_part1_ocr_json);
+        const resolved = resolvePart1StudentAnswer(ans, ocrForResolve);
         return (
           <Part1TaskDrillDownDialog
             open={drillDownKim !== null}
