@@ -2087,6 +2087,110 @@ async function notifyHomeworkStudentAssigned(
   return { channel: null, failed_reason: "no_channels_available" };
 }
 
+// ─── Phase 12 (2026-06-07): уведомление об общем комментарии к ДЗ ─────────────
+//
+// Каскад push → telegram (БЕЗ email, mirror notifyHomeworkStudentAssigned /
+// quick-add). Вызывается из handleSetStudentOverallComment когда репетитор
+// сохраняет НОВЫЙ/ИЗМЕНЁННЫЙ непустой комментарий. Репетитор часто комментирует
+// уже ПОСЛЕ завершения ДЗ учеником → без пуша ученик может не увидеть.
+async function notifyHomeworkOverallComment(
+  db: SupabaseClient,
+  studentId: string,
+  assignmentId: string,
+  assignmentTitle: string,
+  commentText: string,
+  tutorName: string | null,
+): Promise<QuickAssignCascadeResult> {
+  const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
+    "https://sokratai.ru";
+  const url = `${appUrl}/homework/${assignmentId}`;
+  const who = tutorName && tutorName.trim().length > 0 ? tutorName.trim() : "Репетитор";
+  // Push body — короткий сниппет (длинный комментарий не влезет в баннер).
+  const snippet = commentText.length > 160 ? `${commentText.slice(0, 157)}…` : commentText;
+  const pushPayload: PushPayload = {
+    title: `Комментарий к ДЗ: ${assignmentTitle}`,
+    body: `${who}: ${snippet}`,
+    url,
+  };
+
+  // 1) Push
+  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+    const { data: subs } = await db
+      .from("push_subscriptions")
+      .select("endpoint, p256dh, auth")
+      .eq("user_id", studentId);
+    for (const sub of (subs ?? []) as PushSubscriptionData[]) {
+      try {
+        const result = await sendPushNotification(
+          sub,
+          pushPayload,
+          VAPID_PUBLIC_KEY,
+          VAPID_PRIVATE_KEY,
+          VAPID_SUBJECT,
+        );
+        if (result.success) {
+          return { channel: "push", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("homework_overall_comment_push_send_error", {
+          student_id: studentId,
+          error: String(err),
+        });
+      }
+    }
+  }
+
+  // 2) Telegram fallback — полный текст комментария + ссылка.
+  if (TELEGRAM_BOT_TOKEN) {
+    const { data: profile } = await db
+      .from("profiles")
+      .select("telegram_user_id")
+      .eq("id", studentId)
+      .maybeSingle();
+    let chatId = (profile?.telegram_user_id as number | null) ?? null;
+    if (!chatId) {
+      const { data: session } = await db
+        .from("telegram_sessions")
+        .select("telegram_user_id")
+        .eq("user_id", studentId)
+        .maybeSingle();
+      chatId = (session?.telegram_user_id as number | null) ?? null;
+    }
+    if (chatId) {
+      try {
+        const text =
+          `💬 ${escapeHtmlEntities(who)} оставил(а) комментарий к ДЗ <b>${escapeHtmlEntities(assignmentTitle)}</b>\n\n` +
+          `${escapeHtmlEntities(commentText)}\n\n` +
+          `<a href="${escapeHtmlEntities(url)}">Открыть ДЗ</a>`;
+        const tgResp = await fetch(
+          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              text,
+              parse_mode: "HTML",
+              disable_web_page_preview: false,
+            }),
+          },
+        );
+        if (tgResp.ok) {
+          return { channel: "telegram", failed_reason: null };
+        }
+      } catch (err) {
+        console.warn("homework_overall_comment_telegram_send_error", {
+          student_id: studentId,
+          error: String(err),
+        });
+      }
+    }
+  }
+
+  // Email — намеренно не используем (mirror push→telegram quick-add).
+  return { channel: null, failed_reason: "no_channels_available" };
+}
+
 async function handleQuickAssignStudentsWithNotify(
   db: SupabaseClient,
   tutorUserId: string,
@@ -3050,6 +3154,147 @@ async function handleRemindStudent(
   );
 }
 
+// ─── Endpoint: POST /assignments/:id/students/:sid/overall-comment ───────────
+//
+// Phase 12 (2026-06-07): репетитор оставляет общий комментарий ко всему ДЗ
+// конкретному ученику (per-student wrap-up). Single write-path.
+//
+//   * Ownership через getOwnedAssignmentOrThrow + проверка, что ученик назначен
+//     (anti id-spoofing, mirror handleRemindStudent).
+//   * Пустой/пробельный comment → очистка (NULL).
+//   * Anti-leak: comment + _at — student-visible by design; _by — audit-only.
+//   * Notify push→telegram (БЕЗ email) ТОЛЬКО на непустой ИЗМЕНЁННЫЙ текст.
+const OVERALL_COMMENT_MAX = 2000;
+
+async function handleSetStudentOverallComment(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  studentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "studentId не является валидным UUID");
+  }
+
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr;
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  // comment: string | null. Пусто/пробелы после trim → очистка (NULL).
+  let comment: string | null = null;
+  if (typeof b.comment === "string") {
+    const trimmed = b.comment.trim();
+    comment = trimmed.length === 0 ? null : trimmed;
+  } else if (b.comment === null || b.comment === undefined) {
+    comment = null;
+  } else {
+    return jsonError(cors, 400, "VALIDATION", "Поле «comment» должно быть строкой или null");
+  }
+  if (comment !== null && comment.length > OVERALL_COMMENT_MAX) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      `Комментарий слишком длинный (максимум ${OVERALL_COMMENT_MAX} символов)`,
+    );
+  }
+
+  // Confirm the student is actually assigned to this homework (anti id-spoofing).
+  const { data: saRow, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, tutor_overall_comment")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+
+  if (saError) {
+    console.error("homework_overall_comment_sa_error", {
+      assignment_id: assignmentId,
+      student_id: studentId,
+      error: saError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить, что ученик назначен на это ДЗ");
+  }
+  if (!saRow) {
+    return jsonError(cors, 404, "NOT_FOUND", "Ученик не назначен на это ДЗ");
+  }
+
+  const previousComment = (saRow.tutor_overall_comment as string | null) ?? null;
+  const nowIso = new Date().toISOString();
+
+  const { error: updErr } = await db
+    .from("homework_tutor_student_assignments")
+    .update({
+      tutor_overall_comment: comment,
+      tutor_overall_comment_at: comment === null ? null : nowIso,
+      tutor_overall_comment_by: comment === null ? null : tutorUserId,
+    })
+    .eq("id", saRow.id);
+
+  if (updErr) {
+    console.error("homework_overall_comment_update_error", {
+      assignment_id: assignmentId,
+      student_id: studentId,
+      error: updErr.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить комментарий");
+  }
+
+  // Notify ТОЛЬКО на непустой ИЗМЕНЁННЫЙ текст (не пингуем на очистку /
+  // повторное сохранение того же текста).
+  let notify: { sent_push: boolean; sent_telegram: boolean; failed_no_channel: boolean } | null =
+    null;
+  const changed = comment !== null && comment !== previousComment;
+  if (changed) {
+    let tutorName: string | null = null;
+    try {
+      const { data: tutorProfile } = await db
+        .from("profiles")
+        .select("display_name")
+        .eq("id", tutorUserId)
+        .maybeSingle();
+      tutorName = (tutorProfile?.display_name as string | null) ?? null;
+    } catch {
+      // non-fatal — уведомление уйдёт с «Репетитор»
+    }
+
+    const result = await notifyHomeworkOverallComment(
+      db,
+      studentId,
+      assignmentId,
+      assignment.title as string,
+      comment,
+      tutorName,
+    );
+    notify = {
+      sent_push: result.channel === "push",
+      sent_telegram: result.channel === "telegram",
+      failed_no_channel: result.channel === null,
+    };
+  }
+
+  // PII-free telemetry — без текста комментария и без имён.
+  console.log("homework_overall_comment_saved", {
+    assignment_id: assignmentId,
+    student_id: studentId,
+    cleared: comment === null,
+    changed,
+    notify_channel: notify
+      ? (notify.sent_push ? "push" : notify.sent_telegram ? "telegram" : "none")
+      : "skipped",
+  });
+
+  return jsonOk(cors, {
+    ok: true,
+    tutor_overall_comment: comment,
+    tutor_overall_comment_at: comment === null ? null : nowIso,
+    notify,
+  });
+}
+
 // ─── Endpoint: GET /assignments/:id/results ──────────────────────────────────
 
 async function handleGetResults(
@@ -3118,7 +3363,18 @@ async function handleGetResults(
     total_score: number;
     total_max: number;
     total_time_minutes: number | null;
+    // Phase 12 (2026-06-07): общий комментарий репетитора к ДЗ для этого ученика.
+    // Прикрепляется post-pass'ом ниже (optional, чтобы 3 push-сайта не трогать).
+    tutor_overall_comment?: string | null;
+    tutor_overall_comment_at?: string | null;
   }[] = [];
+
+  // Phase 12: student_id → общий комментарий к ДЗ (заполняется из
+  // studentAssignments ниже; пусто если ученики ещё не назначены).
+  const overallCommentByStudent: Record<
+    string,
+    { comment: string | null; at: string | null }
+  > = {};
 
   // student_id → task_id → { final_score, hint_count, has_override, ... }.
   // Built alongside the aggregate accumulator so the per_student heatmap cells
@@ -3142,13 +3398,18 @@ async function handleGetResults(
 
   const { data: studentAssignments } = await db
     .from("homework_tutor_student_assignments")
-    .select("id, student_id")
+    .select("id, student_id, tutor_overall_comment, tutor_overall_comment_at")
     .eq("assignment_id", assignmentId);
 
   // Map student_assignment_id → student_id for joining threads → students.
   const studentBySa: Record<string, string> = {};
   for (const sa of studentAssignments ?? []) {
     studentBySa[sa.id] = sa.student_id;
+    // Phase 12: общий комментарий → student_id (для post-pass на per_student).
+    overallCommentByStudent[sa.student_id] = {
+      comment: (sa.tutor_overall_comment as string | null) ?? null,
+      at: (sa.tutor_overall_comment_at as string | null) ?? null,
+    };
   }
 
   if (studentAssignments && studentAssignments.length > 0) {
@@ -3454,6 +3715,14 @@ async function handleGetResults(
         });
       }
     }
+  }
+
+  // Phase 12: прикрепляем общий комментарий к ДЗ каждому per_student (post-pass —
+  // overallCommentByStudent пуст, если студентов нет → no-op).
+  for (const ps of perStudent) {
+    const oc = overallCommentByStudent[ps.student_id];
+    ps.tutor_overall_comment = oc?.comment ?? null;
+    ps.tutor_overall_comment_at = oc?.at ?? null;
   }
 
   const summary = {
@@ -6380,7 +6649,8 @@ async function handleGetStudentAssignment(
 
   const { data: assigned, error: assignedError } = await db
     .from("homework_tutor_student_assignments")
-    .select("assignment_id")
+    // Phase 12: общий комментарий к ДЗ — student-visible. _by не селектим (audit-only).
+    .select("assignment_id, tutor_overall_comment, tutor_overall_comment_at")
     .eq("assignment_id", assignmentId)
     .eq("student_id", userId)
     .maybeSingle();
@@ -6428,6 +6698,9 @@ async function handleGetStudentAssignment(
   return jsonOk(cors, {
     ...assignment,
     updated_at: assignment.created_at,
+    // Phase 12: общий комментарий репетитора к ДЗ (per-student wrap-up).
+    tutor_overall_comment: (assigned.tutor_overall_comment as string | null) ?? null,
+    tutor_overall_comment_at: (assigned.tutor_overall_comment_at as string | null) ?? null,
     tasks: tasks ?? [],
     materials: materials ?? [],
   });
@@ -6518,7 +6791,9 @@ async function handleGetStudentProblem(
   //    handleGetStudentAssignment.
   const { data: sa, error: saError } = await db
     .from("homework_tutor_student_assignments")
-    .select("id")
+    // Phase 12: tutor_overall_comment(+_at) — student-visible by design (общий
+    // комментарий репетитора к ДЗ). Anti-leak: tutor_overall_comment_by НЕ селектим.
+    .select("id, tutor_overall_comment, tutor_overall_comment_at")
     .eq("assignment_id", hwId)
     .eq("student_id", userId)
     .maybeSingle();
@@ -6645,6 +6920,9 @@ async function handleGetStudentProblem(
       subject: assignment.subject,
       deadline: assignment.deadline,
       status: assignment.status,
+      // Phase 12: общий комментарий репетитора к ДЗ (per-student wrap-up).
+      tutor_overall_comment: (sa.tutor_overall_comment as string | null) ?? null,
+      tutor_overall_comment_at: (sa.tutor_overall_comment_at as string | null) ?? null,
     },
     task: {
       id: targetTask.id,
@@ -9494,6 +9772,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 5 && seg[0] === "assignments" && seg[2] === "students" && seg[4] === "remind" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleRemindStudent(db, userId, seg[1], seg[3], body, cors);
+    }
+
+    // POST /assignments/:id/students/:sid/overall-comment (Phase 12, 2026-06-07)
+    if (
+      seg.length === 5 &&
+      seg[0] === "assignments" &&
+      seg[2] === "students" &&
+      seg[4] === "overall-comment" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleSetStudentOverallComment(db, userId, seg[1], seg[3], body, cors);
     }
 
     // GET /assignments/:id/results

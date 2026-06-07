@@ -65,6 +65,12 @@ export interface StudentHomeworkAssignment {
   status: StudentAssignmentStatus;
   latest_submission_status: string | null;
   created_at: string;
+  /**
+   * Phase 12 (2026-06-07): true, если репетитор оставил общий комментарий к
+   * этому ДЗ (per-student). Драйвит бейдж «Комментарий репетитора» на карточке
+   * списка. Текст комментария на список не грузится — читается на экране ДЗ.
+   */
+  has_tutor_comment?: boolean;
 }
 
 export interface StudentHomeworkTask {

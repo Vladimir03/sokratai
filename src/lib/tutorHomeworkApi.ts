@@ -763,6 +763,15 @@ export interface TutorHomeworkResultsPerStudent {
    * - `submitted=false, total_time_minutes === null` → «—»
    */
   total_time_minutes: number | null;
+
+  /**
+   * Phase 12 (2026-06-07): общий комментарий репетитора ко всему ДЗ для этого
+   * ученика (per-student wrap-up, напр. «Вася, ты молодец, но было две ошибки
+   * на закон Ома…»). `null` = комментария нет. Student-visible by design.
+   */
+  tutor_overall_comment?: string | null;
+  /** Когда комментарий последний раз сохранён/изменён (ISO). `null` если нет. */
+  tutor_overall_comment_at?: string | null;
 }
 
 // ─── Manual score override (Homework Results v2 P0-5 / AC-5) ─────────────────
@@ -844,6 +853,37 @@ export async function bulkForceCompleteStudentTasks(params: {
   return requestHomeworkApi<BulkForceCompleteResponse>(
     `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/force-complete-all-tasks`,
     { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+// ─── Overall homework comment (Phase 12, per-student wrap-up) ─────────────────
+
+export interface SetStudentOverallCommentResponse {
+  ok: true;
+  tutor_overall_comment: string | null;
+  tutor_overall_comment_at: string | null;
+  /** null = notify не отправлялся (очистка / неизменный текст). */
+  notify: {
+    sent_push: boolean;
+    sent_telegram: boolean;
+    failed_no_channel: boolean;
+  } | null;
+}
+
+/**
+ * Phase 12 (2026-06-07): сохранить / изменить / очистить общий комментарий
+ * репетитора к ДЗ для конкретного ученика. Пустая строка (или `null`) → очистка.
+ * Backend уведомляет ученика push→telegram при непустом ИЗМЕНЁННОМ тексте.
+ */
+export async function setStudentOverallComment(params: {
+  assignmentId: string;
+  studentId: string;
+  comment: string | null;
+}): Promise<SetStudentOverallCommentResponse> {
+  const { assignmentId, studentId, comment } = params;
+  return requestHomeworkApi<SetStudentOverallCommentResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/students/${encodeURIComponent(studentId)}/overall-comment`,
+    { method: 'POST', body: JSON.stringify({ comment }) },
   );
 }
 

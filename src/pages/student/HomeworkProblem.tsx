@@ -27,6 +27,7 @@ import { NumericAnswerComposer } from '@/components/student/homework-problem/Num
 import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
 import { SubmitCtaBar } from '@/components/student/homework-problem/SubmitCtaBar';
 import { MathQuickPicker } from '@/components/student/homework-problem/MathQuickPicker';
+import { TutorOverallCommentCard } from '@/components/student/homework-problem/TutorOverallCommentCard';
 import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework/GuidedChatMessage';
 import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
@@ -1196,6 +1197,8 @@ export default function HomeworkProblem() {
 
         {/* Scrollable problem-context area */}
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
+          {/* Phase 12: общий комментарий репетитора к ДЗ (per-student wrap-up). */}
+          <TutorOverallCommentCard comment={data.assignment.tutor_overall_comment} />
           {problemContextTask ? (
             <ProblemContext
               task={problemContextTask}
@@ -1271,6 +1274,14 @@ export default function HomeworkProblem() {
             </h1>
           </div>
         </header>
+
+        {/* Phase 12 (mobile): общий комментарий репетитора к ДЗ — над peek'ом
+            условия. Left aside рендерит свою копию на md+. */}
+        {data.assignment.tutor_overall_comment ? (
+          <div className="md:hidden px-3 pt-3 shrink-0">
+            <TutorOverallCommentCard comment={data.assignment.tutor_overall_comment} />
+          </div>
+        ) : null}
 
         {/* Mobile-only Problem context peek/expanded — hidden at md+
             (left aside renders an always-expanded copy). */}

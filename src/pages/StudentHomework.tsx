@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { useStudentAssignments } from '@/hooks/useStudentHomework';
 import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
+import { MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import PushOptInBanner from '@/components/PushOptInBanner';
 
@@ -75,6 +76,13 @@ const StudentHomework = () => {
                         {assignment.deadline && (
                           <p className="text-sm text-muted-foreground">
                             Дедлайн: {parseISO(assignment.deadline).toLocaleString('ru-RU')}
+                          </p>
+                        )}
+                        {/* Phase 12: бейдж «есть общий комментарий репетитора к ДЗ». */}
+                        {assignment.has_tutor_comment && (
+                          <p className="flex items-center gap-1.5 text-sm font-medium text-accent">
+                            <MessageSquare className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            Комментарий репетитора
                           </p>
                         )}
                         <Button asChild className="w-full">

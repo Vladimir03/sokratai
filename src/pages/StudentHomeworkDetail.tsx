@@ -63,11 +63,18 @@ export default function StudentHomeworkDetail() {
       return;
     }
 
-    // Preview-QA #10 (2026-05-11) fix: all-completed early exit.
-    // Студент завершил все задачи → HomeworkProblem navigate'ит на
-    // `/homework/:hwId` → этот useEffect раньше falls through на
-    // `tasks[0]` → reopens task 1 решённого ДЗ. Теперь:
-    // если все задачи completed → redirect на список ДЗ (`/homework`).
+    // Phase 12 (2026-06-07): завершённое ДЗ БОЛЬШЕ НЕ выбрасывает на список —
+    // открываем его в режиме просмотра, чтобы ученик увидел общий комментарий
+    // репетитора + свои результаты (репетитор часто комментирует уже ПОСЛЕ
+    // завершения). HomeworkProblem рендерит completed-task read-only и НЕ
+    // авто-bounce'ит на mount (навигация только на submit-CTA, а сдавать
+    // нечего) → redirect-loop'а нет. Цель: текущая → последняя по order_num.
+    //
+    // Старое поведение (Preview-QA #10): redirect на `/homework`. Тот фикс ловил
+    // «reopen task 1»; теперь HomeworkProblem корректно показывает completed-
+    // state, поэтому открывать задачу безопасно. Завершение последней задачи
+    // по-прежнему уводит на `/homework` напрямую (navigateAfterCorrect), минуя
+    // эту страницу — так что цикла submit→detail→problem нет.
     const states = thread?.homework_tutor_task_states ?? [];
     const allCompleted =
       thread?.status === 'completed' ||
@@ -77,7 +84,18 @@ export default function StudentHomeworkDetail() {
           return s?.status === 'completed';
         }));
     if (allCompleted) {
-      navigate('/homework', { replace: true });
+      let reviewTaskId: string | undefined;
+      if (thread?.current_task_id) {
+        const exists = tasks.find((t) => t.id === thread.current_task_id);
+        if (exists) reviewTaskId = exists.id;
+      }
+      if (!reviewTaskId) {
+        // `tasks` отсортированы по order_num asc → последняя задача ДЗ.
+        reviewTaskId = tasks[tasks.length - 1]?.id ?? tasks[0].id;
+      }
+      navigate(`/student/homework/${assignmentId}/problem/${reviewTaskId}`, {
+        replace: true,
+      });
       return;
     }
 

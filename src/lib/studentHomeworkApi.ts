@@ -278,6 +278,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
     .select(`
       id,
       assignment_id,
+      tutor_overall_comment,
       homework_tutor_assignments!inner(
         id,
         title,
@@ -298,6 +299,8 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
   type AssignmentJoinRow = {
     id: string;
     assignment_id: string;
+    // Phase 12: общий комментарий репетитора к ДЗ (per-student). Только для бейджа.
+    tutor_overall_comment: string | null;
     homework_tutor_assignments: {
       id: string;
       title: string;
@@ -346,6 +349,8 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         status: assignment.status as StudentHomeworkAssignment['status'],
         latest_submission_status,
         created_at: assignment.created_at,
+        // Phase 12: бейдж «есть комментарий репетитора» на карточке списка.
+        has_tutor_comment: Boolean(row.tutor_overall_comment),
       } satisfies StudentHomeworkAssignment;
     })
     .sort((a, b) => {

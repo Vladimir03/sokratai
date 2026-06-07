@@ -114,7 +114,11 @@ type GuidedTelemetryEvent =
   // «Сохранить и подтвердить», and bulk «Подтвердить всё, что AI проверил»
   // (discriminated by `source`). `task_review_reopened` = «Снять подтверждение».
   | 'task_reviewed'
-  | 'task_review_reopened';
+  | 'task_review_reopened'
+  // ─── Overall homework comment (Phase 12, 2026-06-07) ──────────────────────
+  // PII-free: ids + booleans. `cleared` = комментарий очищен; `notified` =
+  // ученику ушло push/telegram-уведомление о новом комментарии.
+  | 'homework_overall_comment_saved';
 
 type GuidedTelemetryValue =
   | string
@@ -345,6 +349,16 @@ interface TaskReviewReopenedPayload
   taskId: string;
 }
 
+// ─── Overall homework comment (Phase 12, 2026-06-07) ─────────────────────────
+// PII-free: ids + booleans only. No comment text, no student name.
+interface HomeworkOverallCommentSavedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  studentId: string;
+  cleared: boolean;
+  notified: boolean;
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -382,6 +396,7 @@ export function trackGuidedHomeworkEvent(event: 'homework_task_reopened', payloa
 export function trackGuidedHomeworkEvent(event: 'homework_bulk_force_completed', payload: HomeworkBulkForceCompletedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'task_reviewed', payload: TaskReviewedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'task_review_reopened', payload: TaskReviewReopenedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'homework_overall_comment_saved', payload: HomeworkOverallCommentSavedPayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

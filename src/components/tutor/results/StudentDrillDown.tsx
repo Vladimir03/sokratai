@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { BadgeCheck, Loader2 } from 'lucide-react';
+import { BadgeCheck, Loader2, MessageSquare, Pencil } from 'lucide-react';
+import { format, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import {
   AlertDialog,
@@ -18,11 +19,167 @@ import { TaskMiniCard } from './TaskMiniCard';
 import { EditScoreDialog } from './EditScoreDialog';
 import {
   bulkForceCompleteStudentTasks,
+  setStudentOverallComment,
   type TutorHomeworkAssignmentDetails,
   type TutorHomeworkResultsPerStudent,
 } from '@/lib/tutorHomeworkApi';
 import { reviewAllAi } from '@/lib/tutorProgressApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
+import { useAutoResizeTextarea } from '@/hooks/useAutoResizeTextarea';
+
+const OVERALL_COMMENT_MAX = 2000;
+
+// ─── OverallCommentCard (Phase 12, 2026-06-07) ───────────────────────────────
+// Общий комментарий репетитора ко ВСЕМУ ДЗ для одного ученика (per-student
+// wrap-up). Read / edit / save inline. Backend уведомляет ученика push→telegram
+// при непустом ИЗМЕНЁННОМ тексте; пустая строка → очистка комментария.
+function OverallCommentCard({
+  assignmentId,
+  studentId,
+  comment,
+  commentAt,
+}: {
+  assignmentId: string;
+  studentId: string;
+  comment: string | null;
+  commentAt: string | null;
+}) {
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+  const [text, setText] = useState(comment ?? '');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useAutoResizeTextarea(textareaRef, text, 260);
+
+  // Подхватываем внешние изменения комментария, пока репетитор не редактирует.
+  useEffect(() => {
+    if (!isEditing) setText(comment ?? '');
+  }, [comment, isEditing]);
+
+  const saveMutation = useMutation({
+    mutationFn: (value: string | null) =>
+      setStudentOverallComment({ assignmentId, studentId, comment: value }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'results', assignmentId] });
+      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
+      const notified = Boolean(data.notify?.sent_push || data.notify?.sent_telegram);
+      trackGuidedHomeworkEvent('homework_overall_comment_saved', {
+        assignmentId,
+        studentId,
+        cleared: data.tutor_overall_comment == null,
+        notified,
+      });
+      setIsEditing(false);
+      if (data.tutor_overall_comment == null) {
+        toast.success('Комментарий удалён');
+      } else if (notified) {
+        toast.success('Комментарий сохранён, ученик уведомлён');
+      } else {
+        toast.success('Комментарий сохранён (у ученика нет каналов уведомления)');
+      }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Не удалось сохранить комментарий');
+    },
+  });
+
+  const handleSave = () => {
+    const trimmed = text.trim();
+    if (trimmed.length > OVERALL_COMMENT_MAX) return;
+    saveMutation.mutate(trimmed.length === 0 ? null : trimmed);
+  };
+
+  const formattedAt = (() => {
+    if (!commentAt) return null;
+    try {
+      return format(parseISO(commentAt), 'dd.MM.yyyy, HH:mm');
+    } catch {
+      return null;
+    }
+  })();
+
+  // ── Edit mode ───────────────────────────────────────────────────────────────
+  if (isEditing) {
+    const overLimit = text.trim().length > OVERALL_COMMENT_MAX;
+    return (
+      <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+        <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">
+          <MessageSquare className="h-4 w-4 text-accent" aria-hidden="true" />
+          Общий комментарий ученику
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={3}
+          placeholder="Напр.: Вася, ты молодец! Но было две ошибки на закон Ома — повтори его."
+          className="w-full resize-none rounded-md border border-slate-200 bg-white p-2 text-base text-slate-800 placeholder:text-slate-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+        />
+        <div className="mt-1 flex items-center justify-between gap-2">
+          <p className="text-xs text-slate-500">Ученик увидит комментарий и получит уведомление.</p>
+          <span
+            className={`shrink-0 text-xs tabular-nums ${overLimit ? 'text-red-500' : 'text-slate-400'}`}
+          >
+            {text.trim().length}/{OVERALL_COMMENT_MAX}
+          </span>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <Button size="sm" onClick={handleSave} disabled={saveMutation.isPending || overLimit}>
+            {saveMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+            Сохранить
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setText(comment ?? '');
+              setIsEditing(false);
+            }}
+            disabled={saveMutation.isPending}
+          >
+            Отмена
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Read mode (комментарий есть) ─────────────────────────────────────────────
+  if (comment) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-3">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+            <MessageSquare className="h-4 w-4 text-accent" aria-hidden="true" />
+            Общий комментарий ученику
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsEditing(true)}
+            className="h-7 px-2 text-slate-500"
+          >
+            <Pencil className="mr-1 h-3.5 w-3.5" />
+            Изменить
+          </Button>
+        </div>
+        <p className="whitespace-pre-wrap text-sm text-slate-700">{comment}</p>
+        {formattedAt ? <p className="mt-1 text-xs text-slate-400">Изменён: {formattedAt}</p> : null}
+      </div>
+    );
+  }
+
+  // ── Empty state ───────────────────────────────────────────────────────────────
+  return (
+    <button
+      type="button"
+      onClick={() => setIsEditing(true)}
+      className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 transition-colors hover:border-accent/40 hover:text-slate-700"
+    >
+      <MessageSquare className="h-4 w-4 text-slate-400" aria-hidden="true" />
+      Добавить общий комментарий ученику
+    </button>
+  );
+}
 
 // ─── StudentDrillDown (TASK-6, AC-3 / AC-4) ──────────────────────────────────
 // Horizontal row of TaskMiniCard + GuidedThreadViewer filtered by the selected
@@ -229,6 +386,15 @@ export function StudentDrillDown({
 
   return (
     <div className="space-y-4">
+      {/* Phase 12: общий комментарий репетитора ко всему ДЗ для этого ученика —
+          per-student wrap-up, первым элементом разбора. */}
+      <OverallCommentCard
+        assignmentId={assignmentId}
+        studentId={studentId}
+        comment={perStudent?.tutor_overall_comment ?? null}
+        commentAt={perStudent?.tutor_overall_comment_at ?? null}
+      />
+
       {/* Mini-cards row + bulk CTA на одном ряду (code review P2, 2026-05-16).
           `flex-1 min-w-0` на scroll-container'е и `shrink-0` на кнопке —
           mini-cards имеют свой horizontal scroll, button всегда виден.

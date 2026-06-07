@@ -16,6 +16,14 @@ export interface StudentProblemAssignment {
   subject: string;
   deadline: string | null;
   status: StudentAssignmentStatus;
+  /**
+   * Phase 12 (2026-06-07): общий комментарий репетитора ко ВСЕМУ ДЗ для этого
+   * ученика (per-student wrap-up, напр. «Вася, ты молодец, но было две ошибки
+   * на закон Ома…»). `null` = комментария нет. Student-visible by design.
+   */
+  tutor_overall_comment?: string | null;
+  /** Когда комментарий последний раз сохранён/изменён (ISO). */
+  tutor_overall_comment_at?: string | null;
 }
 
 /**

@@ -804,6 +804,29 @@ Spec: `spec.md` (§2.2 revised, §3.2/§3.3, §4.0-4.2, §8 R2, §11 Q1-Q3) + `~
 - Backend `POST /assignments/:id/students/:sid/remind` принимает optional `channel: 'auto'|'telegram'|'email'`. `'auto'` (default) = cascade Telegram → Email. `'telegram'` explicit = только Telegram (422 `NO_TELEGRAM`, 502 `TELEGRAM_FAILED` без fallback). `'email'` explicit = только Email (422 `NO_EMAIL`).
 - Push-канал вне P0. Telemetry `telegram_reminder_sent_from_results` принимает `channel: res.channel` из ответа.
 
+### Общий комментарий репетитора к ДЗ — `tutor_overall_comment` (Phase 12, 2026-06-07)
+
+Репетитор оставляет **один свободный комментарий ко ВСЕМУ ДЗ** конкретному ученику (per-student wrap-up, напр. «Вася, ты молодец, но было две ошибки на закон Ома, повтори его»). Запрос Елены Ивановой. **НЕ путать** с пер-задачным `tutor_score_override_comment` (комментарий к правке балла одной задачи).
+
+**Хранение:** `homework_tutor_student_assignments.tutor_overall_comment TEXT` + `tutor_overall_comment_at TIMESTAMPTZ` + `tutor_overall_comment_by UUID` (миграция `20260607140000`). Per-student link-таблица (1:1 на пару ученик+ДЗ). **GRANT:** таблица использует table-level GRANT + RLS (НЕ column-grant whitelist как `homework_tutor_task_states`) → новые колонки покрыты, отдельный GRANT не нужен.
+
+**Anti-leak:**
+- `tutor_overall_comment` + `_at` — **student-visible BY DESIGN** (mirror `tutor_score_override_comment`). Отдаются ученику через `handleGetStudentProblem` / `handleGetStudentAssignment` (service_role) + RLS list-select (бейдж).
+- `tutor_overall_comment_by` — **audit-only, НИКОГДА не в client-ответ** (mirror `tutor_force_completed_by`). Ни один student/tutor SELECT его не возвращает.
+
+**Single write-path** — `POST /assignments/:id/students/:sid/overall-comment` (`handleSetStudentOverallComment`): ownership `getOwnedAssignmentOrThrow` + проверка link-row (anti id-spoofing, mirror `handleRemindStudent`); пусто/пробелы → очистка (NULL); `OVERALL_COMMENT_MAX = 2000`; UPDATE comment+_at+_by. **Notify push→telegram (БЕЗ email)** через `notifyHomeworkOverallComment` (sibling `notifyHomeworkStudentAssigned`) **ТОЛЬКО** на непустой ИЗМЕНЁННЫЙ текст (очистка/неизменный — без notify). Rule-97 ошибки. PII-free telemetry `homework_overall_comment_saved` (без текста/имён).
+
+**Read-paths (3):** `handleGetResults` → `per_student[*].tutor_overall_comment(+_at)` (post-pass из `overallCommentByStudent`); `handleGetStudentProblem` + `handleGetStudentAssignment` → `assignment.tutor_overall_comment(+_at)`; `listStudentAssignments` (direct PostgREST `!inner`) → `has_tutor_comment: boolean` (только факт, текст не грузится).
+
+**Frontend:**
+- Tutor write: `StudentDrillDown.tsx::OverallCommentCard` — **первым элементом** drill-down (над mini-cards). Read/edit/save inline (`useAutoResizeTextarea` + `setStudentOverallComment` + invalidate results/detail). Toast «…ученик уведомлён» / «…(нет каналов)».
+- Student read: `TutorOverallCommentCard.tsx` (accent-card, `MessageSquare`, plain text) на `HomeworkProblem` (left aside + mobile peek) при непустом `assignment.tutor_overall_comment`. Бейдж «Комментарий репетитора» на карточке `StudentHomework`.
+- **Review-режим завершённого ДЗ (КРИТИЧНО):** `StudentHomeworkDetail` all-completed БОЛЬШЕ НЕ редиректит на `/homework` — открывает последнюю задачу в режиме просмотра (current → last by order_num → first), чтобы ученик увидел комментарий. **Loop-guard:** `HomeworkProblem` НЕ авто-bounce'ит на mount; завершение последней задачи уходит на `/homework` напрямую (`navigateAfterCorrect`), минуя detail-страницу. При правке этого редиректа — повторно проверить отсутствие redirect-loop (это была preview-QA #10 fix).
+
+**При расширении:** новое per-student tutor-поле, видимое ученику → решить tutor-only vs student-visible (default paranoid); audit-`_by`-поля не GRANT'ить и не селектить в client; новый notify-повод — reuse `notifyHomeworkStudentAssigned`-паттерн (push→telegram, без email); telemetry-событие — добавить в типизированный реестр `homeworkTelemetry.ts` (иначе build падает).
+
+Spec/build-лог: `~/.claude/plans/1-functional-meteor.md` Phase 12.
+
 ### Homework share links / public `/p/:slug`
 
 `homework_share_links` (migration `20260422160000`) — множественные read-only ссылки на одно ДЗ с флагами `show_answers` / `show_solutions` / `expires_at`. Tutor CRUD в `homework-api/index.ts`; публичное чтение — отдельный edge function `public-homework-share` под `service_role`. Множественные ссылки на одно ДЗ **разрешены намеренно** (родителю без ответов, коллеге с ответами) — не дедуплицировать.
