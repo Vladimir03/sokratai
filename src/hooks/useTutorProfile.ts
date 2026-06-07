@@ -13,7 +13,7 @@ import {
   type UpsertTutorProfileInput,
 } from '@/lib/tutorProfileApi';
 import { setTutorMiniGroupsEnabled } from '@/lib/tutors';
-import type { Tutor } from '@/lib/tutors';
+import type { Tutor } from '@/types/tutor';
 
 /**
  * React Query bindings for the tutor profile API (profile-card view).
