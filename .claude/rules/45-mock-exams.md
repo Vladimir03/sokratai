@@ -87,3 +87,19 @@ Variant 1 = physics ЕГЭ. `_shared/mock-exam-prompts.ts` uses `resolveSubjectR
 - Тестовый балл (`primaryToSecondary`) гейтится тем же `benchmarks !== null` — чтобы «≈ N тестовых» не показывался для не-физики.
 
 Лог: memory `project_pilot_fixes_2026_06_07.md`.
+
+## Результат пробника — предварительный итог сверху + эталон inline (2026-06-08)
+
+Вау-эффект результата (form-режим «Ввести ответы цифрой», Vladimir на Варианте 5). Правки только фронт: `src/pages/student/StudentMockExamResult.tsx` (+ tutor 1.4 в `TutorMockExamReview.tsx::Part2TaskCard`). **Бэкенд НЕ менялся.**
+
+- **Form-mode разбалловка Части 1 — код УЖЕ корректен** (`handleGetResult`/`handleGetAttempt` derive `student_answer ?? OCR`, итерируют ВСЕ задачи варианта — см. секции выше). Если на проде ученик/репетитор видит «без ответа» при ненулевом итоге → **stale edge-функции** (`mock-exam-student-api`/`mock-exam-tutor-api` деплоятся **Lovable на push**, НЕ `deploy-sokratai`, который только VPS-фронт). Любой свежий push форсит редеплой → чинится сам. Verify: `SELECT kim_number, student_answer, earned_score, score_source FROM mock_exam_attempt_part1_answers WHERE attempt_id='…'` (заполнено → был stale-деплой; NULL → autosave той попытки не сработал, но код-путь верен для новых сдач).
+- **Итоговая сводка `FinalSummary` — СВЕРХУ + ДВА состояния** (было: только approved, снизу). Per-part детали (таблица Части 1, карточки Части 2) остаются НИЖЕ; сводка сверху = единственный overall-итог (не дублировать).
+  - **pre-approval (`isPreliminary`)**: `part1 = total_part1_score` (авто) + `part2 = Σ part2_solutions.ai_suggested_score` (предв. AI — уже раскрыты пер-задачно post-submit, сдвиг 2026-06-02 → **НЕ новый leak**, агрегат той же видимости). Плашка «Предварительно — репетитор подтвердит, баллы Части 2 могут измениться» + muted-плейсхолдер «Комментарий репетитора появится после проверки» (**только pre-approval**). `isWaitingForOCR` → компактный `TopPreparingSummary` «Готовим результат…».
+  - **approved**: финальные `total_score`/`total_part2_score` (числа без изменений).
+  - **Крупное число = тестовый балл /100** (`secondaryScore`) когда `benchmarks !== null` (ЕГЭ физика, max 45); иначе fallback первичный /totalMax. Первичный — строкой ниже. Прогресс-бар + порог/хорошо — на первичной шкале (см. секцию выше, без изменений).
+  - **Общего комментария к пробнику как фичи НЕТ** — `commentPlaceholder` чисто визуальный, pre-approval only. Полная фича (репетитор пишет → ученик видит + notify, mirror `tutor_overall_comment` в ДЗ) — отдельный раунд.
+- **Эталон решения Части 2 — всегда видно inline** (было под `<details>`), и ученик (`Part2ReferenceSolution`), и репетитор (`Part2TaskCard`). Tutor-лейбл «Эталон решения (видит и ученик)» сохранён как предупреждение. URL'ы уже signed бэкендом — client resolver не нужен.
+- **Тексты баннеров**: Часть 1 preliminary → «…Часть 2 проверена AI внизу.»; Часть 2 AI → «…Окончательный балл придёт позже сюда и в Telegram или на почту.»
+- **Divergence (follow-up)**: `PublicMockResult.tsx` (`/p/mock-result/:slug`) — отдельная сводка, **не** получила test-/100-big / inline-эталон в этом раунде (in-app surface only; делит лишь `getEgePhysicsBenchmarks`). Консистентность — отдельная задача при желании.
+
+Лог: план `~/.claude/plans/fuzzy-gliding-rossum.md`.

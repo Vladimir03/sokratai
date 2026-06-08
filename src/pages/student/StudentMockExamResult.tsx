@@ -398,7 +398,9 @@ function Part2BulkPhotosGallery({
   );
 }
 
-// 2026-06-05 (item 5): эталонное решение (текст + фото) под общим collapsible.
+// 2026-06-07 (item 1.4): эталонное решение (текст + фото) — всегда видно inline
+// (без клика), mirror always-visible паттерна task_image_url. Раньше было под
+// `<details>` → Vladimir: «картинки эталона нужно видеть сразу, без клика».
 function Part2ReferenceSolution({
   solutionText,
   solutionImages,
@@ -412,10 +414,8 @@ function Part2ReferenceSolution({
   const images = solutionImages ?? [];
   if (!hasText && images.length === 0) return null;
   return (
-    <details className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
-      <summary className="cursor-pointer touch-manipulation font-medium text-slate-900">
-        Эталонное решение
-      </summary>
+    <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+      <p className="font-medium text-slate-900">Эталонное решение</p>
       {hasText && (
         <div className="mt-2 leading-6">
           <MathBlock text={solutionText ?? ''} className="whitespace-pre-wrap" />
@@ -435,7 +435,7 @@ function Part2ReferenceSolution({
           ))}
         </div>
       )}
-    </details>
+    </div>
   );
 }
 
@@ -544,7 +544,7 @@ function Part2PreliminarySection({
           </div>
           <p className="text-sm text-slate-700">
             Это предварительный разбор от AI. {tutorName ? `Репетитор ${tutorName}` : 'Репетитор'}{' '}
-            подтвердит результат и может скорректировать баллы. Окончательный балл придёт в Telegram.
+            подтвердит результат и может скорректировать баллы. Окончательный балл придёт позже сюда и в Telegram или на почту.
           </p>
         </CardContent>
       </Card>
@@ -688,7 +688,29 @@ function Part2ApprovedSection({
   );
 }
 
-// ─── Final summary (only when approved) ─────────────────────────────────────
+// ─── Final summary (preliminary post-submit + final post-approval) ───────────
+//
+// 1.5 (2026-06-07): сводка показывается СВЕРХУ результата сразу после сдачи
+// (вау-эффект «пробник уже проверен»):
+//   - preliminary=true (pre-approval): Часть 1 авто + Часть 2 = Σ предв. балла
+//     AI; крупно — тестовый балл /100; плашка «предварительно, баллы Части 2
+//     могут измениться»; muted-плейсхолдер комментария репетитора.
+//   - preliminary=false (approved): финальные баллы, подтверждённые тутором.
+// Q2: крупное число = тестовый балл /100 (когда применимо — ЕГЭ физика);
+// иначе fallback на первичный /totalMax.
+
+function TopPreparingSummary() {
+  return (
+    <Card className="mb-3 border-2 border-sky-200 bg-sky-50/40 shadow-none">
+      <CardContent className="p-5 text-center">
+        <div className="flex items-center justify-center gap-2 text-sm text-sky-800">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          Готовим твой результат…
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function FinalSummary({
   totalScore,
@@ -698,6 +720,8 @@ function FinalSummary({
   part1Max,
   part2Score,
   part2Max,
+  preliminary = false,
+  commentPlaceholder = false,
 }: {
   totalScore: number | null;
   totalMax: number | null;
@@ -706,6 +730,10 @@ function FinalSummary({
   part1Max: number | null;
   part2Score: number | null;
   part2Max: number | null;
+  /** 1.5: pre-approval предварительный вид (Часть 2 от AI). */
+  preliminary?: boolean;
+  /** 1.5: muted-плейсхолдер «Комментарий репетитора появится после проверки». */
+  commentPlaceholder?: boolean;
 }) {
   if (
     typeof totalScore !== 'number' ||
@@ -726,28 +754,48 @@ function FinalSummary({
   // (ЕГЭ физика, max 45). Тот же гейт, чтобы тестовый балл не показывался для
   // ОГЭ / других предметов.
   const secondaryScore = benchmarks ? primaryToSecondary(totalScore) : null;
+  const hasTest = secondaryScore !== null;
 
   return (
-    <Card className="mb-3 shadow-none">
+    <Card
+      className={cn(
+        'mb-3 shadow-none',
+        preliminary && 'border-2 border-sky-200 bg-sky-50/40',
+      )}
+    >
       <CardContent className="p-5 text-center">
         <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">
-          Итоговый балл
+          {preliminary ? 'Предварительный результат' : 'Итоговый балл'}
         </p>
-        <div className="mb-2 text-5xl font-semibold text-accent tabular-nums sm:text-6xl">
-          {totalScore}{' '}
-          <span className="text-2xl font-normal text-slate-500 sm:text-3xl">
-            / {totalMax}
-          </span>
-        </div>
-        {secondaryScore !== null ? (
-          <p className="mb-1 text-base font-medium text-slate-700">
-            ≈ {secondaryScore} тестовых баллов
-          </p>
-        ) : null}
+
+        {hasTest ? (
+          // Q2: крупно — тестовый балл /100; первичный — строкой ниже.
+          <>
+            <div className="mb-1 text-5xl font-semibold text-accent tabular-nums sm:text-6xl">
+              {secondaryScore}{' '}
+              <span className="text-2xl font-normal text-slate-500 sm:text-3xl">
+                / 100
+              </span>
+            </div>
+            <p className="mb-1 text-sm font-medium text-slate-700">
+              тестовых баллов ЕГЭ · первичный {totalScore} / {totalMax}
+            </p>
+          </>
+        ) : (
+          <div className="mb-2 text-5xl font-semibold text-accent tabular-nums sm:text-6xl">
+            {totalScore}{' '}
+            <span className="text-2xl font-normal text-slate-500 sm:text-3xl">
+              / {totalMax}
+            </span>
+          </div>
+        )}
+
         <p className="mb-4 text-sm text-slate-500">
-          {secondaryScore !== null
-            ? 'Ориентировочная оценка по шкале ФИПИ 2025. Точная — после публикации шкалы 2026.'
-            : 'Тестовый балл будет известен после публикации шкалы ЕГЭ-2026'}
+          {preliminary
+            ? 'Предварительно — репетитор подтвердит, баллы Части 2 могут измениться.'
+            : hasTest
+              ? 'Ориентировочная оценка по шкале ФИПИ 2025. Точная — после публикации шкалы 2026.'
+              : 'Тестовый балл будет известен после публикации шкалы ЕГЭ-2026'}
         </p>
 
         <div className="mb-4 mt-5">
@@ -823,6 +871,19 @@ function FinalSummary({
             </div>
           </div>
         </div>
+
+        {/* 1.5: плейсхолдер общего комментария репетитора (пока без самой
+            функции — отдельный раунд). Показываем только pre-approval. */}
+        {commentPlaceholder && (
+          <div className="mt-5 rounded-md border border-dashed border-slate-200 bg-slate-50/60 p-3 text-left">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Комментарий репетитора
+            </p>
+            <p className="mt-0.5 text-sm text-slate-400">
+              Появится после проверки.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -930,8 +991,8 @@ function Part1PreliminaryBanner() {
           </p>
           <p className="mt-0.5 text-xs text-sky-800">
             AI распознал бланк и посчитал предварительный балл. Репетитор
-            проверит вручную и пришлёт обновление в течение суток. Часть 2 ещё
-            в проверке.
+            проверит вручную и пришлёт обновление в течение суток. Часть 2
+            проверена AI внизу.
           </p>
         </div>
       </div>
@@ -964,6 +1025,19 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
   const isWaitingForOCR = isPreApproval && !hasPart1Data;
   const isPreliminary = isPreApproval && hasPart1Data;
 
+  // 1.5 (2026-06-07): предварительный итог сразу после сдачи. Часть 1 = авто-балл;
+  // Часть 2 = Σ предварительных баллов AI (уже раскрыты пер-задачно post-submit,
+  // rule 45 — не новый leak). total → тестовый /100. Числа могут вырасти, пока AI
+  // дочитывает Часть 2, и/или измениться после подтверждения репетитором.
+  const part1Computed =
+    view.attempt.total_part1_score ??
+    view.part1_answers.reduce((acc, r) => acc + (r.earned_score ?? 0), 0);
+  const part2Preliminary = view.part2_solutions.reduce(
+    (acc, s) => acc + (s.ai_suggested_score ?? 0),
+    0,
+  );
+  const preliminaryTotal = part1Computed + part2Preliminary;
+
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
       <PageContent>
@@ -974,6 +1048,24 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
             <ManualEntryView view={view} />
           ) : (
             <>
+              {/* 1.5 (2026-06-07): итоговая сводка СВЕРХУ — «вау-эффект», ученик
+                  сразу видит, что пробник уже проверен (предварительно AI).
+                  Детали (таблица Часть 1 + карточки Часть 2) — ниже. */}
+              {isWaitingForOCR && <TopPreparingSummary />}
+              {(isPreliminary || isApproved) && (
+                <FinalSummary
+                  totalScore={isApproved ? view.attempt.total_score : preliminaryTotal}
+                  totalMax={totalMax}
+                  examType={view.variant?.exam_type ?? null}
+                  part1Score={part1Computed}
+                  part1Max={part1Max}
+                  part2Score={isApproved ? view.attempt.total_part2_score : part2Preliminary}
+                  part2Max={part2Max}
+                  preliminary={isPreliminary}
+                  commentPlaceholder={isPreliminary}
+                />
+              )}
+
               {/* TASK-OCR Round 4: Часть 1 reveal banners. Order:
                   1. Waiting banner — пока OCR работает (нет данных)
                   2. Preliminary banner — данные есть, ждём финального approve
@@ -1014,26 +1106,6 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
                   part2Max={part2Max}
                 />
               )}
-
-              {isApproved ? (
-                <FinalSummary
-                  totalScore={view.attempt.total_score}
-                  totalMax={totalMax}
-                  examType={view.variant?.exam_type ?? null}
-                  part1Score={view.attempt.total_part1_score}
-                  part1Max={part1Max}
-                  part2Score={view.attempt.total_part2_score}
-                  part2Max={part2Max}
-                />
-              ) : isPending ? (
-                <Card className="mb-3 bg-slate-100 shadow-none">
-                  <CardContent className="p-5 text-center text-sm text-slate-500">
-                    После проверки репетитора здесь появится итоговый балл
-                    (Часть 1 + Часть 2), сравнение со шкалой ЕГЭ и
-                    комментарий репетитора.
-                  </CardContent>
-                </Card>
-              ) : null}
             </>
           )}
         </main>

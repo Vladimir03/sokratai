@@ -1,3 +1,9 @@
+// Redeploy trigger 2026-06-08: form-mode Часть-1 derive-on-read
+// (`student_answer ?? OCR`, handleGetAttempt) уже КОРРЕКТЕН в коде — на проде
+// репетитор видел «без ответа» из-за STALE edge-функции (деплой через Lovable
+// на push, не deploy-sokratai). Этот no-op комментарий гарантирует редеплой при
+// push. Логику НЕ меняет. См. rule 45 «Результат пробника … 2026-06-08».
+//
 // Mock Exams v1 — tutor-side API (TASK-3 of mock-exams-v1).
 //
 // Endpoints:
