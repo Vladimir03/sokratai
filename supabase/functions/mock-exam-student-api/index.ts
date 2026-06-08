@@ -622,16 +622,14 @@ async function handleGetResult(
   // в Part1Card row под balance.
   let part1Answers: unknown[] = [];
   if (isPostSubmit) {
-    // КРИТИЧНО (2026-06-08): колонки tutor_comment в mock_exam_attempt_part1_answers
-    // НЕТ (schema 20260508120000 — tutor_comment живёт на part2_solutions). Её SELECT
-    // молча ронял ВЕСЬ запрос: PostgREST возвращал error «column does not exist»,
-    // `data`=null, part1Rows пустой → form-режим показывал «без ответа» у ученика И
-    // репетитора (blank выживал на OCR-фолбэке). Колонку убрали; ошибку теперь
-    // ЛОГИРУЕМ, а не глотаем. Per-KIM коммент Части 1 (AC-P11) — потребуется миграция
-    // ADD COLUMN tutor_comment + повторный select.
+    // tutor_comment (per-KIM коммент репетитора Части 1, AC-P11) — колонка добавлена
+    // миграцией 20260608120000. Раньше колонки НЕ было → её SELECT молча ронял ВЕСЬ
+    // запрос (PostgREST «column does not exist» → data=null → part1Rows пуст →
+    // «без ответа» у ученика И репетитора; blank выживал на OCR). Ошибку теперь
+    // ЛОГИРУЕМ, а не глотаем (`error`, не только `data`).
     const { data: part1Rows, error: part1RowsErr } = await db
       .from("mock_exam_attempt_part1_answers")
-      .select("kim_number, student_answer, earned_score")
+      .select("kim_number, student_answer, earned_score, tutor_comment")
       .eq("attempt_id", attempt.id)
       .order("kim_number", { ascending: true });
     if (part1RowsErr) {
