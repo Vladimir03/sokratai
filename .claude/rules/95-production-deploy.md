@@ -145,3 +145,11 @@ systemctl reload nginx
 - **GitHub Actions auto-deploy** — после push на main, GitHub runner билдит и rsync-ит на VPS, deploy-sokratai становится не нужен. Когда это случится — это правило перепишется на «push в main = автодеплой».
 - **Version manifest для emergency force-update** — `dist/version.json` + client-side `versionCheck.ts` + force-reload banner при mismatch с `minSupportedVersion`. Spec: `docs/delivery/features/service-worker-prod/spec.md` §5 + TASK-6/7 (P1, deferred). Пока что emergency recovery через `?sw=off` kill-switch (P0, live с 2026-05-04, см. `src/lib/swKillSwitch.ts`).
 - **Tutor-side push opt-in UI** — `<PushOptInBanner>` смонтирован только на student'ах (`src/pages/StudentHomework.tsx`). Для tutor'ов push subscription пока возможен только вручную через DevTools console. Когда добавится tutor opt-in surface — push на ДЗ от ученика начнёт реально работать end-to-end (R1-3 в Job Graph).
+
+## Edge-функции деплоит Lovable, GitHub-CI deploy СЛОМАН (2026-06-08)
+
+Edge-функции (`supabase/functions/**`) деплоит **Lovable на синк main**, НЕ GitHub Actions. Workflow `.github/workflows/deploy-supabase-functions.yml` **падает на каждом push** (секрет `SUPABASE_ACCESS_TOKEN` пуст, регрессия минимум с 2026-06-05) → это dead weight, на него полагаться нельзя.
+
+**Симптом:** запушил фикс edge-функции, а прод отдаёт старое поведение / boot-crash. Это **Lovable lag / не синканулся**, а НЕ код. Проверка: `curl` функцию — `503` = boot-crash (не задеплоилось/упало при старте), `401` = задеплоено и живо (JWT-гейт), `404` = функции нет.
+
+**Чтобы edge-изменение доехало в прод/preview:** открой/синкни Lovable-проект (он подтянет main и передеплоит функции). Чинить CI «по-настоящему»: задать секрет `SUPABASE_ACCESS_TOKEN` (GitHub → repo Settings → Secrets → Actions) ИЛИ выключить workflow, чтобы убрать ложный red. **Frontend — отдельно**, по-прежнему `deploy-sokratai` (VPS); Lovable edge-deploy его НЕ обновляет.
