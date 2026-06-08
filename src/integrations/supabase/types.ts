@@ -1826,6 +1826,7 @@ export type Database = {
           kim_number: number
           score_source: string
           student_answer: string | null
+          tutor_comment: string | null
           updated_at: string
         }
         Insert: {
@@ -1834,6 +1835,7 @@ export type Database = {
           kim_number: number
           score_source?: string
           student_answer?: string | null
+          tutor_comment?: string | null
           updated_at?: string
         }
         Update: {
@@ -1842,6 +1844,7 @@ export type Database = {
           kim_number?: number
           score_source?: string
           student_answer?: string | null
+          tutor_comment?: string | null
           updated_at?: string
         }
         Relationships: [
