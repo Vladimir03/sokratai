@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -21,22 +21,19 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
-import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { PastLessonsConfirmBanner } from '@/components/tutor/schedule/PastLessonsConfirmBanner';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { getBookingLink } from '@/lib/tutors';
 import {
   createWeeklySlot,
   toggleSlotAvailability,
   deleteWeeklySlot,
   createLesson,
   cancelLesson,
-  getBookingLink,
-  upsertReminderSettings
-} from '@/lib/tutors';
-import {
+  upsertReminderSettings,
   upsertCalendarSettings,
   createAvailabilityException,
   deleteAvailabilityException,
@@ -87,6 +84,12 @@ import type {
 const LessonMaterialsDrawer = lazy(() =>
   import('@/components/tutor/schedule/LessonMaterialsDrawer').then((m) => ({
     default: m.LessonMaterialsDrawer,
+  })),
+);
+
+const PostLessonSheet = lazy(() =>
+  import('@/components/tutor/schedule/PostLessonSheet').then((m) => ({
+    default: m.PostLessonSheet,
   })),
 );
 
@@ -2240,9 +2243,10 @@ interface LessonDetailsDialogProps {
   students: TutorStudentWithProfile[];
   onCancel: () => void;
   onUpdate: () => void;
-  onComplete?: (lessonId: string, amount: number, paymentStatus: string) => void;
   isCompleting?: boolean;
   onOpenMaterials?: () => void;
+  /** Open the guided post-lesson Sheet (past booked individual lessons). */
+  onOpenPostLesson?: () => void;
 }
 
 function LessonDetailsDialog({
@@ -2252,9 +2256,9 @@ function LessonDetailsDialog({
   students,
   onCancel,
   onUpdate,
-  onComplete,
   isCompleting = false,
   onOpenMaterials,
+  onOpenPostLesson,
 }: LessonDetailsDialogProps) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -2347,10 +2351,6 @@ function LessonDetailsDialog({
   const typeLabel = getLessonTypeLabel(lessonType);
 
   const isPast = endDate.getTime() < Date.now();
-  const amountForCompletion = calculateLessonPaymentAmount(
-    lesson.duration_min,
-    lesson.tutor_students?.hourly_rate_cents
-  );
 
   const handleCancelClick = () => {
     if (isSeriesCheckLoading) {
@@ -2719,34 +2719,17 @@ function LessonDetailsDialog({
               </Button>
               {lesson.status === 'booked' && (
               isPast ? (
-                /* Past booked lesson — 3 action buttons matching Telegram bot UX */
-                <div className="flex flex-col gap-2 w-full">
-                  <p className="text-sm text-muted-foreground text-center">
-                    Занятие завершилось. Выберите действие:
-                  </p>
-                  <Button
-                    className="w-full bg-amber-500 hover:bg-amber-600 text-white"
-                    onClick={() => onComplete?.(lesson.id, amountForCompletion ?? 0, 'pending')}
-                    disabled={isCompleting || isCancelling}
-                  >
-                    ✅ Проведено, жду оплату{amountForCompletion ? ` (${formatCurrency(amountForCompletion)})` : ''}
-                  </Button>
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700 text-white"
-                    onClick={() => onComplete?.(lesson.id, amountForCompletion ?? 0, 'paid')}
-                    disabled={isCompleting || isCancelling}
-                  >
-                    💳 Уже оплачено{amountForCompletion ? ` (${formatCurrency(amountForCompletion)})` : ''}
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    className="w-full"
-                    onClick={handleCancelClick}
-                    disabled={isCancelling || isCompleting || isSeriesCheckLoading}
-                  >
-                    {isCancelling ? 'Отмена...' : '❌ Урок отменен'}
-                  </Button>
-                </div>
+                /* Past booked lesson — open the guided post-lesson sheet
+                   (provести + оплата + материалы + ДЗ + уведомление). */
+                <Button
+                  className="w-full"
+                  style={{ touchAction: 'manipulation' }}
+                  onClick={() => onOpenPostLesson?.()}
+                  disabled={isCompleting || isCancelling}
+                >
+                  <ClipboardCheck className="mr-1.5 h-4 w-4" />
+                  Провести и оформить
+                </Button>
               ) : (
                 /* Future booked lesson — edit / cancel */
                 <>
@@ -3473,6 +3456,7 @@ function TutorScheduleContent() {
   const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
   const [materialsDrawerLesson, setMaterialsDrawerLesson] = useState<TutorLessonWithStudent | null>(null);
+  const [postLessonSheetLesson, setPostLessonSheetLesson] = useState<TutorLessonWithStudent | null>(null);
   const [selectedGroupBucket, setSelectedGroupBucket] = useState<GroupLessonBucket | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
@@ -4156,20 +4140,19 @@ function TutorScheduleContent() {
         }
         setLessonDetailsOpen(false);
         refetchLessons();
-        // TASK-9 (schedule-materials P1, rule 98): non-blocking нудж после завершения.
-        // Логику завершения не трогаем — только подсказка, переоткрывающая тот же drawer.
-        const completedLesson =
-          selectedLesson && selectedLesson.id === lessonId ? selectedLesson : null;
-        if (completedLesson) {
-          toast('Добавить материалы к занятию?', {
-            description: 'Запись, конспект или домашку — ученик увидит во вкладке «Занятия».',
-            duration: 8000,
-            action: {
-              label: 'Добавить',
-              onClick: () => setMaterialsDrawerLesson(completedLesson),
-            },
-          });
-        }
+        // Keep the post-lesson sheet open and flip step ① to ✓ (optimistic) so the
+        // tutor continues straight to materials / ДЗ without re-opening anything.
+        // The sheet IS the post-completion materials surface (TASK-9 нудж subsumed).
+        setPostLessonSheetLesson((prev) =>
+          prev && prev.id === lessonId
+            ? {
+                ...prev,
+                status: 'completed',
+                payment_status: paymentStatus as TutorLessonWithStudent['payment_status'],
+                payment_amount: amount,
+              }
+            : prev,
+        );
       } else {
         toast.error('Не удалось завершить урок');
       }
@@ -4185,7 +4168,25 @@ function TutorScheduleContent() {
         return rest;
       });
     }
-  }, [refetchLessons, selectedLesson]);
+  }, [refetchLessons]);
+
+  // Single-lesson cancel from the post-lesson sheet («Урок не состоялся»). The
+  // series-scope cancel stays inside the dialog; here scope is one occurrence.
+  const handleCancelLessonFromSheet = useCallback(async (lessonId: string) => {
+    try {
+      const ok = !!(await cancelLesson(lessonId));
+      if (ok) {
+        toast.success('Занятие отменено');
+        setPostLessonSheetLesson(null);
+        refetchLessons();
+      } else {
+        toast.error('Не удалось отменить занятие');
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Не удалось отменить занятие');
+    }
+  }, [refetchLessons]);
 
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();
@@ -4608,11 +4609,14 @@ function TutorScheduleContent() {
           students={students}
           onCancel={() => refetchLessons()}
           onUpdate={() => refetchLessons()}
-          onComplete={handleCompleteLesson}
           isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
           onOpenMaterials={() => {
             setLessonDetailsOpen(false);
             setMaterialsDrawerLesson(selectedLesson);
+          }}
+          onOpenPostLesson={() => {
+            setLessonDetailsOpen(false);
+            setPostLessonSheetLesson(selectedLesson);
           }}
         />
 
@@ -4622,6 +4626,19 @@ function TutorScheduleContent() {
               open={!!materialsDrawerLesson}
               onOpenChange={(o) => { if (!o) setMaterialsDrawerLesson(null); }}
               lesson={materialsDrawerLesson}
+            />
+          </Suspense>
+        )}
+
+        {postLessonSheetLesson && (
+          <Suspense fallback={null}>
+            <PostLessonSheet
+              open={!!postLessonSheetLesson}
+              onOpenChange={(o) => { if (!o) setPostLessonSheetLesson(null); }}
+              lesson={postLessonSheetLesson}
+              onComplete={handleCompleteLesson}
+              isCompleting={Boolean(completingLessonIds[postLessonSheetLesson.id])}
+              onCancelLesson={handleCancelLessonFromSheet}
             />
           </Suspense>
         )}
