@@ -13,7 +13,26 @@ function normalizeUsername(value: string): string {
 }
 
 function generatePassword(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  const arr = new Uint32Array(1);
+  crypto.getRandomValues(arr);
+  return (100000 + (arr[0] % 900000)).toString();
+}
+
+function tooLong(value: unknown, max: number): boolean {
+  return typeof value === "string" && value.length > max;
+}
+
+function validateBodyLengths(body: Record<string, unknown>): string | null {
+  if (tooLong(body.name, 200)) return "Имя слишком длинное (максимум 200 символов).";
+  if (tooLong(body.telegram_username, 64)) return "Telegram username слишком длинный.";
+  if (tooLong(body.email, 320)) return "Email слишком длинный.";
+  if (tooLong(body.learning_goal, 1000)) return "Цель занятий слишком длинная (максимум 1000 символов).";
+  if (tooLong(body.notes, 2000)) return "Заметки слишком длинные (максимум 2000 символов).";
+  if (tooLong(body.parent_contact, 200)) return "Контакт родителя слишком длинный.";
+  if (tooLong(body.subject, 100)) return "Название предмета слишком длинное.";
+  if (tooLong(body.exam_type, 50)) return "Тип экзамена слишком длинный.";
+  if (tooLong(body.student_id, 64)) return "Некорректный student_id.";
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -52,6 +71,13 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
+    const lengthError = validateBodyLengths(body as Record<string, unknown>);
+    if (lengthError) {
+      return new Response(
+        JSON.stringify({ code: "VALIDATION", error: lengthError }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
     const action = typeof body.action === "string" ? body.action : "manual-add-student";
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const telegramUsernameRaw = typeof body.telegram_username === "string" ? body.telegram_username : "";
