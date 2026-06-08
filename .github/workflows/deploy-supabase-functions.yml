@@ -28,6 +28,15 @@ jobs:
         run: |
           supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
 
+          # Mock-exams ПЕРВЫМИ — критичны для пилота (результат/проверка пробника).
+          # Деплоим до остальных, чтобы фикс выкатился даже если поздний deploy упадёт.
+          # Все 4 — verify_jwt=false: student/tutor делают ручную GoTrue-валидацию
+          # (/auth/v1/user, mirror homework-api); public — публичный; grade — service_role.
+          supabase functions deploy mock-exam-student-api --no-verify-jwt
+          supabase functions deploy mock-exam-tutor-api --no-verify-jwt
+          supabase functions deploy mock-exam-grade --no-verify-jwt
+          supabase functions deploy mock-exam-public --no-verify-jwt
+
           # Deploy all actively maintained edge functions.
           # JWT verification is configured per-function in supabase/config.toml.
           supabase functions deploy telegram-bot --no-verify-jwt
@@ -48,15 +57,6 @@ jobs:
           supabase functions deploy tutor-progress-api
           supabase functions deploy lesson-materials-api
           supabase functions deploy student-lessons-api
-          # Mock-exams (ЕГЭ пробники). Все 4 — verify_jwt=false: student/tutor API
-          # делают ручную JWT-валидацию через GoTrue /auth/v1/user (mirror homework-api),
-          # public — публичный, grade — внутренний вызов через service_role.
-          # student-api + tutor-api ПЕРВЫМИ: если поздний deploy упадёт, критичные
-          # для результата/проверки пробника уже выкатятся.
-          supabase functions deploy mock-exam-student-api --no-verify-jwt
-          supabase functions deploy mock-exam-tutor-api --no-verify-jwt
-          supabase functions deploy mock-exam-grade --no-verify-jwt
-          supabase functions deploy mock-exam-public --no-verify-jwt
           supabase functions deploy oauth-google-init --no-verify-jwt
           supabase functions deploy oauth-google-callback --no-verify-jwt
           supabase functions deploy email-verify --no-verify-jwt
