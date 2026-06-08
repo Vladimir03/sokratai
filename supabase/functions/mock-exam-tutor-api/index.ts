@@ -1299,11 +1299,21 @@ async function handleGetAttempt(
   // нуждается в полном списке для manual scoring inputs blank-mode (TASK-11).
   // Existing answers переопределяют placeholders.
   // AC-P11 (2026-05-26): + tutor_comment в SELECT для drill-down dialog.
-  const { data: part1Rows } = await db
+  // КРИТИЧНО (2026-06-08): колонки tutor_comment в mock_exam_attempt_part1_answers
+  // НЕТ (она на part2_solutions) → её SELECT молча ронял весь запрос (PostgREST
+  // error → data=null), и репетитор в обзоре видел «без ответа» в form-режиме.
+  // Убрали + логируем ошибку. Зеркало mock-exam-student-api::handleGetResult.
+  const { data: part1Rows, error: part1RowsErr } = await db
     .from("mock_exam_attempt_part1_answers")
-    .select("kim_number, student_answer, earned_score, tutor_comment, score_source")
+    .select("kim_number, student_answer, earned_score, score_source")
     .eq("attempt_id", attemptId)
     .order("kim_number", { ascending: true });
+  if (part1RowsErr) {
+    console.error(JSON.stringify({
+      event: "mock_attempt_part1_select_failed",
+      message: part1RowsErr.message,
+    }));
+  }
   const answersByKim = new Map<number, {
     student_answer: string | null;
     earned_score: number | null;
@@ -1314,7 +1324,7 @@ async function handleGetAttempt(
     answersByKim.set(row.kim_number as number, {
       student_answer: row.student_answer as string | null,
       earned_score: row.earned_score as number | null,
-      tutor_comment: row.tutor_comment as string | null,
+      tutor_comment: null,
       score_source: row.score_source as string | null,
     });
   }

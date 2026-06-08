@@ -622,11 +622,24 @@ async function handleGetResult(
   // в Part1Card row под balance.
   let part1Answers: unknown[] = [];
   if (isPostSubmit) {
-    const { data: part1Rows } = await db
+    // КРИТИЧНО (2026-06-08): колонки tutor_comment в mock_exam_attempt_part1_answers
+    // НЕТ (schema 20260508120000 — tutor_comment живёт на part2_solutions). Её SELECT
+    // молча ронял ВЕСЬ запрос: PostgREST возвращал error «column does not exist»,
+    // `data`=null, part1Rows пустой → form-режим показывал «без ответа» у ученика И
+    // репетитора (blank выживал на OCR-фолбэке). Колонку убрали; ошибку теперь
+    // ЛОГИРУЕМ, а не глотаем. Per-KIM коммент Части 1 (AC-P11) — потребуется миграция
+    // ADD COLUMN tutor_comment + повторный select.
+    const { data: part1Rows, error: part1RowsErr } = await db
       .from("mock_exam_attempt_part1_answers")
-      .select("kim_number, student_answer, earned_score, tutor_comment")
+      .select("kim_number, student_answer, earned_score")
       .eq("attempt_id", attempt.id)
       .order("kim_number", { ascending: true });
+    if (part1RowsErr) {
+      console.error(JSON.stringify({
+        event: "mock_result_part1_select_failed",
+        message: part1RowsErr.message,
+      }));
+    }
 
     const rowsByKim = new Map<number, Record<string, unknown>>();
     for (const r of part1Rows ?? []) {
