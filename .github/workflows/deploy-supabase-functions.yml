@@ -26,40 +26,44 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_ID }}
+          # Деплоим напрямую через --project-ref, БЕЗ `supabase link`: команда
+          # link дёргает privileged "project status" endpoint и падает на
+          # developer-токене ("does not have the necessary privileges"). Сам
+          # deploy требует меньше прав. REF = project id из секрета.
+          REF="${{ secrets.SUPABASE_PROJECT_ID }}"
 
           # Mock-exams ПЕРВЫМИ — критичны для пилота (результат/проверка пробника).
           # Деплоим до остальных, чтобы фикс выкатился даже если поздний deploy упадёт.
           # Все 4 — verify_jwt=false: student/tutor делают ручную GoTrue-валидацию
           # (/auth/v1/user, mirror homework-api); public — публичный; grade — service_role.
-          supabase functions deploy mock-exam-student-api --no-verify-jwt
-          supabase functions deploy mock-exam-tutor-api --no-verify-jwt
-          supabase functions deploy mock-exam-grade --no-verify-jwt
-          supabase functions deploy mock-exam-public --no-verify-jwt
+          supabase functions deploy mock-exam-student-api --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy mock-exam-tutor-api --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy mock-exam-grade --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy mock-exam-public --project-ref "$REF" --no-verify-jwt
 
           # Deploy all actively maintained edge functions.
           # JWT verification is configured per-function in supabase/config.toml.
-          supabase functions deploy telegram-bot --no-verify-jwt
-          supabase functions deploy chat --no-verify-jwt
-          supabase functions deploy setup-telegram-webhook --no-verify-jwt
-          supabase functions deploy telegram-auth --no-verify-jwt
-          supabase functions deploy telegram-login-token --no-verify-jwt
-          supabase functions deploy telegram-broadcast --no-verify-jwt
-          supabase functions deploy telegram-scheduled-reminder --no-verify-jwt
-          supabase functions deploy trainer-submit --no-verify-jwt
-          supabase functions deploy homework-api
-          supabase functions deploy push-subscribe
-          supabase functions deploy homework-reminder --no-verify-jwt
-          supabase functions deploy invite-preview --no-verify-jwt
-          supabase functions deploy tutor-account
-          supabase functions deploy tutor-manual-add-student
-          supabase functions deploy tutor-update-student
-          supabase functions deploy tutor-progress-api
-          supabase functions deploy lesson-materials-api
-          supabase functions deploy student-lessons-api
-          supabase functions deploy oauth-google-init --no-verify-jwt
-          supabase functions deploy oauth-google-callback --no-verify-jwt
-          supabase functions deploy email-verify --no-verify-jwt
-          supabase functions deploy auth-email-hook --no-verify-jwt
+          supabase functions deploy telegram-bot --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy chat --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy setup-telegram-webhook --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy telegram-auth --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy telegram-login-token --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy telegram-broadcast --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy telegram-scheduled-reminder --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy trainer-submit --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy homework-api --project-ref "$REF"
+          supabase functions deploy push-subscribe --project-ref "$REF"
+          supabase functions deploy homework-reminder --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy invite-preview --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy tutor-account --project-ref "$REF"
+          supabase functions deploy tutor-manual-add-student --project-ref "$REF"
+          supabase functions deploy tutor-update-student --project-ref "$REF"
+          supabase functions deploy tutor-progress-api --project-ref "$REF"
+          supabase functions deploy lesson-materials-api --project-ref "$REF"
+          supabase functions deploy student-lessons-api --project-ref "$REF"
+          supabase functions deploy oauth-google-init --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy oauth-google-callback --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy email-verify --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy auth-email-hook --project-ref "$REF" --no-verify-jwt
 
           echo "✅ All functions deployed successfully!"
