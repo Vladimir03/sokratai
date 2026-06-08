@@ -14,12 +14,11 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { parseAttachmentUrls, serializeAttachmentUrls } from "../_shared/attachment-refs.ts";
-import {
-  sendPushNotification,
-  type PushPayload,
-  type PushSubscriptionData,
-} from "../_shared/push-sender.ts";
-import { sendLessonMaterialsNotificationEmail } from "../_shared/email-sender.ts";
+import type { PushPayload, PushSubscriptionData } from "../_shared/push-sender.ts";
+// The notify runtime deps (sendPushNotification / sendLessonMaterialsNotificationEmail)
+// are DYNAMICALLY imported inside handleNotify (not top-level) so the materials CRUD
+// can never boot-fail (HTTP 503) from a notify-module link/import issue — defense-in-depth
+// after the 2026-06-08 incident where a missing email-sender export 503'd the whole fn.
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -543,6 +542,11 @@ async function handleNotify(
     return jsonOk(cors, { ok: true, notify: emptyResult });
   }
   const ids = [...studentIds];
+
+  // Dynamic-import the notify runtime deps here (not at module top-level): keeps the
+  // materials CRUD (list/add/delete) boot-independent of the push/email modules.
+  const { sendPushNotification } = await import("../_shared/push-sender.ts");
+  const { sendLessonMaterialsNotificationEmail } = await import("../_shared/email-sender.ts");
 
   // Tutor name (sender label).
   const { data: tutorRow } = await db.from("tutors").select("name").eq("id", tutorPkId).maybeSingle();

@@ -20,6 +20,10 @@ import {
   renderHomeworkTutorMessage,
   type HomeworkTutorMessageData,
 } from './transactional-email-templates/homework-tutor-message.ts';
+import {
+  renderLessonMaterialsNotification,
+  type LessonMaterialsNotificationData,
+} from './transactional-email-templates/lesson-materials-notification.ts';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -37,6 +41,9 @@ export type HomeworkReminderInput = Omit<HomeworkReminderData, 'unsubscribeUrl'>
 
 /** Data for tutor-authored homework reminder message (unsubscribeUrl added internally). */
 export type HomeworkTutorMessageInput = Omit<HomeworkTutorMessageData, 'unsubscribeUrl'>;
+
+/** Data for lesson-materials notification email (unsubscribeUrl added internally). */
+export type LessonMaterialsNotificationInput = Omit<LessonMaterialsNotificationData, 'unsubscribeUrl'>;
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -300,6 +307,53 @@ export async function sendHomeworkReminderEmail(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendHomeworkReminderEmail_error', { to, assignmentId, error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Render and enqueue a lesson-materials notification email (schedule-materials
+ * TASK-7, email fallback in the push→telegram→email cascade). Skips temp emails
+ * (@temp.sokratai.ru) and suppressed addresses.
+ *
+ * Idempotency key includes a timestamp because a tutor may legitimately notify
+ * again after a later editing session (mirror sendHomeworkTutorMessageEmail).
+ */
+export async function sendLessonMaterialsNotificationEmail(
+  db: SupabaseClient,
+  to: string,
+  data: LessonMaterialsNotificationInput,
+  lessonId: string,
+): Promise<EmailResult> {
+  try {
+    const skip = await preSendChecks(db, to);
+    if (skip) return skip;
+
+    const unsubToken = await getOrCreateUnsubscribeToken(db, to);
+    const unsubscribeUrl = buildUnsubscribeUrl(unsubToken);
+
+    const rendered = renderLessonMaterialsNotification({ ...data, unsubscribeUrl });
+
+    const payload: EnqueuePayload = {
+      message_id: crypto.randomUUID(),
+      run_id: crypto.randomUUID(),
+      to,
+      from: SENDER_FROM,
+      sender_domain: SENDER_DOMAIN,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      purpose: 'transactional',
+      label: 'lesson-materials-notification',
+      idempotency_key: `lesson-materials-${lessonId}-${to}-${Date.now()}`,
+      unsubscribe_token: unsubToken,
+      queued_at: new Date().toISOString(),
+    };
+
+    return await enqueue(db, payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('sendLessonMaterialsNotificationEmail_error', { to, lessonId, error: msg });
     return { success: false, error: msg };
   }
 }
