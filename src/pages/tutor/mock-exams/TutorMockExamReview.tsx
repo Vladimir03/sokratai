@@ -1427,16 +1427,18 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
                   <MathText text={solution.solution_text} />
                 </Suspense>
               ) : null}
-              {/* 2026-06-05 (item 5): фото эталонного решения */}
+              {/* 2026-06-05 (item 5): фото эталонного решения.
+                  1.4 fix (2026-06-08): полное фото (object-contain), как в
+                  условии — НЕ обрезать (object-cover/aspect crop резал графики). */}
               {(solution.solution_image_urls?.length ?? 0) > 0 && (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="space-y-2">
                   {(solution.solution_image_urls ?? []).map((url, idx) => (
                     <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
                       <img
                         src={url}
                         alt={`Эталон решения №${solution.kim_number} — фото ${idx + 1}`}
                         loading="lazy"
-                        className="aspect-[3/4] w-full rounded-md border border-slate-200 bg-white object-cover dark:border-slate-700"
+                        className="max-h-96 w-full rounded-md border border-slate-200 bg-white object-contain dark:border-slate-700"
                       />
                     </a>
                   ))}

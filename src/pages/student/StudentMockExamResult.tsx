@@ -422,14 +422,16 @@ function Part2ReferenceSolution({
         </div>
       )}
       {images.length > 0 && (
-        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        // 1.4 fix (2026-06-08): полное фото (object-contain), как в условии —
+        // НЕ обрезать (object-cover/aspect crop резал графики решений).
+        <div className="mt-2 space-y-2">
           {images.map((url, idx) => (
             <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
               <img
                 src={url}
                 alt={`Эталон решения №${kimNumber} — фото ${idx + 1}`}
                 loading="lazy"
-                className="aspect-[3/4] w-full rounded-md border border-slate-200 bg-white object-cover"
+                className="max-h-96 w-full rounded-md border border-slate-200 bg-white object-contain"
               />
             </a>
           ))}
