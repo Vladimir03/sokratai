@@ -48,6 +48,15 @@ jobs:
           supabase functions deploy tutor-progress-api
           supabase functions deploy lesson-materials-api
           supabase functions deploy student-lessons-api
+          # Mock-exams (ЕГЭ пробники). Все 4 — verify_jwt=false: student/tutor API
+          # делают ручную JWT-валидацию через GoTrue /auth/v1/user (mirror homework-api),
+          # public — публичный, grade — внутренний вызов через service_role.
+          # student-api + tutor-api ПЕРВЫМИ: если поздний deploy упадёт, критичные
+          # для результата/проверки пробника уже выкатятся.
+          supabase functions deploy mock-exam-student-api --no-verify-jwt
+          supabase functions deploy mock-exam-tutor-api --no-verify-jwt
+          supabase functions deploy mock-exam-grade --no-verify-jwt
+          supabase functions deploy mock-exam-public --no-verify-jwt
           supabase functions deploy oauth-google-init --no-verify-jwt
           supabase functions deploy oauth-google-callback --no-verify-jwt
           supabase functions deploy email-verify --no-verify-jwt

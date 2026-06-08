@@ -29,6 +29,14 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.lesson-materials-api]
     verify_jwt = true
+  [functions.mock-exam-grade]
+    verify_jwt = false
+  [functions.mock-exam-public]
+    verify_jwt = false
+  [functions.mock-exam-student-api]
+    verify_jwt = false
+  [functions.mock-exam-tutor-api]
+    verify_jwt = false
   [functions.oauth-google-callback]
     verify_jwt = false
   [functions.oauth-google-init]
