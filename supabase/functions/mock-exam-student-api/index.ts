@@ -881,17 +881,6 @@ async function handleGetResult(
     },
     part1_answers: part1Answers,
     part2_solutions: part2Solutions,
-    // TEMP ДИАГНОСТИКА деплоя (2026-06-08) — УДАЛИТЬ после подтверждения.
-    // Если этих полей НЕТ в ответе /result → задеплоен старый код (деплой не
-    // доехал до рантайма). Если `_deploy_marker` есть, а `_debug_part1_with_answer`
-    // > 0 → новый код + derive работает (ответы Части 1 отдаются).
-    _deploy_marker: "form-fix-2026-06-08",
-    _debug_part1_with_answer: part1Answers.filter(
-      (a) =>
-        a !== null &&
-        typeof a === "object" &&
-        (a as Record<string, unknown>).student_answer != null,
-    ).length,
   });
 }
 
