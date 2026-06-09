@@ -5,6 +5,7 @@
 > Деньги-инварианты: rule 60 + новый money-инвариант (PRD §3.7). Единицы: **рубли (integer), без копеек** (PRD §3.8).
 >
 > **Changelog:**
+> - **v4 (2026-06-09)** — устранён 3-й ревью (v3=CONDITIONAL PASS, 3 spec-детали): seed one-shot guard через **marker-таблицу `tutor_ledger_seed_runs`** (P0; не полагаться на note/created_by); RLS/ownership через существующий **`owns_tutor_student`** (`resolve_tutor_pk` не существует, P1); **покрыть ВСЕ активные payment-write сайты** через `_sync_lesson_debit` — подтверждён 2-й путь `update_group_participant_payment_status` (P1, rule-40 dual-write-path).
 > - **v3 (2026-06-09)** — устранены находки 2-го ревью (v2=FAIL). **Сдвиг механизма: debit пишется АДДИТИВНО внутри `complete_lesson_and_create_payment` + reverse в `tutor_delete_lessons`/`tutor_revert_lesson`; триггеры на `tutor_payments` УБРАНЫ.** Это снимает P0-A (legacy manual insert), P1-C (ON CONFLICT DO UPDATE), P1-D (нет tutor_id на tutor_payments) естественно + forward-compatible (в 2b убираем из complete только запись в `tutor_payments`, оставляя ledger-debit — без throwaway-bridge). Также: `created_by` nullable + COALESCE (P0-B), balance защищён guarded BEFORE-UPDATE trigger (P0-3), amount `ROUND::int` (tutor_payments.amount = NUMERIC), reverse no-op-safe (P1-5), soft-cancel не реверсит (P1-6).
 > - v2 — закрыла математику v1 (seed=−долг P0-1, balance=Σ всех signed P0-2). v1=FAIL.
 >
@@ -57,7 +58,7 @@
 
 ## Acceptance Criteria (testable)
 
-- **AC-1 (seed = долг, не выручка):** per-row: debit на каждое историческое `tutor_payments` (`ROUND(amount)::int`, `source_kind='lesson'`, `source_lesson_id`) + credit на каждое `paid` (`source_kind='adjustment'`, note `'seed: оплачено (история)'`, `created_by=NULL`). Итог `balance = −Σ(amount WHERE status IN ('pending','overdue'))`. Ученик только-paid → **0**. One-shot (guard: skip если есть seed-записи).
+- **AC-1 (seed = долг, не выручка):** per-row: debit на каждое историческое `tutor_payments` (`ROUND(amount)::int`, `source_kind='lesson'`, `source_lesson_id`) + credit на каждое `paid` (`source_kind='adjustment'`, note `'seed: оплачено (история)'`, `created_by=NULL`). Итог `balance = −Σ(amount WHERE status IN ('pending','overdue'))`. Ученик только-paid → **0**. One-shot guard через **marker-таблицу `tutor_ledger_seed_runs(tutor_student_id PK)`** (НЕ по note/created_by — seed-debit неотличим, `source_kind='lesson'`).
 - **AC-2 (пополнение):** «Внести оплату» 5000 → `credit, amount=5000, source_kind='topup'`; `balance += 5000`; `tutor_payments` не изменён.
 - **AC-3 (debit внутри complete + идемпотентность + финальная сумма):** Завершение занятия ЛЮБЫМ путём (web grid / PostLessonSheet / group actions / bulk-confirm / Telegram — ВСЕ через `complete_lesson_and_create_payment`) → ровно ОДИН active lesson-debit (`source_kind='lesson', source_lesson_id`, amount = ФИНАЛЬНАЯ сумма payment после `ON CONFLICT DO UPDATE`). Повтор с той же суммой → no-op. Повтор с ДРУГОЙ суммой → debit обновлён (reverse old + new) на финальную. `balance −= amount`.
 - **AC-4 (balance = Σ ВСЕХ signed):** `balance == Σ(credit.amount) − Σ(debit.amount)` по ВСЕМ записям (reversed-оригиналы + offsetting включены; reverse 1500 → −1500 + (+1500) = 0). `recompute_student_balance` совпадает.
@@ -71,6 +72,7 @@
 - **AC-12 (double-reverse идемпотентен — P1-5):** повторный reverse → no-op (`FOR UPDATE` + guard `reversed_by_entry_id IS NULL` + unique `reverses_entry_id`); вставка offsetting через `ON CONFLICT DO NOTHING` → НЕ роняет вызвавший RPC (delete не падает на unique).
 - **AC-13 (created_by-safe — P0-B):** debit/reverse из complete/delete-RPC при service-role/Telegram (нет `auth.uid()`) и seed (миграция, нет user) пишутся БЕЗ NOT NULL violation: `created_by` **nullable**, `= COALESCE(auth.uid(), tutors.user_id)` в RPC; `NULL` в seed.
 - **AC-14 (группа = один debit на участника):** групповое завершение (N оплат участникам в complete-RPC) → N active lesson-debit; идемпотентно.
+- **AC-15 (покрыты ВСЕ payment-write сайты — P1/rule-40):** grep активных функций, вставляющих `tutor_payments` с `lesson_id` (`complete_lesson_and_create_payment`, `update_group_participant_payment_status`, …) — каждая зовёт `_sync_lesson_debit`; ни один lesson-payment-INSERT не минует ledger. Тест: создать/изменить оплату участника через `update_group_participant_payment_status` → debit создан/обновлён (а не только через complete).
 
 ---
 
@@ -78,8 +80,8 @@
 
 **P0:**
 - **R-P0-1**: Миграция ledger — `tutor_ledger_entries` (рубли int; `created_by` **nullable**; `reverses_entry_id`/`reversed_by_entry_id`) + `tutor_students.balance` + AFTER-INSERT balance-maintenance trigger + **guarded BEFORE-UPDATE trigger** (защита balance, AC-10) + partial-unique (active lesson-debit) + unique (one-reversal) + RLS SELECT + REVOKE write.
-- **R-P0-2**: **Расширить `complete_lesson_and_create_payment`** (CREATE OR REPLACE, аддитивно) — после payment-upsert идемпотентно sync lesson-debit (helper `_sync_lesson_debit(lesson, student, tutor, amount, actor)`: нет → insert; есть с другой суммой → reverse+new; та же → no-op). `tutor_id` derived. + **расширить `tutor_delete_lessons`/`tutor_revert_lesson`** — reverse debit при сносе оплаты (no-op-safe). Покрывает AC-3/11/13/14.
-- **R-P0-3**: Seed per-row (debit на всё + credit на paid, `created_by=NULL`, `ROUND::int`) → opening = −долг; one-shot guard (AC-1).
+- **R-P0-2**: **Покрыть ВСЕ активные payment-write сайты (с `lesson_id`) через `_sync_lesson_debit`** (rule-40 dual-write-path) — НЕ только `complete_lesson_and_create_payment`. Подтверждённые сайты: (1) `complete_lesson_and_create_payment`; (2) **`update_group_participant_payment_status`** (INSERT `tutor_payments` ~стр.235 миграции `20260224220000`). **Перед билдом грепнуть `INSERT INTO ...tutor_payments` по активным функциям** (старые перекрыты `CREATE OR REPLACE`) и подключить каждую. Helper `_sync_lesson_debit(lesson, student, tutor, amount, actor)` (CREATE OR REPLACE, аддитивно, после payment-upsert): нет → insert; есть с другой суммой → reverse+new; та же → no-op; `tutor_id` derived. + **расширить `tutor_delete_lessons`/`tutor_revert_lesson`** — reverse debit при сносе оплаты (no-op-safe). Покрывает AC-3/11/13/14/15.
+- **R-P0-3**: Seed per-row (debit на всё + credit на paid, `created_by=NULL`, `ROUND::int`) → opening = −долг; one-shot guard через **marker-таблицу `tutor_ledger_seed_runs`** (AC-1).
 - **R-P0-4**: RPC `tutor_record_topup` + `tutor_reverse_ledger_entry` (race-guarded helper, реюзится delete/revert/UI) + UI «Внести оплату».
 - **R-P0-5**: Баланс на «Обзор» — карточка + «Внести оплату».
 
@@ -112,7 +114,7 @@ created_at           timestamptz NOT NULL default now()
 - `UNIQUE (source_lesson_id, tutor_student_id) WHERE source_kind='lesson' AND kind='debit' AND reversed_by_entry_id IS NULL` (один active lesson-debit).
 - `UNIQUE (reverses_entry_id) WHERE reverses_entry_id IS NOT NULL` (один реверс на оригинал).
 - Индекс `(tutor_student_id, created_at DESC)`.
-- RLS SELECT `tutor_id = resolve_tutor_pk(auth.uid())`; **REVOKE INSERT/UPDATE/DELETE FROM authenticated**.
+- RLS SELECT `owns_tutor_student(tutor_student_id)` (реюз существующего helper — как у `tutor_payments`; `resolve_tutor_pk` НЕ существует, не выдумывать); **REVOKE INSERT/UPDATE/DELETE FROM authenticated**.
 
 ### Migration 2 — balance + защита (AC-10)
 - `ALTER TABLE tutor_students ADD COLUMN balance integer NOT NULL DEFAULT 0;`
@@ -131,8 +133,10 @@ created_at           timestamptz NOT NULL default now()
 - `tutor_reverse_ledger_entry(_entry_id, _note) → uuid` — `FOR UPDATE` + guard + offsetting (`ON CONFLICT DO NOTHING`). Реюзится `_reverse_lesson_debit` + UI.
 - `tutor_edit_lesson_debit(_entry_id, _new_amount)` [P1] — reverse+new.
 
-### Migration 5 — seed (one-shot, guarded)
-Per-row из `tutor_payments`: debit на каждую строку (`ROUND(amount)::int`, `source_kind='lesson'`, `source_lesson_id`, `tutor_id` derived, `created_by=NULL`) + credit на каждую `paid` (`source_kind='adjustment'`, `created_by=NULL`). Net = −Σ(pending+overdue) (AC-1). Пишет в ledger напрямую. Рубли 1:1, нет `*100`. Guard: skip ученика с существующей seed-записью.
+### Migration 5 — seed (one-shot, marker-guarded)
+- Marker: `CREATE TABLE tutor_ledger_seed_runs (tutor_student_id uuid PRIMARY KEY REFERENCES tutor_students(id) ON DELETE CASCADE, seeded_at timestamptz NOT NULL default now());`
+- Per-row из `tutor_payments` для учеников **НЕ в маркере**: debit на каждую строку (`ROUND(amount)::int`, `source_kind='lesson'`, `source_lesson_id`, `tutor_id` derived, `created_by=NULL`) + credit на каждую `paid` (`source_kind='adjustment'`, `created_by=NULL`); затем INSERT строки в `tutor_ledger_seed_runs`. Net = −Σ(pending+overdue) (AC-1). Пишет в ledger напрямую. Рубли 1:1, нет `*100`.
+- **Guard: marker-таблица** (НЕ note/created_by — seed-debit неотличим от live, `source_kind='lesson'`). Re-run миграции → ученики уже в маркере → skip.
 
 ### Frontend
 - `src/lib/tutorBalanceApi.ts`: `recordTopup`, `reverseLedgerEntry`, `editLessonDebit`[P1], `listLedger(studentId)` (рубли); RPC через supabase.rpc + rule-97. Новый RPC → `types.ts` Functions.
@@ -170,8 +174,8 @@ balance=Σ всех signed; debit только через `_sync_lesson_debit` (
 
 ## Implementation Tasks (краткий план)
 1. Migration 1–3 (ledger + balance + balance-maintenance trigger + guarded-trigger + helpers-skeleton) — DB.
-2. Migration 4 (extend complete + delete/revert RPC; `_sync_lesson_debit`/`_reverse_lesson_debit`) — DB.
-3. Migration 5 (seed per-row) — DB.
+2. Migration 4 (extend ВСЕ активные payment-write RPC через `_sync_lesson_debit` — `complete_lesson_and_create_payment` + `update_group_participant_payment_status` + grep остальных; delete/revert через `_reverse_lesson_debit`) — DB.
+3. Migration 5 (marker `tutor_ledger_seed_runs` + seed per-row) — DB.
 4. RPC topup + reverse + `types.ts` + REVOKE/GRANT — DB.
 5. `tutorBalanceApi.ts` + `StudentBalanceCard` + «Внести оплату» sheet — frontend (P0-4/5).
 6. [P1] `LedgerFeed` + editable списание + должники.
