@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Сократ — Карточка ученика · Прогресс + Оплаты (макет)</title>
+<!--
+  DISCOVERY PROTOTYPE (не продакшн-код). Кликабельный макет под кейсы Егора.
+  Вкладка «Прогресс» = обзор ученика целиком: КАРТОЧКА-СВОДКА ДЕНЕГ сверху
+  (баланс + Внести оплату + Отчёт родителю + «Все операции →») → проверка → цель → работы.
+  Вкладка «Оплаты» = полный реестр (баланс, ближайшие списания, лента, редактируемые списания).
+  Открыть двойным кликом в браузере. Дизайн-система: Golos Text, socrat-green #1B6B4A,
+  деньги в ₽, без эмодзи в UI chrome (Lucide-style SVG), инпуты 16px (rule 80/90).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --accent:#1B6B4A; --accent-lt:#DCFCE7; --primary:#1E293B; --warning:#F59E0B;
+    --warning-lt:#FEF3C7; --danger:#EF4444; --danger-lt:#FEE2E2; --surface:#fff; --bg:#F8FAFC;
+    --t1:#0F172A; --t2:#64748B; --t3:#94A3B8; --border:#E2E8F0; --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{font-family:'Golos Text',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased;line-height:1.45;padding:24px 12px 64px;}
+  .wrap{max-width:460px;margin:0 auto;}
+  .hint{max-width:460px;margin:0 auto 14px;font-size:12px;color:var(--t3);text-align:center;}
+  .icon{width:18px;height:18px;display:inline-block;vertical-align:middle;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+  .icon.sm{width:15px;height:15px;}
+  button{font-family:inherit;cursor:pointer;touch-action:manipulation;border:none;background:none;}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;overflow:hidden;box-shadow:0 1px 3px rgba(15,23,42,.05);}
+  .topbar{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border);}
+  .topbar .back{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--t2);background:var(--bg);}
+  .topbar h1{font-size:17px;font-weight:600;margin:0;}
+  .topbar .sub{font-size:12px;color:var(--t2);margin-top:1px;}
+
+  .tabs{display:flex;gap:4px;padding:8px 12px 0;border-bottom:1px solid var(--border);}
+  .tab{flex:0 0 auto;padding:9px 14px;font-size:14px;font-weight:500;color:var(--t2);border-radius:9px 9px 0 0;min-height:40px;display:flex;align-items:center;gap:6px;}
+  .tab[aria-selected="true"]{color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent);font-weight:600;}
+
+  .pane{padding:16px;}
+  .pane[hidden]{display:none;}
+  .sec{margin-top:20px;}
+  .sec h3{font-size:13px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.03em;margin:0 0 10px;display:flex;align-items:center;gap:7px;}
+
+  /* ── Money SUMMARY card (Прогресс) ── */
+  .balcard{border:1px solid var(--border);border-radius:var(--radius);padding:14px 15px;background:linear-gradient(180deg,#fff,#fbfcfb);}
+  .balcard .label{font-size:11px;color:var(--t2);text-transform:uppercase;letter-spacing:.04em;}
+  .balcard-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+  .balcard .num{font-size:28px;font-weight:700;letter-spacing:-.02em;margin-top:2px;}
+  .balcard-actions{display:flex;gap:8px;margin-top:12px;}
+  .alllink{display:flex;align-items:center;gap:5px;margin-top:11px;font-size:13px;font-weight:500;color:var(--accent);padding:4px 0;}
+  .alllink:hover{text-decoration:underline;}
+
+  /* ── Full balance block (Оплаты) ── */
+  .bal{background:linear-gradient(180deg,#fff,#fbfcfb);border:1px solid var(--border);border-radius:var(--radius);padding:18px 16px;text-align:center;}
+  .bal .label{font-size:12px;color:var(--t2);text-transform:uppercase;letter-spacing:.04em;}
+  .bal .num{font-size:38px;font-weight:700;letter-spacing:-.02em;margin:4px 0 2px;}
+  .bal .forecast{font-size:12.5px;color:var(--t2);margin-top:9px;}
+  .bal .forecast b{color:var(--t1);font-weight:600;}
+
+  .num.neg{color:var(--danger);} .num.pos{color:var(--accent);}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;white-space:nowrap;}
+  .chip.debt{background:var(--danger-lt);color:#991B1B;}
+  .chip.ok{background:var(--accent-lt);color:#065F46;}
+
+  .actions{display:flex;gap:8px;margin-top:12px;}
+  .btn{flex:1;min-height:46px;border-radius:12px;font-size:14.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;}
+  .btn.sm{min-height:40px;font-size:13.5px;border-radius:10px;}
+  .btn.primary{background:var(--accent);color:#fff;} .btn.primary:hover{background:#155b3f;}
+  .btn.ghost{background:#fff;border:1px solid var(--border);color:var(--t1);} .btn.ghost:hover{background:var(--bg);}
+
+  /* ── Progress content ── */
+  .review{display:flex;align-items:center;gap:11px;padding:12px;border:1px solid var(--warning);background:var(--warning-lt);border-radius:12px;}
+  .review .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:#fff;color:#B45309;flex-shrink:0;}
+  .review .body{flex:1;min-width:0;}
+  .review .ttl{font-size:14px;font-weight:600;}
+  .review .meta{font-size:12px;color:#92651b;margin-top:1px;}
+  .review .btn{flex:0 0 auto;min-height:36px;padding:0 14px;font-size:13px;background:#fff;border:1px solid #E7C56b;color:#92400E;}
+
+  .goalcard{border:1px solid var(--border);border-radius:12px;padding:14px;background:#fff;}
+  .goal{display:flex;align-items:baseline;gap:9px;}
+  .goal .now{font-size:30px;font-weight:700;color:var(--accent);}
+  .goal .of{font-size:14px;color:var(--t2);} .goal .of b{color:var(--t1);}
+  .delta{font-size:12px;font-weight:600;color:#047857;background:var(--accent-lt);padding:2px 8px;border-radius:999px;margin-left:auto;}
+  .bar{height:8px;border-radius:999px;background:var(--border);margin-top:11px;overflow:hidden;}
+  .bar span{display:block;height:100%;background:var(--accent);border-radius:999px;}
+
+  .row{display:flex;align-items:center;gap:11px;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;margin-bottom:8px;}
+  .row .ico{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .ico.deb{background:var(--danger-lt);color:#B91C1C;} .ico.cred{background:var(--accent-lt);color:#047857;}
+  .ico.work{background:#EEF2FF;color:#4338CA;}
+  .row .body{flex:1;min-width:0;}
+  .row .body .ttl{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row .body .meta{font-size:12px;color:var(--t2);margin-top:1px;}
+  .row .body .meta a{color:var(--accent);text-decoration:none;}
+  .score{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;padding:3px 9px;border-radius:8px;}
+  .score.g{background:var(--accent-lt);color:#065F46;} .score.a{background:var(--warning-lt);color:#92400E;} .score.r{background:var(--danger-lt);color:#991B1B;}
+  .amt{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .amt.deb{color:var(--danger);} .amt.cred{color:var(--accent);} .amt.up{color:var(--t2);}
+  .editbtn{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--t3);flex-shrink:0;}
+  .editbtn:hover{background:var(--bg);color:var(--t1);}
+  .amtedit{width:84px;font-size:15px;font-family:inherit;padding:5px 7px;border:1.5px solid var(--accent);border-radius:8px;text-align:right;font-variant-numeric:tabular-nums;}
+  .upcoming .row{background:var(--bg);border-style:dashed;}
+
+  /* Modal */
+  .scrim{position:fixed;inset:0;background:rgba(15,23,42,.5);display:none;align-items:flex-end;justify-content:center;z-index:50;}
+  .scrim.open{display:flex;}
+  @media(min-width:560px){.scrim{align-items:center;padding:20px;}}
+  .sheet{background:#fff;width:100%;max-width:460px;border-radius:18px 18px 0 0;max-height:92vh;overflow-y:auto;padding:18px 16px 22px;}
+  @media(min-width:560px){.sheet{border-radius:18px;}}
+  .sheet h2{font-size:18px;font-weight:600;margin:0 0 2px;}
+  .sheet .sub{font-size:13px;color:var(--t2);margin:0 0 16px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block;font-size:13px;font-weight:500;color:var(--t2);margin-bottom:6px;}
+  .field input{width:100%;font-size:16px;font-family:inherit;padding:12px 13px;border:1px solid var(--border);border-radius:11px;color:var(--t1);}
+  .field input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(27,107,74,.15);}
+  .field .big{font-size:30px;font-weight:700;text-align:center;}
+  .sheet-actions{display:flex;gap:8px;margin-top:6px;}
+  .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+  .xbtn{width:34px;height:34px;border-radius:9px;color:var(--t2);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .xbtn:hover{background:var(--bg);}
+
+  .report .seg{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 9px;}
+  .rcard{border:1px solid var(--border);border-radius:12px;padding:13px 14px;background:#fff;}
+  .rrow{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;font-size:14px;border-bottom:1px dashed var(--border);}
+  .rrow:last-child{border-bottom:none;} .rrow .k{color:var(--t2);} .rrow .v{font-weight:600;font-variant-numeric:tabular-nums;}
+  .statement .srow{display:flex;justify-content:space-between;font-size:13.5px;padding:7px 0;border-bottom:1px solid var(--border);}
+  .statement .srow:last-child{border-bottom:none;} .statement .total{font-weight:700;font-size:15px;padding-top:10px;}
+  .reportlink{display:flex;align-items:center;gap:8px;background:var(--bg);border:1px solid var(--border);border-radius:11px;padding:10px 12px;font-size:13px;color:var(--t2);margin-top:8px;}
+  .reportlink .url{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--t1);}
+  .leaknote{font-size:11.5px;color:var(--t3);text-align:center;margin-top:14px;}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--primary);color:#fff;font-size:13.5px;font-weight:500;padding:11px 18px;border-radius:11px;opacity:0;pointer-events:none;transition:all .25s;z-index:90;box-shadow:0 8px 24px rgba(15,23,42,.25);}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+  <div class="hint">Кликабельный макет · вкладка «Прогресс» (сводка денег сверху) + «Оплаты» (полный реестр)</div>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="topbar">
+        <button class="back" aria-label="Назад"><svg class="icon" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg></button>
+        <div><h1>Дмитрий Соколов</h1><div class="sub">Физика · ЕГЭ · 1 500 ₽ / занятие</div></div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" onclick="switchTab('progress')">Прогресс</button>
+        <button class="tab" role="tab" aria-selected="false" onclick="switchTab('money')">
+          <svg class="icon sm" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M16 12h.01"/><path d="M2 10h20"/></svg>
+          Оплаты
+        </button>
+      </div>
+
+      <!-- ══ PROGRESS (default) — обзор: деньги-сводка + учёба ══ -->
+      <div class="pane" id="pane-progress">
+
+        <!-- Money summary card -->
+        <div class="balcard">
+          <div class="balcard-top">
+            <div>
+              <div class="label">Баланс ученика</div>
+              <div class="num neg" id="balNumSummary">−750 ₽</div>
+            </div>
+            <span class="chip debt" id="balChipSummary">
+              <svg class="icon sm" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+              <span>Должник</span>
+            </span>
+          </div>
+          <div class="balcard-actions">
+            <button class="btn primary sm" onclick="openPay()">
+              <svg class="icon sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Внести оплату
+            </button>
+            <button class="btn ghost sm" onclick="openReport()">
+              <svg class="icon sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Отчёт родителю
+            </button>
+          </div>
+          <button class="alllink" onclick="switchTab('money')">
+            Все операции и ближайшие списания
+            <svg class="icon sm" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+        </div>
+
+        <!-- Требует проверки (R1) -->
+        <div class="sec">
+          <div class="review">
+            <div class="ico"><svg class="icon sm" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg></div>
+            <div class="body"><div class="ttl">2 работы ждут проверки</div><div class="meta">Подтвердите баллы — ученик увидит результат</div></div>
+            <button class="btn" onclick="toast('Открыли проверку (демо)')">Проверить</button>
+          </div>
+        </div>
+
+        <!-- Цель -->
+        <div class="sec">
+          <h3>Цель</h3>
+          <div class="goalcard">
+            <div class="goal"><div class="now">~68</div><div class="of">из <b>80</b> баллов ЕГЭ</div><span class="delta">↑ +6 за месяц</span></div>
+            <div class="bar"><span style="width:85%"></span></div>
+          </div>
+        </div>
+
+        <!-- Последние работы -->
+        <div class="sec">
+          <h3>Последние работы</h3>
+          <div class="row">
+            <div class="ico work"><svg class="icon sm" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+            <div class="body"><div class="ttl">ДЗ «Импульс»</div><div class="meta">17 июня</div></div>
+            <span class="score g">4 / 5</span>
+          </div>
+          <div class="row">
+            <div class="ico work"><svg class="icon sm" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></div>
+            <div class="body"><div class="ttl">Пробник №3</div><div class="meta">14 июня</div></div>
+            <span class="score a">62 / 100</span>
+          </div>
+          <div class="row">
+            <div class="ico work"><svg class="icon sm" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+            <div class="body"><div class="ttl">ДЗ «Работа и энергия»</div><div class="meta">10 июня</div></div>
+            <span class="score g">5 / 5</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ ОПЛАТЫ — полный реестр ══ -->
+      <div class="pane" id="pane-money" hidden>
+        <div class="bal">
+          <div class="label">Баланс ученика</div>
+          <div class="num neg" id="balNum">−750 ₽</div>
+          <span class="chip debt" id="balChip"><svg class="icon sm" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg><span>Должник</span></span>
+          <div class="forecast">После ближайших 2 занятий: <b id="forecast">−3 750 ₽</b></div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" onclick="openPay()"><svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Внести оплату</button>
+          <button class="btn ghost" onclick="openReport()"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Отчёт родителю</button>
+        </div>
+
+        <div class="sec upcoming">
+          <h3><svg class="icon sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Ближайшие списания</h3>
+          <div class="row"><div class="ico deb"><svg class="icon sm" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg></div><div class="body"><div class="ttl">Колебания</div><div class="meta">24 июня · ещё не списано</div></div><div class="amt up">1 500 ₽</div></div>
+          <div class="row"><div class="ico deb"><svg class="icon sm" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/></svg></div><div class="body"><div class="ttl">Волны</div><div class="meta">26 июня · ещё не списано</div></div><div class="amt up">1 500 ₽</div></div>
+        </div>
+
+        <div class="sec">
+          <h3><svg class="icon sm" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>Операции</h3>
+          <div id="feed"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAY sheet -->
+  <div class="scrim" id="payScrim">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Внести оплату">
+      <div class="modal-head"><div><h2>Внести оплату</h2><p class="sub">Родитель передал деньги — просто запишите сумму. Раскидывать по занятиям не нужно.</p></div>
+        <button class="xbtn" onclick="closePay()" aria-label="Закрыть"><svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="field"><label for="payAmt">Получено, ₽</label><input id="payAmt" class="big" type="number" inputmode="numeric" placeholder="0" /></div>
+      <div class="field"><label for="payDate">Дата</label><input id="payDate" type="date" /></div>
+      <div class="sheet-actions"><button class="btn ghost" onclick="closePay()">Отмена</button><button class="btn primary" onclick="submitPay()">Записать</button></div>
+    </div>
+  </div>
+
+  <!-- PARENT REPORT sheet -->
+  <div class="scrim" id="reportScrim">
+    <div class="sheet report" role="dialog" aria-modal="true" aria-label="Отчёт родителю">
+      <div class="modal-head"><div><h2>Отчёт для родителя</h2><p class="sub">Дмитрий Соколов · Физика · ЕГЭ</p></div>
+        <button class="xbtn" onclick="closeReport()" aria-label="Закрыть"><svg class="icon" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+      <div class="reportlink"><svg class="icon sm" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span class="url">sokratai.ru/p/r8k2m4qz</span><button class="btn ghost" style="flex:0 0 auto;min-height:34px;padding:0 12px;font-size:13px" onclick="copyLink()">Скопировать</button></div>
+      <div class="seg">Прогресс</div>
+      <div class="rcard"><div class="goal"><div class="now">~68</div><div class="of">из цели <b>80</b> баллов ЕГЭ</div><span class="delta" style="margin-left:auto">↑ +6 за месяц</span></div></div>
+      <div class="rcard" style="margin-top:8px">
+        <div class="rrow"><span class="k">ДЗ «Импульс»</span><span class="v">4 / 5</span></div>
+        <div class="rrow"><span class="k">Пробник №3</span><span class="v">62 / 100</span></div>
+        <div class="rrow"><span class="k">ДЗ «Работа и энергия»</span><span class="v">5 / 5</span></div>
+      </div>
+      <div class="seg">Баланс и оплаты</div>
+      <div class="rcard statement">
+        <div class="srow"><span>3 июня · Пополнение</span><span style="color:var(--accent);font-weight:600">+6 000 ₽</span></div>
+        <div class="srow"><span>5 июня · Занятие «Кинематика»</span><span style="color:var(--danger)">−1 500 ₽</span></div>
+        <div class="srow"><span>10 июня · Занятие «Динамика»</span><span style="color:var(--danger)">−1 500 ₽</span></div>
+        <div class="srow"><span>12 июня · Занятие «Статика» (½)</span><span style="color:var(--danger)">−750 ₽</span></div>
+        <div class="srow"><span>17 июня · Занятие «Импульс»</span><span style="color:var(--danger)">−1 500 ₽</span></div>
+        <div class="srow"><span>19 июня · Занятие «Энергия»</span><span style="color:var(--danger)">−1 500 ₽</span></div>
+        <div class="srow total"><span>Итоговый баланс</span><span style="color:var(--danger)">−750 ₽</span></div>
+      </div>
+      <div class="leaknote">Для родителя — только итоги и баллы. Без решений задач и критериев.</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  var ops = [
+    { type:'debit',  amount:1500, label:'Занятие «Энергия»',     date:'19 июня', lesson:true },
+    { type:'debit',  amount:1500, label:'Занятие «Импульс»',     date:'17 июня', lesson:true },
+    { type:'debit',  amount:750,  label:'Занятие «Статика» (½)', date:'12 июня', lesson:true },
+    { type:'debit',  amount:1500, label:'Занятие «Динамика»',    date:'10 июня', lesson:true },
+    { type:'credit', amount:6000, label:'Оплата от родителя',    date:'3 июня',  lesson:false },
+    { type:'debit',  amount:1500, label:'Занятие «Кинематика»',  date:'5 июня',  lesson:true },
+  ];
+  var UPCOMING = 3000;
+
+  function fmt(n){ return new Intl.NumberFormat('ru-RU').format(Math.abs(n)) + ' ₽'; }
+  function balance(){ return ops.reduce(function(s,o){ return s + (o.type==='credit'? o.amount : -o.amount); }, 0); }
+
+  function setBal(numEl, chipEl){
+    var b = balance();
+    numEl.textContent = (b<0?'−':'+') + fmt(b);
+    numEl.className = 'num ' + (b<0?'neg':'pos');
+    if(chipEl){
+      chipEl.className = 'chip ' + (b<0?'debt':'ok');
+      chipEl.querySelector('span').textContent = b<0 ? 'Должник' : 'Оплачено вперёд';
+    }
+  }
+
+  function render(){
+    setBal(document.getElementById('balNumSummary'), document.getElementById('balChipSummary'));
+    setBal(document.getElementById('balNum'), document.getElementById('balChip'));
+    var b = balance(), fc = b - UPCOMING;
+    document.getElementById('forecast').textContent = (fc<0?'−':'+') + fmt(fc);
+
+    var feed = document.getElementById('feed'); feed.innerHTML='';
+    ops.forEach(function(o,i){
+      var isCred=o.type==='credit', row=document.createElement('div'); row.className='row';
+      row.innerHTML =
+        '<div class="ico '+(isCred?'cred':'deb')+'">'+(isCred?
+          '<svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>':
+          '<svg class="icon sm" viewBox="0 0 24 24"><line x1="17" y1="7" x2="7" y2="17"/><polyline points="17 17 7 17 7 7"/></svg>')+'</div>'+
+        '<div class="body"><div class="ttl">'+o.label+'</div><div class="meta">'+o.date+(o.lesson?' · <a href="#" onclick="return false">занятие</a>':'')+'</div></div>'+
+        '<div class="amt '+(isCred?'cred':'deb')+'" id="amt-'+i+'">'+(isCred?'+':'−')+fmt(o.amount)+'</div>'+
+        (o.type==='debit'?'<button class="editbtn" title="Изменить сумму списания" onclick="editAmt('+i+')"><svg class="icon sm" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></button>':'');
+      feed.appendChild(row);
+    });
+  }
+
+  function editAmt(i){
+    var cell=document.getElementById('amt-'+i), cur=ops[i].amount;
+    cell.innerHTML='<input class="amtedit" type="number" inputmode="numeric" value="'+cur+'" />';
+    var inp=cell.querySelector('input'); inp.focus(); inp.select();
+    function commit(){ var v=parseInt(inp.value,10); if(!isNaN(v)&&v>=0){ops[i].amount=v;} render(); toast('Сумма списания обновлена'); }
+    inp.addEventListener('blur',commit);
+    inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){inp.blur();} });
+  }
+
+  function openPay(){ document.getElementById('payDate').value=new Date().toISOString().slice(0,10); document.getElementById('payAmt').value=''; document.getElementById('payScrim').classList.add('open'); setTimeout(function(){document.getElementById('payAmt').focus();},50); }
+  function closePay(){ document.getElementById('payScrim').classList.remove('open'); }
+  function submitPay(){ var v=parseInt(document.getElementById('payAmt').value,10); if(isNaN(v)||v<=0){toast('Введите сумму');return;} ops.unshift({type:'credit',amount:v,label:'Оплата от родителя',date:'сегодня',lesson:false}); closePay(); render(); toast('Оплата записана · баланс обновлён'); }
+  function openReport(){ document.getElementById('reportScrim').classList.add('open'); }
+  function closeReport(){ document.getElementById('reportScrim').classList.remove('open'); }
+  function copyLink(){ try{ navigator.clipboard && navigator.clipboard.writeText('sokratai.ru/p/r8k2m4qz'); }catch(e){} toast('Ссылка скопирована'); }
+
+  function switchTab(which){
+    document.getElementById('pane-money').hidden = which!=='money';
+    document.getElementById('pane-progress').hidden = which!=='progress';
+    var tabs=document.querySelectorAll('.tab');
+    tabs[0].setAttribute('aria-selected', which==='progress');
+    tabs[1].setAttribute('aria-selected', which==='money');
+  }
+
+  var toastTimer;
+  function toast(msg){ var t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(function(){t.classList.remove('show');},2200); }
+
+  ['payScrim','reportScrim'].forEach(function(id){ document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) this.classList.remove('open'); }); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'){ closePay(); closeReport(); } });
+
+  render();
+</script>
+</body>
+</html>
