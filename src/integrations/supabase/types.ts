@@ -3249,8 +3249,57 @@ export type Database = {
           },
         ]
       }
+      tutor_ledger_entries: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          note: string | null
+          occurred_on: string
+          reversed_by_entry_id: string | null
+          reverses_entry_id: string | null
+          source_kind: string
+          source_lesson_id: string | null
+          tutor_id: string
+          tutor_student_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          note?: string | null
+          occurred_on?: string
+          reversed_by_entry_id?: string | null
+          reverses_entry_id?: string | null
+          source_kind: string
+          source_lesson_id?: string | null
+          tutor_id: string
+          tutor_student_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          note?: string | null
+          occurred_on?: string
+          reversed_by_entry_id?: string | null
+          reverses_entry_id?: string | null
+          source_kind?: string
+          source_lesson_id?: string | null
+          tutor_id?: string
+          tutor_student_id?: string
+        }
+        Relationships: []
+      }
       tutor_students: {
         Row: {
+          balance: number
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -4000,9 +4049,22 @@ export type Database = {
         Returns: Json
       }
       tutor_get_invite_code: { Args: never; Returns: string }
+      tutor_record_topup: {
+        Args: {
+          _amount: number
+          _note?: string
+          _occurred_on?: string
+          _tutor_student_id: string
+        }
+        Returns: string
+      }
       tutor_remove_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
+      }
+      tutor_reverse_ledger_entry: {
+        Args: { _entry_id: string; _note?: string }
+        Returns: string
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
       update_group_participant_payment_status: {

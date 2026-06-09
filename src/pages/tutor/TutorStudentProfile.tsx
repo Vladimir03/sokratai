@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import StudentProgressPanel from '@/components/tutor/students/StudentProgressPanel';
+import StudentBalanceCard from '@/components/tutor/students/StudentBalanceCard';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -584,6 +585,7 @@ function TutorStudentProfileContent() {
 
           {/* Вкладка: Прогресс (агрегат работ + цель + «требует проверки») */}
           <TabsContent value="progress" className="space-y-4">
+            <StudentBalanceCard tutorStudentId={student.id} />
             <StudentProgressPanel tutorStudentId={student.id} />
           </TabsContent>
 
