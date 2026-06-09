@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Plus, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -25,14 +25,11 @@ import {
   useTutorGroups,
   useTutorGroupMemberships,
   useTutorStudent,
-  useMockExams,
   useStudentChats,
   useStudentChatMessages,
 } from '@/hooks/useTutor';
 import { 
-  updateTutorStudent, 
-  createMockExam, 
-  deleteMockExam,
+  updateTutorStudent,
   removeStudentFromTutor,
   updateTutorStudentProfile,
   createTutorGroup,
@@ -52,7 +49,7 @@ import {
   invalidateTutorStudentDependentQueries,
   removeTutorStudentFromCache,
 } from '@/lib/tutorStudentCacheSync';
-import type { MockExam, TutorGroupMembership } from '@/types/tutor';
+import type { TutorGroupMembership } from '@/types/tutor';
 import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
 /**
@@ -114,15 +111,6 @@ function TutorStudentProfileContent() {
     failureCount: studentFailureCount,
   } = useTutorStudent(tutorStudentId);
   const {
-    mockExams,
-    loading: mockExamsLoading,
-    error: mockExamsError,
-    refetch: refetchMockExams,
-    isFetching: mockExamsIsFetching,
-    isRecovering: mockExamsIsRecovering,
-    failureCount: mockExamsFailureCount,
-  } = useMockExams(tutorStudentId);
-  const {
     chats,
     loading: chatsLoading,
     error: chatsError,
@@ -152,7 +140,6 @@ function TutorStudentProfileContent() {
   const [notesInitialized, setNotesInitialized] = useState(false);
   
   // Диалоги
-  const [addMockExamOpen, setAddMockExamOpen] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [deleteStudentOpen, setDeleteStudentOpen] = useState(false);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
@@ -190,8 +177,8 @@ function TutorStudentProfileContent() {
     );
   }, [memberships, tutorStudentId]);
   const initialLoading = loading && !student && !error;
-  const pageError = error || mockExamsError || chatsError;
-  const pageIsFetching = studentIsFetching || mockExamsIsFetching || chatsIsFetching;
+  const pageError = error || chatsError;
+  const pageIsFetching = studentIsFetching || chatsIsFetching;
   
   // Инициализация полей при загрузке студента
   if (student && !notesInitialized) {
@@ -494,7 +481,6 @@ function TutorStudentProfileContent() {
           isFetching={pageIsFetching}
           onRetry={() => {
             refetchStudent();
-            refetchMockExams();
             refetchChats();
           }}
         />
@@ -590,10 +576,9 @@ function TutorStudentProfileContent() {
             ученика и сразу видит задания/работы, а не пустой профиль — фидбэк Эмилии). */}
         <Tabs defaultValue="progress" className="w-full">
           <TabsList className="grid w-full grid-cols-5">
-            <TabsTrigger value="progress">Прогресс</TabsTrigger>
+            <TabsTrigger value="progress">Обзор</TabsTrigger>
             <TabsTrigger value="overview">Профиль</TabsTrigger>
             <TabsTrigger value="notes">Заметки</TabsTrigger>
-            <TabsTrigger value="mockexams">Пробники</TabsTrigger>
             <TabsTrigger value="dialogs">AI-диалоги</TabsTrigger>
           </TabsList>
 
@@ -738,61 +723,6 @@ function TutorStudentProfileContent() {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-          
-          {/* Вкладка: Пробники */}
-          <TabsContent value="mockexams" className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="font-medium">Результаты пробников</h3>
-              <Button size="sm" onClick={() => setAddMockExamOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Добавить
-              </Button>
-            </div>
-            
-            {mockExamsLoading ? (
-              <div className="space-y-2">
-                <Skeleton className="h-16 w-full" />
-                <Skeleton className="h-16 w-full" />
-              </div>
-            ) : mockExamsError ? (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  {mockExamsError}
-                </CardContent>
-              </Card>
-            ) : mockExams.length === 0 ? (
-              <Card>
-                <CardContent className="py-8 text-center text-muted-foreground">
-                  Пробники пока не добавлены
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-2">
-                {mockExams.map((exam) => (
-                  <MockExamCard 
-                    key={exam.id} 
-                    exam={exam} 
-                    onDelete={async () => {
-                      await deleteMockExam(exam.id);
-                      refetchMockExams();
-                      toast.success('Пробник удалён');
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-            
-            {/* Диалог добавления пробника */}
-            <AddMockExamDialog
-              open={addMockExamOpen}
-              onOpenChange={setAddMockExamOpen}
-              tutorStudentId={tutorStudentId!}
-              onSuccess={() => {
-                refetchMockExams();
-                toast.success('Пробник добавлен');
-              }}
-            />
           </TabsContent>
           
           {/* Вкладка: AI-диалоги */}
@@ -1193,155 +1123,7 @@ function TutorStudentProfileContent() {
 // Вспомогательные компоненты
 // =============================================
 
-function MockExamCard({ exam, onDelete }: { exam: MockExam; onDelete: () => void }) {
-  const [isDeleting, setIsDeleting] = useState(false);
-  
-  const handleDelete = async () => {
-    setIsDeleting(true);
-    await onDelete();
-    setIsDeleting(false);
-  };
-  
-  return (
-    <Card>
-      <CardContent className="py-3 flex items-center gap-4">
-        <div className="flex-1">
-          <p className="font-medium">
-            {exam.score}{exam.max_score ? ` / ${exam.max_score}` : ''} баллов
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {new Date(exam.date).toLocaleDateString('ru-RU')}
-            {exam.notes && ` • ${exam.notes}`}
-          </p>
-        </div>
-        <Button 
-          variant="ghost" 
-          size="icon"
-          disabled={isDeleting}
-          onClick={handleDelete}
-        >
-          <Trash2 className="h-4 w-4 text-destructive" />
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-function AddMockExamDialog({ 
-  open, 
-  onOpenChange, 
-  tutorStudentId,
-  onSuccess 
-}: { 
-  open: boolean; 
-  onOpenChange: (open: boolean) => void;
-  tutorStudentId: string;
-  onSuccess: () => void;
-}) {
-  const [date, setDate] = useState('');
-  const [score, setScore] = useState('');
-  const [maxScore, setMaxScore] = useState('');
-  const [examNotes, setExamNotes] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  
-  const handleSubmit = async () => {
-    if (!date || !score) {
-      toast.error('Укажите дату и балл');
-      return;
-    }
-    
-    setIsSaving(true);
-    try {
-      await createMockExam({
-        tutor_student_id: tutorStudentId,
-        date,
-        score: parseInt(score, 10),
-        max_score: maxScore ? parseInt(maxScore, 10) : undefined,
-        notes: examNotes || undefined,
-      });
-      onSuccess();
-      onOpenChange(false);
-      // Reset form
-      setDate('');
-      setScore('');
-      setMaxScore('');
-      setExamNotes('');
-    } catch (err) {
-      console.error('Error creating mock exam:', err);
-      toast.error('Ошибка сохранения');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-  
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Добавить результат пробника</DialogTitle>
-        </DialogHeader>
-        
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="examDate">Дата</Label>
-            <Input
-              id="examDate"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-            />
-          </div>
-          
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="examScore">Балл</Label>
-              <Input
-                id="examScore"
-                type="number"
-                min="0"
-                value={score}
-                onChange={(e) => setScore(e.target.value)}
-                placeholder="например, 75"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="examMaxScore">Макс. балл (опц.)</Label>
-              <Input
-                id="examMaxScore"
-                type="number"
-                min="0"
-                value={maxScore}
-                onChange={(e) => setMaxScore(e.target.value)}
-                placeholder="например, 100"
-              />
-            </div>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="examNotes">Заметка (опц.)</Label>
-            <Input
-              id="examNotes"
-              value={examNotes}
-              onChange={(e) => setExamNotes(e.target.value)}
-              placeholder="например, вариант СтатГрад"
-            />
-          </div>
-        </div>
-        
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? 'Сохранение...' : 'Добавить'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function ChatMessagesDialog({ 
+function ChatMessagesDialog({
   chatId, 
   onClose 
 }: { 
