@@ -71,6 +71,11 @@ export interface TutorStudent {
   parent_contact: string | null;
   last_lesson_at: string | null;
   hourly_rate_cents: number | null;
+  /**
+   * Баланс ученика (РУБЛИ, ledger-managed — rule 60 «Баланс ученика»). Отрицательный = долг.
+   * Optional defensively: кэш/старые ответы могли не нести колонку.
+   */
+  balance?: number;
   created_at: string;
   updated_at: string;
 }

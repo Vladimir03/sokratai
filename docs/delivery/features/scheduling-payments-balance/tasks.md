@@ -2,7 +2,7 @@
 
 > Pipeline step 5. SPEC: `spec.md` v6 (4 раунда ревью закрыты). Автор: Vladimir × Claude · 2026-06-09
 >
-> **СТАТУС (2026-06-10): TASK-1 ✅ (`3f1f706`) · TASK-2+4 ✅ (`b2d670b`) · TASK-3 ✅ (`f26ab22` + ревью-фиксы `11f961f`/`2de12fa`) · TASK-5 ✅ (`39213ce`). DB-слой = 6 миграций `20260609120000…120500`. Осталось: deploy-гейты (Lovable применяет миграции → SQL-гейты → `deploy-sokratai`) · TASK-6 (P1: лента операций + правка записей + должники).**
+> **СТАТУС (2026-06-10): TASK-1 ✅ (`3f1f706`) · TASK-2+4 ✅ (`b2d670b`) · TASK-3 ✅ (`f26ab22` + ревью-фиксы `11f961f`/`2de12fa`) · TASK-5 ✅ (`39213ce`) · TASK-6 ✅ (spec v7). 6 миграций `20260609*` применены Lovable 2026-06-10, seed-гейт пройден (balance==−долг, 0 строк). Осталось: Lovable применяет `20260610120000` → `deploy-sokratai` (фронт TASK-5+6).**
 > Единицы: рубли integer. Деньги: миграции локально НЕ прогоняются → строим аккуратными чанками + SQL-гейты на проде/staging.
 > Порядок: TASK-1 (фундамент, NEW) → TASK-2 (helpers+RPC, NEW) → TASK-4 (seed, NEW) → **TASK-3 (вшивание в money-RPC — репродукция замороженного, делать осторожно, отдельным проходом + Codex)** → TASK-5/6 (фронт).
 
@@ -47,8 +47,12 @@
 - «Внести оплату» sheet (одно поле ₽ 16px + дата).
 - **🚀 Deploy needed** (frontend).
 
-### TASK-6 — Frontend P1
-`LedgerFeed` на «Оплаты» + редактируемое списание (reverse+new) + «должники» (`balance<0`).
+### TASK-6 — Лента операций + правка записей + должники ✅ (2026-06-10) · AC-16..19 · spec v7
+**Files**: `supabase/migrations/20260610120000_ledger_edit_topup.sql`, `src/lib/tutorBalanceApi.ts`, `src/components/tutor/students/{TopupDialog,LedgerFeed,StudentBalanceCard}.tsx`, `src/pages/tutor/TutorPayments.tsx`, `types.ts`
+- `replaces_entry_id` + атомарная `tutor_edit_topup` (reverse+new, только topup-credit).
+- `LedgerFeed` (collapse «исправлено»/«отменено» + история) на карточке баланса («Все операции») + быстрый Pencil у последнего пополнения.
+- Правка списаний — ТОЛЬКО через занятие: re-complete (individual) / hint (группа) / `tutor_revert_lesson` (отмена); занятие удалено → plain reverse.
+- «Должники по балансу» на «Оплатах» (balance<0 из `useTutorStudents`) + «Внести» → общий `TopupDialog`.
 
 ## Validation (каждая DB-задача)
 `npm run lint && npm run build && npm run smoke-check` (фронт/греп) + SQL-гейты на staging/проде (AC-1/3/4/10/11/12/14). Деплой: миграции — Lovable на push; фронт — `deploy-sokratai`.

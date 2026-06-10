@@ -5,6 +5,7 @@
 > Деньги-инварианты: rule 60 + новый money-инвариант (PRD §3.7). Единицы: **рубли (integer), без копеек** (PRD §3.8).
 >
 > **Changelog:**
+> - **v7 (2026-06-10)** — TASK-6 специфицирован и построен (правка записей — запрос Vladimir «и поступление можно отредактировать»): лента операций + правка/отмена записей + «Должники по балансу». Решения (AskUserQuestion): лента + быстрый Pencil у последнего пополнения на карточке; правятся пополнения И списания; collapse «исправлено» с раскрываемой историей; отдельное «Отменить запись». **Списания правятся ТОЛЬКО через канонический путь занятия** (re-complete с новой суммой / `tutor_revert_lesson`) — НЕ прямой записью в ledger (иначе рассинхрон с `tutor_payments`/`/pay`-ботом); группа → правка в занятии (hint). Пополнения — атомарная RPC `tutor_edit_topup` (reverse+new в одной транзакции, `replaces_entry_id` для collapse). Миграция `20260610120000`.
 > - **v6 (2026-06-09)** — re-review CONDITIONAL PASS (3 находки закрыты), 1 P2: `_sync_lesson_debit` — убрана ветка reverse при `amount<=0` (теперь pure no-op `RETURN NULL`); reverse живёт ТОЛЬКО в `_reverse_lesson_debit` (delete/revert/future edit). Делает инвариант «re-complete-to-0 НЕ реверсит» **структурным** (не зависит от callsite-гейта `IF amount>0`). Single-responsibility helper. Миграция `20260609120500` (CREATE OR REPLACE). Поведение текущих callsite не меняется (всегда `amount>0`).
 > - **v5 (2026-06-09)** — устранён TASK-3 Codex-ревью (3 находки): **P0** — `_sync_lesson_debit` само-сериализуется `pg_advisory_xact_lock(lesson,student)` + RAISE на conflict-mismatch (никогда silent NULL), не полагается на caller-сериализацию (хотя сейчас payment-row-lock уже сериализует); **P1** — `tutor_id` derived из `tutor_students` (authoritative) + validate переданного + RAISE `STUDENT_TUTOR_MISMATCH` (rule 40); **P1** — re-complete-to-0 на существующем debit НЕ авто-реверсит (мирроринг frozen payment-поведения — payment-row тоже не сносится; undo = delete/revert или edit-списание из Parking Lot). Фикс через новую `CREATE OR REPLACE`-миграцию `20260609120400` (push→Lovable мог уже применить `…120100`).
 > - **v4 (2026-06-09)** — устранён 3-й ревью (v3=CONDITIONAL PASS, 3 spec-детали): seed one-shot guard через **marker-таблицу `tutor_ledger_seed_runs`** (P0; не полагаться на note/created_by); RLS/ownership через существующий **`owns_tutor_student`** (`resolve_tutor_pk` не существует, P1); **покрыть ВСЕ активные payment-write сайты** через `_sync_lesson_debit` — подтверждён 2-й путь `update_group_participant_payment_status` (P1, rule-40 dual-write-path).
@@ -185,6 +186,25 @@ balance=Σ всех signed; debit только через `_sync_lesson_debit` (
 Детальная нарезка + промпты → `tasks.md` (step 5).
 
 ---
+
+## TASK-6 — Лента операций + правка записей + должники (v7, 2026-06-10)
+
+**Схема/RPC (миграция `20260610120000`):**
+- `tutor_ledger_entries.replaces_entry_id uuid NULL` (FK self, SET NULL) — новая запись-исправление ссылается на заменённую (collapse-отображение). Partial index.
+- `tutor_edit_topup(_entry_id, _new_amount, _occurred_on?, _note?)` — SECURITY DEFINER, authenticated: `FOR UPDATE` → ownership (`owns_tutor_student`) → **только `source_kind='topup' AND kind='credit' AND reverses_entry_id IS NULL`** (иначе `NOT_EDITABLE`) → не reversed (`ALREADY_REVERSED`) → `_reverse_ledger_entry(старая)` + INSERT новой с `replaces_entry_id` — **атомарно в одной транзакции**. Гонки: one-reversal unique → второй конкурентный edit получает `ALREADY_REVERSED`.
+
+**Правка списаний — НИКОГДА не прямой записью в ledger (КРИТИЧНО):**
+- Сумма (индивидуальное занятие) → повторный `complete_lesson_and_create_payment(lesson, новая_сумма, текущий_payment_status)` — обновляет И оплату, И debit (amount-aware `_sync_lesson_debit`). Единый write-path, рассинхрон невозможен.
+- Группа → правка суммы участника в карточке занятия (Расписание); в ленте — hint (v1).
+- «Отменить списание» (занятие существует) → `tutor_revert_lesson` (снимает pending-оплату + реверсит debit + занятие → cancelled). Занятие удалено (`source_lesson_id` NULL) → обычный `tutor_reverse_ledger_entry` (оплат уже нет — desync исключён).
+
+**Collapse-отображение ленты (frontend, `LedgerFeed.tsx`):** offsetting-строки (`reverses_entry_id`) скрыты; сторнированная запись с заменой — скрыта (вместо неё новая с бейджем «исправлено» + раскрываемая история «было N → стало M»); сторнированная без замены — зачёркнута «отменено». Лента + быстрый Pencil у последнего пополнения на карточке баланса. «Должники по балансу» — карточка на «Оплатах» (`balance < 0` из уже загруженного `useTutorStudents`, select `*` несёт `balance`).
+
+**AC (TASK-6):**
+- **AC-16 (атомарная правка):** edit topup → старая reversed + новая создана в одной транзакции; balance изменился ровно на дельту; double-edit/гонка → `ALREADY_REVERSED` (не двойная правка).
+- **AC-17 (collapse):** после правки в ленте ОДНА строка (новая, «исправлено», история раскрывается); после отмены — зачёркнутая «отменено»; offsetting-строки не видны.
+- **AC-18 (списание через занятие):** правка суммы из ленты обновляет `tutor_payments.amount` И active debit на одну и ту же сумму (никакого ledger-only пути); отмена через `tutor_revert_lesson` снимает оба.
+- **AC-19 (должники):** карточка показывает только `balance<0`, сортировка по величине долга; «Внести» пополняет и убирает из списка.
 
 ## Parking Lot
 - Авто-debit cron + ежедневная сводка — **2b**.

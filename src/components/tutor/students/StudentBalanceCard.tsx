@@ -1,25 +1,20 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format } from 'date-fns';
-import { Wallet, Plus, Loader2, FileText, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
+import { ru } from 'date-fns/locale';
+import { Wallet, Plus, Loader2, FileText, RefreshCw, Pencil, ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/formatters';
-import { getStudentBalance, recordTopup } from '@/lib/tutorBalanceApi';
+import { getStudentBalance, listLedger } from '@/lib/tutorBalanceApi';
+import TopupDialog, { type TopupEditTarget } from './TopupDialog';
+import LedgerFeed from './LedgerFeed';
 
-// Карточка-сводка баланса ученика (Phase 2a, TASK-5) — ПЕРВЫМ блоком вкладки «Обзор».
-// Баланс = Σ ledger (РУБЛИ). Отрицательный = должен. Job: «знать сколько должен» +
-// «зафиксировать оплату одним числом». Лента операций / отчёт родителю — позже (TASK-6 / 2c).
+// Карточка-сводка баланса ученика (Phase 2a, TASK-5+6) — ПЕРВЫМ блоком вкладки «Обзор».
+// Баланс = Σ ledger (РУБЛИ). Отрицательный = должен. Последнее пополнение правится в один
+// клик (кейс «только что внёс и опечатался»); «Все операции» раскрывает ленту (LedgerFeed).
 export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId: string }) {
-  const qc = useQueryClient();
-
   const { data: balance, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['tutor', 'balance', tutorStudentId],
     queryFn: () => getStudentBalance(tutorStudentId),
@@ -27,34 +22,35 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
     staleTime: 60_000,
   });
 
-  const [open, setOpen] = useState(false);
-  const [amountText, setAmountText] = useState('');
-  const [dateText, setDateText] = useState(() => format(new Date(), 'yyyy-MM-dd'));
-
-  const amount = parseInt(amountText.replace(/[^\d]/g, ''), 10);
-  const amountValid = Number.isFinite(amount) && amount > 0;
-
-  const topup = useMutation({
-    mutationFn: () => recordTopup(tutorStudentId, amount, dateText || undefined),
-    onSuccess: (res) => {
-      if (!res.ok) {
-        toast.error(res.error ?? 'Не удалось внести оплату.');
-        return;
-      }
-      toast.success(`Оплата ${formatCurrency(amount)} внесена`);
-      qc.invalidateQueries({ queryKey: ['tutor', 'balance', tutorStudentId] });
-      qc.invalidateQueries({ queryKey: ['tutor', 'ledger', tutorStudentId] });
-      setOpen(false);
-      setAmountText('');
-    },
-    onError: () => toast.error('Не удалось внести оплату.'),
+  const ledger = useQuery({
+    queryKey: ['tutor', 'ledger', tutorStudentId],
+    queryFn: () => listLedger(tutorStudentId),
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 
+  const [topupOpen, setTopupOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<TopupEditTarget | null>(null);
+  const [feedOpen, setFeedOpen] = useState(false);
+
+  // Последнее активное пополнение — быстрый Pencil прямо на карточке.
+  const lastTopup = useMemo(
+    () =>
+      (ledger.data ?? []).find(
+        (e) => e.source_kind === 'topup' && e.kind === 'credit' && !e.reversed_by_entry_id && !e.reverses_entry_id,
+      ) ?? null,
+    [ledger.data],
+  );
+
+  const visibleOpsCount = useMemo(() => {
+    const entries = ledger.data ?? [];
+    const replacedIds = new Set(entries.filter((e) => e.replaces_entry_id).map((e) => e.replaces_entry_id as string));
+    return entries.filter((e) => !e.reverses_entry_id && !(e.reversed_by_entry_id && replacedIds.has(e.id))).length;
+  }, [ledger.data]);
+
   const bal = balance ?? 0;
-  const tone =
-    bal < 0 ? 'text-rose-600' : bal > 0 ? 'text-emerald-600' : 'text-slate-900';
-  const statusLabel =
-    bal < 0 ? 'Задолженность' : bal > 0 ? 'Предоплата' : 'Нет задолженности';
+  const tone = bal < 0 ? 'text-rose-600' : bal > 0 ? 'text-emerald-600' : 'text-slate-900';
+  const statusLabel = bal < 0 ? 'Задолженность' : bal > 0 ? 'Предоплата' : 'Нет задолженности';
 
   return (
     <Card>
@@ -87,11 +83,7 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
         )}
 
         <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={() => setOpen(true)}
-            disabled={isLoading || isError}
-            className="min-h-[44px]"
-          >
+          <Button onClick={() => setTopupOpen(true)} disabled={isLoading || isError} className="min-h-[44px]">
             <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" /> Внести оплату
           </Button>
           <Button
@@ -103,51 +95,49 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
             <FileText className="mr-1.5 h-4 w-4" aria-hidden="true" /> Отчёт родителю
           </Button>
         </div>
+
+        {lastTopup && (
+          <div className="flex items-center justify-between gap-2 rounded-lg bg-socrat-surface px-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Последняя оплата:{' '}
+              <span className="font-medium text-emerald-600">+{formatCurrency(lastTopup.amount)}</span>
+              {' · '}
+              {format(parseISO(lastTopup.occurred_on), 'd MMMM', { locale: ru })}
+            </p>
+            <Button
+              variant="ghost" size="icon" className="h-8 w-8 shrink-0"
+              aria-label="Изменить последнее пополнение" title="Изменить (опечатка в сумме/дате)"
+              onClick={() => setEditTarget({ id: lastTopup.id, amount: lastTopup.amount, occurred_on: lastTopup.occurred_on })}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+
+        {(ledger.data?.length ?? 0) > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setFeedOpen((v) => !v)}
+              className="flex min-h-[44px] w-full items-center justify-between text-sm font-medium text-slate-700 hover:text-slate-900"
+              style={{ touchAction: 'manipulation' }}
+              aria-expanded={feedOpen}
+            >
+              <span>Все операции ({visibleOpsCount})</span>
+              <ChevronDown className={cn('h-4 w-4 transition-transform', feedOpen && 'rotate-180')} aria-hidden="true" />
+            </button>
+            {feedOpen && <LedgerFeed tutorStudentId={tutorStudentId} entries={ledger.data ?? []} />}
+          </div>
+        )}
       </CardContent>
 
-      <Dialog open={open} onOpenChange={(o) => { if (!topup.isPending) setOpen(o); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Внести оплату</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="topup-amount">Сумма (₽)</Label>
-              <Input
-                id="topup-amount"
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder="например, 4000"
-                value={amountText}
-                onChange={(e) => setAmountText(e.target.value)}
-                className="text-base"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="topup-date">Дата (необязательно)</Label>
-              <Input
-                id="topup-date"
-                type="date"
-                value={dateText}
-                onChange={(e) => setDateText(e.target.value)}
-                className="text-base"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={topup.isPending}>
-              Отмена
-            </Button>
-            <Button onClick={() => topup.mutate()} disabled={!amountValid || topup.isPending}>
-              {topup.isPending ? (
-                <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Сохраняю…</>
-              ) : (
-                <>Внести{amountValid ? ` ${formatCurrency(amount)}` : ''}</>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TopupDialog open={topupOpen} onOpenChange={setTopupOpen} tutorStudentId={tutorStudentId} />
+      <TopupDialog
+        open={editTarget !== null}
+        onOpenChange={(o) => { if (!o) setEditTarget(null); }}
+        tutorStudentId={tutorStudentId}
+        editEntry={editTarget}
+      />
     </Card>
   );
 }

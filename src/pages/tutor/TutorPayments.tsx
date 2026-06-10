@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Plus, Check, Bell, Copy, ExternalLink, Trash2 } from 'lucide-react';
+import { Plus, Check, Bell, Copy, ExternalLink, Trash2, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +18,8 @@ import {
   markPaymentAsPaid, 
   deleteTutorPayment 
 } from '@/lib/tutors';
-import type { TutorPaymentWithStudent } from '@/types/tutor';
+import TopupDialog from '@/components/tutor/students/TopupDialog';
+import type { TutorPaymentWithStudent, TutorStudentWithProfile } from '@/types/tutor';
 
 // =============================================
 // Типы и утилиты
@@ -98,6 +99,66 @@ function getStudentName(payment: TutorPaymentWithStudent): string {
 
 function getParentContact(payment: TutorPaymentWithStudent): string | null {
   return payment.tutor_students?.parent_contact || null;
+}
+
+// =============================================
+// Должники по балансу (Phase 2a, rule 60 «Баланс ученика») — balance < 0.
+// Источник: уже загруженный useTutorStudents (select * несёт balance).
+// «Внести» → общий TopupDialog (инвалидирует ['tutor','students'] → список сам обновится).
+// =============================================
+
+function DebtorsCard({ students }: { students: TutorStudentWithProfile[] }) {
+  const [topupFor, setTopupFor] = useState<{ id: string; name: string } | null>(null);
+
+  const debtors = useMemo(
+    () =>
+      students
+        .filter((s) => (s.balance ?? 0) < 0)
+        .sort((a, b) => (a.balance ?? 0) - (b.balance ?? 0)),
+    [students],
+  );
+
+  if (debtors.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base font-semibold">
+          <Wallet className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          Должники по балансу ({debtors.length})
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="divide-y divide-slate-100 pt-0">
+        {debtors.map((s) => {
+          const name = s.display_name?.trim() || s.profiles?.full_name || s.profiles?.username || 'Без имени';
+          return (
+            <div key={s.id} className="flex items-center justify-between gap-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
+              <span className="shrink-0 text-sm font-semibold tabular-nums text-rose-600">
+                {formatAmount(s.balance ?? 0)}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => setTopupFor({ id: s.id, name })}
+              >
+                Внести
+              </Button>
+            </div>
+          );
+        })}
+        {topupFor && (
+          <TopupDialog
+            open
+            onOpenChange={(o) => { if (!o) setTopupFor(null); }}
+            tutorStudentId={topupFor.id}
+            studentName={topupFor.name}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // =============================================
@@ -258,7 +319,10 @@ function TutorPaymentsContent() {
             Добавить
           </Button>
         </div>
-        
+
+        {/* Должники по балансу (Phase 2a) */}
+        <DebtorsCard students={students} />
+
         {/* Фильтры */}
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
