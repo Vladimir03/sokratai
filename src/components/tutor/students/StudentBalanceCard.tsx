@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/formatters';
 import { getStudentBalance, listLedger } from '@/lib/tutorBalanceApi';
 import TopupDialog, { type TopupEditTarget } from './TopupDialog';
 import LedgerFeed from './LedgerFeed';
+import ParentReportDialog from './ParentReportDialog';
 
 // Карточка-сводка баланса ученика (Phase 2a, TASK-5+6) — ПЕРВЫМ блоком вкладки «Обзор».
 // Баланс = Σ ledger (РУБЛИ). Отрицательный = должен. Последнее пополнение правится в один
@@ -32,6 +33,7 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
   const [topupOpen, setTopupOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<TopupEditTarget | null>(null);
   const [feedOpen, setFeedOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Последнее активное пополнение — быстрый Pencil прямо на карточке.
   const lastTopup = useMemo(
@@ -88,8 +90,8 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
           </Button>
           <Button
             variant="outline"
-            disabled
-            title="Скоро — отчёт родителю по балансу и прогрессу"
+            onClick={() => setReportOpen(true)}
+            title="Read-only отчёт для родителя: прогресс + баланс по ссылке"
             className="min-h-[44px]"
           >
             <FileText className="mr-1.5 h-4 w-4" aria-hidden="true" /> Отчёт родителю
@@ -138,6 +140,7 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
         tutorStudentId={tutorStudentId}
         editEntry={editTarget}
       />
+      <ParentReportDialog open={reportOpen} onOpenChange={setReportOpen} tutorStudentId={tutorStudentId} />
     </Card>
   );
 }

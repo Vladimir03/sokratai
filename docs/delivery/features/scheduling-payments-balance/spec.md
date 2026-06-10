@@ -5,6 +5,7 @@
 > Деньги-инварианты: rule 60 + новый money-инвариант (PRD §3.7). Единицы: **рубли (integer), без копеек** (PRD §3.8).
 >
 > **Changelog:**
+> - **v9 (2026-06-10)** — **Phase 2c «Отчёт родителю» специфицирован и построен** (см. секцию «Phase 2c» ниже): share-ссылка `/p/report/:slug` (bearer-slug, mirror `homework_share_links`), публичный edge `public-student-report` (service_role, anti-leak remap), прогресс-часть = **SHARED `_shared/student-progress-build.ts`** (verbatim-вынос R2-агрегата из `tutor-progress-api` — single source, без дрейфа), выписка ledger без note, диалог создания/отзыва из карточки баланса.
 > - **v8 (2026-06-10)** — (а) **фикс «два долга»** (`3a787c4`): чипы «Долг» в шапке профиля + `StudentCard` дерайвятся из `balance` (single source; legacy `debt_amount` расходится после mark-paid/delete на «Оплатах», остаётся только внутри «Оплат» до 2b); `balance>0` → «Предоплата». (б) **ChatGPT-5.5 frontend-ревью TASK-5/6: FAIL → закрыт** (`bf18e98`): P0 — отмена lesson-debit гейтится paid-оплатой (preflight + race-fallback `had_paid`→warning); P1 — error-гейт фетча статуса оплаты (paid не деградирует в pending), строгий `parseRubleAmount`, `invalidateBalanceCaches` на всех lesson-money-путях (complete/group-toggle/delete/bulk); P2 — маркер обрыва correction-chain за окном 50 + порядок «старое→новое», ⚠️→AlertCircle.
 > - **v7 (2026-06-10)** — TASK-6 специфицирован и построен (правка записей — запрос Vladimir «и поступление можно отредактировать»): лента операций + правка/отмена записей + «Должники по балансу». Решения (AskUserQuestion): лента + быстрый Pencil у последнего пополнения на карточке; правятся пополнения И списания; collapse «исправлено» с раскрываемой историей; отдельное «Отменить запись». **Списания правятся ТОЛЬКО через канонический путь занятия** (re-complete с новой суммой / `tutor_revert_lesson`) — НЕ прямой записью в ledger (иначе рассинхрон с `tutor_payments`/`/pay`-ботом); группа → правка в занятии (hint). Пополнения — атомарная RPC `tutor_edit_topup` (reverse+new в одной транзакции, `replaces_entry_id` для collapse). Миграция `20260610120000`.
 > - **v6 (2026-06-09)** — re-review CONDITIONAL PASS (3 находки закрыты), 1 P2: `_sync_lesson_debit` — убрана ветка reverse при `amount<=0` (теперь pure no-op `RETURN NULL`); reverse живёт ТОЛЬКО в `_reverse_lesson_debit` (delete/revert/future edit). Делает инвариант «re-complete-to-0 НЕ реверсит» **структурным** (не зависит от callsite-гейта `IF amount>0`). Single-responsibility helper. Миграция `20260609120500` (CREATE OR REPLACE). Поведение текущих callsite не меняется (всегда `amount>0`).
@@ -206,6 +207,26 @@ balance=Σ всех signed; debit только через `_sync_lesson_debit` (
 - **AC-17 (collapse):** после правки в ленте ОДНА строка (новая, «исправлено», история раскрывается); после отмены — зачёркнутая «отменено»; offsetting-строки не видны.
 - **AC-18 (списание через занятие):** правка суммы из ленты обновляет `tutor_payments.amount` И active debit на одну и ту же сумму (никакого ledger-only пути); отмена через `tutor_revert_lesson` снимает оба.
 - **AC-19 (должники):** карточка показывает только `balance<0`, сортировка по величине долга; «Внести» пополняет и убирает из списка.
+
+## Phase 2c — «Отчёт родителю» (v9, 2026-06-10)
+
+**Форма (PRD §3, решения locked):** ОДИН общий read-only отчёт: сверху прогресс кратко (цель + текущий балл + последние работы), снизу баланс + выписка по датам + ИТОГ. Родитель не логинится — share-ссылка. **Без решений/критериев** (anti-leak).
+
+**Схема (миграция `20260610140000`):** `student_report_links(slug PK DEFAULT substr(md5(gen_random_uuid()),1,8), tutor_student_id FK CASCADE, created_by DEFAULT auth.uid(), created_at, revoked_at NULL)`. RLS FOR ALL `owns_tutor_student` (tutor CRUD через PostgREST). Slug = bearer (mirror `homework_share_links`); отзыв = `revoked_at`.
+
+**Реюз R2 (single source, КРИТИЧНО):** агрегат «прогресс ученика» **вынесен VERBATIM** из `tutor-progress-api::handleStudentProgress` в **`_shared/student-progress-build.ts`** (`buildStudentProgress(db, tutorUserId, tutorPkId, tutorStudentId)` + `loadHomeworkForStudents`/`aggregateHwWork`/`resolveTutorPkId`/константы). `tutor-progress-api` импортирует их обратно (handleStudentProgress — тонкая обёртка; overview не изменён). Любая правка агрегата теперь автоматически едет в обе поверхности — НЕ дублировать.
+
+**Публичный edge `public-student-report`** (`verify_jwt=false`, service_role; mirror `public-homework-share`): `GET /report/:slug` → slug regex `[a-z0-9]{8}` ДО DB → link (`revoked_at` → `{revoked:true}` 200) → `tutor_students` whitelist (`subject, exam_type, balance` + `tutor_id`) → `tutors` (`user_id` для builder, `name` — rule 96 #10: НИКАКИХ telegram/booking/email) → `buildStudentProgress` → выписка ledger (только активные: не reversed/не offsetting; **БЕЗ `note`** — заметки тутора приватны; limit 60).
+
+**PUBLIC REMAP (anti-leak поверх builder'а):** наружу НЕ уходят `student.id`/`student_id`/`avatar_url`, `works[].id`/`assignment_id`, `pending_review_count`; works cap 10. Payload: `{student{name,track,grade_class,subject}, tutor{name}, target, summary, works[], balance, statement[], generated_at}`. `Cache-Control: no-store`. Телеметрия server-side `student_report_visited` (slug, mirror homework).
+
+**Frontend:** `/p/report/:slug` → `PublicStudentReport.tsx` (вне AppFrame; states ok/revoked/not_found/invalid/error; рендер: шапка → Прогресс (цель/уровень + работы lite через `rollupByScoreKind`) → Баланс и оплаты (итог + выписка) → дисклеймер «Для родителя — только итоги и баллы. Без решений задач и критериев»). Кнопка «Отчёт родителю» на `StudentBalanceCard` активирована → `ParentReportDialog`: get-or-create активной ссылки (PostgREST+RLS), copy (clipboard+fallback), «Отозвать ссылку». URL = `https://sokratai.ru/p/report/{slug}` (прод-домен — ссылка живёт у родителя).
+
+**AC (2c):**
+- **AC-20 (ссылка):** создаётся из карточки; повторное открытие диалога показывает ту же активную; «Отозвать» → страница отдаёт state «ссылка больше не действует»; после отзыва можно создать новую.
+- **AC-21 (anti-leak):** payload НЕ содержит `solution_*`/`rubric_*`/AI-комментариев/hints/uuid'ов/аватара/имени за пределами ученика+тутора; выписка без `note`; пробники — только подтверждённые агрегаты (унаследовано от builder'а).
+- **AC-22 (single source):** прогресс-числа отчёта == «Обзору» тутора (один builder); правка агрегата в одном месте.
+- **AC-23 (states):** битый slug → invalid; неизвестный → not_found; отозванный → revoked; рабочий → отчёт.
 
 ## Parking Lot
 - Авто-debit cron + ежедневная сводка — **2b**.

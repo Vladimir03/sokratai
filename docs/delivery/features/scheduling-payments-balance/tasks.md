@@ -47,6 +47,10 @@
 - «Внести оплату» sheet (одно поле ₽ 16px + дата).
 - **🚀 Deploy needed** (frontend).
 
+### TASK-7 — Phase 2c «Отчёт родителю» ✅ (2026-06-10) · AC-20..23 · spec v9
+**Files**: `supabase/migrations/20260610140000_student_report_links.sql`, `supabase/functions/_shared/student-progress-build.ts` (verbatim-вынос R2-агрегата), `supabase/functions/tutor-progress-api/index.ts` (тонкая обёртка), `supabase/functions/public-student-report/index.ts`, `config.toml`+workflow, `src/lib/publicReportApi.ts`, `src/pages/PublicStudentReport.tsx`, `src/App.tsx` (`/p/report/:slug`), `src/components/tutor/students/{ParentReportDialog,StudentBalanceCard}.tsx`, `types.ts`.
+- Share-ссылка (bearer-slug) + отзыв; публичный отчёт: прогресс lite (single source с тутор-вью) + баланс + выписка без note; anti-leak remap (без uuid/avatar/комментариев).
+
 ### TASK-6 — Лента операций + правка записей + должники ✅ (2026-06-10) · AC-16..19 · spec v7
 **Files**: `supabase/migrations/20260610120000_ledger_edit_topup.sql`, `src/lib/tutorBalanceApi.ts`, `src/components/tutor/students/{TopupDialog,LedgerFeed,StudentBalanceCard}.tsx`, `src/pages/tutor/TutorPayments.tsx`, `types.ts`
 - `replaces_entry_id` + атомарная `tutor_edit_topup` (reverse+new, только topup-credit).

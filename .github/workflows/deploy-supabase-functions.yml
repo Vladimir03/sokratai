@@ -40,6 +40,7 @@ jobs:
           supabase functions deploy mock-exam-tutor-api --project-ref "$REF" --no-verify-jwt
           supabase functions deploy mock-exam-grade --project-ref "$REF" --no-verify-jwt
           supabase functions deploy mock-exam-public --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy public-student-report --project-ref "$REF" --no-verify-jwt
 
           # Deploy all actively maintained edge functions.
           # JWT verification is configured per-function in supabase/config.toml.

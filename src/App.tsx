@@ -41,6 +41,7 @@ const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExam
 const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
 const PublicMockInvite = lazy(() => import("./pages/PublicMockInvite"));
 const PublicMockResult = lazy(() => import("./pages/PublicMockResult"));
+const PublicStudentReport = lazy(() => import("./pages/PublicStudentReport"));
 const Progress = lazy(() => import("./pages/Progress"));
 const Profile = lazy(() => import("./pages/Profile"));
 const MiniApp = lazy(() => import("./pages/MiniApp"));
@@ -273,6 +274,14 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <PublicMockResult />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/p/report/:slug"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <PublicStudentReport />
                 </Suspense>
               }
             />
