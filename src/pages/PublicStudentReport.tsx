@@ -51,7 +51,7 @@ function WorkRow({ work }: { work: ReportWork }) {
   );
 }
 
-function ReportBody({ data }: { data: PublicStudentReportData }) {
+export function ReportBody({ data }: { data: PublicStudentReportData }) {
   const { student, tutor, summary, works, balance, statement } = data;
   const trend = summary.trend ?? [];
   const trendDelta = trend.length >= 2 ? trend[trend.length - 1] - trend[trend.length - 2] : null;
@@ -171,7 +171,7 @@ export default function PublicStudentReport() {
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-2xl items-center px-4 py-3">
-          <span className="text-lg font-semibold text-slate-900">Сократ AI</span>
+          <img src="/sokrat-logo.png" alt="Сократ AI" className="h-7 w-auto" />
         </div>
       </header>
       <main className="mx-auto max-w-2xl px-4 py-6">

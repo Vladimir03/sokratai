@@ -1,12 +1,54 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, ExternalLink, Link2Off, Loader2 } from 'lucide-react';
+import { AlertCircle, Check, Copy, ExternalLink, Eye, Link2Off, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/supabaseClient';
+import { fetchPublicStudentReport } from '@/lib/publicReportApi';
+import { ReportBody } from '@/pages/PublicStudentReport';
+
+// Предпросмотр «как видит родитель» — тот же ReportBody + тот же публичный endpoint.
+function ReportPreviewDialog({
+  open, onOpenChange, slug,
+}: { open: boolean; onOpenChange: (o: boolean) => void; slug: string }) {
+  const { data: result, isLoading } = useQuery({
+    queryKey: ['public', 'student-report', slug],
+    queryFn: () => fetchPublicStudentReport(slug),
+    enabled: open,
+    refetchOnWindowFocus: false,
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Предпросмотр — как видит родитель</DialogTitle>
+        </DialogHeader>
+        <div className="rounded-xl bg-slate-50 p-3">
+          {isLoading || !result ? (
+            <div className="flex items-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Загружаю отчёт…
+            </div>
+          ) : result.status === 'ok' ? (
+            <ReportBody data={result.data} />
+          ) : (
+            <div className="flex flex-col items-center gap-2 py-10 text-center">
+              <AlertCircle className="h-8 w-8 text-slate-300" aria-hidden="true" />
+              <p className="text-sm text-muted-foreground">
+                Не удалось загрузить предпросмотр. Сохраните изменения и попробуйте ещё раз.
+              </p>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>Закрыть</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // «Отчёт родителю» (Phase 2c) — share-ссылка на публичный read-only отчёт
 // (/p/report/:slug). slug = bearer: знание ссылки = доступ; «Отозвать» гасит её
@@ -43,6 +85,7 @@ export default function ParentReportDialog({
 }: { open: boolean; onOpenChange: (o: boolean) => void; tutorStudentId: string }) {
   const qc = useQueryClient();
   const [copied, setCopied] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const linkQuery = useQuery({
     queryKey: ['tutor', 'report-link', tutorStudentId],
@@ -119,7 +162,7 @@ export default function ParentReportDialog({
         </DialogHeader>
         <div className="space-y-3 py-2">
           <p className="text-sm text-muted-foreground">
-            Read-only страница для родителя: прогресс (цель, балл, последние работы) и баланс
+            Страница для родителя: прогресс (цель, балл, последние работы) и баланс
             с выпиской. Без решений задач и критериев. Открывается без входа — по ссылке.
           </p>
 
@@ -138,16 +181,21 @@ export default function ParentReportDialog({
                   <ExternalLink className="h-4 w-4 text-slate-600" />
                 </a>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground"
-                onClick={() => slug && revokeLink.mutate(slug)}
-                disabled={revokeLink.isPending}
-              >
-                <Link2Off className="mr-1.5 h-3.5 w-3.5" />
-                {revokeLink.isPending ? 'Отзываю…' : 'Отозвать ссылку'}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPreviewOpen(true)}>
+                  <Eye className="mr-1.5 h-3.5 w-3.5" /> Предпросмотр
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => slug && revokeLink.mutate(slug)}
+                  disabled={revokeLink.isPending}
+                >
+                  <Link2Off className="mr-1.5 h-3.5 w-3.5" />
+                  {revokeLink.isPending ? 'Отзываю…' : 'Отозвать ссылку'}
+                </Button>
+              </div>
             </div>
           ) : (
             <Button onClick={() => createLink.mutate()} disabled={createLink.isPending} className="min-h-[44px]">
@@ -163,6 +211,9 @@ export default function ParentReportDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>Закрыть</Button>
         </DialogFooter>
       </DialogContent>
+      {slug && (
+        <ReportPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} slug={slug} />
+      )}
     </Dialog>
   );
 }

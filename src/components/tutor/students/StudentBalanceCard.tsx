@@ -91,7 +91,7 @@ export default function StudentBalanceCard({ tutorStudentId }: { tutorStudentId:
           <Button
             variant="outline"
             onClick={() => setReportOpen(true)}
-            title="Read-only отчёт для родителя: прогресс + баланс по ссылке"
+            title="Отчёт для родителя: прогресс и баланс по ссылке"
             className="min-h-[44px]"
           >
             <FileText className="mr-1.5 h-4 w-4" aria-hidden="true" /> Отчёт родителю

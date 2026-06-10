@@ -1,7 +1,15 @@
 // «Отчёт родителю» — публичный read-only отчёт (Phase 2c). Без auth (slug = bearer).
 // RU-bypass: хардкод api.sokratai.ru (mirror mockExamPublicApi, rule 95).
+import { SUPABASE_PUBLISHABLE_KEY } from '@/lib/supabaseClient';
 
 const FUNCTIONS_BASE_URL = 'https://api.sokratai.ru/functions/v1';
+
+// Шлём anon-ключ (Authorization+apikey): работает при verify_jwt=true И =false —
+// не зависим от того, подхватил ли деплой config.toml для новой функции (rule 96 #11).
+const PUBLIC_HEADERS = {
+  apikey: SUPABASE_PUBLISHABLE_KEY,
+  Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+};
 
 export interface ReportWork {
   kind: 'homework' | 'mock';
@@ -50,7 +58,10 @@ export type PublicStudentReportResult =
 export async function fetchPublicStudentReport(slug: string): Promise<PublicStudentReportResult> {
   if (!/^[a-z0-9]{8}$/i.test(slug)) return { status: 'invalid_slug' };
   try {
-    const res = await fetch(`${FUNCTIONS_BASE_URL}/public-student-report/report/${slug.toLowerCase()}`);
+    const res = await fetch(
+      `${FUNCTIONS_BASE_URL}/public-student-report/report/${slug.toLowerCase()}`,
+      { headers: PUBLIC_HEADERS },
+    );
     const body = await res.json().catch(() => null);
     if (res.ok && body?.revoked) return { status: 'revoked' };
     if (res.ok && body?.student) return { status: 'ok', data: body as PublicStudentReportData };
