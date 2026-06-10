@@ -53,6 +53,9 @@ function WorkRow({ work }: { work: ReportWork }) {
 
 export function ReportBody({ data }: { data: PublicStudentReportData }) {
   const { student, tutor, summary, works, balance, statement } = data;
+  const examLabel = student.track === 'ege' ? 'ЕГЭ'
+    : student.track === 'oge' ? 'ОГЭ'
+    : (student.track || '').toUpperCase();
   const trend = summary.trend ?? [];
   const trendDelta = trend.length >= 2 ? trend[trend.length - 1] - trend[trend.length - 2] : null;
   const balanceTone = balance < 0 ? 'text-rose-600' : balance > 0 ? 'text-emerald-600' : 'text-slate-900';
@@ -65,7 +68,7 @@ export function ReportBody({ data }: { data: PublicStudentReportData }) {
         <p className="mt-0.5 text-sm text-muted-foreground">
           {student.name}
           {student.subject ? ` · ${getSubjectLabel(student.subject)}` : ''}
-          {student.track ? ` · ${student.track.toUpperCase()}` : ''}
+          {examLabel ? ` · ${examLabel}` : ''}
           {student.grade_class ? ` · ${student.grade_class}` : ''}
         </p>
         {tutor.name && (
@@ -170,8 +173,9 @@ export default function PublicStudentReport() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-2xl items-center px-4 py-3">
-          <img src="/sokrat-logo.png" alt="Сократ AI" className="h-7 w-auto" />
+        <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-3">
+          <img src="/sokrat-logo.png" alt="" className="h-7 w-auto" />
+          <span className="text-lg font-semibold text-slate-900">Сократ AI</span>
         </div>
       </header>
       <main className="mx-auto max-w-2xl px-4 py-6">
