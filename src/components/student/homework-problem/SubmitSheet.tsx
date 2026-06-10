@@ -92,6 +92,16 @@ interface SubmitSheetProps {
    * overlay удалить».
    */
   onSubmit: (payload: SubmitSheetSubmissionPayload) => void;
+  /**
+   * Submit-nudge prefill (2026-06-10, graceful-stirring-treasure): фото-refs
+   * из discussion-вложений ученика («Это готовое решение? → Сдать на
+   * проверку») мержатся с restored draft при открытии (dedup, cap 5).
+   * Refs из того же bucket/namespace (`uploadStudentThreadImage`) — валидны
+   * для submission без перезагрузки.
+   */
+  prefillPhotos?: string[];
+  /** Текст из discussion-сообщения ученика; дописывается, только если draft-text пуст. */
+  prefillText?: string;
 }
 
 const HINT_BY_KIND: Record<SubmitSheetTaskKind, string> = {
@@ -139,6 +149,8 @@ export function SubmitSheet({
   threadId,
   subject = null,
   onSubmit,
+  prefillPhotos,
+  prefillText,
 }: SubmitSheetProps) {
   const isHumanitiesWriting = isHumanitiesWritingSubject(subject);
   const [numeric, setNumeric] = useState('');
@@ -208,6 +220,12 @@ export function SubmitSheet({
   const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
   const lastSerializedRef = useRef<string>('');
 
+  // Submit-nudge prefill читается через ref: применяется ровно в момент
+  // открытия (внутри restore-эффекта), смена prop-identity между рендерами
+  // не должна ре-триггерить restore/reset.
+  const prefillRef = useRef<{ photos?: string[]; text?: string }>({});
+  prefillRef.current = { photos: prefillPhotos, text: prefillText };
+
   // Restore from localStorage on open; otherwise reset to blank.
   useEffect(() => {
     if (!open) return;
@@ -244,6 +262,24 @@ export function SubmitSheet({
       setText('');
       lastSerializedRef.current = '';
       setLastAutosaveAt(null);
+    }
+    // Submit-nudge prefill поверх restored draft / blank state: фото мержатся
+    // с dedup + cap 5 (PHOTO_LIMIT); текст — только если поле пустое (draft
+    // ученика не перетираем).
+    const prefill = prefillRef.current;
+    if (prefill.photos && prefill.photos.length > 0) {
+      const incoming = prefill.photos;
+      setPhotos((prev) => {
+        const merged = [...prev];
+        for (const ref of incoming) {
+          if (!merged.includes(ref)) merged.push(ref);
+        }
+        return merged.slice(0, 5);
+      });
+    }
+    if (prefill.text && prefill.text.trim()) {
+      const incomingText = prefill.text.trim();
+      setText((prev) => (prev.trim() ? prev : incomingText));
     }
   }, [open, draftKey]);
 
@@ -447,7 +483,20 @@ export function SubmitSheet({
   };
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          // Review P1-1: persist-on-close. Закрытие (overlay / Esc / ✕) до
+          // первого 5s autosave-тика раньше ТЕРЯЛО содержимое формы — включая
+          // submit-nudge prefillPhotos, чьи refs уже убраны из chat-вложений.
+          // Синхронный persist закрывает и эту, и пред-существовавшую дыру
+          // («набрал текст и сразу закрыл»). handleSubmit персистит сам.
+          persistDraftNow({ numeric, photos, text });
+          onClose();
+        }
+      }}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className="fixed inset-0 z-50 bg-slate-900/55 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in data-[state=closed]:animate-out data-[state=closed]:fade-out duration-200"

@@ -64,6 +64,13 @@ export interface StreamChatOptions {
    * guided homework check/hint paths.
    */
   studentName?: string;
+  /**
+   * Submit-nudge capability flag (2026-06-10): caller умеет вырезать токен
+   * [[SUBMIT_CTA]] из ответа до persist'а/рендера. Только тогда сервер
+   * инжектит инструкцию детекции финального ответа (deploy-skew guard —
+   * старые бандлы токен не стрипают). Передаёт ТОЛЬКО HomeworkProblem.
+   */
+  submitCtaMarker?: boolean;
   onDelta: (text: string) => void;
   onDone: () => void;
   onError?: (error: Error) => void;
@@ -89,6 +96,7 @@ export async function streamChat({
   subject,
   studentGender,
   studentName,
+  submitCtaMarker,
   onDelta,
   onDone,
   onError,
@@ -136,6 +144,7 @@ export async function streamChat({
           subject: subject || undefined,
           studentName: studentName || undefined,
           studentGender: studentGender || undefined,
+          submitCtaMarker: submitCtaMarker === true ? true : undefined,
         }),
         signal: controller.signal,
       });

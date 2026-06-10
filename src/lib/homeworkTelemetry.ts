@@ -118,7 +118,16 @@ type GuidedTelemetryEvent =
   // ─── Overall homework comment (Phase 12, 2026-06-07) ──────────────────────
   // PII-free: ids + booleans. `cleared` = комментарий очищен; `notified` =
   // ученику ушло push/telegram-уведомление о новом комментарии.
-  | 'homework_overall_comment_saved';
+  | 'homework_overall_comment_saved'
+  // ─── Submit-nudge маршрутизация (2026-06-10, graceful-stirring-treasure) ──
+  // PII-free: ids + source, БЕЗ текста сообщений. Ученики писали финальные
+  // ответы / крепили фото решений в scoring-neutral обсуждение — nudge-баннер
+  // предлагает «зачёт в один тап» через нормальный грейдинг. `source`
+  // различает триггеры: клиентская эвристика (numeric), AI-маркер
+  // [[SUBMIT_CTA]] из /chat, выбор намерения при прикреплении фото.
+  | 'submit_nudge_shown'
+  | 'submit_nudge_accepted'
+  | 'submit_nudge_dismissed';
 
 type GuidedTelemetryValue =
   | string
@@ -359,6 +368,15 @@ interface HomeworkOverallCommentSavedPayload
   notified: boolean;
 }
 
+// ─── Submit-nudge маршрутизация (2026-06-10) ─────────────────────────────────
+// PII-free: ids + source. Текст сообщения / фото-refs НИКОГДА не логируются.
+interface SubmitNudgePayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  assignmentId: string;
+  taskId: string;
+  source: 'heuristic' | 'ai_marker' | 'photo_intent';
+}
+
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
   gtag?: (...args: unknown[]) => void;
@@ -397,6 +415,9 @@ export function trackGuidedHomeworkEvent(event: 'homework_bulk_force_completed',
 export function trackGuidedHomeworkEvent(event: 'task_reviewed', payload: TaskReviewedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'task_review_reopened', payload: TaskReviewReopenedPayload): void;
 export function trackGuidedHomeworkEvent(event: 'homework_overall_comment_saved', payload: HomeworkOverallCommentSavedPayload): void;
+export function trackGuidedHomeworkEvent(event: 'submit_nudge_shown', payload: SubmitNudgePayload): void;
+export function trackGuidedHomeworkEvent(event: 'submit_nudge_accepted', payload: SubmitNudgePayload): void;
+export function trackGuidedHomeworkEvent(event: 'submit_nudge_dismissed', payload: SubmitNudgePayload): void;
 export function trackGuidedHomeworkEvent(event: GuidedTelemetryEvent, payload?: GuidedTelemetryPayload): void;
 export function trackGuidedHomeworkEvent(
   event: GuidedTelemetryEvent,

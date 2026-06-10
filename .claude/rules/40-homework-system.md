@@ -1258,6 +1258,29 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 
 Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 
+### Submit-nudge маршрутизация в обсуждении (2026-06-10)
+
+Пилотный фидбэк (Егор/Ульяна): ученики писали финальные ответы («0,1») и крепили фото готовых решений в **scoring-neutral** поле обсуждения (`/chat`) → AI вёл сократический диалог, задача не закрывалась. Фикс — nudge-баннер «зачёт в один тап»: распознанный финальный ответ маршрутизируется в **нормальный грейдинг** (`checkAnswer` / SubmitSheet → `submitSolution`).
+
+**Главный инвариант — НИКАКОГО тихого авто-зачёта (решение Vladimir 2026-06-10).** `/chat` остаётся scoring-neutral; nudge только подсвечивает CTA. Не возрождать идею «бот сам засчитывает из обсуждения».
+
+**Три триггера одного баннера (`SubmitNudgeBanner.tsx`, state `submitNudge` в `HomeworkProblem.tsx`):**
+1. `heuristic` — pre-send intercept в `handleChatSend` на numeric: `looksLikeBareAnswer` (`src/lib/answerLikeHeuristic.ts`). **Shape-гейт обязателен**: кандидат после среза связок (`extractAnswerCandidate`) должен начинаться с `[-+=≈]?\d` — без него «у меня не получается» / «не понимаю шаг 2» ловились баннером (review P1). `dismissedNudgeTextRef` пропускает тот же текст после «Просто обсудить».
+2. `ai_marker` — guided `/chat` помечает финальный ответ токеном `[[SUBMIT_CTA]]` в конце реплики.
+3. `photo_intent` — фото через скрепку в обсуждение на extended/proof → выбор «Сдать на проверку» (SubmitSheet с prefill, refs убираются из chat-вложений) / «Спросить Сократа».
+
+**Token-контракт `[[SUBMIT_CTA]]` (КРИТИЧНО):**
+- **Capability flag**: сервер инжектит инструкцию детекции ТОЛЬКО при `submitCtaMarker: true` в body (`streamChat.ts` опция → `ChatRequestBody` → `processAIRequest(submitCtaMarkerSupported)`). Флаг шлёт только `HomeworkProblem`. Это deploy-skew guard (edge деплоится Lovable раньше VPS-фронта) — старый бандл не стрипает токен. Новая поверхность с маркером — обязана стрипать токен И слать флаг.
+- Токен вырезается клиентом **ДО** `saveThreadMessage` (`stripSubmitMarker`) — в БД и в `GuidedThreadViewer` токена нет.
+- Streaming-display — через `stripSubmitMarkerStreaming` (придерживает хвост-префикс маркера): guided-задачи **без** эталона идут pass-through SSE (`guardedAgainstSolutionLeak = hasTutorSolution`), маркер может прийти разрезанным по дельтам.
+- Telegram-бот не затронут: инструкция живёт в guided subjectBlock (`guidedHomeworkAssignmentId && resolvedSubject`) + за флагом, бот ни того ни другого не шлёт.
+
+**SubmitSheet prefill**: props `prefillPhotos`/`prefillText` мержатся с restored draft при open (dedup, cap 5; текст — только если draft пуст; читаются через ref в restore-эффекте). **Persist-on-close** в `onOpenChange` обязателен (review P1): закрытие до 5s-autosave-тика теряло форму, включая prefill-фото, чьи refs уже убраны из chat-вложений.
+
+**Визуальный контракт**: send обсуждения = серый `bg-slate-700` (зелёный — только «сдать», один primary на экран) + caption «Обсуждение с Сократом — не идёт на проверку». Telemetry: `submit_nudge_{shown,accepted,dismissed}` `{assignmentId, taskId, source}` — PII-free, без текста сообщений.
+
+План/лог: `~/.claude/plans/graceful-stirring-treasure.md` + memory `project_submit_nudge_2026_06_10.md`.
+
 ### Homework constructor QA checklist
 
 ДЗ-конструктор — **ключевой функционал**, регрессии блокируют пилот. Перед merge'ем любого PR трогающего `src/pages/tutor/TutorHomeworkCreate.tsx`, `src/components/tutor/homework-create/{HWTasksSection,HWTaskCard,HWMaterialsSection}.tsx` — **ОБЯЗАТЕЛЬНО** прогнать manual QA checklist на dev preview ИЛИ production после deploy. Это **хроническая риск-зона** (state-management regressions фиксились многократно).

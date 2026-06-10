@@ -24,6 +24,7 @@ import {
   getSubmitSheetDraftKey,
 } from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
+import { SubmitNudgeBanner } from '@/components/student/homework-problem/SubmitNudgeBanner';
 import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
 import { SubmitCtaBar } from '@/components/student/homework-problem/SubmitCtaBar';
 import { MathQuickPicker } from '@/components/student/homework-problem/MathQuickPicker';
@@ -60,6 +61,13 @@ import {
   StudentHomeworkApiError,
 } from '@/lib/studentHomeworkApi';
 import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
+import {
+  looksLikeBareAnswer,
+  extractAnswerCandidate,
+  stripSubmitMarker,
+  stripSubmitMarkerStreaming,
+  SUBMIT_CTA_MARKER,
+} from '@/lib/answerLikeHeuristic';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 
 /**
@@ -224,11 +232,36 @@ export default function HomeworkProblem() {
     setChatDraft('');
     setAttachmentRefs([]);
     setMicHintExpanded(false);
+    setSubmitNudge(null);
+    dismissedNudgeTextRef.current = null;
+    setSheetPrefill(null);
   }, [data, hwId, taskId, persistedMessages.length]);
 
   const [chatDraft, setChatDraft] = useState('');
   const [submitOpen, setSubmitOpen] = useState(false);
   const [attachmentRefs, setAttachmentRefs] = useState<string[]>([]);
+
+  // ─── Submit-nudge маршрутизация (2026-06-10, graceful-stirring-treasure) ──
+  // Ученики писали финальные ответы / крепили фото решений в scoring-neutral
+  // обсуждение (/chat) — задача не закрывалась (фидбэк Егора/Ульяны). Никакого
+  // авто-зачёта: баннер лишь маршрутизирует в нормальный грейдинг
+  // (checkAnswer / SubmitSheet → submitSolution) в один тап. Три триггера:
+  //   - 'heuristic'    : pre-send intercept на numeric (looksLikeBareAnswer);
+  //   - 'ai_marker'    : guided /chat вернул [[SUBMIT_CTA]] (финальный ответ);
+  //   - 'photo_intent' : фото прикреплено в обсуждение на extended/proof.
+  const [submitNudge, setSubmitNudge] = useState<{
+    source: 'heuristic' | 'ai_marker' | 'photo_intent';
+    text?: string;
+    photoRefs?: string[];
+  } | null>(null);
+  // «Просто обсудить» / ✕ для конкретного текста — не показывать nudge на
+  // тот же текст повторно (иначе send блокируется навсегда).
+  const dismissedNudgeTextRef = useRef<string | null>(null);
+  // Prefill для SubmitSheet при accept'е photo_intent / ai_marker nudge.
+  const [sheetPrefill, setSheetPrefill] = useState<{
+    photos?: string[];
+    text?: string;
+  } | null>(null);
 
   // Phase 3 Commit C: math symbol picker state + last-focused textarea ref.
   // Tracks the most recently focused <input> / <textarea> inside the
@@ -416,6 +449,31 @@ export default function HomeworkProblem() {
     const trimmed = chatDraft.trim();
     if (!trimmed && attachmentRefs.length === 0) return;
 
+    // ─── Submit-nudge: pre-send intercept «голый ответ» (numeric) ──────────
+    // Кейс Ульяны: «0,1» в поле обсуждения → AI сократически переспрашивает,
+    // задача не закрывается. Перехватываем ДО отправки и предлагаем прогнать
+    // через настоящий checkAnswer. «Просто обсудить» (dismissedNudgeTextRef)
+    // пропускает тот же текст при повторном send.
+    if (
+      data.task.task_kind === 'numeric' &&
+      !isCurrentCompleted &&
+      attachmentRefs.length === 0 &&
+      trimmed.length > 0 &&
+      looksLikeBareAnswer(trimmed) &&
+      dismissedNudgeTextRef.current !== trimmed
+    ) {
+      setSubmitNudge({ source: 'heuristic', text: trimmed });
+      trackGuidedHomeworkEvent('submit_nudge_shown', {
+        assignmentId: data.assignment.id,
+        taskId: data.task.id,
+        source: 'heuristic',
+      });
+      return;
+    }
+    // Обычная отправка в обсуждение = выбор «спросить» — снимаем активный
+    // nudge (в т.ч. photo_intent, если ученик проигнорировал баннер).
+    setSubmitNudge(null);
+
     const taskOrder = data.task.order_num;
     const targetTaskId = data.task.id;
     const userTempId = `temp-user-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -513,9 +571,15 @@ export default function HomeworkProblem() {
         // Server-side подтверждает оба через DB (anti-tamper).
         studentName: data.student?.display_name ?? undefined,
         studentGender: data.student?.gender ?? null,
+        // Submit-nudge capability (review P0-1): этот экран стрипает
+        // [[SUBMIT_CTA]] до persist'а — серверу можно инжектить инструкцию.
+        submitCtaMarker: true,
         onDelta: (delta) => {
           fullContent += delta;
-          setStreamingText(fullContent);
+          // [[SUBMIT_CTA]]-маркер не должен мелькать в стриминговом UI —
+          // включая частично пришедший префикс («[[SUBMIT») в pass-through
+          // SSE-пути (guided-задачи без эталона репетитора, review P0-2).
+          setStreamingText(stripSubmitMarkerStreaming(fullContent));
         },
         onDone: () => undefined,
         onError: (e) => {
@@ -534,7 +598,32 @@ export default function HomeworkProblem() {
         },
       });
 
-      const assistantText = fullContent.trim() || 'Принято. Продолжаем разбор задачи.';
+      // ─── AI-маркер финального ответа ([[SUBMIT_CTA]], guided /chat) ──────
+      // Сервер просит модель пометить ответ токеном, когда последнее сообщение
+      // ученика выглядит как финальный ответ / готовое решение. Токен
+      // вырезается ДО persist'а (в БД и у репетитора его нет), а на экране
+      // появляется nudge «зачёт в один тап» через нормальный грейдинг.
+      const hasSubmitMarker = fullContent.includes(SUBMIT_CTA_MARKER);
+      const assistantText =
+        stripSubmitMarker(fullContent).trim() || 'Принято. Продолжаем разбор задачи.';
+      // numeric маршрутизируется в checkAnswer(text) — без текста nudge
+      // бессмысленен; extended/proof идут в SubmitSheet (текст ИЛИ фото).
+      const canRouteMarker =
+        data.task.task_kind === 'numeric'
+          ? trimmed.length > 0
+          : trimmed.length > 0 || refsForRequest.length > 0;
+      if (hasSubmitMarker && !isCurrentCompleted && canRouteMarker) {
+        setSubmitNudge({
+          source: 'ai_marker',
+          text: trimmed.length > 0 ? trimmed : undefined,
+          photoRefs: refsForRequest.length > 0 ? refsForRequest : undefined,
+        });
+        trackGuidedHomeworkEvent('submit_nudge_shown', {
+          assignmentId: data.assignment.id,
+          taskId: data.task.id,
+          source: 'ai_marker',
+        });
+      }
       setOptimisticMessages((prev) => [
         ...prev,
         {
@@ -595,6 +684,7 @@ export default function HomeworkProblem() {
     chatDraft,
     attachmentRefs,
     isStreaming,
+    isCurrentCompleted,
     persistedMessages,
     queryClient,
     hwId,
@@ -726,13 +816,33 @@ export default function HomeworkProblem() {
         data.task.order_num,
       );
       setAttachmentRefs((prev) => [...prev, ref]);
+      // ─── Submit-nudge: выбор намерения при фото (extended/proof) ─────────
+      // Вопрос Ульяны: «фото через скрепку не засчитывается ничего?» — фото в
+      // обсуждении доходит до AI, но НЕ считается сдачей. Спрашиваем намерение
+      // сразу: «Сдать на проверку» (SubmitSheet с этим фото) / «Спросить».
+      const kind = data.task.task_kind;
+      if ((kind === 'extended' || kind === 'proof') && !isCurrentCompleted) {
+        // telemetry один раз на показ баннера (не на каждое доп. фото).
+        if (submitNudge?.source !== 'photo_intent') {
+          trackGuidedHomeworkEvent('submit_nudge_shown', {
+            assignmentId: data.assignment.id,
+            taskId: data.task.id,
+            source: 'photo_intent',
+          });
+        }
+        setSubmitNudge((prev) =>
+          prev?.source === 'photo_intent'
+            ? { ...prev, photoRefs: [...(prev.photoRefs ?? []), ref] }
+            : { source: 'photo_intent', photoRefs: [ref] },
+        );
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось загрузить файл');
     } finally {
       setIsUploadingAttachment(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
-  }, [data, threadId]);
+  }, [data, threadId, isCurrentCompleted, submitNudge?.source]);
 
   // ─── Step navigation (Q7, Q8 + codex #7): canonical tasks list ────────────
   const handleStepClick = useCallback(
@@ -796,6 +906,8 @@ export default function HomeworkProblem() {
   const handleSubmissionSubmit = useCallback(
     async (payload: SubmitSheetSubmissionPayload) => {
       if (!data) return;
+      // Submit-nudge: реальная сдача состоялась — баннер больше не актуален.
+      setSubmitNudge(null);
       // Synthesize optimistic user bubble content — mirrors backend
       // `handleStudentSubmission::answerText` formula (rule §40):
       //   numeric → «Числовой ответ: X»
@@ -948,9 +1060,13 @@ export default function HomeworkProblem() {
   const [answerDraft, setAnswerDraft] = useState('');
   const [isInlineAnswerSubmitting, setIsInlineAnswerSubmitting] = useState(false);
 
-  const handleInlineAnswerSubmit = useCallback(async () => {
+  // `overrideValue` — submit-nudge маршрутизация: текст из discussion-поля
+  // прогоняется через тот же checkAnswer без копирования в answerDraft.
+  // ВНИМАНИЕ: не передавать как прямой onClick-хендлер (MouseEvent попадёт в
+  // overrideValue) — callsites оборачивают в `() => handleInlineAnswerSubmit()`.
+  const handleInlineAnswerSubmit = useCallback(async (overrideValue?: string) => {
     if (!data || !threadId) return;
-    const trimmed = answerDraft.trim();
+    const trimmed = (overrideValue ?? answerDraft).trim();
     if (!trimmed || isInlineAnswerSubmitting || isStreaming) return;
 
     const taskOrder = data.task.order_num;
@@ -1030,6 +1146,102 @@ export default function HomeworkProblem() {
     hwId,
     taskId,
   ]);
+
+  // ─── Submit-nudge actions (2026-06-10) ────────────────────────────────────
+  // Primary: маршрутизация в настоящий грейдинг (никакого тихого авто-зачёта —
+  // решение Vladimir 2026-06-10). numeric → checkAnswer тем же текстом;
+  // extended/proof → SubmitSheet с prefill (текст + фото из обсуждения).
+  const handleNudgeAccept = useCallback(() => {
+    if (!submitNudge || !data) return;
+    trackGuidedHomeworkEvent('submit_nudge_accepted', {
+      assignmentId: data.assignment.id,
+      taskId: data.task.id,
+      source: submitNudge.source,
+    });
+    if (data.task.task_kind === 'numeric') {
+      const candidate = extractAnswerCandidate(submitNudge.text ?? '');
+      setSubmitNudge(null);
+      // heuristic-перехват не очищал chatDraft (текст оставался в поле) —
+      // теперь он уходит на проверку, поле чистим.
+      setChatDraft('');
+      void handleInlineAnswerSubmit(candidate);
+      return;
+    }
+    const refs = submitNudge.photoRefs ?? [];
+    setSheetPrefill({
+      photos: refs.length > 0 ? refs : undefined,
+      // photo_intent: текст ученик ещё не писал; ai_marker: его сообщение —
+      // это и есть решение, переносим в поле «текст решения».
+      text: submitNudge.source === 'photo_intent' ? undefined : submitNudge.text,
+    });
+    if (submitNudge.source === 'photo_intent' && refs.length > 0) {
+      // Фото уезжает в сдачу — убираем из pending chat-вложений (не задвоить).
+      setAttachmentRefs((prev) => prev.filter((r) => !refs.includes(r)));
+    }
+    setSubmitNudge(null);
+    setSubmitOpen(true);
+  }, [submitNudge, data, handleInlineAnswerSubmit]);
+
+  // Secondary: «просто обсудить/спросить». Для heuristic-перехвата — помечаем
+  // текст как dismissed и повторяем send (теперь пройдёт в /chat); для
+  // ai_marker / photo_intent — просто скрываем баннер (текущее поведение).
+  const handleNudgeSecondary = useCallback(() => {
+    if (!submitNudge || !data) return;
+    trackGuidedHomeworkEvent('submit_nudge_dismissed', {
+      assignmentId: data.assignment.id,
+      taskId: data.task.id,
+      source: submitNudge.source,
+    });
+    if (submitNudge.source === 'heuristic') {
+      dismissedNudgeTextRef.current = submitNudge.text ?? null;
+      setSubmitNudge(null);
+      void handleChatSend();
+      return;
+    }
+    setSubmitNudge(null);
+  }, [submitNudge, data, handleChatSend]);
+
+  // ✕: скрыть без действия. Для heuristic тоже помечаем текст dismissed,
+  // иначе следующий send того же текста снова заблокируется баннером.
+  const handleNudgeDismiss = useCallback(() => {
+    if (!submitNudge || !data) return;
+    trackGuidedHomeworkEvent('submit_nudge_dismissed', {
+      assignmentId: data.assignment.id,
+      taskId: data.task.id,
+      source: submitNudge.source,
+    });
+    if (submitNudge.source === 'heuristic') {
+      dismissedNudgeTextRef.current = submitNudge.text ?? null;
+    }
+    setSubmitNudge(null);
+  }, [submitNudge, data]);
+
+  // Тексты баннера по триггеру (numeric vs extended/proof различаются CTA).
+  const nudgeContent = useMemo(() => {
+    if (!submitNudge || !data) return null;
+    if (submitNudge.source === 'photo_intent') {
+      return {
+        message: 'Фото прикреплено к обсуждению. Это готовое решение?',
+        primaryLabel: 'Сдать на проверку',
+        secondaryLabel: 'Спросить Сократа',
+      };
+    }
+    if (data.task.task_kind === 'numeric') {
+      return {
+        message:
+          submitNudge.source === 'heuristic'
+            ? 'Похоже, это готовый ответ, а не вопрос. Обсуждение не проверяет ответ.'
+            : 'Сократ считает, что это финальный ответ.',
+        primaryLabel: 'Проверить как ответ',
+        secondaryLabel: submitNudge.source === 'heuristic' ? 'Просто обсудить' : 'Продолжить обсуждение',
+      };
+    }
+    return {
+      message: 'Похоже, решение готово. Сдай его на проверку, чтобы закрыть задачу.',
+      primaryLabel: 'Сдать это решение',
+      secondaryLabel: 'Продолжить обсуждение',
+    };
+  }, [submitNudge, data]);
 
   const navigateAfterCorrect = useCallback(
     (override?: { nextTaskId?: string | null }) => {
@@ -1506,11 +1718,29 @@ export default function HomeworkProblem() {
       />
       ) : null}
 
+      {/* Submit-nudge баннер (2026-06-10): «зачёт в один тап» над композером.
+          Триггеры: эвристика «голый ответ» (numeric) / AI-маркер [[SUBMIT_CTA]]
+          / выбор намерения при фото (extended/proof). Никакого авто-зачёта —
+          primary маршрутизирует в checkAnswer / SubmitSheet. */}
+      {nudgeContent && submitNudge && !isCurrentCompleted && !isSpeaking ? (
+        <div className="bg-white border-t border-socrat-border-light px-2.5 pt-2">
+          <SubmitNudgeBanner
+            message={nudgeContent.message}
+            primaryLabel={nudgeContent.primaryLabel}
+            onPrimary={handleNudgeAccept}
+            secondaryLabel={nudgeContent.secondaryLabel}
+            onSecondary={handleNudgeSecondary}
+            onDismiss={handleNudgeDismiss}
+            disabled={isStreaming || isInlineAnswerSubmitting || isUploadingAttachment}
+          />
+        </div>
+      ) : null}
+
       {data.task.task_kind === 'numeric' ? (
         <NumericAnswerComposer
           answerDraft={answerDraft}
           onAnswerDraftChange={setAnswerDraft}
-          onSendAnswer={handleInlineAnswerSubmit}
+          onSendAnswer={() => void handleInlineAnswerSubmit()}
           discussionDraft={chatDraft}
           onDiscussionDraftChange={setChatDraft}
           onSendDiscussion={handleChatSend}
@@ -1634,6 +1864,12 @@ export default function HomeworkProblem() {
           </div>
         ) : null}
 
+        {/* Микрокопия (2026-06-10): пилотные ученики писали финальные ответы
+            в обсуждение, ожидая проверки. Явно проговариваем семантику поля. */}
+        <span className="text-[11px] font-medium text-socrat-muted px-1">
+          Обсуждение с Сократом — не идёт на проверку
+        </span>
+
         {/* Chat row — paperclip + input + hint/mic group + send.
             NB: hidden file input живёт выше conditional (preview-QA #9),
             оба composer'а используют один и тот же fileInputRef. */}
@@ -1734,12 +1970,15 @@ export default function HomeworkProblem() {
             </button>
           )}
 
+          {/* Серый send (2026-06-10): зелёный = только «сдать на проверку»
+              (один primary на экран, rule 90). Зеркало discussion-send в
+              NumericAnswerComposer (bg-slate-700). */}
           <button
             type="button"
-            aria-label="Отправить"
+            aria-label="Отправить в обсуждение"
             disabled={!canSendChat}
             onClick={() => void handleChatSend()}
-            className="grid place-items-center w-10 h-10 rounded-full bg-socrat-primary hover:bg-socrat-primary-dark disabled:opacity-50 disabled:cursor-not-allowed text-white shrink-0 touch-manipulation transition-colors"
+            className="grid place-items-center w-10 h-10 rounded-full bg-slate-700 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white shrink-0 touch-manipulation transition-colors"
           >
             {isStreaming ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -1769,7 +2008,14 @@ export default function HomeworkProblem() {
 
       <SubmitSheet
         open={submitOpen}
-        onClose={() => setSubmitOpen(false)}
+        onClose={() => {
+          setSubmitOpen(false);
+          // Submit-nudge prefill одноразовый — сбрасываем при закрытии (draft
+          // autosave внутри SubmitSheet уже сохранил содержимое формы).
+          setSheetPrefill(null);
+        }}
+        prefillPhotos={sheetPrefill?.photos}
+        prefillText={sheetPrefill?.text}
         hwId={hwId ?? data.assignment.id}
         taskId={taskId ?? data.task.id}
         threadId={threadId}

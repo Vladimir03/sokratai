@@ -73,6 +73,16 @@ interface ChatRequestBody {
    * Russian / French / etc. homework with physics-only vocabulary.
    */
   subject?: string | null;
+  /**
+   * Submit-nudge capability flag (2026-06-10, graceful-stirring-treasure).
+   * `true` = клиент умеет вырезать токен [[SUBMIT_CTA]] из ответа ДО persist'а
+   * и рендерить nudge-кнопку. Инструкция детекции финального ответа инжектится
+   * ТОЛЬКО при этом флаге — иначе при раздельном деплое (edge через Lovable
+   * раньше, фронт через deploy-sokratai позже) старый бандл показал бы сырой
+   * токен ученику и записал его в БД / GuidedThreadViewer (review P0-1).
+   * Не security-sensitive: флаг не влияет на грейдинг и ничего не раскрывает.
+   */
+  submitCtaMarker?: boolean;
 }
 
 // SECURITY: Allowed domains for image fetching to prevent SSRF attacks
@@ -1013,7 +1023,7 @@ serve(async (req) => {
       
       userId = body.userId;
 
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject, submitCtaMarker } = body;
       const responseProfile = normalizeResponseProfile(body.responseProfile);
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
@@ -1050,6 +1060,7 @@ serve(async (req) => {
         guidedHomeworkTaskId,
         subject,
         studentGender,
+        submitCtaMarker === true,
       );
     } else {
       const supabase = createClient(Deno.env.get("SUPABASE_URL") ?? "", Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
@@ -1071,7 +1082,7 @@ serve(async (req) => {
       userId = user.id;
 
       const body = await req.json() as ChatRequestBody;
-      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject } = body;
+      const { messages, systemPrompt, taskContext, taskImageUrls, studentImageUrl, studentImageUrls, chatId, studentName, studentGender, guidedHomeworkAssignmentId, guidedHomeworkTaskId, subject, submitCtaMarker } = body;
       const latestUserMessage = Array.isArray(messages)
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
@@ -1112,6 +1123,7 @@ serve(async (req) => {
         guidedHomeworkTaskId,
         subject,
         studentGender,
+        submitCtaMarker === true,
       );
     }
   } catch (error) {
@@ -1144,6 +1156,9 @@ async function processAIRequest(
   // Client supplies as hint; server-side подтверждает через tutor_students.gender
   // → profiles.gender lookup когда есть guidedHomeworkAssignmentId.
   clientStudentGender?: "male" | "female" | null,
+  // Submit-nudge (2026-06-10): клиент умеет стрипать [[SUBMIT_CTA]] — только
+  // тогда инжектим инструкцию детекции финального ответа (deploy-skew guard).
+  submitCtaMarkerSupported = false,
 ) {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -1660,6 +1675,22 @@ async function processAIRequest(
       rubric.tutor_rubric_active
         ? "ПРИОРИТЕТ: критерии репетитора (выше) важнее стандартной методологии при конфликте."
         : "",
+      // Submit-nudge маркер (2026-06-10, graceful-stirring-treasure): ученики
+      // пишут финальные ответы в scoring-neutral обсуждение — фронт по токену
+      // показывает кнопку «отправить на проверку» (нормальный грейдинг-путь).
+      // Токен вырезается клиентом ДО persist'а — в БД и у репетитора его нет.
+      // Сам этот путь остаётся scoring-neutral (rule 40) — токен НИЧЕГО не
+      // засчитывает, только подсвечивает CTA.
+      // Гейт на capability flag (review P0-1): инструкция инжектится ТОЛЬКО
+      // когда клиент заявил, что умеет стрипать токен — иначе при deploy-skew
+      // (edge через Lovable раньше фронта) старый бандл показал бы сырой токен.
+      ...(submitCtaMarkerSupported
+        ? [
+            "",
+            "ДЕТЕКЦИЯ ФИНАЛЬНОГО ОТВЕТА: если ПОСЛЕДНЕЕ сообщение ученика — это его финальный ответ или законченное решение задачи (а не вопрос и не промежуточный шаг рассуждения), добавь В САМОМ КОНЦЕ своего ответа отдельной строкой ровно этот токен: [[SUBMIT_CTA]]",
+            "Не упоминай этот токен в остальном тексте, не объясняй его ученику и не используй его в других случаях.",
+          ]
+        : []),
     ].filter(Boolean).join("\n");
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${subjectBlock}`;
   }
