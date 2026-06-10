@@ -3,6 +3,8 @@
 // ledger feed (RLS owns_tutor_student); writes via the SECURITY DEFINER RPCs.
 // Errors: RPCs RAISE short codes → mapped to RU here (rule 97 mirror, like tutorSchedule.ts).
 import { supabase } from '@/lib/supabaseClient';
+import { getCurrentTutor } from '@/lib/tutors';
+import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 
 export type LedgerKind = 'debit' | 'credit';
 export type LedgerSource = 'lesson' | 'topup' | 'adjustment';
@@ -120,6 +122,89 @@ export async function reverseLedgerEntry(
   });
   if (error) return { ok: false, ...mapBalanceError(error.message) };
   return { ok: true, entryId: typeof data === 'string' ? data : undefined };
+}
+
+export interface MonthIncome {
+  /** Заработано: Σ активных lesson-списаний месяца (РУБЛИ). */
+  earned: number;
+  /** Ожидается за месяц = earned + Σ цен запланированных (booked) занятий месяца. */
+  expected: number;
+}
+
+/**
+ * Доход репетитора за календарный месяц (запрос Егора, план rustling-herding-hare).
+ * «Заработано» — ОДИН запрос ledger: активные lesson-debits с occurred_on внутри месяца
+ * (occurred_on = дата занятия; правки сумм и отмены/удаления учтены реверсами).
+ * «Ожидается» — заработано + цены booked-занятий месяца: индивидуальное → ставка×длительность
+ * (calculateLessonPaymentAmount, РУБЛИ); группа → Σ payment_amount участников (проставлены
+ * при создании). Cancelled не считаются; completed входят через ledger-часть.
+ */
+export async function getMonthIncome(year: number, monthIndex0: number): Promise<MonthIncome> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) throw new Error('Не удалось определить репетитора.');
+
+  const start = new Date(year, monthIndex0, 1);
+  const end = new Date(year, monthIndex0 + 1, 1); // exclusive
+  const toDateStr = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  // 1) Заработано (ledger, кросс-ученически — RLS owns_tutor_student + defensive tutor_id).
+  const { data: debits, error: ledgerErr } = await supabase
+    .from('tutor_ledger_entries')
+    .select('amount')
+    .eq('tutor_id', tutor.id)
+    .eq('kind', 'debit')
+    .eq('source_kind', 'lesson')
+    .is('reversed_by_entry_id', null)
+    .gte('occurred_on', toDateStr(start))
+    .lt('occurred_on', toDateStr(end));
+  if (ledgerErr) {
+    console.error('getMonthIncome ledger error:', ledgerErr);
+    throw new Error('Не удалось загрузить доход за месяц.');
+  }
+  const earned = (debits ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
+
+  // 2) Запланированное: booked-занятия месяца (mirror getTutorLessons date-range query).
+  const { data: lessonsRaw, error: lessonsErr } = await supabase
+    .from('tutor_lessons')
+    .select('id, student_id, duration_min, tutor_students ( hourly_rate_cents )')
+    .eq('tutor_id', tutor.id)
+    .eq('status', 'booked')
+    .gte('start_at', start.toISOString())
+    .lt('start_at', end.toISOString());
+  if (lessonsErr) {
+    console.error('getMonthIncome lessons error:', lessonsErr);
+    throw new Error('Не удалось загрузить запланированные занятия.');
+  }
+  const lessons = (lessonsRaw ?? []) as unknown as Array<{
+    id: string;
+    student_id: string | null;
+    duration_min: number;
+    tutor_students: { hourly_rate_cents: number | null } | null;
+  }>;
+
+  let expectedExtra = 0;
+  const groupIds: string[] = [];
+  for (const l of lessons) {
+    if (l.student_id === null) {
+      groupIds.push(l.id); // unified-группа — цена по участникам
+    } else {
+      expectedExtra += calculateLessonPaymentAmount(l.duration_min, l.tutor_students?.hourly_rate_cents) ?? 0;
+    }
+  }
+  if (groupIds.length > 0) {
+    const { data: parts, error: partsErr } = await supabase
+      .from('tutor_lesson_participants')
+      .select('payment_amount')
+      .in('lesson_id', groupIds);
+    if (partsErr) {
+      console.error('getMonthIncome participants error:', partsErr);
+      throw new Error('Не удалось загрузить участников групп.');
+    }
+    expectedExtra += (parts ?? []).reduce((s, p) => s + Number(p.payment_amount ?? 0), 0);
+  }
+
+  return { earned, expected: earned + expectedExtra };
 }
 
 /** Лента операций ученика (новые сверху). Для TASK-6 «Все операции». */

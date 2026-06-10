@@ -78,6 +78,7 @@ import type {
   TutorStudentWithProfile,
   TutorWeeklySlot,
 } from '@/types/tutor';
+import MonthIncomeStrip from '@/components/tutor/schedule/MonthIncomeStrip';
 
 // schedule-materials: drawer to attach recording/PDF/homework to a lesson.
 // Lazy — keeps this large page's chunk lean (performance.md); only loads on first open.
@@ -4414,6 +4415,9 @@ function TutorScheduleContent() {
             Сегодня: {todayLessons} | Неделя: {weekLessons}
           </span>
         </div>
+
+        {/* Доход за месяц видимой недели (запрос Егора; ledger Phase 2a, rule 60) */}
+        <MonthIncomeStrip weekStart={weekStart} />
 
         {/* Week navigation */}
         <div className="flex items-center justify-between">
