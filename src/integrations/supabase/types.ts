@@ -2441,30 +2441,6 @@ export type Database = {
         }
         Relationships: []
       }
-      student_report_links: {
-        Row: {
-          created_at: string
-          created_by: string
-          revoked_at: string | null
-          slug: string
-          tutor_student_id: string
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string
-          revoked_at?: string | null
-          slug?: string
-          tutor_student_id: string
-        }
-        Update: {
-          created_at?: string
-          created_by?: string
-          revoked_at?: string | null
-          slug?: string
-          tutor_student_id?: string
-        }
-        Relationships: []
-      }
       suppressed_emails: {
         Row: {
           created_at: string
