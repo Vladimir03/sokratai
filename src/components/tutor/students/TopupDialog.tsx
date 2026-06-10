@@ -66,6 +66,7 @@ export default function TopupDialog({
       qc.invalidateQueries({ queryKey: ['tutor', 'balance', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'ledger', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'students'] });
+      qc.invalidateQueries({ queryKey: ['tutor', 'student', tutorStudentId] }); // шапка-чип «Долг» профиля
       onOpenChange(false);
     },
     onError: () => toast.error('Не удалось сохранить.'),

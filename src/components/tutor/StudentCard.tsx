@@ -44,7 +44,10 @@ export const StudentCard = memo(function StudentCard({
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
   const lastActivity = formatRelativeTime(student.last_activity_at ?? null);
-  const debtAmount = student.debt_amount ?? 0;
+  // Долг — из ledger-баланса (единый источник, rule 60), НЕ legacy debt_amount
+  // (tutor_payments): иначе чип расходится с балансом на карточке ученика.
+  const balance = student.balance ?? 0;
+  const debtAmount = balance < 0 ? -balance : 0;
 
   const displayName = student.profiles?.username || 'Без имени';
   const grade = student.profiles?.grade;
@@ -287,6 +290,11 @@ export const StudentCard = memo(function StudentCard({
                 <>
                   <AlertCircle className="h-4 w-4 text-red-500" aria-hidden="true" />
                   <span className="text-red-600 font-medium">Долг: {formatCurrency(debtAmount)}</span>
+                </>
+              ) : balance > 0 ? (
+                <>
+                  <CheckCircle className="h-4 w-4 text-green-500" aria-hidden="true" />
+                  <span className="text-green-600">Предоплата: {formatCurrency(balance)}</span>
                 </>
               ) : paymentStatus.isPaid ? (
                 <>

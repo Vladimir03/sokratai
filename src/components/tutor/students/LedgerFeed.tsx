@@ -82,6 +82,7 @@ function LessonChargeDialog({
       qc.invalidateQueries({ queryKey: ['tutor', 'balance', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'ledger', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'students'] });
+      qc.invalidateQueries({ queryKey: ['tutor', 'student', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'payments'] });
       qc.invalidateQueries({ queryKey: ['tutor', 'lessons'] });
       onClose();
@@ -168,6 +169,7 @@ export default function LedgerFeed({
     qc.invalidateQueries({ queryKey: ['tutor', 'balance', tutorStudentId] });
     qc.invalidateQueries({ queryKey: ['tutor', 'ledger', tutorStudentId] });
     qc.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    qc.invalidateQueries({ queryKey: ['tutor', 'student', tutorStudentId] }); // шапка-чип «Долг» профиля
   };
 
   const cancel = useMutation({

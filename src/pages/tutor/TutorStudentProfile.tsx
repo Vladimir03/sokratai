@@ -130,7 +130,11 @@ function TutorStudentProfileContent() {
     loading: membershipsLoading,
     refetch: refetchMemberships,
   } = useTutorGroupMemberships(miniGroupsEnabled);
-  const studentDebt = student?.debt_amount ?? 0;
+  // Единый источник долга — ledger-баланс (rule 60 «Баланс ученика»), НЕ legacy
+  // debt_amount из tutor_payments: legacy-страница «Оплаты» (отметить оплачено /
+  // удалить) меняет debt_amount, но не balance → числа на одном экране расходились.
+  const studentBalance = student?.balance ?? 0;
+  const studentDebt = studentBalance < 0 ? -studentBalance : 0;
 
   // Локальное состояние для редактирования
   const [notes, setNotes] = useState<string>('');
@@ -546,6 +550,10 @@ function TutorStudentProfileContent() {
                   {studentDebt > 0 ? (
                     <span className="text-red-600 font-medium">
                       ⚠️ Долг: {formatCurrency(studentDebt)}
+                    </span>
+                  ) : studentBalance > 0 ? (
+                    <span className="text-green-600 font-medium">
+                      Предоплата: {formatCurrency(studentBalance)}
                     </span>
                   ) : (
                     <span className={paymentStatus.isPaid ? 'text-green-600' : 'text-amber-600'}>
