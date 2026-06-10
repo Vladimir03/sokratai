@@ -2463,7 +2463,15 @@ export type Database = {
           slug?: string
           tutor_student_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "student_report_links_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       suppressed_emails: {
         Row: {
