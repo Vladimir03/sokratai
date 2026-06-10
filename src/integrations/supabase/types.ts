@@ -2810,6 +2810,7 @@ export type Database = {
           kind: string
           note: string | null
           occurred_on: string
+          replaces_entry_id: string | null
           reversed_by_entry_id: string | null
           reverses_entry_id: string | null
           source_kind: string
@@ -2825,6 +2826,7 @@ export type Database = {
           kind: string
           note?: string | null
           occurred_on?: string
+          replaces_entry_id?: string | null
           reversed_by_entry_id?: string | null
           reverses_entry_id?: string | null
           source_kind: string
@@ -2840,6 +2842,7 @@ export type Database = {
           kind?: string
           note?: string | null
           occurred_on?: string
+          replaces_entry_id?: string | null
           reversed_by_entry_id?: string | null
           reverses_entry_id?: string | null
           source_kind?: string
@@ -2848,6 +2851,13 @@ export type Database = {
           tutor_student_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "tutor_ledger_entries_replaces_entry_id_fkey"
+            columns: ["replaces_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_ledger_entries"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tutor_ledger_entries_reversed_by_entry_id_fkey"
             columns: ["reversed_by_entry_id"]
@@ -4130,6 +4140,15 @@ export type Database = {
       tutor_delete_lessons: {
         Args: { _lesson_id: string; _scope?: string }
         Returns: Json
+      }
+      tutor_edit_topup: {
+        Args: {
+          _entry_id: string
+          _new_amount: number
+          _note?: string
+          _occurred_on?: string
+        }
+        Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }
       tutor_record_topup: {
