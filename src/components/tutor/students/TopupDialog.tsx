@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency } from '@/lib/formatters';
-import { editTopup, recordTopup } from '@/lib/tutorBalanceApi';
+import { editTopup, parseRubleAmount, recordTopup } from '@/lib/tutorBalanceApi';
 
 export interface TopupEditTarget {
   id: string;
@@ -46,8 +46,10 @@ export default function TopupDialog({
     setDateText(editEntry ? editEntry.occurred_on : format(new Date(), 'yyyy-MM-dd'));
   }, [open, editEntry]);
 
-  const amount = parseInt(amountText.replace(/[^\d]/g, ''), 10);
-  const amountValid = Number.isFinite(amount) && amount > 0;
+  // Строгий парсинг (P1 ревью): «-5000»/«1,5» → invalid, НЕ молча другое число.
+  const parsedAmount = parseRubleAmount(amountText);
+  const amountValid = parsedAmount !== null;
+  const amount = parsedAmount ?? 0;
   const unchanged = isEdit && editEntry
     ? amount === editEntry.amount && dateText === editEntry.occurred_on
     : false;

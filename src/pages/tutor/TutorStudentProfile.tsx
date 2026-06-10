@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -548,8 +548,9 @@ function TutorStudentProfileContent() {
                 
                 <div className="flex items-center gap-4 text-sm flex-wrap">
                   {studentDebt > 0 ? (
-                    <span className="text-red-600 font-medium">
-                      ⚠️ Долг: {formatCurrency(studentDebt)}
+                    <span className="inline-flex items-center gap-1 text-red-600 font-medium">
+                      <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                      Долг: {formatCurrency(studentDebt)}
                     </span>
                   ) : studentBalance > 0 ? (
                     <span className="text-green-600 font-medium">

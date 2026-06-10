@@ -45,6 +45,18 @@ function mapBalanceError(rawMsg: string): { code?: string; error: string } {
   return { error: 'Не удалось выполнить операцию. Попробуйте ещё раз.' };
 }
 
+/**
+ * Строгий парсер суммы в РУБЛЯХ: только положительное целое. Минус, запятые/точки
+ * и прочие символы → null (НЕ вычищать их в другое число: «-5000»≠5000, «1,5»≠15).
+ * Пробелы-разряды («4 000») допускаются.
+ */
+export function parseRubleAmount(raw: string): number | null {
+  const s = raw.trim().replace(/\s+/g, '');
+  if (!/^\d{1,7}$/.test(s)) return null;
+  const n = parseInt(s, 10);
+  return n > 0 ? n : null;
+}
+
 /** Текущий баланс ученика (РУБЛИ). Отрицательный = должен. */
 export async function getStudentBalance(tutorStudentId: string): Promise<number> {
   const { data, error } = await supabase

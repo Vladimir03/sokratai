@@ -227,6 +227,13 @@ export const ConfirmLessonsSheet = memo(function ConfirmLessonsSheet({
       }
 
       await queryClient.invalidateQueries({ queryKey: ['tutor', 'lessons'] });
+      // Phase 2a (rule 60): bulk-confirm реюзит complete-RPC → ledger-debit'ы записаны;
+      // обновляем кэши оплат и баланса (чипы «Долг», карточка баланса, «Должники»).
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'payments'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'balance'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'ledger'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'student'] });
       onOpenChange(false);
 
       const firstConfirmedId = confirmPayload[0]?.lesson_id ?? null;

@@ -3608,6 +3608,16 @@ function TutorScheduleContent() {
     refetchTutor,
   ]);
 
+  // Phase 2a (rule 60 «Баланс ученика»): money-RPC занятий (complete / group-toggle /
+  // delete / revert) пишут или реверсят ledger-debit → после них обновляем кэши баланса,
+  // иначе чипы «Долг» / карточка баланса / «Должники» показывают stale-числа.
+  const invalidateBalanceCaches = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'balance'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'ledger'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'student'] });
+  }, [queryClient]);
+
   const scheduleParticipantPaymentRefresh = useCallback(() => {
     if (participantPaymentRefreshTimerRef.current) {
       clearTimeout(participantPaymentRefreshTimerRef.current);
@@ -3616,9 +3626,10 @@ function TutorScheduleContent() {
     participantPaymentRefreshTimerRef.current = setTimeout(() => {
       refetchLessons();
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'payments'] });
+      invalidateBalanceCaches();
       participantPaymentRefreshTimerRef.current = null;
     }, 700);
-  }, [queryClient, refetchLessons]);
+  }, [queryClient, refetchLessons, invalidateBalanceCaches]);
 
   useEffect(() => {
     return () => {
@@ -4140,6 +4151,7 @@ function TutorScheduleContent() {
         }
         setLessonDetailsOpen(false);
         refetchLessons();
+        invalidateBalanceCaches(); // complete пишет ledger-debit (rule 60)
         // Keep the post-lesson sheet open and flip step ① to ✓ (optimistic) so the
         // tutor continues straight to materials / ДЗ without re-opening anything.
         // The sheet IS the post-completion materials surface (TASK-9 нудж subsumed).
@@ -4168,7 +4180,7 @@ function TutorScheduleContent() {
         return rest;
       });
     }
-  }, [refetchLessons]);
+  }, [refetchLessons, invalidateBalanceCaches]);
 
   // Single-lesson cancel from the post-lesson sheet («Урок не состоялся»). The
   // series-scope cancel stays inside the dialog; here scope is one occurrence.
@@ -4607,7 +4619,7 @@ function TutorScheduleContent() {
           onOpenChange={setLessonDetailsOpen}
           lesson={selectedLesson}
           students={students}
-          onCancel={() => refetchLessons()}
+          onCancel={() => { refetchLessons(); invalidateBalanceCaches(); }}
           onUpdate={() => refetchLessons()}
           isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
           onOpenMaterials={() => {
@@ -4647,7 +4659,7 @@ function TutorScheduleContent() {
           open={groupDetailsOpen}
           onOpenChange={handleGroupDetailsOpenChange}
           bucket={selectedGroupBucket}
-          onActionApplied={() => refetchLessons()}
+          onActionApplied={() => { refetchLessons(); invalidateBalanceCaches(); }}
           onParticipantPaymentUpdated={scheduleParticipantPaymentRefresh}
           onOpenMaterials={(lesson) => {
             handleGroupDetailsOpenChange(false);

@@ -19,7 +19,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { formatCurrency } from '@/lib/formatters';
 import { completeLessonAndCreatePayment } from '@/lib/tutorSchedule';
 import { revertLesson } from '@/lib/scheduleBulkComplete';
-import { reverseLedgerEntry, type LedgerEntry } from '@/lib/tutorBalanceApi';
+import { parseRubleAmount, reverseLedgerEntry, type LedgerEntry } from '@/lib/tutorBalanceApi';
 import TopupDialog, { type TopupEditTarget } from './TopupDialog';
 
 // Лента операций баланса (TASK-6). Append-only ledger → collapse-отображение:
@@ -54,19 +54,25 @@ function LessonChargeDialog({
   const info = useQuery({
     queryKey: ['tutor', 'ledger-lesson-info', lessonId, tutorStudentId],
     queryFn: async () => {
-      const [{ data: lesson }, { data: payment }] = await Promise.all([
+      const [lessonRes, paymentRes] = await Promise.all([
         supabase.from('tutor_lessons').select('id, student_id, start_at').eq('id', lessonId).maybeSingle(),
         supabase.from('tutor_payments').select('status').eq('lesson_id', lessonId).eq('tutor_student_id', tutorStudentId).maybeSingle(),
       ]);
-      return { lesson, paymentStatus: payment?.status ?? 'pending' };
+      // P1 (ревью): ошибки НЕ глотать — иначе paid молча деградирует в 'pending'
+      // и re-complete перепишет оплаченную запись. Без достоверного статуса не сохраняем.
+      if (lessonRes.error) throw new Error('LESSON_LOAD_FAILED');
+      if (paymentRes.error) throw new Error('PAYMENT_LOAD_FAILED');
+      return { lesson: lessonRes.data, paymentStatus: paymentRes.data?.status ?? 'pending' };
     },
     refetchOnWindowFocus: false,
   });
 
   const isGroup = info.data?.lesson ? info.data.lesson.student_id === null : false;
   const lessonGone = info.isSuccess && !info.data?.lesson;
-  const amount = parseInt(amountText.replace(/[^\d]/g, ''), 10);
-  const amountValid = Number.isFinite(amount) && amount > 0;
+  // Строгий парсинг (P1 ревью): «-5000»/«1,5» → invalid, не молча другое число.
+  const parsedAmount = parseRubleAmount(amountText);
+  const amountValid = parsedAmount !== null;
+  const amount = parsedAmount ?? 0;
 
   const save = useMutation({
     mutationFn: async () => {
@@ -100,6 +106,11 @@ function LessonChargeDialog({
           <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Загружаю занятие…
           </div>
+        ) : info.isError ? (
+          <p className="py-2 text-sm text-muted-foreground">
+            Не удалось загрузить занятие и статус оплаты — без них менять сумму небезопасно.
+            Закройте окно и попробуйте ещё раз.
+          </p>
         ) : lessonGone ? (
           <p className="py-2 text-sm text-muted-foreground">
             Занятие не найдено (удалено). Используйте «Отменить запись», чтобы вернуть сумму на баланс.
@@ -129,10 +140,10 @@ function LessonChargeDialog({
         )}
         <DialogFooter>
           <Button variant="ghost" onClick={onClose} disabled={save.isPending}>Закрыть</Button>
-          {!isGroup && !lessonGone && (
+          {!isGroup && !lessonGone && !info.isError && (
             <Button
               onClick={() => save.mutate()}
-              disabled={!amountValid || amount === entry.amount || save.isPending || info.isLoading}
+              disabled={!amountValid || amount === entry.amount || save.isPending || !info.isSuccess}
             >
               {save.isPending ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Сохраняю…</> : 'Сохранить'}
             </Button>
@@ -173,27 +184,51 @@ export default function LedgerFeed({
   };
 
   const cancel = useMutation({
-    mutationFn: async (entry: LedgerEntry) => {
+    mutationFn: async (entry: LedgerEntry): Promise<{ ok: boolean; error?: string; warning?: string }> => {
       // Активное списание за существующее занятие → канонический revert занятия (синхронно
       // снимает оплату + debit). Иначе — обычный reverse записи ledger.
       if (entry.source_kind === 'lesson' && entry.kind === 'debit' && entry.source_lesson_id) {
+        // P0 (ревью): tutor_revert_lesson СОХРАНЯЕТ paid-оплату, но реверсит debit →
+        // оплаченная запись осталась бы без заряда (рассинхрон). Гейт ДО мутации.
+        const { data: paidRow, error: paidErr } = await supabase
+          .from('tutor_payments')
+          .select('id')
+          .eq('lesson_id', entry.source_lesson_id)
+          .eq('tutor_student_id', tutorStudentId)
+          .eq('status', 'paid')
+          .maybeSingle();
+        if (paidErr) {
+          return { ok: false, error: 'Не удалось проверить оплату занятия — попробуйте ещё раз.' };
+        }
+        if (paidRow) {
+          return {
+            ok: false,
+            error: 'По занятию уже отмечена полученная оплата — отмена списания заблокирована. Сначала снимите отметку «оплачено» на странице «Оплаты».',
+          };
+        }
         const res = await revertLesson(entry.source_lesson_id);
         if (!res.ok) {
           const friendly = res.errorMessage?.includes('NOT_OWNED_OR_NOT_COMPLETED')
             ? 'Занятие не найдено или уже отменено. Удалите занятие в «Расписании» — списание вернётся автоматически.'
             : res.errorMessage ?? 'Не удалось отменить списание.';
-          return { ok: false as const, error: friendly };
+          return { ok: false, error: friendly };
         }
-        return { ok: true as const };
+        if (res.had_paid) {
+          // Гонка: оплату отметили paid между preflight и RPC. Revert уже прошёл
+          // (занятие отменено, debit реверснут), paid-строка сохранена — предупреждаем.
+          return { ok: true, warning: 'Занятие отменено, но по нему есть полученная оплата — проверьте страницу «Оплаты».' };
+        }
+        return { ok: true };
       }
       const res = await reverseLedgerEntry(entry.id, 'отменено репетитором');
-      return res.ok ? { ok: true as const } : { ok: false as const, error: res.error };
+      return res.ok ? { ok: true } : { ok: false, error: res.error };
     },
     onSuccess: (res) => {
       if (!res.ok) {
         toast.error(res.error ?? 'Не удалось отменить запись.');
         return;
       }
+      if (res.warning) toast.warning(res.warning);
       toast.success('Запись отменена, баланс обновлён');
       invalidate();
       qc.invalidateQueries({ queryKey: ['tutor', 'payments'] });
@@ -213,15 +248,21 @@ export default function LedgerFeed({
         const isCancelled = Boolean(e.reversed_by_entry_id);
         const isCorrected = Boolean(e.replaces_entry_id);
         const isCredit = e.kind === 'credit';
-        // История правок: цепочка заменённых записей (в пределах загруженного окна).
+        // История правок: цепочка заменённых записей. Окно ленты = limit 50 — если
+        // заменённая запись за окном, честно помечаем обрыв (P2 ревью), не молчим.
         const history: LedgerEntry[] = [];
+        let historyTruncated = false;
         let cursor = e.replaces_entry_id;
         while (cursor) {
           const prev = byId.get(cursor);
-          if (!prev) break;
+          if (!prev) {
+            historyTruncated = true;
+            break;
+          }
           history.push(prev);
           cursor = prev.replaces_entry_id;
         }
+        history.reverse(); // старое → новое
         const canEditTopup = !isCancelled && e.source_kind === 'topup' && isCredit && !e.reverses_entry_id;
         const canEditLesson = !isCancelled && e.source_kind === 'lesson' && e.kind === 'debit' && Boolean(e.source_lesson_id);
         const canCancel = !isCancelled && !e.reverses_entry_id;
@@ -254,9 +295,11 @@ export default function LedgerFeed({
                   {format(parseISO(e.occurred_on), 'd MMMM yyyy', { locale: ru })}
                   {e.note && !e.note.startsWith('seed:') && !e.note.startsWith('reverse:') ? ` · ${e.note}` : ''}
                 </p>
-                {isCorrected && expandedId === e.id && history.length > 0 && (
+                {isCorrected && expandedId === e.id && (
                   <p className="mt-1 text-xs text-muted-foreground">
-                    История: {history.map((h) => formatCurrency(h.amount)).join(' → ')} → {formatCurrency(e.amount)}
+                    История: {historyTruncated && '… (ранние правки не загружены) → '}
+                    {history.length > 0 && `${history.map((h) => formatCurrency(h.amount)).join(' → ')} → `}
+                    {formatCurrency(e.amount)}
                   </p>
                 )}
               </div>
