@@ -2801,6 +2801,113 @@ export type Database = {
           },
         ]
       }
+      tutor_ledger_entries: {
+        Row: {
+          amount: number
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          note: string | null
+          occurred_on: string
+          reversed_by_entry_id: string | null
+          reverses_entry_id: string | null
+          source_kind: string
+          source_lesson_id: string | null
+          tutor_id: string
+          tutor_student_id: string
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          note?: string | null
+          occurred_on?: string
+          reversed_by_entry_id?: string | null
+          reverses_entry_id?: string | null
+          source_kind: string
+          source_lesson_id?: string | null
+          tutor_id: string
+          tutor_student_id: string
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          note?: string | null
+          occurred_on?: string
+          reversed_by_entry_id?: string | null
+          reverses_entry_id?: string | null
+          source_kind?: string
+          source_lesson_id?: string | null
+          tutor_id?: string
+          tutor_student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_ledger_entries_reversed_by_entry_id_fkey"
+            columns: ["reversed_by_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_ledger_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_ledger_entries_reverses_entry_id_fkey"
+            columns: ["reverses_entry_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_ledger_entries"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_ledger_entries_source_lesson_id_fkey"
+            columns: ["source_lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_ledger_entries_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_ledger_entries_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_ledger_seed_runs: {
+        Row: {
+          seeded_at: string
+          tutor_student_id: string
+        }
+        Insert: {
+          seeded_at?: string
+          tutor_student_id: string
+        }
+        Update: {
+          seeded_at?: string
+          tutor_student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_ledger_seed_runs_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: true
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_lesson_materials: {
         Row: {
           created_at: string
@@ -3251,6 +3358,7 @@ export type Database = {
       }
       tutor_students: {
         Row: {
+          balance: number
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -3272,6 +3380,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          balance?: number
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -3293,6 +3402,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          balance?: number
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -3607,6 +3717,24 @@ export type Database = {
       }
     }
     Functions: {
+      _reverse_ledger_entry: {
+        Args: { _actor: string; _entry_id: string; _note: string }
+        Returns: string
+      }
+      _reverse_lesson_debit: {
+        Args: { _lesson_id: string; _tutor_student_id: string }
+        Returns: string
+      }
+      _sync_lesson_debit: {
+        Args: {
+          _actor: string
+          _amount: number
+          _lesson_id: string
+          _tutor_id: string
+          _tutor_student_id: string
+        }
+        Returns: string
+      }
       book_lesson_slot: {
         Args: {
           _booking_link: string
@@ -3985,6 +4113,10 @@ export type Database = {
           read_ct: number
         }[]
       }
+      recompute_student_balance: {
+        Args: { _tutor_student_id: string }
+        Returns: number
+      }
       student_assigned_to_homework: {
         Args: { _assignment_id: string }
         Returns: boolean
@@ -4000,9 +4132,22 @@ export type Database = {
         Returns: Json
       }
       tutor_get_invite_code: { Args: never; Returns: string }
+      tutor_record_topup: {
+        Args: {
+          _amount: number
+          _note?: string
+          _occurred_on?: string
+          _tutor_student_id: string
+        }
+        Returns: string
+      }
       tutor_remove_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
+      }
+      tutor_reverse_ledger_entry: {
+        Args: { _entry_id: string; _note?: string }
+        Returns: string
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
       update_group_participant_payment_status: {
