@@ -247,6 +247,19 @@ https://api.sokratai.ru/functions/v1/email-verify?token_hash={{ .TokenHash }}&ty
 
 **Симптом нарушения:** edge function существует в `supabase/functions/` но не deploy'ится на production → 404 для всех вызовов.
 
+### 11a. Публичный edge function: клиент шлёт anon-ключ, не полагайся на `verify_jwt=false` из config
+
+`verify_jwt=false` в `config.toml` означает «функция публичная, ключ не нужен» — **но Lovable иногда деплоит новую функцию с `verify_jwt=true`** (config не подхвачен сразу). Тогда gateway возвращает **401 `UNAUTHORIZED_NO_AUTH_HEADER`** на keyless-запрос ДО входа в функцию — публичная страница показывает «не удалось загрузить» (инцидент 2026-06-11, `public-student-report`/«Отчёт родителю»).
+
+**Правило:** клиент публичной функции, вызываемый **без сессии** (родитель/аноним), ОБЯЗАН слать **anon publishable key** в обоих заголовках:
+```ts
+import { SUPABASE_PUBLISHABLE_KEY } from '@/lib/supabaseClient';
+fetch(url, { headers: { apikey: SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}` } });
+```
+Anon-ключ — валидный JWT, поэтому gateway пропускает запрос и при `verify_jwt=true`, и при `=false` → не зависим от того, применился ли config. (Внутри функция всё равно работает под `service_role`.) Reference: `src/lib/publicReportApi.ts`. `config.toml` `verify_jwt=false` всё равно держим (правильный intent), но он больше не load-bearing.
+
+**Диагностика «публичная страница не грузится»:** `curl` функцию БЕЗ ключа — `401 UNAUTHORIZED_NO_AUTH_HEADER` = gateway держит verify_jwt=true (или config не применён) → шли anon-ключ; `404` = функция не задеплоена; `503` = boot-crash (битый импорт, rule 95).
+
 ---
 
 ## Hard Rules — Ops (Supabase Dashboard manual actions)
