@@ -2,7 +2,7 @@
 
 > Pipeline step 5. SPEC: `spec.md` v6 (4 раунда ревью закрыты). Автор: Vladimir × Claude · 2026-06-09
 >
-> **СТАТУС (2026-06-10): TASK-1 ✅ (`3f1f706`) · TASK-2+4 ✅ (`b2d670b`) · TASK-3 ✅ (`f26ab22` + ревью-фиксы `11f961f`/`2de12fa`) · TASK-5 ✅ (`39213ce`) · TASK-6 ✅ (spec v7). 6 миграций `20260609*` применены Lovable 2026-06-10, seed-гейт пройден (balance==−долг, 0 строк). Осталось: Lovable применяет `20260610120000` → `deploy-sokratai` (фронт TASK-5+6).**
+> **СТАТУС (2026-06-10): TASK-1 ✅ (`3f1f706`) · TASK-2+4 ✅ (`b2d670b`) · TASK-3 ✅ (`f26ab22` + ревью-фиксы `11f961f`/`2de12fa`) · TASK-5 ✅ (`39213ce`) · TASK-6 ✅ (`7000807`/`cb84f9b`, spec v7) · фикс «два долга» ✅ (`3a787c4`) · ChatGPT-5.5 frontend-ревью FAIL→закрыт ✅ (`bf18e98`, spec v8: paid-гейт отмены, error-гейт фетча, parseRubleAmount, invalidateBalanceCaches). 6 миграций `20260609*` применены Lovable, seed-гейт 0 строк ✓. Осталось: Lovable применяет `20260610120000` → `deploy-sokratai` (весь фронт) → QA.**
 > Единицы: рубли integer. Деньги: миграции локально НЕ прогоняются → строим аккуратными чанками + SQL-гейты на проде/staging.
 > Порядок: TASK-1 (фундамент, NEW) → TASK-2 (helpers+RPC, NEW) → TASK-4 (seed, NEW) → **TASK-3 (вшивание в money-RPC — репродукция замороженного, делать осторожно, отдельным проходом + Codex)** → TASK-5/6 (фронт).
 
