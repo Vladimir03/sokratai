@@ -1346,6 +1346,8 @@ export type Database = {
       }
       kb_folders: {
         Row: {
+          catalog_subtopic_id: string | null
+          catalog_topic_id: string | null
           created_at: string | null
           id: string
           name: string
@@ -1354,6 +1356,8 @@ export type Database = {
           sort_order: number | null
         }
         Insert: {
+          catalog_subtopic_id?: string | null
+          catalog_topic_id?: string | null
           created_at?: string | null
           id?: string
           name: string
@@ -1362,6 +1366,8 @@ export type Database = {
           sort_order?: number | null
         }
         Update: {
+          catalog_subtopic_id?: string | null
+          catalog_topic_id?: string | null
           created_at?: string | null
           id?: string
           name?: string
@@ -1370,6 +1376,27 @@ export type Database = {
           sort_order?: number | null
         }
         Relationships: [
+          {
+            foreignKeyName: "kb_folders_catalog_subtopic_id_fkey"
+            columns: ["catalog_subtopic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_subtopics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_folders_catalog_topic_id_fkey"
+            columns: ["catalog_topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "kb_folders_catalog_topic_id_fkey"
+            columns: ["catalog_topic_id"]
+            isOneToOne: false
+            referencedRelation: "kb_topics_with_counts"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "kb_folders_parent_id_fkey"
             columns: ["parent_id"]
@@ -1639,30 +1666,36 @@ export type Database = {
       kb_topics: {
         Row: {
           created_at: string | null
-          exam: Database["public"]["Enums"]["exam_type"]
+          exam: Database["public"]["Enums"]["exam_type"] | null
           id: string
           kim_numbers: number[] | null
+          kind: string
           name: string
           section: string
           sort_order: number | null
+          subject: string
         }
         Insert: {
           created_at?: string | null
-          exam: Database["public"]["Enums"]["exam_type"]
+          exam?: Database["public"]["Enums"]["exam_type"] | null
           id?: string
           kim_numbers?: number[] | null
+          kind?: string
           name: string
           section: string
           sort_order?: number | null
+          subject?: string
         }
         Update: {
           created_at?: string | null
-          exam?: Database["public"]["Enums"]["exam_type"]
+          exam?: Database["public"]["Enums"]["exam_type"] | null
           id?: string
           kim_numbers?: number[] | null
+          kind?: string
           name?: string
           section?: string
           sort_order?: number | null
+          subject?: string
         }
         Relationships: []
       }
@@ -3727,10 +3760,12 @@ export type Database = {
           exam: Database["public"]["Enums"]["exam_type"] | null
           id: string | null
           kim_numbers: number[] | null
+          kind: string | null
           material_count: number | null
           name: string | null
           section: string | null
           sort_order: number | null
+          subject: string | null
           subtopic_names: string[] | null
           task_count: number | null
         }
@@ -4073,12 +4108,46 @@ export type Database = {
         }[]
       }
       kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
+      kb_mod_create_subtopic: {
+        Args: { p_name: string; p_sort_order?: number; p_topic_id: string }
+        Returns: string
+      }
+      kb_mod_create_topic: {
+        Args: {
+          p_exam?: Database["public"]["Enums"]["exam_type"]
+          p_kim_numbers?: number[]
+          p_kind?: string
+          p_name: string
+          p_section: string
+          p_sort_order?: number
+          p_subject?: string
+        }
+        Returns: string
+      }
+      kb_mod_delete_subtopic: { Args: { p_id: string }; Returns: undefined }
+      kb_mod_delete_topic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_reassign: {
         Args: { p_new_source_task_id: string; p_published_task_id: string }
         Returns: undefined
       }
       kb_mod_unpublish: {
         Args: { p_published_task_id: string }
+        Returns: undefined
+      }
+      kb_mod_update_subtopic: {
+        Args: { p_id: string; p_name?: string; p_sort_order?: number }
+        Returns: undefined
+      }
+      kb_mod_update_topic: {
+        Args: {
+          p_exam?: Database["public"]["Enums"]["exam_type"]
+          p_id: string
+          p_kim_numbers?: number[]
+          p_name?: string
+          p_section?: string
+          p_sort_order?: number
+          p_subject?: string
+        }
         Returns: undefined
       }
       kb_normalize_fingerprint:
@@ -4091,11 +4160,24 @@ export type Database = {
             }
             Returns: string
           }
+      kb_publish_folder_to_catalog: {
+        Args: {
+          p_folder_id: string
+          p_subtopic_id?: string
+          p_topic_id: string
+        }
+        Returns: {
+          published_count: number
+          skipped_count: number
+        }[]
+      }
       kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
+      kb_require_moderator: { Args: never; Returns: string }
       kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
+          kind_filter?: string
           query: string
           result_limit?: number
           source_filter?: string
