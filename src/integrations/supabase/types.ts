@@ -1861,6 +1861,7 @@ export type Database = {
         Row: {
           ai_draft_json: Json | null
           attempt_id: string
+          hide_ai_feedback: boolean
           kim_number: number
           photo_url: string | null
           status: string
@@ -1871,6 +1872,7 @@ export type Database = {
         Insert: {
           ai_draft_json?: Json | null
           attempt_id: string
+          hide_ai_feedback?: boolean
           kim_number: number
           photo_url?: string | null
           status?: string
@@ -1881,6 +1883,7 @@ export type Database = {
         Update: {
           ai_draft_json?: Json | null
           attempt_id?: string
+          hide_ai_feedback?: boolean
           kim_number?: number
           photo_url?: string | null
           status?: string
