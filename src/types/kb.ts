@@ -4,6 +4,15 @@
 
 export type ExamType = 'ege' | 'oge';
 
+/** Тип темы каталога: экзаменационная (ЕГЭ/ОГЭ, группировка по № КИМ) или олимпиадная. */
+export type TopicKind = 'exam' | 'olympiad';
+
+/**
+ * Верхний фильтр витрины каталога. 'ege'/'oge' → exam-темы по экзамену;
+ * 'olympiad' → олимпиадные темы (kind='olympiad', без № КИМ).
+ */
+export type CatalogFilter = 'ege' | 'oge' | 'olympiad';
+
 export type MaterialType = 'file' | 'link' | 'media' | 'board';
 
 // =============================================
@@ -14,10 +23,15 @@ export interface KBTopic {
   id: string;
   name: string;
   section: string;
-  exam: ExamType;
+  /** NULL для олимпиадных тем (kind='olympiad'). */
+  exam: ExamType | null;
   kim_numbers: number[];
   sort_order: number;
   created_at: string;
+  /** Предмет темы ('physics' по умолчанию; закладка под математику). */
+  subject: string;
+  /** 'exam' (ЕГЭ/ОГЭ) | 'olympiad'. */
+  kind: TopicKind;
 }
 
 /** Topic with aggregated counts from kb_topics_with_counts view */
@@ -45,6 +59,13 @@ export interface KBFolder {
   name: string;
   sort_order: number;
   created_at: string;
+  /**
+   * Тема каталога, в которую публикуется папка (kb_publish_folder_to_catalog).
+   * NULL = папка ещё не публиковалась. Заполняется при первой публикации →
+   * prefill в PublishFolderModal для повторной публикации в один клик.
+   */
+  catalog_topic_id?: string | null;
+  catalog_subtopic_id?: string | null;
 }
 
 /** Folder node with recursive children for tree rendering */

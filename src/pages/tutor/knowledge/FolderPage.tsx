@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, UploadCloud, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -8,6 +8,7 @@ import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
 import { EditTaskModal } from '@/components/kb/EditTaskModal';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { MoveToFolderModal } from '@/components/kb/MoveToFolderModal';
+import { PublishFolderModal } from '@/components/kb/PublishFolderModal';
 import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
@@ -32,6 +33,7 @@ function FolderContent() {
   const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
   const [kimFilter, setKimFilter] = useState<number | null>(null);
+  const [showPublish, setShowPublish] = useState(false);
 
   // Tasks filtered by clicked-on KIM badge. `null` shows all.
   const visibleTasks = useMemo(
@@ -131,6 +133,16 @@ function FolderContent() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {isModerator ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowPublish(true)}
+                      className="inline-flex items-center gap-2 rounded-xl border border-socrat-folder/30 bg-socrat-folder-bg px-4 py-2.5 text-sm font-semibold text-socrat-folder shadow-sm transition-all duration-200 hover:border-socrat-folder/50 [touch-action:manipulation]"
+                    >
+                      <UploadCloud className="h-4 w-4" />
+                      В каталог
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setShowCreateFolder(true)}
@@ -277,6 +289,10 @@ function FolderContent() {
             currentFolderId={folderId}
             onClose={() => setMovingTask(null)}
           />
+        ) : null}
+
+        {showPublish && folder ? (
+          <PublishFolderModal folder={folder} onClose={() => setShowPublish(false)} />
         ) : null}
 
         {renamingFolder ? (

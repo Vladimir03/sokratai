@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, X } from 'lucide-react';
+import { ArrowLeft, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { MaterialCard } from '@/components/kb/MaterialCard';
+import { SubtopicManager } from '@/components/kb/SubtopicManager';
 import { TaskCard } from '@/components/kb/TaskCard';
+import { TopicEditorModal } from '@/components/kb/TopicEditorModal';
 import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
 import { ExamBadge } from '@/components/kb/ui/ExamBadge';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
@@ -16,7 +18,7 @@ import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
-import { countTasksBySubtopic, groupTasksByKim, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
+import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
@@ -46,8 +48,11 @@ function CatalogTopicContent() {
   const [copyTask, setCopyTask] = useState<KBTask | null>(null);
   const [kimFilter, setKimFilter] = useState<number | null>(null);
   const [subtopicFilter, setSubtopicFilter] = useState<string | null>(null);
+  const [editingTopic, setEditingTopic] = useState(false);
   const { addTask, hasTask } = useHWDraftStore();
   const queryClient = useQueryClient();
+
+  const isOlympiad = topic?.kind === 'olympiad';
 
   const subtopicById = useMemo(() => new Map(subtopics.map((s) => [s.id, s])), [subtopics]);
   const subtopicOrder = useMemo(
@@ -70,10 +75,13 @@ function CatalogTopicContent() {
     return list;
   }, [tasks, kimFilter, subtopicFilter]);
 
-  // Группировка по возрастанию КИМ — секции «КИМ № N · M задач».
+  // Олимпиадные темы — без № КИМ: группируем по подтемам. Экзаменационные — по КИМ.
   const taskGroups = useMemo(
-    () => groupTasksByKim(visibleTasks, subtopicOrder),
-    [visibleTasks, subtopicOrder],
+    () =>
+      isOlympiad
+        ? groupTasksBySubtopic(visibleTasks, subtopics)
+        : groupTasksByKim(visibleTasks, subtopicOrder),
+    [isOlympiad, visibleTasks, subtopics, subtopicOrder],
   );
 
   // Сброс фильтров/раскрытия при смене темы (param-only навигация не размонтирует компонент).
@@ -162,12 +170,24 @@ function CatalogTopicContent() {
                     <h2 className="font-display text-[1.75rem] font-bold tracking-[-0.04em] text-slate-950">
                       {topic.name}
                     </h2>
-                    <ExamBadge exam={topic.exam} />
+                    <ExamBadge exam={topic.exam} kind={topic.kind} />
                     <SourceBadge source="socrat" className="bg-socrat-border-light text-slate-500" />
+                    {isModerator ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingTopic(true)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-socrat-border px-2.5 py-1 text-[12px] font-semibold text-slate-600 transition-colors hover:border-socrat-primary/30 hover:text-socrat-primary [touch-action:manipulation]"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Редактировать тему
+                      </button>
+                    ) : null}
                   </div>
                   <p className="text-sm text-slate-500">
                     {topic.section}
-                    {topic.kim_numbers.length > 0 ? ` · КИМ № ${topic.kim_numbers.join(', ')}` : ''}
+                    {!isOlympiad && topic.kim_numbers.length > 0
+                      ? ` · КИМ № ${topic.kim_numbers.join(', ')}`
+                      : ''}
                   </p>
                   {subtopics.length > 0 ? (
                     <SubtopicFilterChips
@@ -188,6 +208,10 @@ function CatalogTopicContent() {
                 <StatCounter value={topic.task_count} label="задач" />
               </div>
             </section>
+          ) : null}
+
+          {isModerator && topic ? (
+            <SubtopicManager topicId={topic.id} subtopics={subtopics} />
           ) : null}
 
           <section>
@@ -278,6 +302,15 @@ function CatalogTopicContent() {
         </div>
 
         {copyTask ? <CopyToFolderModal task={copyTask} onClose={() => setCopyTask(null)} /> : null}
+
+        {editingTopic && topic ? (
+          <TopicEditorModal
+            mode="edit"
+            kind={topic.kind}
+            initial={topic}
+            onClose={() => setEditingTopic(false)}
+          />
+        ) : null}
       </KnowledgeBaseFrame>
   );
 }

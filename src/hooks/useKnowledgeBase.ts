@@ -18,7 +18,7 @@ import type {
   KBSubtopic,
   CreateKBTaskInput,
   UpdateKBTaskInput,
-  ExamType,
+  CatalogFilter,
 } from '@/types/kb';
 
 // =============================================
@@ -26,7 +26,7 @@ import type {
 // =============================================
 
 async function fetchTopics(
-  examFilter?: ExamType,
+  filter?: CatalogFilter,
   searchQuery?: string,
 ): Promise<KBTopicWithCounts[]> {
   let query = supabase
@@ -34,9 +34,14 @@ async function fetchTopics(
     .select('*')
     .order('sort_order');
 
-  if (examFilter) {
-    query = query.eq('exam', examFilter);
+  if (filter === 'olympiad') {
+    // Олимпиадные темы (exam=NULL); по предмету пока не фильтруем (физика).
+    query = query.eq('kind', 'olympiad');
+  } else if (filter) {
+    // Экзаменационные темы: по экзамену + kind='exam' (олимпиадные не подмешиваем).
+    query = query.eq('exam', filter).eq('kind', 'exam');
   }
+  // filter === undefined → все темы (селекторы темы в CreateTaskModal / KBPickerSheet).
 
   if (searchQuery && searchQuery.trim().length > 0) {
     query = query.ilike('name', `%${searchQuery.trim()}%`);
@@ -195,16 +200,16 @@ function useKBQuery<TData>({
   };
 }
 
-/** All topics with counts, optionally filtered by exam and search */
-export function useTopics(examFilter?: ExamType, searchQuery?: string) {
+/** All topics with counts, optionally filtered by catalog filter (ege/oge/olympiad) and search */
+export function useTopics(filter?: CatalogFilter, searchQuery?: string) {
   const queryKey = useMemo(
-    () => ['tutor', 'kb', 'topics', examFilter ?? 'all', searchQuery ?? ''] as const,
-    [examFilter, searchQuery],
+    () => ['tutor', 'kb', 'topics', filter ?? 'all', searchQuery ?? ''] as const,
+    [filter, searchQuery],
   );
 
   const result = useKBQuery<KBTopicWithCounts[]>({
     queryKey,
-    queryFn: () => fetchTopics(examFilter, searchQuery),
+    queryFn: () => fetchTopics(filter, searchQuery),
     defaultValue: [],
     errorMessage: 'Не удалось загрузить темы',
   });

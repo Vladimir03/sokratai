@@ -50,7 +50,9 @@ export const CatalogTaskGroups = memo(function CatalogTaskGroups({
   return (
     <div className={cn('flex flex-col gap-4', className)}>
       {groups.map((group) => {
-        const key = groupKey(group.kim);
+        // Олимпиадные (под)группы задают свои key/label; KIM-группы — дефолтные.
+        const key = group.key ?? groupKey(group.kim);
+        const label = group.label ?? groupLabel(group.kim);
         const isOpen = !collapsed.has(key);
         const panelId = `${idBase}-${key}`;
         const count = group.tasks.length;
@@ -70,7 +72,7 @@ export const CatalogTaskGroups = memo(function CatalogTaskGroups({
                   isOpen ? '' : '-rotate-90',
                 )}
               />
-              <span className="text-sm font-semibold text-slate-800">{groupLabel(group.kim)}</span>
+              <span className="text-sm font-semibold text-slate-800">{label}</span>
               <span className="text-xs font-medium tabular-nums text-slate-400">
                 · {count} {pluralizeRu(count, ['задача', 'задачи', 'задач'])}
               </span>

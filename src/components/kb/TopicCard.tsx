@@ -17,12 +17,13 @@ export const TopicCard = memo(function TopicCard({ topic, onClick }: TopicCardPr
       <div className="min-w-0 flex-1">
         <div className="mb-1.5 flex flex-wrap items-center gap-2">
           <span className="text-[1.05rem] font-semibold leading-none text-slate-950">{topic.name}</span>
-          <ExamBadge exam={topic.exam} />
+          <ExamBadge exam={topic.exam} kind={topic.kind} />
         </div>
 
         <div className="text-[13px] text-slate-600">
           {topic.task_count} задач · {topic.material_count} мат.
-          {topic.kim_numbers.length > 0 && ` · КИМ № ${topic.kim_numbers.join(', ')}`}
+          {topic.kind !== 'olympiad' && topic.kim_numbers.length > 0
+            && ` · КИМ № ${topic.kim_numbers.join(', ')}`}
         </div>
 
         {topic.subtopic_names.length > 0 && (

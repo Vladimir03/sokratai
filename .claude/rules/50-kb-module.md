@@ -66,6 +66,40 @@
 - `trg_kb_after_update_moderation` — AFTER UPDATE, auto-publish + auto-resync
 - `trg_kb_after_insert_moderation` — AFTER INSERT, auto-publish если задача вставлена в «сократ»
 
+## Самообслуживаемый каталог + раздел «Олимпиады» (2026-06-11)
+
+Каталог стал самообслуживаемым для модератора (Егор) + добавлен раздел «Олимпиады». Аддитивно, **без переписывания** read-path каталога. Контекст: темы/подтемы заводились SQL-миграциями (модератор не мог менять без кода), а олимпиадные задачи не помещались в ЕГЭ/ОГЭ-модель. Миграции `20260611130000…130300`. Spec/лог: `~/.claude/plans/wild-nibbling-comet.md` + memory `project_kb_self_serve_olympiad.md`.
+
+**Схема (additive, `20260611130000`):**
+- `kb_topics.kind TEXT NOT NULL DEFAULT 'exam' CHECK ('exam'|'olympiad')` + `subject TEXT DEFAULT 'physics'` (закладка под математику) + `exam` стал **NULLABLE** (олимпиадные темы: `exam=NULL`, `kind='olympiad'`). **Enum `exam_type` НЕ трогали** (готча `ALTER TYPE ADD VALUE`) — `kind` чище.
+- `kb_folders.catalog_topic_id`/`catalog_subtopic_id` — биндинг папки к теме публикации (папка «помнит» тему → повторная публикация в один клик).
+- View `kb_topics_with_counts` — `subject`/`kind` добавлены **В КОНЕЦ** (CREATE OR REPLACE требует сохранить порядок старых колонок).
+
+**Модераторская таксономия (`20260611130100`, SECURITY DEFINER + `kb_require_moderator()` = `has_role(uid,'moderator')` + REVOKE FROM PUBLIC + GRANT authenticated, рус. ошибки rule 97):** `kb_mod_create/update/delete_topic` + `…_subtopic`. `kind` после создания не меняется. **Delete-гейты:** тема — нет задач (`kb_tasks.topic_id`) И нет материалов (`kb_materials.topic_id`, оба FK RESTRICT); подтема — нет задач. `kb_topics`/`kb_subtopics` остаются SELECT-only для authenticated (нет write-политик) → запись ТОЛЬКО через эти RPC.
+
+**Публикация папки (`20260611130200`, `kb_publish_folder_to_catalog(folder, topic, subtopic?)`):** модель **source→copy через существующий `kb_publish_task`** (НЕ destructive `promote_folder_to_catalog`). Личная папка = редактируемый источник, каталог = проекция; рубрика НЕ копируется (whitelist `kb_publish_task`), fingerprint-dedup, audit. Инварианты:
+- **Skip уже опубликованных** (`published_task_id IS NOT NULL`) — идемпотентная повторная публикация.
+- **Re-read `published_task_id` после `UPDATE`** перед явным `kb_publish_task`: если папка в дереве «сократ», `UPDATE topic_id` авто-публикует через CASE A триггера → явный вызов упал бы «already published» и откатил батч.
+- **Нормализация по теме:** `subtopic_id = p_subtopic_id` (НЕ `COALESCE` — иначе подтема от старой темы); `exam = <exam темы>`; `kim_number = NULL` у олимпиадных (иначе КИМ-маркер на карточке + экзам-задачи выпадали из поиска).
+- Пишет биндинг `kb_folders.catalog_topic_id/_subtopic_id`.
+
+**Broadened resync (`20260611130200`):** `trg_fn_kb_after_update_moderation` CASE B (resync опубликованного источника) **больше НЕ гейтится** `kb_is_in_socrat_tree` → правка источника синхронит каталог из любой папки. CASE A (авто-публикация при переносе в «сократ») не тронут. `kb_resync_task` сам ловит коллизии fingerprint.
+
+**Anti-leak рубрики — legacy `promote` нейтрализован (`20260611130300`):** `promote_folder_to_catalog` (прямой `owner_id=NULL` без strip рубрики, в обход dedup) **REVOKE’нут от authenticated/PUBLIC** (в UI/edge не вызывается; миграции-сиды от superuser работают) + **scrub** `UPDATE kb_tasks SET rubric_text=NULL, rubric_image_urls=NULL WHERE owner_id IS NULL`. `kb_publish_task` INSERT и `kb_resync_task` UPDATE рубрику не копируют → каталожные копии чисты by construction. **Любой новый путь публикации — ТОЛЬКО через `kb_publish_task`**, не прямой `owner_id=NULL`.
+
+**Поиск kind-aware (`20260611130300`):** `kb_search` получил параметр `kind_filter TEXT DEFAULT NULL` (DROP+CREATE, старые 4-арг вызовы работают). `'olympiad'` → `t.kind='olympiad'` / каталожные задачи под олимпиадной темой; иначе ветка `exam` (как было). Без этого олимпиадный поиск был пуст (`t.exam=NULL ≠ exam_filter`).
+
+**Frontend:**
+- Фильтр витрины — `CatalogFilter = 'ege'|'oge'|'olympiad'` (3-я кнопка «Олимпиады»). `useTopics(filter)`: `olympiad`→`kind='olympiad'`, ege/oge→`exam=filter AND kind='exam'`. `useTopics()` без аргумента = все темы (селекторы в `CreateTaskModal`/`KBPickerSheet`).
+- Олимпиадная тема: группировка задач **по подтемам** (`groupTasksBySubtopic`, не `groupTasksByKim`); № КИМ скрыт; `ExamBadge` рисует по `kind` (бейдж «Олимпиада», т.к. `exam=NULL`).
+- `CatalogTaskGroups` расширен **backward-compat**: `KimGroup` получил опц. `key`/`label` (КИМ-группы их не задают → пикер ДЗ не тронут, rule 40).
+- Модераторский UI за `useIsModerator()`: «＋ Тема» на лендинге, «Редактировать тему» + `SubtopicManager` на странице темы, «В каталог» (`PublishFolderModal`) на странице папки. Новые: `TopicEditorModal`, `SubtopicManager`, `PublishFolderModal`, `kbModeratorApi.ts`, `useModeratorCatalog.ts`.
+- `kbModeratorApi.rpcError`: кириллица в message → показываем (rule 97), иначе рус. fallback + `console.warn` сырого текста (диагностика).
+
+**Контент:** математика отложена (решение владельца) — колонка `subject` заложена, это добавление контента+под-фильтра, не схемы. Олимпиадный контент = физика Егора.
+
+**При расширении:** новая запись в `kb_topics`/`kb_subtopics` — через `kb_mod_*` RPC (не прямой PostgREST); новый путь публикации — через `kb_publish_task` (рубрика не утекает); новый предмет/измерение — additive колонка + фильтр; олимпиадные темы — `exam=NULL`, без № КИМ; смена сигнатуры `useTopics`/`KimGroup` — проверить `KBPickerSheet`/`CreateTaskModal` (rule 40 risk-zone).
+
 ## Storage protection (2026-05-20, миграция `20260520120000`)
 
 `trg_protect_kb_attachments_from_delete` — BEFORE DELETE на `storage.objects`. Блокирует удаление объекта из bucket `kb-attachments`, если хоть один `kb_tasks.attachment_url` или `kb_tasks.solution_attachment_url` ссылается на него.

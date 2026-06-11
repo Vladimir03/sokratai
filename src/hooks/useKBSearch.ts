@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabaseClient';
-import type { ExamType } from '@/types/kb';
+import type { CatalogFilter, ExamType } from '@/types/kb';
 
 // =============================================
 // Types
@@ -30,13 +30,17 @@ export interface KBSearchGrouped {
 
 async function fetchKBSearch(
   query: string,
-  examFilter: ExamType,
+  filter: CatalogFilter,
 ): Promise<KBSearchResult[]> {
+  // kb_search kind-aware: для 'olympiad' фильтруем по kind (exam=NULL у олимпиад),
+  // для ЕГЭ/ОГЭ — по exam (kind_filter=undefined → ветка exam в RPC).
+  const isOlympiad = filter === 'olympiad';
   const { data, error } = await supabase.rpc('kb_search', {
     query,
-    exam_filter: examFilter,
+    exam_filter: isOlympiad ? undefined : (filter as ExamType),
     source_filter: undefined,
     result_limit: 20,
+    kind_filter: isOlympiad ? 'olympiad' : undefined,
   });
   if (error) throw error;
   // Generated types mark parent_topic_id/snippet as non-null but SQL returns NULLs
@@ -52,7 +56,7 @@ async function fetchKBSearch(
  * Calls supabase.rpc('kb_search') and groups results by type.
  * Identity is resolved server-side via auth.uid().
  */
-export function useKBSearch(query: string, examFilter: ExamType) {
+export function useKBSearch(query: string, examFilter: CatalogFilter) {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 

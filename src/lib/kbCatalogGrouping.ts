@@ -1,7 +1,7 @@
 // Группировка и счётчики задач каталога Сократа.
 // Чистые помощники (без React) — переиспользуются каталогом (`CatalogTopicPage`)
 // и пикером конструктора ДЗ (`KBPickerSheet`).
-import type { KBTask } from '@/types/kb';
+import type { KBSubtopic, KBTask } from '@/types/kb';
 
 /** Sentinel для фильтра «Без подтемы» (отличается от `null` = «Все подтемы»). */
 export const NO_SUBTOPIC_FILTER = '__no_subtopic__';
@@ -10,6 +10,13 @@ export interface KimGroup {
   /** Номер КИМ группы, либо `null` для задач без номера. */
   kim: number | null;
   tasks: KBTask[];
+  /**
+   * Опциональные display-переопределения для не-КИМ группировок (олимпиады
+   * группируются по подтемам). Если заданы — `CatalogTaskGroups` берёт их
+   * вместо дефолтных «КИМ № N». KIM-группы их не задают → поведение прежнее.
+   */
+  key?: string;
+  label?: string;
 }
 
 export interface SubtopicCounts {
@@ -60,6 +67,55 @@ export function groupTasksByKim(
     }
     current.tasks.push(task);
   }
+  return groups;
+}
+
+/**
+ * Группирует задачи по ПОДТЕМЕ — для олимпиадных тем (без № КИМ).
+ * Порядок групп: по `sort_order` подтемы; задачи без подтемы — в конце.
+ * Если у темы нет подтем вовсе → одна группа «Все задачи».
+ * Возвращает `KimGroup[]` (с заданными `key`/`label`) для переиспользования
+ * `CatalogTaskGroups` без изменения его сигнатуры.
+ */
+export function groupTasksBySubtopic(
+  tasks: KBTask[],
+  subtopics: KBSubtopic[],
+): KimGroup[] {
+  if (tasks.length === 0) return [];
+
+  const order = new Map(subtopics.map((s) => [s.id, s.sort_order]));
+  const nameById = new Map(subtopics.map((s) => [s.id, s.name]));
+
+  const bySubtopic = new Map<string, KBTask[]>();
+  const noSubtopic: KBTask[] = [];
+  for (const t of tasks) {
+    if (t.subtopic_id && nameById.has(t.subtopic_id)) {
+      const list = bySubtopic.get(t.subtopic_id) ?? [];
+      list.push(t);
+      bySubtopic.set(t.subtopic_id, list);
+    } else {
+      noSubtopic.push(t);
+    }
+  }
+
+  // Нет подтем → единая группа «Все задачи» (без шумного заголовка-разбивки).
+  if (bySubtopic.size === 0) {
+    return [{ kim: null, key: 'all', label: 'Все задачи', tasks }];
+  }
+
+  const groups: KimGroup[] = Array.from(bySubtopic.entries())
+    .sort((a, b) => (order.get(a[0]) ?? SORT_LAST) - (order.get(b[0]) ?? SORT_LAST))
+    .map(([id, list]) => ({
+      kim: null,
+      key: id,
+      label: nameById.get(id) ?? 'Подтема',
+      tasks: list,
+    }));
+
+  if (noSubtopic.length > 0) {
+    groups.push({ kim: null, key: NO_SUBTOPIC_FILTER, label: 'Без подтемы', tasks: noSubtopic });
+  }
+
   return groups;
 }
 

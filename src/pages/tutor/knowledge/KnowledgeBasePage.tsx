@@ -11,13 +11,15 @@ import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
 import { TopicCard } from '@/components/kb/TopicCard';
+import { TopicEditorModal } from '@/components/kb/TopicEditorModal';
 import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
 import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
+import { useIsModerator } from '@/hooks/useIsModerator';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { cn } from '@/lib/utils';
-import type { ExamType, KBTopicWithCounts } from '@/types/kb';
+import type { CatalogFilter, KBTopicWithCounts } from '@/types/kb';
 
 type MainTab = 'catalog' | 'mybase';
 
@@ -26,7 +28,7 @@ function KnowledgeBaseContent() {
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') === 'mybase' ? 'mybase' : 'catalog';
   const [mainTab, setMainTab] = useState<MainTab>(initialTab);
-  const [examFilter, setExamFilter] = useState<ExamType>('ege');
+  const [examFilter, setExamFilter] = useState<CatalogFilter>('ege');
   const [searchQuery, setSearchQuery] = useState('');
 
   return (
@@ -76,8 +78,8 @@ function KnowledgeBaseContent() {
 interface CatalogHomeProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
-  examFilter: ExamType;
-  setExamFilter: (value: ExamType) => void;
+  examFilter: CatalogFilter;
+  setExamFilter: (value: CatalogFilter) => void;
   onOpenTopic: (topicId: string) => void;
 }
 
@@ -91,7 +93,9 @@ function CatalogHome({
   const navigate = useNavigate();
   const { topics, loading, error, refetch, isFetching } = useTopics(examFilter);
   const search = useKBSearch(searchQuery, examFilter);
+  const { isModerator } = useIsModerator();
   const [showDropdown, setShowDropdown] = useState(true);
+  const [showCreateTopic, setShowCreateTopic] = useState(false);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
@@ -131,11 +135,23 @@ function CatalogHome({
     <div>
       <KBStatusCard error={error} isFetching={isFetching} onRetry={refetch} className="mb-6" />
 
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-foreground">
-          Каталог задач
-        </h2>
-        <p className="mt-2 text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground">
+            Каталог задач
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
+        </div>
+        {isModerator ? (
+          <button
+            type="button"
+            onClick={() => setShowCreateTopic(true)}
+            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5 text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35 [touch-action:manipulation]"
+          >
+            <Plus className="h-4 w-4" />
+            Тема
+          </button>
+        ) : null}
       </div>
 
       <div className="relative mb-4">
@@ -168,10 +184,11 @@ function CatalogHome({
       <FilterChips
         className="mb-7"
         selected={examFilter}
-        onChange={(key) => setExamFilter(key as ExamType)}
+        onChange={(key) => setExamFilter(key as CatalogFilter)}
         options={[
           { key: 'ege', label: 'ЕГЭ Физика', activeClassName: 'text-socrat-ege' },
           { key: 'oge', label: 'ОГЭ Физика', activeClassName: 'text-socrat-oge' },
+          { key: 'olympiad', label: 'Олимпиады', activeClassName: 'text-socrat-folder' },
         ]}
       />
 
@@ -199,6 +216,27 @@ function CatalogHome({
           <p className="text-sm font-semibold text-slate-800">Ничего не найдено</p>
           <p className="mt-1 text-xs text-slate-500">Попробуйте изменить запрос</p>
         </div>
+      ) : null}
+
+      {!loading && topics.length === 0 && !searchQuery.trim() ? (
+        <div className="rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-12 text-center">
+          <p className="text-sm font-semibold text-slate-800">
+            {examFilter === 'olympiad' ? 'Олимпиадных тем пока нет' : 'Тем пока нет'}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {isModerator
+              ? 'Создайте тему кнопкой «Тема» выше и опубликуйте в неё задачи из своей папки.'
+              : 'Скоро здесь появятся задачи.'}
+          </p>
+        </div>
+      ) : null}
+
+      {showCreateTopic ? (
+        <TopicEditorModal
+          mode="create"
+          kind={examFilter === 'olympiad' ? 'olympiad' : 'exam'}
+          onClose={() => setShowCreateTopic(false)}
+        />
       ) : null}
     </div>
   );
