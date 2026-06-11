@@ -738,7 +738,7 @@ async function handleGetResult(
       .from("mock_exam_attempt_part2_solutions")
       .select(
         isApproved
-          ? "kim_number, photo_url, tutor_score, tutor_comment, status"
+          ? "kim_number, photo_url, tutor_score, tutor_comment, status, ai_draft_json, hide_ai_feedback"
           : "kim_number, photo_url, status, ai_draft_json",
       )
       .eq("attempt_id", attempt.id)
@@ -763,11 +763,26 @@ async function handleGetResult(
           await Promise.all(solutionImageRefs.map((r) => resolveSignedUrl(db, r)))
         ).filter((u): u is string => typeof u === "string");
         if (isApproved) {
+          // 2026-06-11: post-approval раскрываем AI разбор ОТДЕЛЬНЫМ блоком рядом с
+          // комментарием репетитора (decision #1), gated `hide_ai_feedback`.
+          // Извлекаем ТОЛЬКО `feedback` из ai_draft_json (как pre-approval) —
+          // comment_for_tutor / flags / elements_check / confidence НИКОГДА ученику
+          // (rule 45 anti-leak). hide → null. Без graceful-placeholder (post-approval
+          // нет «AI проверяет…» лимба — пустой feedback → блок просто не рендерится).
+          const draftApproved = (row.ai_draft_json && typeof row.ai_draft_json === "object")
+            ? row.ai_draft_json as Record<string, unknown>
+            : null;
+          const hideAi = row.hide_ai_feedback === true;
+          const aiFeedbackApproved = (!hideAi && draftApproved &&
+            typeof draftApproved.feedback === "string" && draftApproved.feedback.trim() !== "")
+            ? draftApproved.feedback
+            : null;
           return {
             kim_number: row.kim_number,
             photo_url: photoSigned,
             tutor_score: row.tutor_score,
             tutor_comment: row.tutor_comment,
+            ai_feedback: aiFeedbackApproved,
             status: row.status,
             max_score: (v?.max_score as number | undefined) ?? 0,
             task_text: (v?.task_text as string | null) ?? null,

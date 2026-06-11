@@ -15,10 +15,12 @@ import type {
   CreateInviteLinkPayload,
   CreateMockExamAssignmentPayload,
   CreateMockExamAssignmentResponse,
+  CuratePart2TaskPayload,
   MockExamAssignmentDetail,
   MockExamAssignmentListItem,
   MockExamAttemptDetail,
   MockExamInviteLink,
+  MockExamPart2SolutionStatus,
 } from '@/types/mockExam';
 
 // HARDCODED — see src/lib/supabaseClient.ts (RU bypass, ignore Lovable auto-env).
@@ -229,6 +231,38 @@ export async function assignMockExamPart2Photos(
 ): Promise<{ attempt_id: string; updated_kim_count: number }> {
   return requestTutorMockExamApi(
     `/attempts/${encodeURIComponent(attemptId)}/assign-part2-photos`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/**
+ * 2026-06-11: per-task курирование Части 2 — репетитор скрывает AI разбор от ученика
+ * и/или пишет свой комментарий, БЕЗ подтверждения задачи (не меняет балл/статус,
+ * не пересчитывает totals). См. handleCuratePart2Task.
+ */
+export async function curateMockExamPart2Task(
+  attemptId: string,
+  payload: CuratePart2TaskPayload,
+): Promise<{
+  attempt_id: string;
+  kim_number: number;
+  tutor_comment: string | null;
+  hide_ai_feedback: boolean;
+  status: MockExamPart2SolutionStatus;
+}> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/curate-part2-task`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+}
+
+/** 2026-06-11: bulk «скрыть/показать AI по всем задачам Части 2» одной попытки. */
+export async function curateMockExamPart2HideAll(
+  attemptId: string,
+  payload: { hide_ai_feedback: boolean },
+): Promise<{ attempt_id: string; updated_kim_count: number; hide_ai_feedback: boolean }> {
+  return requestTutorMockExamApi(
+    `/attempts/${encodeURIComponent(attemptId)}/curate-part2-hide-all`,
     { method: 'POST', body: JSON.stringify(payload) },
   );
 }

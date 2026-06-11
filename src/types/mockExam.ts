@@ -390,6 +390,19 @@ export interface MockExamAttemptPart2Solution {
   solution_text: string | null;
   /** 2026-06-05 (item 5): фото эталонного решения (signed URLs). */
   solution_image_urls?: string[];
+  /** 2026-06-11: репетитор скрыл AI разбор (feedback) от ученика по этой задаче. */
+  hide_ai_feedback?: boolean;
+}
+
+/**
+ * 2026-06-11: per-task курирование Части 2 — репетитор скрывает AI разбор от ученика
+ * и/или пишет свой комментарий, БЕЗ подтверждения задачи (отдельный endpoint
+ * curate-part2-task, не меняет status/score).
+ */
+export interface CuratePart2TaskPayload {
+  kim_number: number;
+  tutor_comment?: string | null;
+  hide_ai_feedback?: boolean;
 }
 
 export interface MockExamAttemptDetail {

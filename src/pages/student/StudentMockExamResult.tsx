@@ -570,6 +570,10 @@ function Part2SolutionCard({
   const hasComment = Boolean(
     solution.tutor_comment && solution.tutor_comment.trim().length > 0,
   );
+  // 2026-06-11: post-approval AI разбор — отдельный блок (если репетитор не скрыл;
+  // backend отдаёт null при hide_ai_feedback). Может сосуществовать с комментарием.
+  const aiFeedback = (solution.ai_feedback ?? '').trim();
+  const hasAi = aiFeedback.length > 0;
 
   return (
     <Card className="shadow-none">
@@ -612,6 +616,16 @@ function Part2SolutionCard({
               loading="lazy"
               className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
             />
+          </div>
+        )}
+
+        {hasAi && (
+          <div className="mt-3 rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900">
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Разбор AI
+            </p>
+            <p className="whitespace-pre-wrap leading-6">{aiFeedback}</p>
           </div>
         )}
 

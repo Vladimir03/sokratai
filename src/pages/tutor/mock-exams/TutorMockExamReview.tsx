@@ -28,7 +28,10 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Eye,
+  EyeOff,
   Info,
+  Loader2,
   Pencil,
   RotateCcw,
   Search,
@@ -39,6 +42,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -70,6 +74,8 @@ import {
   approveMockExamAll,
   approveMockExamTask,
   assignMockExamPart2Photos,
+  curateMockExamPart2HideAll,
+  curateMockExamPart2Task,
   finalizeMockExamPart1,
   regradeMockExamPart2,
   retryMockExamPart1OCR,
@@ -1247,6 +1253,53 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
     approveMutation.mutate({ score, comment });
   };
 
+  // 2026-06-11: inline курирование Части 2 — комментарий ученику + скрыть AI разбор,
+  // БЕЗ подтверждения задачи (curate-эндпоинт не меняет балл/статус/totals). Optimistic
+  // patch кэша attempt → мгновенная реакция тумблера; rollback на ошибке.
+  const [commentDraft, setCommentDraft] = useState(solution.tutor_comment ?? '');
+  useEffect(() => {
+    setCommentDraft(solution.tutor_comment ?? '');
+  }, [solution.tutor_comment]);
+
+  const curateMutation = useMutation({
+    mutationFn: (patch: { tutor_comment?: string | null; hide_ai_feedback?: boolean }) =>
+      curateMockExamPart2Task(attemptId, { kim_number: solution.kim_number, ...patch }),
+    onMutate: async (patch) => {
+      const key = MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId);
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<MockExamAttemptDetail>(key);
+      queryClient.setQueryData<MockExamAttemptDetail>(key, (old) =>
+        old
+          ? {
+              ...old,
+              part2_solutions: old.part2_solutions.map((s) =>
+                s.kim_number === solution.kim_number ? { ...s, ...patch } : s,
+              ),
+            }
+          : old,
+      );
+      return { prev };
+    },
+    onError: (err, _patch, ctx) => {
+      if (ctx?.prev) {
+        queryClient.setQueryData(MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId), ctx.prev);
+      }
+      toast.error(err instanceof MockExamApiError ? err.message : 'Не удалось сохранить');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId),
+      });
+    },
+  });
+
+  const handleCommentBlur = () => {
+    const next = commentDraft.trim();
+    if (next !== (solution.tutor_comment ?? '')) {
+      curateMutation.mutate({ tutor_comment: next.length > 0 ? next : null });
+    }
+  };
+
   // Card shell — низкая уверенность красная рамка, иначе нейтральная.
   const cardClass = cn(
     'bg-white border rounded-lg overflow-hidden dark:bg-slate-900',
@@ -1472,13 +1525,40 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           </div>
         ) : null}
 
-        {/* 2026-06-02 (item 2): shared AI разбор — видит И ученик, И ты. Главный фидбэк. */}
+        {/* 2026-06-02: shared AI разбор — видит И ученик, И ты. Главный фидбэк.
+            2026-06-11: репетитор может СКРЫТЬ его от ученика (per-task тумблер).
+            Скрытый — виден тебе серым с пометкой; ученик post-approval его не увидит. */}
         {aiDraft?.feedback ? (
-          <div className="rounded-md border border-violet-200 bg-violet-50 p-3 text-sm text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200">
-            <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
-              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              Разбор AI · видит ученик
-            </p>
+          <div
+            className={cn(
+              'rounded-md border p-3 text-sm transition-colors',
+              solution.hide_ai_feedback
+                ? 'border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-500'
+                : 'border-violet-200 bg-violet-50 text-violet-900 dark:border-violet-900 dark:bg-violet-950/30 dark:text-violet-200',
+            )}
+          >
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                {solution.hide_ai_feedback ? 'Разбор AI · скрыт от ученика' : 'Разбор AI · видит ученик'}
+              </p>
+              {!isReadOnlyAttempt ? (
+                <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-normal normal-case text-slate-500">
+                  {solution.hide_ai_feedback ? (
+                    <EyeOff className="h-3.5 w-3.5" aria-hidden="true" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Скрыть
+                  <Switch
+                    checked={solution.hide_ai_feedback ?? false}
+                    onCheckedChange={(next) => curateMutation.mutate({ hide_ai_feedback: next })}
+                    disabled={curateMutation.isPending}
+                    aria-label="Скрыть AI разбор от ученика"
+                  />
+                </label>
+              ) : null}
+            </div>
             <Suspense fallback={<span>{aiDraft.feedback}</span>}>
               <MathText text={aiDraft.feedback} />
             </Suspense>
@@ -1495,8 +1575,41 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           </div>
         ) : null}
 
-        {/* Tutor comment (если был при override) */}
-        {solution.tutor_comment ? (
+        {/* 2026-06-11: редактируемый комментарий ученику inline (раньше read-only).
+            Save on-blur через curate-эндпоинт (НЕ меняет балл/статус/totals). Ученик
+            видит post-approval (decision #2). Та же колонка tutor_comment, что в диалоге
+            «Изменить балл» — last-write-wins, общий query key. */}
+        {!isReadOnlyAttempt ? (
+          <div className="rounded-md border border-emerald-200 bg-emerald-50/50 p-3 dark:border-emerald-900 dark:bg-emerald-950/20">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <label
+                htmlFor={`p2-comment-${solution.kim_number}`}
+                className="text-xs font-medium text-emerald-800 dark:text-emerald-300"
+              >
+                Комментарий ученику (необязательно)
+              </label>
+              {curateMutation.isPending ? (
+                <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                  Сохраняю…
+                </span>
+              ) : null}
+            </div>
+            <textarea
+              id={`p2-comment-${solution.kim_number}`}
+              value={commentDraft}
+              onChange={(e) => setCommentDraft(e.target.value)}
+              onBlur={handleCommentBlur}
+              rows={2}
+              placeholder="Например: ход верный, но потеряны единицы измерения"
+              className="w-full resize-y rounded-md border border-emerald-200 bg-white px-3 py-2 text-base text-slate-800 placeholder:text-slate-400 focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 dark:border-emerald-900 dark:bg-slate-900 dark:text-slate-100"
+              style={{ touchAction: 'manipulation' }}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Ученик увидит это после подтверждения пробника.
+            </p>
+          </div>
+        ) : solution.tutor_comment ? (
           <div className="bg-slate-50 border border-slate-200 rounded p-3 dark:bg-slate-800 dark:border-slate-700">
             <p className="text-xs text-slate-500 mb-1">Твой комментарий</p>
             <Suspense fallback={<p className="text-sm">{solution.tutor_comment}</p>}>
@@ -1983,6 +2096,27 @@ function TutorMockExamReviewContent() {
       .sort((a, b) => a.kim_number - b.kim_number);
   }, [attempt]);
 
+  // 2026-06-11: bulk «скрыть/показать AI разбор по всем задачам Части 2».
+  const allAiHidden =
+    part2Solutions.length > 0 && part2Solutions.every((s) => s.hide_ai_feedback);
+  const hideAllMutation = useMutation({
+    mutationFn: (hide: boolean) =>
+      curateMockExamPart2HideAll(attemptId as string, { hide_ai_feedback: hide }),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({
+        queryKey: MOCK_EXAM_ATTEMPT_QUERY_KEY(attemptId as string),
+      });
+      toast.success(
+        res.hide_ai_feedback
+          ? 'AI разбор скрыт по всем задачам Части 2'
+          : 'AI разбор показан по всем задачам Части 2',
+      );
+    },
+    onError: (err) => {
+      toast.error(err instanceof MockExamApiError ? err.message : 'Не удалось обновить');
+    },
+  });
+
   // TASK-OCR-2 Round 2 (2026-05-21): combined "Запустить AI заново" — параллельно
   // зовёт retry-part1-ocr (если blank mode) + regrade-part2. Mirrors stale-lock
   // recovery pattern в обоих endpoint'ах. Используется в
@@ -2296,9 +2430,26 @@ function TutorMockExamReviewContent() {
           отображается в карточке как legacy fallback. */}
       {part2Solutions.length > 0 ? (
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Часть 2 — оценка по задачам ({part2Solutions.length} {part2Solutions.length === 1 ? 'задание' : 'задания'})
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight">
+              Часть 2 — оценка по задачам ({part2Solutions.length} {part2Solutions.length === 1 ? 'задание' : 'задания'})
+            </h2>
+            {attempt.status !== 'manually_entered' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => hideAllMutation.mutate(!allAiHidden)}
+                disabled={hideAllMutation.isPending}
+              >
+                {allAiHidden ? (
+                  <Eye className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                ) : (
+                  <EyeOff className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                {allAiHidden ? 'Показать AI по всем' : 'Скрыть AI по всем'}
+              </Button>
+            ) : null}
+          </div>
           <div className="space-y-3">
             {part2Solutions.map((solution) => (
               <Part2TaskCard

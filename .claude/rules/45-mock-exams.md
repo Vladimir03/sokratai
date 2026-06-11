@@ -118,3 +118,21 @@ Variant 1 = physics ЕГЭ. `_shared/mock-exam-prompts.ts` uses `resolveSubjectR
 - Frontend (`sokratai.ru`) — отдельно через `deploy-sokratai` (VPS, `git pull`); edge — через Lovable. Два независимых деплоя.
 
 Лог: план `~/.claude/plans/fuzzy-gliding-rossum.md`, memory `project_mock_result_summary_2026_06_08.md`.
+
+## Курирование Части 2 репетитором — скрыть AI разбор + комментарий ученику (2026-06-11)
+
+Запрос Елены (скрыть/удалить не понравившийся AI-комментарий) + Vladimir (свой комментарий к задачам Ч2). Репетитор курирует, что видит ученик по каждой задаче Части 2: **скрыть AI разбор** (`feedback`) и/или **написать свой комментарий** — inline на карточке, БЕЗ подтверждения задачи.
+
+**Схема:** `mock_exam_attempt_part2_solutions.hide_ai_feedback BOOLEAN NOT NULL DEFAULT false` (миграция `20260611120000`). Table-level GRANT покрывает. Управляет **только** `feedback` — `comment_for_tutor`/`flags`/`elements_check` ученику не доходят независимо.
+
+**Reveal-контракт (изменён, decision):** post-approval теперь раскрывает **ДВА отдельных блока** ученику: AI разбор (violet, если `feedback` непуст И `!hide_ai_feedback`) + комментарий репетитора (emerald, если есть). Раньше post-approval AI разбор НЕ отдавался вообще. `handleGetResult` approved-ветка теперь SELECTит `ai_draft_json, hide_ai_feedback` и извлекает **ТОЛЬКО `feedback`** (как pre-approval, rule 45 anti-leak), gated hide → null. Pre-approval (предварительно) — без изменений. `ai_suggested_score` post-approval НЕ добавляли (итог = `tutor_score`).
+
+**Write-path (КРИТИЧНО — отдельный endpoint, НЕ extend approve):** `POST /attempts/:id/curate-part2-task` (`handleCuratePart2Task`) + `POST /attempts/:id/curate-part2-hide-all`. Почему отдельный: `handleApproveTask` требует `tutor_score`, флипает `status` (heuristic непустой comment → `tutor_modified`) и зовёт `resyncAttemptTotals` — курирование не должно делать НИЧЕГО из этого. **UPDATE (не UPSERT)** по `(attempt_id, kim_number)` — UPSERT вставил бы фантом с `status` DEFAULT на нерешённый KIM; нет строки → 404. Без `status`/`tutor_score`/resync → status preservation цел, totals не трогаются. `manually_entered` → 409. `tutor_comment` пишут **два пути** (curate inline + диалог approve) — одна колонка, оба инвалидируют `MOCK_EXAM_ATTEMPT_QUERY_KEY` → last-write-wins, single source (диалоговое поле оставлено намеренно).
+
+**Frontend tutor (`TutorMockExamReview.tsx`, HIGH-RISK):** `Part2TaskCard` — тумблер «Скрыть» (`Switch`) на шапке AI-разбора (скрытый → серый + «скрыт от ученика»); inline `<textarea>` «Комментарий ученику» (save **on-blur**, `text-base` iOS, optimistic patch кэша attempt → rollback на ошибке). Bulk «Скрыть/Показать AI по всем» в шапке секции Часть 2 (`curateMockExamPart2HideAll`, идемпотентно/двунаправленно, label из `every(hide)`). Gated `!manually_entered`. Reuse violet (AI) / emerald (репетитор) палитры (rule 90 waiver).
+
+**Frontend student (`StudentMockExamResult.tsx`):** `Part2SolutionCard` (approved) — violet «Разбор AI» блок (если `ai_feedback`) ПЕРЕД emerald «Комментарий репетитора». Оба gated на непустой контент: оба/один/ни одного (AI скрыт + нет коммента → только балл + эталон).
+
+**При расширении:** новое per-task курирование Ч2 → отдельный curate-endpoint (UPDATE, без status/score/resync), не extend approve; новое поле, видимое ученику из ai_draft_json → извлекать ИМЕННО его (whitelist), не отдавать draft целиком; per-task флаг видимости — gated на approved-ветке reveal'а.
+
+**Deploy:** миграция first (Lovable) → редеплой `mock-exam-{tutor,student}-api` (Lovable, после миграции — обе SELECTят `hide_ai_feedback`) → `deploy-sokratai` (фронт). Лог: план `~/.claude/plans/fuzzy-gliding-rossum.md`, memory `project_mock_part2_curation_2026_06_11.md`.

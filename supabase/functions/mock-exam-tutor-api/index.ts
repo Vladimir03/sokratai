@@ -1401,7 +1401,7 @@ async function handleGetAttempt(
   // Part 2 solutions + signed photo URLs.
   const { data: part2Rows } = await db
     .from("mock_exam_attempt_part2_solutions")
-    .select("kim_number, photo_url, ai_draft_json, tutor_score, tutor_comment, status")
+    .select("kim_number, photo_url, ai_draft_json, tutor_score, tutor_comment, status, hide_ai_feedback")
     .eq("attempt_id", attemptId)
     .order("kim_number", { ascending: true });
 
@@ -1421,6 +1421,7 @@ async function handleGetAttempt(
         tutor_score: row.tutor_score,
         tutor_comment: row.tutor_comment,
         status: row.status,
+        hide_ai_feedback: row.hide_ai_feedback === true,
         task_text: variant?.task_text ?? "",
         task_image_url: variant?.task_image_url ?? null,
         max_score: variant?.max_score ?? 0,
@@ -2565,6 +2566,108 @@ async function handleRecheckPart1(
 // чтобы AI пересчитал баллы с новой привязкой.
 // ────────────────────────────────────────────────────────────────────────────
 
+// 2026-06-11: per-task курирование Части 2 репетитором (скрыть AI разбор от ученика
+// + свой комментарий ученику) — БЕЗ approval. Отдельный endpoint, а НЕ extend
+// approve-task: handleApproveTask требует tutor_score, флипает status (heuristic:
+// непустой comment → tutor_modified) и зовёт resyncAttemptTotals — курирование не
+// должно делать НИЧЕГО из этого. Прецедент — handleAssignPart2Photos. UPDATE (не
+// UPSERT): строка создаётся submit/grade'ом; UPSERT мог бы вставить фантом с status
+// DEFAULT 'awaiting_review' на нерешённый KIM. Без status/score → totals не трогаем,
+// status preservation цел. `tutor_comment` пишут ДВА пути (этот + диалог approve) —
+// одна колонка, оба инвалидируют один query key → last-write-wins, single source.
+async function handleCuratePart2Task(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+  if (attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "MANUALLY_ENTERED", "Это запись прошлого пробника — нечего курировать.");
+  }
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : null;
+  if (!b) {
+    return jsonError(cors, 400, "INVALID_BODY", "Тело запроса должно быть JSON-объектом");
+  }
+  if (!isPositiveInt(b.kim_number)) {
+    return jsonError(cors, 400, "VALIDATION", "kim_number должен быть положительным целым");
+  }
+  const hasComment = Object.prototype.hasOwnProperty.call(b, "tutor_comment");
+  const hasHide = Object.prototype.hasOwnProperty.call(b, "hide_ai_feedback");
+  if (!hasComment && !hasHide) {
+    return jsonError(cors, 400, "VALIDATION", "Передайте tutor_comment и/или hide_ai_feedback");
+  }
+  if (hasHide && typeof b.hide_ai_feedback !== "boolean") {
+    return jsonError(cors, 400, "VALIDATION", "hide_ai_feedback должен быть boolean");
+  }
+  if (hasComment && b.tutor_comment !== null && typeof b.tutor_comment !== "string") {
+    return jsonError(cors, 400, "VALIDATION", "tutor_comment должен быть строкой или null");
+  }
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (hasComment) {
+    const c = b.tutor_comment;
+    patch.tutor_comment = (typeof c === "string" && c.trim() !== "") ? c.trim() : null;
+  }
+  if (hasHide) patch.hide_ai_feedback = b.hide_ai_feedback;
+
+  const { data: updated, error } = await db
+    .from("mock_exam_attempt_part2_solutions")
+    .update(patch)
+    .eq("attempt_id", attemptId)
+    .eq("kim_number", b.kim_number as number)
+    .select("attempt_id, kim_number, tutor_comment, hide_ai_feedback, status")
+    .maybeSingle();
+  if (error) {
+    console.error("mock_exam_curate_part2_failed", { error: error.message, attempt_id: attemptId });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить");
+  }
+  if (!updated) {
+    return jsonError(cors, 404, "TASK_NOT_FOUND", "Задача не найдена для этой попытки");
+  }
+  return jsonOk(cors, updated);
+}
+
+// 2026-06-11: bulk «скрыть/показать AI по всем задачам Части 2». Один UPDATE всех
+// part2-строк попытки. Идемпотентно + двунаправленно. Только hide_ai_feedback.
+async function handleCuratePart2HideAll(
+  db: SupabaseClient,
+  tutorUserId: string,
+  attemptId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
+  if (ownedOrErr instanceof Response) return ownedOrErr;
+  const { attempt } = ownedOrErr;
+  if (attempt.status === "manually_entered") {
+    return jsonError(cors, 409, "MANUALLY_ENTERED", "Это запись прошлого пробника — нечего курировать.");
+  }
+
+  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+  if (typeof b.hide_ai_feedback !== "boolean") {
+    return jsonError(cors, 400, "VALIDATION", "hide_ai_feedback должен быть boolean");
+  }
+  const { data, error } = await db
+    .from("mock_exam_attempt_part2_solutions")
+    .update({ hide_ai_feedback: b.hide_ai_feedback, updated_at: new Date().toISOString() })
+    .eq("attempt_id", attemptId)
+    .select("kim_number");
+  if (error) {
+    console.error("mock_exam_curate_hide_all_failed", { error: error.message, attempt_id: attemptId });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось обновить");
+  }
+  return jsonOk(cors, {
+    attempt_id: attemptId,
+    updated_kim_count: (data ?? []).length,
+    hide_ai_feedback: b.hide_ai_feedback,
+  });
+}
+
 async function handleAssignPart2Photos(
   db: SupabaseClient,
   tutorUserId: string,
@@ -3594,6 +3697,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req);
       return await handleAssignPart2Photos(db, userId, seg[1], body, cors);
+    }
+
+    // 2026-06-11 — POST /attempts/:id/curate-part2-task
+    // Per-task курирование Части 2: скрыть AI разбор + комментарий ученику (без approval).
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "curate-part2-task" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleCuratePart2Task(db, userId, seg[1], body, cors);
+    }
+
+    // 2026-06-11 — POST /attempts/:id/curate-part2-hide-all
+    if (
+      seg.length === 3 && seg[0] === "attempts" &&
+      seg[2] === "curate-part2-hide-all" && route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleCuratePart2HideAll(db, userId, seg[1], body, cors);
     }
 
     // Phase 6 (2026-05-15) — POST /attempts/:id/regrade-part2

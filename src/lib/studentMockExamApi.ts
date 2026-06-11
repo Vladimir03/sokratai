@@ -272,7 +272,12 @@ export interface StudentMockExamResultPart2Solution {
    * (используется tutor_score).
    */
   ai_suggested_score?: number | null;
-  /** 2026-06-02 (item 2): shared AI разбор «что верно/неверно», pre-approval. */
+  /**
+   * Shared AI разбор «что верно/неверно». PRE-approval (2026-06-02, item 2) —
+   * «предварительно». POST-approval (2026-06-11) — раскрывается ОТДЕЛЬНЫМ блоком
+   * рядом с комментарием репетитора, gated `hide_ai_feedback` (репетитор может
+   * скрыть). null = AI ещё не проверил / скрыт репетитором.
+   */
   ai_feedback?: string | null;
   /** Populated post-submit (pre- and post-approval) — item 2. */
   task_text?: string | null;
