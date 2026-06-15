@@ -31,6 +31,8 @@ export interface ReportStatementEntry {
   amount: number; // РУБЛИ
 }
 
+export type ReportVerdict = 'good' | 'ok' | 'attention';
+
 export interface PublicStudentReportData {
   student: { name: string; track: string; grade_class: string | null; subject: string | null };
   tutor: { name: string | null };
@@ -41,11 +43,25 @@ export interface PublicStudentReportData {
     current_level: number | null;
     target: number | null;
     trend: number[];
+    // Homework-only счётчики (period-scoped). optional — старый edge их не шлёт (deploy-skew).
+    hw_done?: number;
+    hw_total?: number;
+    hw_overdue?: number;
+    hw_success_pct?: number | null;
   };
   works: ReportWork[];
-  balance: number; // РУБЛИ, отрицательный = долг
+  balance: number | null; // РУБЛИ, отрицательный = долг; null = тренер скрыл оплату
   statement: ReportStatementEntry[];
   generated_at: string;
+  // v2 (ОС Елены, 2026-06-15) — все optional для backward-compat со старым edge (deploy-skew):
+  // фронт деплоится отдельно (deploy-sokratai) от edge (Lovable), новый ReportBody должен
+  // корректно деградировать на старом payload.
+  verdict?: ReportVerdict | null;
+  tutor_comment?: string | null;
+  metrics?: { mock_score: boolean; hw_done: boolean; hw_success: boolean };
+  attention?: string[];
+  period?: { kind: string; start: string | null; end: string | null } | null;
+  show_debt_line?: boolean;
 }
 
 export type PublicStudentReportResult =
@@ -56,7 +72,7 @@ export type PublicStudentReportResult =
   | { status: 'error'; message: string };
 
 export async function fetchPublicStudentReport(slug: string): Promise<PublicStudentReportResult> {
-  if (!/^[a-z0-9]{8}$/i.test(slug)) return { status: 'invalid_slug' };
+  if (!/^[a-z0-9]{8,64}$/i.test(slug)) return { status: 'invalid_slug' }; // legacy 8 + новые 24
   try {
     const res = await fetch(
       `${FUNCTIONS_BASE_URL}/public-student-report/report/${slug.toLowerCase()}`,

@@ -23,7 +23,7 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
-const REPORT_SLUG_RE = /^[a-z0-9]{8}$/i;
+const REPORT_SLUG_RE = /^[a-z0-9]{8,64}$/i; // legacy 8-символьные + новые 24-символьные
 const STATEMENT_LIMIT = 60;
 const WORKS_LIMIT = 10;
 
@@ -72,7 +72,9 @@ Deno.serve(async (req) => {
 
     const { data: link, error: linkErr } = await db
       .from("student_report_links")
-      .select("slug, tutor_student_id, revoked_at")
+      .select(
+        "slug, tutor_student_id, revoked_at, verdict, show_mock_score, show_hw_done, show_hw_success, tutor_comment, period_kind, period_start, period_end, show_debt_line",
+      )
       .eq("slug", normalizedSlug)
       .maybeSingle();
     if (linkErr) {
@@ -104,30 +106,71 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Report link not found", code: "not_found" }, 404);
     }
 
-    // Прогресс — SHARED builder (single source с тутор-вью R2).
+    // Период отчёта (ОС Елены): конкретные даты-снимок хранятся на ссылке.
+    // period_kind='all' → даты NULL → all-time (как было). Иначе фильтруем агрегат.
+    const periodStart = (link.period_start as string | null) ?? null;
+    const periodEnd = (link.period_end as string | null) ?? null;
+    const period = (periodStart || periodEnd) ? { start: periodStart, end: periodEnd } : null;
+
+    // Прогресс — SHARED builder (single source с тутор-вью R2), period-scoped.
     const progress = await buildStudentProgress(
       db,
       tutor.user_id as string,
       ts.tutor_id as string,
       link.tutor_student_id as string,
+      period,
     );
     if (!progress) {
       return jsonResponse({ error: "Report link not found", code: "not_found" }, 404);
     }
 
-    // Выписка: активные записи (не reversed, не offsetting), БЕЗ note.
-    const { data: entries, error: ledgerErr } = await db
-      .from("tutor_ledger_entries")
-      .select("kind, amount, occurred_on, source_kind, created_at")
-      .eq("tutor_student_id", link.tutor_student_id as string)
-      .is("reversed_by_entry_id", null)
-      .is("reverses_entry_id", null)
-      .order("occurred_on", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(STATEMENT_LIMIT);
-    if (ledgerErr) {
-      console.error("student_report_ledger_load_failed", ledgerErr.message);
-      return jsonResponse({ error: "Failed to load report" }, 500);
+    // Оплата (ОС Елены): тренер может ПОЛНОСТЬЮ скрыть строку баланса (часть оплат вне
+    // Сократа). show_debt_line=false → НЕ грузим ledger и НЕ кладём ни баланс, ни выписку.
+    // Выписка period-scoped (операции за период); баланс — текущий (ответ «должен/ок сейчас»).
+    const showDebt = link.show_debt_line !== false;
+    let balance: number | null = null;
+    let statement: { occurred_on: unknown; kind: unknown; source_kind: unknown; amount: number }[] = [];
+    if (showDebt) {
+      let ledgerQuery = db
+        .from("tutor_ledger_entries")
+        .select("kind, amount, occurred_on, source_kind, created_at")
+        .eq("tutor_student_id", link.tutor_student_id as string)
+        .is("reversed_by_entry_id", null)
+        .is("reverses_entry_id", null);
+      if (periodStart) ledgerQuery = ledgerQuery.gte("occurred_on", periodStart);
+      if (periodEnd) ledgerQuery = ledgerQuery.lte("occurred_on", periodEnd);
+      const { data: entries, error: ledgerErr } = await ledgerQuery
+        .order("occurred_on", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(STATEMENT_LIMIT);
+      if (ledgerErr) {
+        console.error("student_report_ledger_load_failed", ledgerErr.message);
+        return jsonResponse({ error: "Failed to load report" }, 500);
+      }
+      balance = Number(ts.balance ?? 0);
+      statement = (entries ?? []).map((e) => ({
+        occurred_on: e.occurred_on,
+        kind: e.kind,
+        source_kind: e.source_kind,
+        amount: Number(e.amount ?? 0),
+      }));
+    }
+
+    // «Что требует внимания» — авто-факты (счётчики, anti-leak-safe). Тон/нажим тренер
+    // добавляет словами в комментарий (ОС Елены, Q3). Здесь — только факты.
+    const s = progress.summary;
+    const hwTotal = Number(s.hw_total ?? 0);
+    const hwDone = Number(s.hw_done ?? 0);
+    const overdue = Number(s.hw_overdue ?? 0);
+    const notDone = Math.max(0, hwTotal - hwDone);
+    const attention: string[] = [];
+    // overdue (срок прошёл + не завершено) ⊆ notDone → одна строка, без двойного счёта.
+    if (notDone > 0) {
+      const overduePart = overdue > 0 ? ` (из них просрочено ${overdue})` : "";
+      attention.push(`Не выполнено ${notDone} из ${hwTotal} ДЗ${overduePart} — напомните`);
+    }
+    if (s.hw_success_pct != null && s.hw_success_pct < 60 && hwDone > 0) {
+      attention.push(`Невысокий процент верных ответов: ${s.hw_success_pct}%`);
     }
 
     // PUBLIC REMAP — наружу только безопасные поля (никаких uuid/avatar/comments).
@@ -146,10 +189,9 @@ Deno.serve(async (req) => {
         status: w.status,
       }));
 
-    // Server-side telemetry, PII-free (mirror public-homework-share).
+    // Server-side telemetry, PII-free. slug = bearer-token → НЕ логируем его (даже в логах).
     console.warn(JSON.stringify({
       event: "student_report_visited",
-      slug: normalizedSlug,
       timestamp: new Date().toISOString(),
     }));
 
@@ -164,13 +206,19 @@ Deno.serve(async (req) => {
       target: progress.target,
       summary: progress.summary,
       works,
-      balance: Number(ts.balance ?? 0),
-      statement: (entries ?? []).map((e) => ({
-        occurred_on: e.occurred_on,
-        kind: e.kind,
-        source_kind: e.source_kind,
-        amount: Number(e.amount ?? 0),
-      })),
+      // Конфиг отчёта (ОС Елены): вердикт-чип, комментарий тренера, метрики-галочки, период.
+      verdict: (link.verdict as string | null) ?? null,
+      tutor_comment: (link.tutor_comment as string | null) ?? null,
+      metrics: {
+        mock_score: link.show_mock_score !== false,
+        hw_done: link.show_hw_done !== false,
+        hw_success: link.show_hw_success !== false,
+      },
+      attention,
+      period: { kind: (link.period_kind as string) ?? "all", start: periodStart, end: periodEnd },
+      show_debt_line: showDebt,
+      balance,
+      statement,
       generated_at: new Date().toISOString(),
     });
   } catch (e) {

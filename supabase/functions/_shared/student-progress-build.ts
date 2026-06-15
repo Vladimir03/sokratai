@@ -193,7 +193,20 @@ export interface StudentProgressPayload {
     current_level: number | null;
     target: number | null;
     trend: number[];
+    // Homework-only counters (period-scoped) — для «Отчёта родителю» (ОС Елены).
+    // Тутор-«Обзор» их игнорирует (additive). hw_success_pct = Σraw/Σmax по сданным
+    // (только работы с оценкой → несданные не топят % в ноль).
+    hw_done: number;
+    hw_total: number;
+    hw_overdue: number;
+    hw_success_pct: number | null;
   };
+}
+
+/** Период отчёта (даты-снимок). null/отсутствие границы = без ограничения. */
+export interface ProgressPeriod {
+  start: string | null; // YYYY-MM-DD (inclusive)
+  end: string | null; // YYYY-MM-DD (inclusive)
 }
 
 /**
@@ -206,6 +219,7 @@ export async function buildStudentProgress(
   tutorUserId: string,
   tutorPkId: string,
   tutorStudentId: string,
+  period?: ProgressPeriod | null,
 ): Promise<StudentProgressPayload | null> {
   const { data: ts } = await db
     .from("tutor_students")
@@ -229,7 +243,33 @@ export async function buildStudentProgress(
     (prof?.username && !/^user_/i.test(prof.username as string) ? (prof.username as string) : null) ||
     "Ученик";
 
+  // Период (ОС Елены): фильтруем работы по дате (deadline ?? created_at для ДЗ,
+  // дата сдачи для пробника). null/без границы = без ограничения (тутор-«Обзор» зовёт
+  // без периода → all-time, поведение не меняется). end инклюзивен (до конца дня).
+  const periodStartMs = period?.start ? Date.parse(period.start) : null;
+  const periodEndMs = period?.end ? Date.parse(period.end) + 86_400_000 : null; // exclusive next-day
+  const inPeriod = (dateStr: string | null | undefined): boolean => {
+    if (periodStartMs == null && periodEndMs == null) return true;
+    if (!dateStr) return true; // нет даты — не отбрасываем (консервативно)
+    const t = Date.parse(dateStr);
+    if (Number.isNaN(t)) return true;
+    if (periodStartMs != null && t < periodStartMs) return false;
+    if (periodEndMs != null && t >= periodEndMs) return false;
+    return true;
+  };
+
   const works: Record<string, unknown>[] = [];
+
+  // Homework-only counters (period-scoped) для «Отчёта родителю» (ОС Елены).
+  // hw_done = ЗАВЕРШЁННЫЕ треды (не «начатые») — родителю «сделано N из M» = доделано.
+  // success% — Σraw/Σmax ТОЛЬКО по завершённым (там все ячейки оценены → честный %,
+  // недоделанные задачи не топят его в ноль). overdue — срок прошёл И тред не завершён
+  // (сдано-вовремя-ждёт-проверки тренера = НЕ просрочка для родителя).
+  let hwTotal = 0;
+  let hwCompleted = 0;
+  let hwOverdue = 0;
+  let hwSumRaw = 0;
+  let hwSumMax = 0;
 
   // ── Homework works ──
   const hw = await loadHomeworkForStudents(db, tutorUserId, [studentId]);
@@ -244,6 +284,7 @@ export async function buildStudentProgress(
     if (sa.studentId !== studentId) continue;
     const assignment = hw.assignmentById.get(sa.assignmentId);
     if (!assignment) continue;
+    if (!inPeriod(assignment.deadline ?? assignment.created_at)) continue;
     const tasks = hw.tasksByAssignment.get(sa.assignmentId) ?? [];
     const tinfo = saThread.get(saId) ?? { threadStatus: "active", states: [] as HwState[] };
     const stateByTask = new Map(tinfo.states.map((s) => [s.task_id, s]));
@@ -268,6 +309,15 @@ export async function buildStudentProgress(
     const anyScore = cells.some((c) => c.score != null);
     const workStatus = !submitted ? "none" : reviewed ? "verified" : pendingReview > 0 ? "review" : "manual";
     const deadline = assignment.deadline;
+    const threadCompleted = tinfo.threadStatus === "completed";
+    hwTotal++;
+    if (threadCompleted) {
+      hwCompleted++;
+      hwSumRaw += raw;
+      hwSumMax += rawMax;
+    } else if (deadline != null && Date.parse(deadline) < Date.now()) {
+      hwOverdue++;
+    }
     works.push({
       id: sa.assignmentId,
       kind: "homework",
@@ -339,6 +389,7 @@ export async function buildStudentProgress(
       const reviewed = HW_CONFIRMED_MOCK.has(status);
       const dateStr = (at.submitted_at as string | null) ?? (at.manual_entered_date as string | null) ?? (at.created_at as string | null);
       const dateMs = dateStr ? Date.parse(dateStr) : 0;
+      if (!inPeriod(dateStr ?? meta.created_at)) continue;
       if (reviewed && scoreKind === "ege_scaled") {
         const scaled = egePrimaryToScaled(totalScore);
         if (scaled != null) confirmedScaledSeries.push({ date: dateMs, scaled });
@@ -386,6 +437,8 @@ export async function buildStudentProgress(
   const behindGoal = pctToGoal != null && pctToGoal < BEHIND_GOAL_PCT;
   const backlog = works.some((w) => w.status === "review");
 
+  const hwSuccessPct = hwSumMax > 0 ? Math.round((hwSumRaw / hwSumMax) * 100) : null;
+
   return {
     student: {
       id: tutorStudentId,
@@ -405,6 +458,10 @@ export async function buildStudentProgress(
       current_level: currentLevel,
       target: targetScore,
       trend,
+      hw_done: hwCompleted,
+      hw_total: hwTotal,
+      hw_overdue: hwOverdue,
+      hw_success_pct: hwSuccessPct,
     },
   };
 }

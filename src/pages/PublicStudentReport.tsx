@@ -3,7 +3,8 @@ import { useParams } from 'react-router-dom';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import {
-  AlertCircle, BookOpen, ClipboardCheck, FileQuestion, Link2Off, Target, Wallet,
+  AlertCircle, AlertTriangle, BookOpen, CheckCircle2, ClipboardCheck, FileQuestion,
+  Link2Off, MessageSquare, TrendingUp, Wallet,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatCurrency } from '@/lib/formatters';
@@ -13,6 +14,7 @@ import {
   fetchPublicStudentReport,
   type PublicStudentReportData,
   type ReportStatementEntry,
+  type ReportVerdict,
   type ReportWork,
 } from '@/lib/publicReportApi';
 
@@ -51,97 +53,193 @@ function WorkRow({ work }: { work: ReportWork }) {
   );
 }
 
+// Вердикт-чип «молодец / ругать» — ставит тренер (ОС Елены). Палитра emerald/amber/rose =
+// статусная семантика (rule 90 waiver). Иконки Lucide (не эмодзи — rule 90).
+const VERDICT_CONFIG: Record<ReportVerdict, { label: string; icon: typeof CheckCircle2; box: string; iconColor: string }> = {
+  good: { label: 'Молодец', icon: CheckCircle2, box: 'border-emerald-200 bg-emerald-50 text-emerald-900', iconColor: 'text-emerald-600' },
+  ok: { label: 'Есть над чем поработать', icon: TrendingUp, box: 'border-amber-200 bg-amber-50 text-amber-900', iconColor: 'text-amber-600' },
+  attention: { label: 'Нужен контроль', icon: AlertTriangle, box: 'border-rose-200 bg-rose-50 text-rose-900', iconColor: 'text-rose-600' },
+};
+
+function StatCard({ value, label, sub }: { value: string; label: string; sub?: string | null }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 text-center">
+      <p className="text-2xl font-bold tabular-nums text-slate-900">{value}</p>
+      <p className="mt-0.5 text-xs font-medium text-slate-500">{label}</p>
+      {sub ? <p className="mt-0.5 text-[11px] leading-tight text-muted-foreground">{sub}</p> : null}
+    </div>
+  );
+}
+
+function reportPeriodLabel(period: PublicStudentReportData['period']): string | null {
+  if (!period || (!period.start && !period.end)) return null;
+  if (period.start && period.end) {
+    return `за ${format(parseISO(period.start), 'd MMM', { locale: ru })} – ${format(parseISO(period.end), 'd MMM yyyy', { locale: ru })}`;
+  }
+  if (period.start) return `с ${format(parseISO(period.start), 'd MMM yyyy', { locale: ru })}`;
+  if (period.end) return `по ${format(parseISO(period.end), 'd MMM yyyy', { locale: ru })}`;
+  return null;
+}
+
 export function ReportBody({ data }: { data: PublicStudentReportData }) {
   const { student, tutor, summary, works, balance, statement } = data;
   const examLabel = student.track === 'ege' ? 'ЕГЭ'
     : student.track === 'oge' ? 'ОГЭ'
     : (student.track || '').toUpperCase();
+  const subjectLabel = student.subject ? getSubjectLabel(student.subject) : null;
+
   const trend = summary.trend ?? [];
   const trendDelta = trend.length >= 2 ? trend[trend.length - 1] - trend[trend.length - 2] : null;
-  const balanceTone = balance < 0 ? 'text-rose-600' : balance > 0 ? 'text-emerald-600' : 'text-slate-900';
+
+  // v2 (ОС Елены) — все поля optional: старый edge их не шлёт, фронт деградирует мягко.
+  const metrics = data.metrics ?? { mock_score: true, hw_done: true, hw_success: true };
+  const verdict = data.verdict ?? null;
+  const comment = (data.tutor_comment ?? '').trim();
+  const attention = data.attention ?? [];
+  const periodLabel = reportPeriodLabel(data.period);
+  // Оплата: старый edge без show_debt_line → показываем (как раньше), если есть баланс.
+  const showDebt = (data.show_debt_line ?? true) && balance != null;
+  const bal = balance ?? 0;
+
+  // Числа сверху — только включённые галочками метрики и при наличии данных (ОС Елены, Q2).
+  const stats: { value: string; label: string; sub?: string | null }[] = [];
+  if (metrics.mock_score && summary.current_level != null) {
+    const goalSub = summary.target != null
+      ? `цель ${formatScoreNumber(summary.target)}${trendDelta ? `, ${trendDelta > 0 ? '+' : ''}${formatScoreNumber(trendDelta)} за пробник` : ''}`
+      : null;
+    stats.push({ value: `≈${formatScoreNumber(summary.current_level)}`, label: 'Балл за пробник', sub: goalSub });
+  }
+  if (metrics.hw_done && (summary.hw_total ?? 0) > 0) {
+    stats.push({ value: `${summary.hw_done ?? 0} из ${summary.hw_total}`, label: 'Сделано ДЗ' });
+  }
+  if (metrics.hw_success && summary.hw_success_pct != null) {
+    stats.push({ value: `${summary.hw_success_pct}%`, label: 'Верных ответов' });
+  }
+  // Фолбэк ТОЛЬКО для старого edge (нет поля metrics) — иначе уважаем выбор тренера
+  // (снял все галочки → чисел нет). Новый edge всегда шлёт metrics.
+  if (stats.length === 0 && data.metrics == null && summary.total > 0) {
+    stats.push({ value: `${summary.done} из ${summary.total}`, label: 'Сдано работ' });
+  }
+
+  const VC = verdict ? VERDICT_CONFIG[verdict] : null;
 
   return (
-    <div className="space-y-6">
-      {/* Шапка отчёта */}
+    <div className="space-y-5">
+      {/* Шапка: предмет КРУПНО — родитель сразу понимает, о чём отчёт (ОС Елены, Гр.1) */}
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">Отчёт по ученику</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
-          {student.name}
-          {student.subject ? ` · ${getSubjectLabel(student.subject)}` : ''}
-          {examLabel ? ` · ${examLabel}` : ''}
-          {student.grade_class ? ` · ${student.grade_class}` : ''}
-        </p>
-        {tutor.name && (
-          <p className="text-sm text-muted-foreground">Репетитор: {tutor.name}</p>
+        {examLabel && (
+          <p className="text-xs font-semibold uppercase tracking-wide text-accent">{examLabel}</p>
         )}
+        <h1 className="text-2xl font-bold leading-tight text-slate-900">
+          {subjectLabel ?? 'Отчёт по ученику'}
+        </h1>
+        <p className="mt-1 text-base font-medium text-slate-900">
+          {student.name}
+          {student.grade_class ? <span className="font-normal text-muted-foreground"> · {student.grade_class}</span> : null}
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {periodLabel ?? 'за всё время'}
+          {tutor.name ? ` · Репетитор: ${tutor.name}` : ''}
+        </p>
       </div>
 
-      {/* Прогресс */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Прогресс</h2>
-        {(summary.current_level != null || summary.target != null) && (
-          <div className="mt-3 flex items-center gap-3 rounded-lg bg-socrat-surface px-3 py-2.5">
-            <Target className="h-5 w-5 shrink-0 text-accent" aria-hidden="true" />
-            <p className="text-sm text-slate-800">
-              {summary.current_level != null ? (
-                <>Текущий уровень: <span className="font-semibold tabular-nums">≈{formatScoreNumber(summary.current_level)}</span></>
-              ) : (
-                'Текущий уровень появится после первого подтверждённого пробника'
-              )}
-              {summary.target != null && (
-                <> · цель <span className="font-semibold tabular-nums">{formatScoreNumber(summary.target)}</span>{student.track === 'ege' ? ' баллов ЕГЭ' : ''}</>
-              )}
-              {trendDelta != null && trendDelta !== 0 && (
-                <span className={cn('ml-1 font-medium', trendDelta > 0 ? 'text-emerald-600' : 'text-rose-600')}>
-                  ({trendDelta > 0 ? '+' : ''}{formatScoreNumber(trendDelta)} за последний пробник)
-                </span>
-              )}
-            </p>
+      {/* Вердикт-чип + комментарий тренера — ответ «молодец или ругать?» */}
+      {(VC || comment) && (
+        <section className="space-y-3">
+          {VC && (
+            <div className={cn('flex items-center gap-2 rounded-xl border px-3.5 py-2.5', VC.box)}>
+              <VC.icon className={cn('h-5 w-5 shrink-0', VC.iconColor)} aria-hidden="true" />
+              <span className="text-base font-semibold">{VC.label}</span>
+            </div>
+          )}
+          {comment && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                Комментарий репетитора
+              </div>
+              <p className="mt-1.5 whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800">{comment}</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Числа сверху */}
+      {stats.length > 0 && (
+        <div className={cn('grid gap-2', stats.length === 1 ? 'grid-cols-1' : stats.length === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
+          {stats.map((st, i) => <StatCard key={i} {...st} />)}
+        </div>
+      )}
+
+      {/* Что требует внимания (авто-факты) / всё ок */}
+      {attention.length > 0 ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" /> Что требует внимания
+          </h2>
+          <ul className="mt-2 space-y-1">
+            {attention.map((a, i) => (
+              <li key={i} className="flex gap-2 text-sm text-amber-900">
+                <span aria-hidden="true">•</span><span>{a}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : (summary.hw_total ?? 0) > 0 ? (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm font-medium text-emerald-800">
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          Все задания выполнены вовремя
+        </div>
+      ) : null}
+
+      {/* Оплата — одна строка, ответ «должен или ок?» (ОС Елены, Гр.4) */}
+      {showDebt && (
+        <section className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="flex items-center gap-3">
+            <Wallet className="h-5 w-5 shrink-0 text-slate-400" aria-hidden="true" />
+            <div>
+              <p className={cn('text-xl font-bold tabular-nums', bal < 0 ? 'text-rose-600' : bal > 0 ? 'text-emerald-600' : 'text-slate-900')}>
+                {bal < 0 ? `Задолженность ${formatCurrency(Math.abs(bal))}` : bal > 0 ? `Предоплата ${formatCurrency(bal)}` : 'Оплат хватает'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {bal < 0 ? 'нужно пополнить баланс' : bal > 0 ? 'на балансе есть средства' : 'задолженности нет'}
+              </p>
+            </div>
           </div>
-        )}
-        <p className="mt-3 text-xs text-muted-foreground">
-          Сдано работ: {summary.done} из {summary.total}
-        </p>
-        {works.length > 0 ? (
+          {statement.length > 0 && (
+            <details className="mt-3 border-t border-slate-100 pt-2">
+              <summary className="cursor-pointer list-none text-sm font-medium text-accent">Подробнее: история оплат</summary>
+              <div className="mt-2 divide-y divide-slate-100">
+                {statement.map((e, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span className="text-muted-foreground">
+                      {format(parseISO(e.occurred_on), 'd MMMM yyyy', { locale: ru })}
+                      {' · '}
+                      <span className="text-slate-700">{statementLabel(e)}</span>
+                    </span>
+                    <span className={cn('font-semibold tabular-nums', e.kind === 'credit' ? 'text-emerald-600' : 'text-slate-900')}>
+                      {e.kind === 'credit' ? '+' : '−'}{formatCurrency(e.amount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </section>
+      )}
+
+      {/* Подробнее: работы (свёрнуто — 90% родителей темы не интересны, ОС Елены, Гр.5) */}
+      {works.length > 0 && (
+        <details className="rounded-xl border border-slate-200 bg-white p-4">
+          <summary className="cursor-pointer list-none text-sm font-medium text-accent">
+            Подробнее: работы ({works.length})
+          </summary>
+          <p className="mt-2 text-xs text-muted-foreground">Сдано {summary.done} из {summary.total}</p>
           <div className="mt-1 divide-y divide-slate-100">
             {works.map((w, i) => <WorkRow key={i} work={w} />)}
           </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">Работ пока нет.</p>
-        )}
-      </section>
-
-      {/* Баланс и оплаты */}
-      <section className="rounded-xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Баланс и оплаты</h2>
-        <div className="mt-3 flex items-center gap-3">
-          <Wallet className="h-5 w-5 shrink-0 text-slate-400" aria-hidden="true" />
-          <p className={cn('text-2xl font-bold tabular-nums', balanceTone)}>{formatCurrency(balance)}</p>
-          <span className="text-sm text-muted-foreground">
-            {balance < 0 ? 'задолженность' : balance > 0 ? 'предоплата' : 'нет задолженности'}
-          </span>
-        </div>
-        {statement.length > 0 && (
-          <div className="mt-3 divide-y divide-slate-100">
-            {statement.map((e, i) => (
-              <div key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
-                <span className="text-muted-foreground">
-                  {format(parseISO(e.occurred_on), 'd MMMM yyyy', { locale: ru })}
-                  {' · '}
-                  <span className="text-slate-700">{statementLabel(e)}</span>
-                </span>
-                <span className={cn('font-semibold tabular-nums', e.kind === 'credit' ? 'text-emerald-600' : 'text-slate-900')}>
-                  {e.kind === 'credit' ? '+' : '−'}{formatCurrency(e.amount)}
-                </span>
-              </div>
-            ))}
-            <div className="flex items-center justify-between gap-3 py-2 text-sm font-semibold">
-              <span>Итоговый баланс</span>
-              <span className={cn('tabular-nums', balanceTone)}>{formatCurrency(balance)}</span>
-            </div>
-          </div>
-        )}
-      </section>
+        </details>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Для родителя — только итоги и баллы. Без решений задач и критериев.
