@@ -2481,50 +2481,23 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string
-          period_end: string | null
-          period_kind: string
-          period_start: string | null
           revoked_at: string | null
-          show_debt_line: boolean
-          show_hw_done: boolean
-          show_hw_success: boolean
-          show_mock_score: boolean
           slug: string
-          tutor_comment: string | null
           tutor_student_id: string
-          verdict: string | null
         }
         Insert: {
           created_at?: string
           created_by?: string
-          period_end?: string | null
-          period_kind?: string
-          period_start?: string | null
           revoked_at?: string | null
-          show_debt_line?: boolean
-          show_hw_done?: boolean
-          show_hw_success?: boolean
-          show_mock_score?: boolean
           slug?: string
-          tutor_comment?: string | null
           tutor_student_id: string
-          verdict?: string | null
         }
         Update: {
           created_at?: string
           created_by?: string
-          period_end?: string | null
-          period_kind?: string
-          period_start?: string | null
           revoked_at?: string | null
-          show_debt_line?: boolean
-          show_hw_done?: boolean
-          show_hw_success?: boolean
-          show_mock_score?: boolean
           slug?: string
-          tutor_comment?: string | null
           tutor_student_id?: string
-          verdict?: string | null
         }
         Relationships: [
           {
@@ -3599,7 +3572,6 @@ export type Database = {
           invite_code: string | null
           mini_groups_enabled: boolean
           name: string
-          report_show_debt_default: boolean
           subjects: string[] | null
           telegram_id: string | null
           telegram_username: string | null
@@ -3618,7 +3590,6 @@ export type Database = {
           invite_code?: string | null
           mini_groups_enabled?: boolean
           name: string
-          report_show_debt_default?: boolean
           subjects?: string[] | null
           telegram_id?: string | null
           telegram_username?: string | null
@@ -3637,7 +3608,6 @@ export type Database = {
           invite_code?: string | null
           mini_groups_enabled?: boolean
           name?: string
-          report_show_debt_default?: boolean
           subjects?: string[] | null
           telegram_id?: string | null
           telegram_username?: string | null
