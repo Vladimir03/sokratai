@@ -32,6 +32,48 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_tutor_plan_grants: {
+        Row: {
+          action: string
+          created_at: string
+          expires_at: string | null
+          granted_by: string
+          id: string
+          note: string | null
+          previous_expires_at: string | null
+          previous_tier: string | null
+          target_email: string | null
+          target_user_id: string
+          tier: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          expires_at?: string | null
+          granted_by: string
+          id?: string
+          note?: string | null
+          previous_expires_at?: string | null
+          previous_tier?: string | null
+          target_email?: string | null
+          target_user_id: string
+          tier: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          expires_at?: string | null
+          granted_by?: string
+          id?: string
+          note?: string | null
+          previous_expires_at?: string | null
+          previous_tier?: string | null
+          target_email?: string | null
+          target_user_id?: string
+          tier?: string
+        }
+        Relationships: []
+      }
       answer_attempts: {
         Row: {
           attempt_time: string
@@ -3844,6 +3886,27 @@ export type Database = {
           _tutor_student_id: string
         }
         Returns: string
+      }
+      admin_grant_tutor_plan: {
+        Args: { p_email: string; p_expires_at: string; p_note?: string }
+        Returns: Json
+      }
+      admin_list_tutor_plans: {
+        Args: never
+        Returns: {
+          active_students: number
+          email: string
+          is_paid: boolean
+          name: string
+          subscription_expires_at: string
+          subscription_tier: string
+          trial_ends_at: string
+          user_id: string
+        }[]
+      }
+      admin_revoke_tutor_plan: {
+        Args: { p_email: string; p_note?: string }
+        Returns: Json
       }
       book_lesson_slot: {
         Args: {
