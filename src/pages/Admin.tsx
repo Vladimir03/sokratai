@@ -17,9 +17,10 @@ import { AdminCRM } from "@/components/admin/AdminCRM";
 import { AdminPayments } from "@/components/admin/AdminPayments";
 import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminMockExams } from "@/components/admin/AdminMockExams";
+import { AdminTutorPlans } from "@/components/admin/AdminTutorPlans";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap, Wallet } from "lucide-react";
 import { BusinessDashboard } from "@/components/admin/business/BusinessDashboard";
 import { ProductDiscoveryDashboard } from "@/components/admin/discovery/ProductDiscoveryDashboard";
 import { cn } from "@/lib/utils";
@@ -236,6 +237,10 @@ const Admin = () => {
               <GraduationCap className="w-4 h-4" />
               Репетиторы
             </TabsTrigger>
+            <TabsTrigger value="tutor-plans" className="flex items-center gap-2">
+              <Wallet className="w-4 h-4" />
+              Тарифы
+            </TabsTrigger>
             <TabsTrigger value="payments" className="flex items-center gap-2">
               <CreditCard className="w-4 h-4" />
               Платежи
@@ -333,6 +338,10 @@ const Admin = () => {
               startDate={dateRange.from.toISOString()}
               endDate={dateRange.to.toISOString()}
             />
+          </TabsContent>
+
+          <TabsContent value="tutor-plans">
+            <AdminTutorPlans />
           </TabsContent>
 
           <TabsContent value="payments">

@@ -148,6 +148,7 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `96-auth-ru-bypass.md` | 11 hard rules for auth flows in RU |
 | `97-edge-function-error-contract.md` | Non-2xx JSON error contract |
 | `98-schedule-materials.md` | «Занятия»: lesson materials, anti-leak/FK-drift, group model, one-hop ДЗ, post-login landing |
+| `99-ai-quota-subscriptions.md` | AI daily-message quota (10/50), `get_subscription_status`, paid-tutor boost gate, admin grant-tutor-plan mechanism |
 | `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser |
 
 ---
