@@ -3617,6 +3617,7 @@ function TutorScheduleContent() {
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'ledger'] });
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'student'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'received-payments'] }); // журнал «Оплаты» (оплата за занятие)
   }, [queryClient]);
 
   const scheduleParticipantPaymentRefresh = useCallback(() => {

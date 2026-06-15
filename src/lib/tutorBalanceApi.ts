@@ -39,6 +39,7 @@ function mapBalanceError(rawMsg: string): { code?: string; error: string } {
   if (msg.includes('NOT_OWNED')) return { code: 'NOT_OWNED', error: 'Ученик не найден.' };
   if (msg.includes('INVALID_AMOUNT')) return { code: 'INVALID_AMOUNT', error: 'Сумма должна быть больше 0.' };
   if (msg.includes('ALREADY_REVERSED')) return { code: 'ALREADY_REVERSED', error: 'Эта запись уже отменена или исправлена.' };
+  if (msg.includes('LESSON_ENTRY_NOT_REVERSIBLE')) return { code: 'LESSON_ENTRY_NOT_REVERSIBLE', error: 'Оплату за занятие нельзя отменить здесь — измените статус занятия в «Расписании».' };
   if (msg.includes('NOT_EDITABLE')) return { code: 'NOT_EDITABLE', error: 'Эту запись нельзя изменить здесь — списания за занятия правятся через занятие.' };
   if (msg.includes('ENTRY_NOT_FOUND')) return { code: 'ENTRY_NOT_FOUND', error: 'Операция не найдена.' };
   if (msg.includes('LEDGER_DEBIT_RACE') || msg.includes('LEDGER_DEBIT_LOST')) {
@@ -220,4 +221,80 @@ export async function listLedger(tutorStudentId: string, limit = 50): Promise<Le
     throw new Error('Не удалось загрузить операции.');
   }
   return (data ?? []) as LedgerEntry[];
+}
+
+/** Полученная оплата (active credit) для кросс-ученического журнала «Оплаты». */
+export interface TutorReceivedPayment {
+  id: string;
+  tutor_student_id: string;
+  amount: number; // РУБЛИ, всегда credit (положительное)
+  occurred_on: string; // 'YYYY-MM-DD' — дата оплаты
+  source_kind: LedgerSource; // 'topup' | 'lesson' | 'adjustment'
+  source_lesson_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+/**
+ * Кросс-ученический журнал ПОЛУЧЕННЫХ оплат (credits) для страницы «Оплаты» — сверка с поступлениями
+ * на карту. Только активные кредиты (topup + lesson-payment + reconcile), без offsetting/сторнированных
+ * → каждая оплата ровно раз. Списания (debits) не входят (они в балансе ученика и на «Доходе»).
+ * Имя ученика резолвится на странице из уже загруженного useTutorStudents (ledger имени не несёт).
+ */
+export async function listTutorReceivedPayments(params?: {
+  from?: string; // 'YYYY-MM-DD' inclusive (occurred_on >=)
+  to?: string; // 'YYYY-MM-DD' inclusive (occurred_on <=)
+  studentId?: string;
+  limit?: number;
+}): Promise<TutorReceivedPayment[]> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) throw new Error('Не удалось определить репетитора.');
+
+  let q = supabase
+    .from('tutor_ledger_entries')
+    .select('id, tutor_student_id, amount, occurred_on, source_kind, source_lesson_id, note, created_at')
+    .eq('tutor_id', tutor.id) // defensive + индекс; RLS owns_tutor_student тоже применяется
+    .eq('kind', 'credit')
+    .is('reverses_entry_id', null) // не показываем offsetting-аудит-строки
+    .is('reversed_by_entry_id', null) // не показываем сторнированные/заменённые оригиналы
+    .order('occurred_on', { ascending: false })
+    .order('created_at', { ascending: false });
+
+  if (params?.studentId) q = q.eq('tutor_student_id', params.studentId);
+  if (params?.from) q = q.gte('occurred_on', params.from);
+  if (params?.to) q = q.lte('occurred_on', params.to);
+  q = q.limit(params?.limit ?? 200);
+
+  const { data, error } = await q;
+  if (error) {
+    console.error('listTutorReceivedPayments error:', error);
+    throw new Error('Не удалось загрузить оплаты.');
+  }
+  return (data ?? []) as TutorReceivedPayment[];
+}
+
+/** Максимум строк журнала «Оплаты» в одном запросе (отображение). */
+export const RECEIVED_PAYMENTS_LIST_LIMIT = 200;
+
+/**
+ * Точный итог «Получено» (Σ + count) по фильтру — SQL-aggregate RPC (round-3 #6: без клиент-капа и без
+ * молчаливого фолбэка). Ошибку прокидываем наверх → страница показывает «—», а не неверное число.
+ * Имя RPC кастится `as never` (escape-hatch для RPC вне generated types.ts, конвенция rule 99).
+ */
+export async function getReceivedPaymentsTotal(params?: {
+  from?: string;
+  to?: string;
+  studentId?: string;
+}): Promise<{ total: number; count: number }> {
+  const { data, error } = await supabase.rpc('tutor_received_payments_summary' as never, {
+    _from: params?.from || undefined,
+    _to: params?.to || undefined,
+    _student_id: params?.studentId || undefined,
+  } as never);
+  if (error) {
+    console.error('getReceivedPaymentsTotal error:', error);
+    throw new Error('Не удалось посчитать итог оплат.');
+  }
+  const row = (data ?? {}) as { total?: number | string; count?: number | string };
+  return { total: Number(row.total ?? 0), count: Number(row.count ?? 0) };
 }

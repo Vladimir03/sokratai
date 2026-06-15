@@ -29,6 +29,7 @@ import {
   tutorRetryDelay,
   withTutorTimeout,
 } from '@/hooks/tutorQueryOptions';
+import { listTutorReceivedPayments, type TutorReceivedPayment } from '@/lib/tutorBalanceApi';
 import type {
   Tutor,
   TutorGroupMembership,
@@ -371,6 +372,40 @@ export function useTutorPayments() {
   const result = useTutorQuery<TutorPaymentWithStudent[]>({
     queryKey,
     queryFn: getTutorPayments,
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить оплаты',
+    hasData: (data) => data !== undefined,
+  });
+
+  return {
+    payments: result.data,
+    loading: result.loading,
+    error: result.error,
+    refetch: result.refetch,
+    isFetching: result.isFetching,
+    isRecovering: result.isRecovering,
+    failureCount: result.failureCount,
+  };
+}
+
+/**
+ * Кросс-ученический журнал полученных оплат (ledger credits) для страницы «Оплаты».
+ * Источник правды — баланс/ledger (не legacy tutor_payments). Key под ['tutor','received-payments', ...]
+ * → prefix-инвалидация при topup/edit/reverse (двусторонняя синхра с карточкой ученика).
+ */
+export function useTutorReceivedPayments(params: { from?: string; to?: string; studentId?: string }) {
+  const { from, to, studentId } = params;
+  const queryKey = useMemo(
+    () => ['tutor', 'received-payments', studentId ?? 'all', from ?? '', to ?? ''] as const,
+    [studentId, from, to],
+  );
+  const result = useTutorQuery<TutorReceivedPayment[]>({
+    queryKey,
+    queryFn: () => listTutorReceivedPayments({
+      studentId: studentId || undefined,
+      from: from || undefined,
+      to: to || undefined,
+    }),
     defaultValue: [],
     errorMessage: 'Не удалось загрузить оплаты',
     hasData: (data) => data !== undefined,

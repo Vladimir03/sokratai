@@ -1,114 +1,67 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Plus, Check, Bell, Copy, ExternalLink, Trash2, Wallet } from 'lucide-react';
+import { useState, useMemo, useCallback, memo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
+import { ru } from 'date-fns/locale';
+import { Plus, Bell, Copy, ExternalLink, Trash2, Wallet, Pencil, CalendarDays } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { useTutorPayments, useTutorStudents } from '@/hooks/useTutor';
-import { 
-  createTutorPayment, 
-  markPaymentAsPaid, 
-  deleteTutorPayment 
-} from '@/lib/tutors';
-import TopupDialog from '@/components/tutor/students/TopupDialog';
-import type { TutorPaymentWithStudent, TutorStudentWithProfile } from '@/types/tutor';
+import { useTutorReceivedPayments, useTutorStudents } from '@/hooks/useTutor';
+import { formatCurrency } from '@/lib/formatters';
+import {
+  getMonthIncome,
+  getReceivedPaymentsTotal,
+  reverseLedgerEntry,
+  RECEIVED_PAYMENTS_LIST_LIMIT,
+  type TutorReceivedPayment,
+} from '@/lib/tutorBalanceApi';
+import TopupDialog, { type TopupEditTarget, type TopupStudentOption } from '@/components/tutor/students/TopupDialog';
+import type { TutorStudentWithProfile } from '@/types/tutor';
 
 // =============================================
-// Типы и утилиты
+// Страница «Оплаты» — единый баланс (ledger), а не legacy tutor_payments.
+// Список = кросс-ученический журнал ПОЛУЧЕННЫХ оплат (active credits) для сверки с поступлениями на карту.
+// «+ Добавить» = пополнение баланса (topup), всегда «получено», без подтверждения.
+// План: ~/.claude/plans/1-glowing-spindle.md
 // =============================================
 
-type PaymentUiStatus = 'pending' | 'paid';
-type StatusFilter = 'all' | PaymentUiStatus;
-
-interface PaymentStats {
-  pendingAmount: number;
-  pendingCount: number;
-  paidAmount: number;
-  paidCount: number;
-  totalAmount: number;
-  totalCount: number;
+function resolveStudentName(s: TutorStudentWithProfile): string {
+  return s.display_name?.trim() || s.profiles?.full_name || s.profiles?.username || 'Без имени';
 }
 
-function formatAmount(amount: number): string {
-  return new Intl.NumberFormat('ru-RU', {
-    style: 'currency',
-    currency: 'RUB',
-    minimumFractionDigits: 0,
-  }).format(amount);
-}
-
-function formatDate(dateString: string | null): string {
-  if (!dateString) return '—';
-  return new Date(dateString).toLocaleDateString('ru-RU');
-}
-
-function toLocalDateKey(dateString: string): string | null {
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return null;
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const dd = String(date.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function formatDateFromKey(dateKey: string | null): string {
-  if (!dateKey) return '—';
-  return new Date(`${dateKey}T00:00:00`).toLocaleDateString('ru-RU');
-}
-
-function resolveLessonDateKey(payment: TutorPaymentWithStudent): string | null {
-  if (payment.tutor_lessons?.start_at) {
-    const key = toLocalDateKey(payment.tutor_lessons.start_at);
-    if (key) return key;
-  }
-
-  if (payment.due_date) {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(payment.due_date)) {
-      return payment.due_date;
-    }
-    return toLocalDateKey(payment.due_date);
-  }
-
-  return null;
-}
-
-function getUiStatus(payment: TutorPaymentWithStudent): PaymentUiStatus {
-  return payment.status === 'paid' ? 'paid' : 'pending';
-}
-
-function getStatusBadge(status: PaymentUiStatus) {
-  switch (status) {
-    case 'paid':
-      return <Badge variant="default" className="bg-green-500">Оплачено</Badge>;
-    default:
-      return <Badge variant="secondary">Ожидает</Badge>;
+function formatPaymentDate(dateKey: string): string {
+  try {
+    return format(parseISO(dateKey), 'd MMM yyyy', { locale: ru });
+  } catch {
+    return dateKey;
   }
 }
 
-function getStudentName(payment: TutorPaymentWithStudent): string {
-  return payment.tutor_students?.profiles?.username || 'Без имени';
-}
-
-function getParentContact(payment: TutorPaymentWithStudent): string | null {
-  return payment.tutor_students?.parent_contact || null;
+function sourceLabel(p: TutorReceivedPayment): string {
+  if (p.source_kind === 'lesson') return 'Занятие';
+  if (p.source_kind === 'topup') return 'Оплата';
+  if (p.note?.startsWith('seed:') || p.note?.startsWith('reconcile:')) return 'Оплачено (история)';
+  return 'Корректировка';
 }
 
 // =============================================
-// Должники по балансу (Phase 2a, rule 60 «Баланс ученика») — balance < 0.
-// Источник: уже загруженный useTutorStudents (select * несёт balance).
-// «Внести» → общий TopupDialog (инвалидирует ['tutor','students'] → список сам обновится).
+// Должники по балансу (balance < 0) + «Напомнить»
 // =============================================
 
 function DebtorsCard({ students }: { students: TutorStudentWithProfile[] }) {
   const [topupFor, setTopupFor] = useState<{ id: string; name: string } | null>(null);
+  const [remindFor, setRemindFor] = useState<{ name: string; debt: number; parentContact: string | null } | null>(null);
 
   const debtors = useMemo(
     () =>
@@ -130,13 +83,25 @@ function DebtorsCard({ students }: { students: TutorStudentWithProfile[] }) {
       </CardHeader>
       <CardContent className="divide-y divide-slate-100 pt-0">
         {debtors.map((s) => {
-          const name = s.display_name?.trim() || s.profiles?.full_name || s.profiles?.username || 'Без имени';
+          const name = resolveStudentName(s);
+          const debt = -(s.balance ?? 0);
           return (
             <div key={s.id} className="flex items-center justify-between gap-3 py-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
               <span className="shrink-0 text-sm font-semibold tabular-nums text-rose-600">
-                {formatAmount(s.balance ?? 0)}
+                {formatCurrency(s.balance ?? 0)}
               </span>
+              {s.parent_contact && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => setRemindFor({ name, debt, parentContact: s.parent_contact ?? null })}
+                >
+                  <Bell className="h-4 w-4" aria-hidden="true" />
+                  <span className="sr-only">Напомнить</span>
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -156,10 +121,56 @@ function DebtorsCard({ students }: { students: TutorStudentWithProfile[] }) {
             studentName={topupFor.name}
           />
         )}
+        <RemindDialog
+          open={remindFor !== null}
+          onOpenChange={(o) => { if (!o) setRemindFor(null); }}
+          target={remindFor}
+        />
       </CardContent>
     </Card>
   );
 }
+
+// =============================================
+// Строка журнала полученных оплат
+// =============================================
+
+const ReceivedPaymentRow = memo(function ReceivedPaymentRow({
+  payment, studentName, onEdit, onDelete,
+}: {
+  payment: TutorReceivedPayment;
+  studentName: string;
+  onEdit: (p: TutorReceivedPayment) => void;
+  onDelete: (p: TutorReceivedPayment) => void;
+}) {
+  const canEdit = payment.source_kind === 'topup';
+  const canDelete = payment.source_kind === 'topup' || payment.source_kind === 'adjustment';
+
+  return (
+    <TableRow>
+      <TableCell className="font-medium">{studentName}</TableCell>
+      <TableCell className="text-right font-semibold tabular-nums text-emerald-600">
+        +{formatCurrency(payment.amount)}
+      </TableCell>
+      <TableCell className="text-muted-foreground">{formatPaymentDate(payment.occurred_on)}</TableCell>
+      <TableCell className="text-muted-foreground">{sourceLabel(payment)}</TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-1">
+          {canEdit && (
+            <Button variant="ghost" size="icon" title="Изменить" onClick={() => onEdit(payment)}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          )}
+          {canDelete && (
+            <Button variant="ghost" size="icon" title="Удалить" onClick={() => onDelete(payment)}>
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+});
 
 // =============================================
 // Основной компонент
@@ -167,539 +178,331 @@ function DebtorsCard({ students }: { students: TutorStudentWithProfile[] }) {
 
 function TutorPaymentsContent() {
   const {
-    payments,
-    loading,
-    error,
-    refetch,
-    isFetching: paymentsIsFetching,
-    isRecovering: paymentsIsRecovering,
-    failureCount: paymentsFailureCount,
-  } = useTutorPayments();
-  const {
     students,
     error: studentsError,
+    loading: studentsLoading,
     refetch: refetchStudents,
     isFetching: studentsIsFetching,
-    isRecovering: studentsIsRecovering,
-    failureCount: studentsFailureCount,
   } = useTutorStudents();
-  
-  // Фильтры
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [studentFilter, setStudentFilter] = useState<string>('all');
-  const [lessonDateFrom, setLessonDateFrom] = useState('');
-  const [lessonDateTo, setLessonDateTo] = useState('');
-  
-  // Диалог добавления
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  
-  // Диалог напоминания
-  const [remindDialogOpen, setRemindDialogOpen] = useState(false);
-  const [selectedPayment, setSelectedPayment] = useState<TutorPaymentWithStudent | null>(null);
-  const initialLoading = loading && payments.length === 0 && !error;
-  const hasErrors = Boolean(error || studentsError);
-  const isPageFetching = paymentsIsFetching || studentsIsFetching;
-  
-  // Фильтрация платежей
-  const filteredPayments = useMemo(() => {
-    return payments.filter(payment => {
-      const uiStatus = getUiStatus(payment);
-      const lessonDateKey = resolveLessonDateKey(payment);
-      
-      // Фильтр по статусу
-      if (statusFilter !== 'all' && uiStatus !== statusFilter) {
-        return false;
-      }
-      
-      // Фильтр по ученику
-      if (studentFilter !== 'all' && payment.tutor_student_id !== studentFilter) {
-        return false;
-      }
 
-      // Фильтр по дате занятия (date-only, inclusive)
-      if (lessonDateFrom || lessonDateTo) {
-        if (!lessonDateKey) return false;
-        if (lessonDateFrom && lessonDateKey < lessonDateFrom) return false;
-        if (lessonDateTo && lessonDateKey > lessonDateTo) return false;
+  // Фильтры (server-side по occurred_on)
+  const [studentFilter, setStudentFilter] = useState<string>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
+  const {
+    payments,
+    error: paymentsError,
+    loading: paymentsLoading,
+    refetch: refetchPayments,
+    isFetching: paymentsIsFetching,
+  } = useTutorReceivedPayments({
+    studentId: studentFilter !== 'all' ? studentFilter : undefined,
+    from: dateFrom || undefined,
+    to: dateTo || undefined,
+  });
+
+  // Точный итог «Получено» (Σ + count по фильтру) — отдельно от капнутого списка (round-2 #6).
+  const receivedTotalQuery = useQuery({
+    queryKey: ['tutor', 'received-payments', 'total', studentFilter, dateFrom, dateTo],
+    queryFn: () => getReceivedPaymentsTotal({
+      studentId: studentFilter !== 'all' ? studentFilter : undefined,
+      from: dateFrom || undefined,
+      to: dateTo || undefined,
+    }),
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 1000,
+  });
+
+  // Доход за месяц (Σ активных lesson-списаний месяца) — KPI, ключ общий с MonthIncomeStrip.
+  const now = useMemo(() => new Date(), []);
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthIncome = useQuery({
+    queryKey: ['tutor', 'ledger', 'month-income', monthKey],
+    queryFn: () => getMonthIncome(now.getFullYear(), now.getMonth()),
+    refetchOnWindowFocus: false,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Диалоги
+  const [addOpen, setAddOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{ entry: TopupEditTarget; studentId: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TutorReceivedPayment | null>(null);
+
+  const qc = useQueryClient();
+
+  const invalidateAll = useCallback((studentId: string) => {
+    qc.invalidateQueries({ queryKey: ['tutor', 'balance', studentId] });
+    qc.invalidateQueries({ queryKey: ['tutor', 'ledger', studentId] });
+    qc.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    qc.invalidateQueries({ queryKey: ['tutor', 'student', studentId] });
+    qc.invalidateQueries({ queryKey: ['tutor', 'received-payments'] });
+  }, [qc]);
+
+  const studentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of students) map.set(s.id, resolveStudentName(s));
+    return map;
+  }, [students]);
+
+  const studentOptions = useMemo<TopupStudentOption[]>(
+    () => students.map((s) => ({ id: s.id, name: resolveStudentName(s), hourly_rate_cents: s.hourly_rate_cents })),
+    [students],
+  );
+
+  // Сводки. «Получено» показываем ТОЛЬКО при успехе aggregate-RPC (round-4 #6): на загрузке И на ошибке
+  // → «—», БЕЗ фолбэка на сумму капнутого списка (иначе при зависшем запросе долго висело бы неверное
+  // число первых 200 строк как «итог»).
+  const receivedTotal = receivedTotalQuery.isSuccess ? receivedTotalQuery.data.total : null;
+  const receivedCount = receivedTotalQuery.isSuccess ? receivedTotalQuery.data.count : null;
+  const listTruncated = payments.length >= RECEIVED_PAYMENTS_LIST_LIMIT;
+  const totalDebt = useMemo(
+    () => students.reduce((sum, s) => sum + ((s.balance ?? 0) < 0 ? -(s.balance ?? 0) : 0), 0),
+    [students],
+  );
+  const debtorCount = useMemo(() => students.filter((s) => (s.balance ?? 0) < 0).length, [students]);
+
+  const deleteMutation = useMutation({
+    mutationFn: (p: TutorReceivedPayment) => reverseLedgerEntry(p.id, 'отменено репетитором'),
+    onSuccess: (res, p) => {
+      if (!res.ok) {
+        toast.error(res.error ?? 'Не удалось удалить запись.');
+        return;
       }
-      
-      return true;
-    });
-  }, [payments, statusFilter, studentFilter, lessonDateFrom, lessonDateTo]);
-  
-  // Статистика
-  const stats = useMemo<PaymentStats>(() => {
-    let pendingAmount = 0;
-    let pendingCount = 0;
-    let paidAmount = 0;
-    let paidCount = 0;
-    let totalAmount = 0;
-    
-    for (const payment of filteredPayments) {
-      const uiStatus = getUiStatus(payment);
-      totalAmount += payment.amount;
-      
-      if (uiStatus === 'pending') {
-        pendingAmount += payment.amount;
-        pendingCount++;
-      } else if (uiStatus === 'paid') {
-        paidAmount += payment.amount;
-        paidCount++;
-      }
-    }
-    
-    return {
-      pendingAmount,
-      pendingCount,
-      paidAmount,
-      paidCount,
-      totalAmount,
-      totalCount: filteredPayments.length,
-    };
-  }, [filteredPayments]);
-  
-  // Обработчики
-  const handleMarkAsPaid = useCallback(async (paymentId: string) => {
-    const result = await markPaymentAsPaid(paymentId);
-    if (result) {
-      toast.success('Оплата отмечена');
-      refetch();
-    } else {
-      toast.error('Ошибка при обновлении');
-    }
-  }, [refetch]);
-  
-  const handleDelete = useCallback(async (paymentId: string) => {
-    const result = await deleteTutorPayment(paymentId);
-    if (result) {
-      toast.success('Запись удалена');
-      refetch();
-    } else {
-      toast.error('Ошибка при удалении');
-    }
-  }, [refetch]);
-  
-  const handleRemind = useCallback((payment: TutorPaymentWithStudent) => {
-    setSelectedPayment(payment);
-    setRemindDialogOpen(true);
-  }, []);
+      toast.success('Оплата снята с баланса');
+      invalidateAll(p.tutor_student_id);
+      setDeleteTarget(null);
+    },
+    onError: () => toast.error('Не удалось удалить запись.'),
+  });
 
   const handleRetryAll = useCallback(() => {
-    refetch();
+    refetchPayments();
     refetchStudents();
-  }, [refetch, refetchStudents]);
-  
-  // Загрузка
+  }, [refetchPayments, refetchStudents]);
+
+  const initialLoading = studentsLoading && students.length === 0 && !studentsError;
+
+  // round-2 #8 (rule 95): critical только когда нет несущих данных (0 учеников). Фоновый refetch-fail
+  // с уже загруженными учениками → degraded (тихо), не баннер поверх данных.
+  const studentsCritical = studentsError && students.length === 0 ? studentsError : null;
+  const isDegraded = (Boolean(paymentsError) || (Boolean(studentsError) && students.length > 0)) && !studentsCritical;
+
   if (initialLoading) {
     return (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-            <Skeleton className="h-24" />
-          </div>
-          <Skeleton className="h-64" />
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
         </div>
+        <Skeleton className="h-64" />
+      </div>
     );
   }
 
   return (
-      <div className="space-y-6">
-        <TutorDataStatus
-          criticalError={error || studentsError}
-          isFetching={isPageFetching}
-          onRetry={handleRetryAll}
-        />
+    <div className="space-y-6">
+      {/* Несущие данные = students (должники/сводка/select/имена). Падение списка оплат при
+          загруженных students → degraded, не критичный баннер (rule 95, без OR-of-N). */}
+      <TutorDataStatus
+        criticalError={studentsCritical}
+        degraded={isDegraded}
+        isFetching={studentsIsFetching || paymentsIsFetching}
+        onRetry={handleRetryAll}
+      />
 
-        {/* Заголовок */}
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-bold">💳 Оплаты</h1>
-          <Button onClick={() => setAddDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Добавить
-          </Button>
-        </div>
-
-        {/* Должники по балансу (Phase 2a) */}
-        <DebtorsCard students={students} />
-
-        {/* Фильтры */}
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Статус</Label>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-              <SelectTrigger className="w-[170px]">
-                <SelectValue placeholder="Статус" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все статусы</SelectItem>
-                <SelectItem value="pending">Ожидает</SelectItem>
-                <SelectItem value="paid">Оплачено</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Ученик</Label>
-            <Select value={studentFilter} onValueChange={setStudentFilter}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Ученик" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все ученики</SelectItem>
-                {students.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.profiles?.username || 'Без имени'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="lessonDateFrom" className="text-xs text-muted-foreground">
-              Дата занятия: с
-            </Label>
-            <Input
-              id="lessonDateFrom"
-              type="date"
-              value={lessonDateFrom}
-              onChange={(e) => setLessonDateFrom(e.target.value)}
-              className="w-[170px]"
-            />
-          </div>
-
-          <div className="space-y-1">
-            <Label htmlFor="lessonDateTo" className="text-xs text-muted-foreground">
-              Дата занятия: по
-            </Label>
-            <Input
-              id="lessonDateTo"
-              type="date"
-              value={lessonDateTo}
-              onChange={(e) => setLessonDateTo(e.target.value)}
-              className="w-[170px]"
-            />
-          </div>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Ожидается к получению
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatAmount(stats.pendingAmount)}</p>
-              <p className="text-sm text-muted-foreground">{stats.pendingCount} записей</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Получено
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-green-600">{formatAmount(stats.paidAmount)}</p>
-              <p className="text-sm text-muted-foreground">{stats.paidCount} оплат</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                Всего
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{formatAmount(stats.totalAmount)}</p>
-              <p className="text-sm text-muted-foreground">{stats.totalCount} записей</p>
-            </CardContent>
-          </Card>
-        </div>
-        
-        {/* Таблица */}
-        <Card>
-          <div className="overflow-x-auto">
-            <Table className="min-w-[900px] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ученик</TableHead>
-                  <TableHead className="text-right">Сумма</TableHead>
-                  <TableHead>Период</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Дата занятия</TableHead>
-                  <TableHead>Оплачено</TableHead>
-                  <TableHead className="text-right">Действия</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredPayments.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                      {hasErrors
-                        ? 'Не удалось обновить данные об оплатах. Выполняется восстановление...'
-                        : payments.length === 0
-                          ? 'Нет записей об оплатах'
-                          : 'Ничего не найдено'}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filteredPayments.map(payment => {
-                    const uiStatus = getUiStatus(payment);
-                    const parentContact = getParentContact(payment);
-                    const lessonDateKey = resolveLessonDateKey(payment);
-                    
-                    return (
-                      <TableRow key={payment.id}>
-                        <TableCell className="font-medium">
-                          {getStudentName(payment)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {formatAmount(payment.amount)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {payment.period || '—'}
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(uiStatus)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDateFromKey(lessonDateKey)}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {formatDate(payment.paid_at)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {uiStatus !== 'paid' && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Отметить оплачено"
-                                onClick={() => handleMarkAsPaid(payment.id)}
-                              >
-                                <Check className="h-4 w-4 text-green-600" />
-                              </Button>
-                            )}
-                            
-                            {uiStatus !== 'paid' && parentContact && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                title="Напомнить"
-                                onClick={() => handleRemind(payment)}
-                              >
-                                <Bell className="h-4 w-4" />
-                              </Button>
-                            )}
-                            
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              title="Удалить"
-                              onClick={() => handleDelete(payment.id)}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </Card>
-        
-        {/* Диалог добавления */}
-        <AddPaymentDialog
-          open={addDialogOpen}
-          onOpenChange={setAddDialogOpen}
-          students={students}
-          onSuccess={() => {
-            refetch();
-            toast.success('Запись добавлена');
-          }}
-        />
-        
-        {/* Диалог напоминания */}
-        <RemindDialog
-          open={remindDialogOpen}
-          onOpenChange={setRemindDialogOpen}
-          payment={selectedPayment}
-        />
+      {/* Заголовок */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <h1 className="flex items-center gap-2 text-2xl font-bold">
+          <Wallet className="h-6 w-6 text-accent" aria-hidden="true" />
+          Оплаты
+        </h1>
+        <Button onClick={() => setAddOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Добавить
+        </Button>
       </div>
-  );
-}
 
-// =============================================
-// Диалог добавления оплаты
-// =============================================
+      {/* Должники по балансу */}
+      <DebtorsCard students={students} />
 
-interface AddPaymentDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  students: { id: string; hourly_rate_cents?: number | null; profiles?: { username: string } | null }[];
-  onSuccess: () => void;
-}
-
-function AddPaymentDialog({ open, onOpenChange, students, onSuccess }: AddPaymentDialogProps) {
-  const [studentId, setStudentId] = useState('');
-  const [amount, setAmount] = useState('');
-  const [period, setPeriod] = useState('');
-  const [lessonDate, setLessonDate] = useState('');
-  const [isSaving, setIsSaving] = useState(false);
-  
-  const selectedStudent = useMemo(() => students.find(s => s.id === studentId), [students, studentId]);
-  const hourlyRate = selectedStudent?.hourly_rate_cents ? selectedStudent.hourly_rate_cents / 100 : null;
-
-  const handleQuickAmount = (hours: number) => {
-    if (hourlyRate) {
-      setAmount((hourlyRate * hours).toString());
-    }
-  };
-  
-  const handleSubmit = async () => {
-    if (!studentId || !amount) {
-      toast.error('Выберите ученика и укажите сумму');
-      return;
-    }
-    
-    setIsSaving(true);
-    try {
-      const result = await createTutorPayment({
-        tutor_student_id: studentId,
-        amount: parseInt(amount, 10),
-        period: period || undefined,
-        due_date: lessonDate || undefined,
-      });
-      
-      if (result) {
-        onSuccess();
-        onOpenChange(false);
-        // Reset form
-        setStudentId('');
-        setAmount('');
-        setPeriod('');
-        setLessonDate('');
-      } else {
-        toast.error('Ошибка при сохранении');
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
-  
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Добавить запись об оплате</DialogTitle>
-        </DialogHeader>
-        
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label>Ученик *</Label>
-            <Select value={studentId} onValueChange={setStudentId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Выберите ученика" />
-              </SelectTrigger>
-              <SelectContent>
-                {students.map(s => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.profiles?.username || 'Без имени'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="amount">Сумма (₽) *</Label>
-            <Input
-              id="amount"
-              type="number"
-              min="1"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="например, 5000"
-            />
-            {hourlyRate && (
-              <div className="mt-2 flex flex-col gap-1.5">
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <span>💰 Ставка: <strong>{hourlyRate} ₽/ч</strong></span>
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(1)}>1 ч</Badge>
-                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(1.5)}>1.5 ч</Badge>
-                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(2)}>2 ч</Badge>
-                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(4)}>4 ч</Badge>
-                  <Badge variant="outline" className="cursor-pointer hover:bg-muted font-normal text-xs py-0.5" onClick={() => handleQuickAmount(8)}>8 ч</Badge>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="period">Период (опц.)</Label>
-            <Input
-              id="period"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              placeholder="например, Февраль 2026 или 8 уроков"
-            />
-          </div>
-          
-          <div className="space-y-2">
-            <Label htmlFor="lessonDate">Дата занятия (опц.)</Label>
-            <Input
-              id="lessonDate"
-              type="date"
-              value={lessonDate}
-              onChange={(e) => setLessonDate(e.target.value)}
-            />
-          </div>
+      {/* Фильтры */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Ученик</Label>
+          <Select value={studentFilter} onValueChange={setStudentFilter}>
+            <SelectTrigger className="w-[220px] text-base">
+              <SelectValue placeholder="Ученик" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все ученики</SelectItem>
+              {students.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{resolveStudentName(s)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-        
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button onClick={handleSubmit} disabled={isSaving}>
-            {isSaving ? 'Сохранение...' : 'Добавить'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div className="space-y-1">
+          <Label htmlFor="dateFrom" className="text-xs text-muted-foreground">Дата оплаты: с</Label>
+          <Input id="dateFrom" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[170px] text-base" />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="dateTo" className="text-xs text-muted-foreground">Дата оплаты: по</Label>
+          <Input id="dateTo" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[170px] text-base" />
+        </div>
+      </div>
+
+      {/* Сводки */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Получено</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-emerald-600">{receivedTotal === null ? '—' : formatCurrency(receivedTotal)}</p>
+            <p className="text-sm text-muted-foreground">
+              {receivedTotalQuery.isError ? 'не удалось посчитать' : receivedCount === null ? 'считаем…' : `${receivedCount} оплат`}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Ожидается к получению</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-rose-600">{formatCurrency(totalDebt)}</p>
+            <p className="text-sm text-muted-foreground">{debtorCount} должников</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+              <CalendarDays className="h-4 w-4" aria-hidden="true" />
+              Доход за месяц
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold">{monthIncome.data ? formatCurrency(monthIncome.data.earned) : '—'}</p>
+            <p className="text-sm text-muted-foreground">
+              {monthIncome.data ? `ожидается ${formatCurrency(monthIncome.data.expected)}` : 'считаем…'}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Таблица полученных оплат */}
+      <Card>
+        <div className="overflow-x-auto touch-pan-x">
+          <Table className="min-w-[640px] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Ученик</TableHead>
+                <TableHead className="text-right">Сумма</TableHead>
+                <TableHead>Дата оплаты</TableHead>
+                <TableHead>Источник</TableHead>
+                <TableHead className="text-right">Действия</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {payments.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    {paymentsError
+                      ? 'Не удалось обновить список оплат. Выполняется восстановление…'
+                      : paymentsLoading
+                        ? 'Загрузка…'
+                        : 'Полученных оплат пока нет'}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                payments.map((p) => (
+                  <ReceivedPaymentRow
+                    key={p.id}
+                    payment={p}
+                    studentName={studentNameById.get(p.tutor_student_id) ?? 'Без имени'}
+                    onEdit={(pay) => setEditTarget({
+                      entry: { id: pay.id, amount: pay.amount, occurred_on: pay.occurred_on },
+                      studentId: pay.tutor_student_id,
+                    })}
+                    onDelete={(pay) => setDeleteTarget(pay)}
+                  />
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+        {listTruncated && (
+          <p className="px-4 py-2 text-xs text-muted-foreground">
+            Показаны последние {RECEIVED_PAYMENTS_LIST_LIMIT} оплат. Итог «Получено» учитывает все за период.
+          </p>
+        )}
+      </Card>
+
+      {/* «+ Добавить» — пополнение баланса (select-режим TopupDialog) */}
+      <TopupDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        tutorStudentId=""
+        students={studentOptions}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['tutor', 'received-payments'] })}
+      />
+
+      {/* Правка пополнения (только topup) */}
+      <TopupDialog
+        open={editTarget !== null}
+        onOpenChange={(o) => { if (!o) setEditTarget(null); }}
+        tutorStudentId={editTarget?.studentId ?? ''}
+        editEntry={editTarget?.entry ?? null}
+        onSaved={() => qc.invalidateQueries({ queryKey: ['tutor', 'received-payments'] })}
+      />
+
+      {/* Удаление (сторно) полученной оплаты */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o && !deleteMutation.isPending) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Удалить оплату?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `Сумма ${formatCurrency(deleteTarget.amount)} будет снята с баланса ученика. Запись останется в истории операций с пометкой «отменено».`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteMutation.isPending}>Не удалять</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(ev) => { ev.preventDefault(); if (deleteTarget) deleteMutation.mutate(deleteTarget); }}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? 'Удаляю…' : 'Удалить'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }
 
 // =============================================
-// Диалог напоминания
+// Диалог напоминания (должнику)
 // =============================================
 
 interface RemindDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  payment: TutorPaymentWithStudent | null;
+  target: { name: string; debt: number; parentContact: string | null } | null;
 }
 
-function RemindDialog({ open, onOpenChange, payment }: RemindDialogProps) {
-  if (!payment) return null;
-  
-  const studentName = getStudentName(payment);
-  const parentContact = getParentContact(payment);
+function RemindDialog({ open, onOpenChange, target }: RemindDialogProps) {
+  const parentContact = target?.parentContact ?? null;
   const isTelegramUsername = parentContact?.startsWith('@');
-  const lessonDateKey = resolveLessonDateKey(payment);
-  
-  const reminderText = `Здравствуйте! Напоминаю об оплате занятий для ${studentName}.\n\nСумма: ${formatAmount(payment.amount)}${payment.period ? `\nПериод: ${payment.period}` : ''}${lessonDateKey ? `\nДата занятия: ${formatDateFromKey(lessonDateKey)}` : ''}\n\nСпасибо!`;
-  
+
+  const reminderText = target
+    ? `Здравствуйте! Напоминаю об оплате занятий для ${target.name}.\n\nК оплате: ${formatCurrency(target.debt)}\n\nСпасибо!`
+    : '';
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(reminderText);
@@ -708,41 +511,34 @@ function RemindDialog({ open, onOpenChange, payment }: RemindDialogProps) {
       toast.error('Не удалось скопировать');
     }
   };
-  
+
   const handleOpenTelegram = () => {
     if (isTelegramUsername && parentContact) {
-      const username = parentContact.slice(1); // Remove @
-      window.open(`https://t.me/${username}`, '_blank');
+      window.open(`https://t.me/${parentContact.slice(1)}`, '_blank');
     }
   };
-  
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Напомнить об оплате</DialogTitle>
         </DialogHeader>
-        
         <div className="space-y-4">
           <div>
             <p className="text-sm text-muted-foreground mb-1">Контакт родителя:</p>
             <p className="font-medium">{parentContact || 'Не указан'}</p>
           </div>
-          
           <div>
             <p className="text-sm text-muted-foreground mb-2">Текст напоминания:</p>
-            <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap">
-              {reminderText}
-            </div>
+            <div className="bg-muted p-3 rounded-md text-sm whitespace-pre-wrap">{reminderText}</div>
           </div>
         </div>
-        
         <DialogFooter className="flex-col sm:flex-row gap-2">
           <Button variant="outline" onClick={handleCopy} className="w-full sm:w-auto">
             <Copy className="h-4 w-4 mr-2" />
             Скопировать текст
           </Button>
-          
           {isTelegramUsername && (
             <Button onClick={handleOpenTelegram} className="w-full sm:w-auto">
               <ExternalLink className="h-4 w-4 mr-2" />

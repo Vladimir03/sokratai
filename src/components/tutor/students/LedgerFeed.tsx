@@ -91,6 +91,7 @@ function LessonChargeDialog({
       qc.invalidateQueries({ queryKey: ['tutor', 'student', tutorStudentId] });
       qc.invalidateQueries({ queryKey: ['tutor', 'payments'] });
       qc.invalidateQueries({ queryKey: ['tutor', 'lessons'] });
+      qc.invalidateQueries({ queryKey: ['tutor', 'received-payments'] }); // правка суммы меняет lesson-credit (round-3 #7)
       onClose();
     },
     onError: () => toast.error('Не удалось изменить списание.'),
@@ -181,31 +182,16 @@ export default function LedgerFeed({
     qc.invalidateQueries({ queryKey: ['tutor', 'ledger', tutorStudentId] });
     qc.invalidateQueries({ queryKey: ['tutor', 'students'] });
     qc.invalidateQueries({ queryKey: ['tutor', 'student', tutorStudentId] }); // шапка-чип «Долг» профиля
+    qc.invalidateQueries({ queryKey: ['tutor', 'received-payments'] }); // журнал «Оплаты»
   };
 
   const cancel = useMutation({
     mutationFn: async (entry: LedgerEntry): Promise<{ ok: boolean; error?: string; warning?: string }> => {
-      // Активное списание за существующее занятие → канонический revert занятия (синхронно
-      // снимает оплату + debit). Иначе — обычный reverse записи ledger.
+      // Linked lesson-debit → канонический revert занятия: реверсит И debit, И credit (net 0) + отменяет
+      // занятие. Прежний paid-preflight убран (round-3 #3): revert теперь paid-safe (сторнирует обе
+      // стороны → нет фантома +amount), а оплаченную tutor_payments-строку сохраняет → had_paid-warning.
+      // Orphan lesson-запись (удалённое занятие, source_lesson_id null) и прочее → обычный reverse.
       if (entry.source_kind === 'lesson' && entry.kind === 'debit' && entry.source_lesson_id) {
-        // P0 (ревью): tutor_revert_lesson СОХРАНЯЕТ paid-оплату, но реверсит debit →
-        // оплаченная запись осталась бы без заряда (рассинхрон). Гейт ДО мутации.
-        const { data: paidRow, error: paidErr } = await supabase
-          .from('tutor_payments')
-          .select('id')
-          .eq('lesson_id', entry.source_lesson_id)
-          .eq('tutor_student_id', tutorStudentId)
-          .eq('status', 'paid')
-          .maybeSingle();
-        if (paidErr) {
-          return { ok: false, error: 'Не удалось проверить оплату занятия — попробуйте ещё раз.' };
-        }
-        if (paidRow) {
-          return {
-            ok: false,
-            error: 'По занятию уже отмечена полученная оплата — отмена списания заблокирована. Сначала снимите отметку «оплачено» на странице «Оплаты».',
-          };
-        }
         const res = await revertLesson(entry.source_lesson_id);
         if (!res.ok) {
           const friendly = res.errorMessage?.includes('NOT_OWNED_OR_NOT_COMPLETED')
@@ -214,9 +200,7 @@ export default function LedgerFeed({
           return { ok: false, error: friendly };
         }
         if (res.had_paid) {
-          // Гонка: оплату отметили paid между preflight и RPC. Revert уже прошёл
-          // (занятие отменено, debit реверснут), paid-строка сохранена — предупреждаем.
-          return { ok: true, warning: 'Занятие отменено, но по нему есть полученная оплата — проверьте страницу «Оплаты».' };
+          return { ok: true, warning: 'Занятие отменено; по нему была отмечена оплата — проверьте «Оплаты».' };
         }
         return { ok: true };
       }
@@ -265,7 +249,12 @@ export default function LedgerFeed({
         history.reverse(); // старое → новое
         const canEditTopup = !isCancelled && e.source_kind === 'topup' && isCredit && !e.reverses_entry_id;
         const canEditLesson = !isCancelled && e.source_kind === 'lesson' && e.kind === 'debit' && Boolean(e.source_lesson_id);
-        const canCancel = !isCancelled && !e.reverses_entry_id;
+        // LINKED lesson-credit (оплата за существующее занятие) НЕ сторнируется напрямую (#3): иначе credit
+        // ушёл бы без debit/`tutor_payments` → десинк. Занятие отменяется через строку списания
+        // (lesson-debit → revertLesson реверсит И debit, И credit). ORPHAN lesson-credit (занятие удалено,
+        // source_lesson_id null) — сторнируется обычным reverse (round-3 #3, рассинхрон исключён).
+        const canCancel = !isCancelled && !e.reverses_entry_id
+          && !(e.source_kind === 'lesson' && isCredit && Boolean(e.source_lesson_id));
 
         return (
           <div key={e.id} className="py-2.5">
