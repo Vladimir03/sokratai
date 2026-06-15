@@ -2952,6 +2952,7 @@ export type Database = {
           reverses_entry_id: string | null
           source_kind: string
           source_lesson_id: string | null
+          source_payment_id: string | null
           tutor_id: string
           tutor_student_id: string
         }
@@ -2968,6 +2969,7 @@ export type Database = {
           reverses_entry_id?: string | null
           source_kind: string
           source_lesson_id?: string | null
+          source_payment_id?: string | null
           tutor_id: string
           tutor_student_id: string
         }
@@ -2984,6 +2986,7 @@ export type Database = {
           reverses_entry_id?: string | null
           source_kind?: string
           source_lesson_id?: string | null
+          source_payment_id?: string | null
           tutor_id?: string
           tutor_student_id?: string
         }
@@ -3014,6 +3017,13 @@ export type Database = {
             columns: ["source_lesson_id"]
             isOneToOne: false
             referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_ledger_entries_source_payment_id_fkey"
+            columns: ["source_payment_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_payments"
             referencedColumns: ["id"]
           },
           {
@@ -3869,12 +3879,36 @@ export type Database = {
       }
     }
     Functions: {
+      _credit_manual_payment: {
+        Args: {
+          _actor: string
+          _amount: number
+          _payment_id: string
+          _tutor_id: string
+          _tutor_student_id: string
+        }
+        Returns: string
+      }
       _reverse_ledger_entry: {
         Args: { _actor: string; _entry_id: string; _note: string }
         Returns: string
       }
+      _reverse_lesson_credit: {
+        Args: { _lesson_id: string; _tutor_student_id: string }
+        Returns: string
+      }
       _reverse_lesson_debit: {
         Args: { _lesson_id: string; _tutor_student_id: string }
+        Returns: string
+      }
+      _sync_lesson_credit: {
+        Args: {
+          _actor: string
+          _amount: number
+          _lesson_id: string
+          _tutor_id: string
+          _tutor_student_id: string
+        }
         Returns: string
       }
       _sync_lesson_debit: {
@@ -4361,6 +4395,10 @@ export type Database = {
         Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }
+      tutor_received_payments_summary: {
+        Args: { _from?: string; _student_id?: string; _to?: string }
+        Returns: Json
+      }
       tutor_record_topup: {
         Args: {
           _amount: number
