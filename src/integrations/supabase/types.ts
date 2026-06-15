@@ -2938,6 +2938,29 @@ export type Database = {
           },
         ]
       }
+      tutor_ledger_credit_recon_runs: {
+        Row: {
+          reconciled_at: string
+          tutor_student_id: string
+        }
+        Insert: {
+          reconciled_at?: string
+          tutor_student_id: string
+        }
+        Update: {
+          reconciled_at?: string
+          tutor_student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_ledger_credit_recon_runs_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: true
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_ledger_entries: {
         Row: {
           amount: number
