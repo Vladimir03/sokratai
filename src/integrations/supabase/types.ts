@@ -3902,6 +3902,10 @@ export type Database = {
       }
     }
     Functions: {
+      _apply_lesson_debit_from_current_cost: {
+        Args: { _actor: string; _lesson_id: string; _tutor_student_id: string }
+        Returns: undefined
+      }
       _credit_manual_payment: {
         Args: {
           _actor: string
@@ -4414,6 +4418,10 @@ export type Database = {
         Args: { _tutor_id?: string }
         Returns: Json
       }
+      tutor_cancel_lesson_with_charge: {
+        Args: { _amount: number; _lesson_id: string }
+        Returns: Json
+      }
       tutor_confirm_lessons: { Args: { p_lessons: Json }; Returns: Json }
       tutor_delete_lessons: {
         Args: { _lesson_id: string; _scope?: string }
@@ -4429,6 +4437,7 @@ export type Database = {
         Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }
+      tutor_ids_with_due_lessons: { Args: never; Returns: string[] }
       tutor_received_payments_summary: {
         Args: { _from?: string; _student_id?: string; _to?: string }
         Returns: Json
