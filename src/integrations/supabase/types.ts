@@ -4152,6 +4152,14 @@ export type Database = {
           tutor_can_upgrade: boolean
         }[]
       }
+      get_tutor_balance_debtors_by_telegram: {
+        Args: { _telegram_id: string }
+        Returns: {
+          debt: number
+          student_name: string
+          tutor_student_id: string
+        }[]
+      }
       get_tutor_pending_payments_by_telegram: {
         Args: { _telegram_id: string }
         Returns: {
@@ -4466,6 +4474,10 @@ export type Database = {
       }
       tutor_set_participant_cost: {
         Args: { _amount: number; _lesson_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_settle_debt_by_telegram: {
+        Args: { _telegram_id: string; _tutor_student_id: string }
         Returns: Json
       }
       tutor_sync_my_due_debits: { Args: never; Returns: Json }
