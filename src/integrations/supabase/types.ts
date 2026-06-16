@@ -3912,6 +3912,13 @@ export type Database = {
         }
         Returns: string
       }
+      _lesson_effective_costs: {
+        Args: { _lesson_id: string }
+        Returns: {
+          amount: number
+          tutor_student_id: string
+        }[]
+      }
       _reverse_ledger_entry: {
         Args: { _actor: string; _entry_id: string; _note: string }
         Returns: string
@@ -4403,6 +4410,10 @@ export type Database = {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
       }
+      tutor_auto_debit_due_lessons: {
+        Args: { _tutor_id?: string }
+        Returns: Json
+      }
       tutor_confirm_lessons: { Args: { p_lessons: Json }; Returns: Json }
       tutor_delete_lessons: {
         Args: { _lesson_id: string; _scope?: string }
@@ -4440,6 +4451,15 @@ export type Database = {
         Returns: string
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
+      tutor_set_lesson_cost: {
+        Args: { _amount: number; _lesson_id: string }
+        Returns: Json
+      }
+      tutor_set_participant_cost: {
+        Args: { _amount: number; _lesson_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_sync_my_due_debits: { Args: never; Returns: Json }
       update_group_participant_payment_status: {
         Args: {
           _lesson_id: string
