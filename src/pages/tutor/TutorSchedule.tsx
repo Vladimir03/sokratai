@@ -26,7 +26,7 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
-import { syncMyDueDebits, setLessonCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
+import { syncMyDueDebits, setLessonCost, setParticipantCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import {
   createWeeklySlot,
@@ -481,6 +481,7 @@ function GroupDetailsDialog({
   const [participantPaymentError, setParticipantPaymentError] = useState<string | null>(null);
   // Phase 2b: per-participant cost editor (cost-driven списание; заменяет paid/pending тумблер)
   const [participantCostText, setParticipantCostText] = useState('');
+  const [, setLastParticipantActionStatus] = useState<string | null>(null);
 
   // Detect unified group lesson (single lesson row with group_session_id)
   const isUnifiedGroupLesson = !!(bucket?.groupSessionId && bucket.lessons.length === 1 && !bucket.lessons[0].tutor_student_id);

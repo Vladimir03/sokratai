@@ -3902,6 +3902,10 @@ export type Database = {
       }
     }
     Functions: {
+      _apply_lesson_debit_from_current_cost: {
+        Args: { _actor: string; _lesson_id: string; _tutor_student_id: string }
+        Returns: undefined
+      }
       _credit_manual_payment: {
         Args: {
           _actor: string
@@ -3911,6 +3915,13 @@ export type Database = {
           _tutor_student_id: string
         }
         Returns: string
+      }
+      _lesson_effective_costs: {
+        Args: { _lesson_id: string }
+        Returns: {
+          amount: number
+          tutor_student_id: string
+        }[]
       }
       _reverse_ledger_entry: {
         Args: { _actor: string; _entry_id: string; _note: string }
@@ -4139,6 +4150,14 @@ export type Database = {
           trial_days_left: number
           trial_ends_at: string
           tutor_can_upgrade: boolean
+        }[]
+      }
+      get_tutor_balance_debtors_by_telegram: {
+        Args: { _telegram_id: string }
+        Returns: {
+          debt: number
+          student_name: string
+          tutor_student_id: string
         }[]
       }
       get_tutor_pending_payments_by_telegram: {
@@ -4403,6 +4422,14 @@ export type Database = {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
       }
+      tutor_auto_debit_due_lessons: {
+        Args: { _tutor_id?: string }
+        Returns: Json
+      }
+      tutor_cancel_lesson_with_charge: {
+        Args: { _amount: number; _lesson_id: string }
+        Returns: Json
+      }
       tutor_confirm_lessons: { Args: { p_lessons: Json }; Returns: Json }
       tutor_delete_lessons: {
         Args: { _lesson_id: string; _scope?: string }
@@ -4418,6 +4445,7 @@ export type Database = {
         Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }
+      tutor_ids_with_due_lessons: { Args: never; Returns: string[] }
       tutor_received_payments_summary: {
         Args: { _from?: string; _student_id?: string; _to?: string }
         Returns: Json
@@ -4440,6 +4468,19 @@ export type Database = {
         Returns: string
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
+      tutor_set_lesson_cost: {
+        Args: { _amount: number; _lesson_id: string }
+        Returns: Json
+      }
+      tutor_set_participant_cost: {
+        Args: { _amount: number; _lesson_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_settle_debt_by_telegram: {
+        Args: { _telegram_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_sync_my_due_debits: { Args: never; Returns: Json }
       update_group_participant_payment_status: {
         Args: {
           _lesson_id: string
