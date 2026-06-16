@@ -3137,14 +3137,10 @@ async function handleDiagnosticCancel(telegramUserId: number) {
 // ============= PAYMENT HANDLING =============
 
 // Mobile payment marking type (used by /pay command flow)
-type PendingPaymentRow = {
-  payment_id: string;
+type BalanceDebtorRow = {
   tutor_student_id: string;
   student_name: string;
-  amount: number;
-  period: string | null;
-  due_date: string | null;
-  lesson_start_at: string | null;  // actual lesson date from tutor_lessons (matches cabinet)
+  debt: number; // рубли долга (= -balance); единый источник — баланс ученика (B5 cutover)
 };
 
 type ParsedPaymentCallback = {
@@ -3276,28 +3272,6 @@ function resolveLessonAmount(
   return null;
 }
 
-async function sendPaymentReminderPrompt(
-  telegramUserId: number,
-  lessonId: string,
-  amount: number | null
-) {
-  const amountText = amount != null ? ` (${amount} ₽)` : "";
-  await sendTelegramMessage(
-    telegramUserId,
-    `✨ <b>Double WOW</b>\n\nОтправить напоминание родителю с вашими реквизитами${amountText}?`,
-    {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: "Да", callback_data: `payment_remind:yes:${lessonId}` },
-            { text: "Нет", callback_data: `payment_remind:no:${lessonId}` },
-          ],
-        ],
-      },
-    }
-  );
-}
-
 async function handlePaymentRemindCallback(telegramUserId: number, data: string) {
   const parts = data.split(":");
   if (parts.length !== 3) {
@@ -3385,89 +3359,22 @@ async function handlePaymentCallback(telegramUserId: number, data: string, messa
     callbackFormat: parsed.callbackFormat,
   });
 
-  const tutor = await getTutorByTelegramId(telegramUserId);
-  if (!tutor) {
-    await sendTelegramMessage(
-      telegramUserId,
-      "❌ Вы не найдены как репетитор. Свяжите Telegram в настройках."
-    );
-    return;
-  }
+  // ⚠️ LEGACY (Phase 2b cutover): per-lesson «жду оплату / уже оплачено / отменён» больше нет.
+  // Деньги теперь на балансе ученика: занятие списывается автоматически (cost-driven auto-debit),
+  // полученные оплаты отмечаются в /pay (гасит долг), отмена/нулевая стоимость — в кабинете.
+  // Старые сообщения-напоминания могут висеть в чатах — НЕ трогаем деньги/занятие, а fail-loud:
+  // routing на /pay (mark «уже оплачено» отдельно завершало+списывало занятие БЕЗ credit'а → минус).
+  console.log("payment_callback_dormant", {
+    telegramUserId,
+    lessonId: parsed.lessonId,
+    paymentStatus: parsed.paymentStatus,
+  });
 
-  let statusText = "";
-  let emoji = "";
-  let shouldOfferReminder = false;
-  let amountForReminder: number | null = null;
+  const dormantText =
+    parsed.paymentStatus === "cancelled"
+      ? "ℹ️ <b>Эта кнопка устарела</b>\n\nОтмена занятия теперь делается в кабинете — в карточке занятия можно указать сумму списания (0 = не списывать)."
+      : "ℹ️ <b>Эта кнопка устарела</b>\n\nОплаты теперь на балансе ученика. Открой /pay, чтобы отметить полученную оплату, или внеси её в кабинете на странице «Оплаты».";
 
-  if (parsed.paymentStatus === "cancelled") {
-    const { error } = await supabase
-      .from("tutor_lessons")
-      .update({
-        status: "cancelled",
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: "tutor",
-        payment_reminder_sent: true,
-      })
-      .eq("id", parsed.lessonId)
-      .eq("tutor_id", tutor.id);
-
-    if (error) {
-      console.error("Error cancelling lesson:", error);
-      await sendTelegramMessage(telegramUserId, "❌ Ошибка при отмене урока.");
-      return;
-    }
-
-    statusText = "Урок отменен";
-    emoji = "❌";
-  } else {
-    const lessonContext = await getLessonPaymentContext(tutor.id, parsed.lessonId);
-    const resolvedAmount = resolveLessonAmount(lessonContext, parsed.callbackAmount);
-    const rpcAmount = resolvedAmount ?? 0;
-
-    const { error } = await supabase.rpc("complete_lesson_and_create_payment", {
-      _lesson_id: parsed.lessonId,
-      _amount: rpcAmount,
-      _payment_status: parsed.paymentStatus,
-      _tutor_telegram_id: telegramUserId.toString(),
-    });
-
-    if (error) {
-      console.error("Error completing lesson and creating payment:", error);
-      await sendTelegramMessage(telegramUserId, "❌ Ошибка при завершении урока.");
-      return;
-    }
-
-    console.log("payment_upsert_done", {
-      telegramUserId,
-      lessonId: parsed.lessonId,
-      paymentStatus: parsed.paymentStatus,
-      amount: rpcAmount,
-    });
-
-    switch (parsed.paymentStatus) {
-      case "paid":
-        statusText = "Оплачено";
-        emoji = "✅";
-        shouldOfferReminder = true;
-        amountForReminder = resolvedAmount;
-        break;
-      case "paid_earlier":
-        statusText = "Оплачено ранее";
-        emoji = "💳";
-        break;
-      case "pending":
-        statusText = "Оплатит позже";
-        emoji = "⏳";
-        shouldOfferReminder = true;
-        amountForReminder = resolvedAmount;
-        break;
-      default:
-        statusText = parsed.paymentStatus;
-        emoji = "📝";
-    }
-  }
-
-  // Edit the original message to show the result
   if (messageId) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
       method: "POST",
@@ -3475,19 +3382,12 @@ async function handlePaymentCallback(telegramUserId: number, data: string, messa
       body: JSON.stringify({
         chat_id: telegramUserId,
         message_id: messageId,
-        text: `${emoji} <b>Действие выполнено</b>\n\n${statusText}`,
+        text: dormantText,
         parse_mode: "HTML",
       }),
     });
   } else {
-    await sendTelegramMessage(
-      telegramUserId,
-      `${emoji} Статус обновлён: ${statusText}`
-    );
-  }
-
-  if (shouldOfferReminder) {
-    await sendPaymentReminderPrompt(telegramUserId, parsed.lessonId, amountForReminder);
+    await sendTelegramMessage(telegramUserId, dormantText);
   }
 }
 
@@ -3495,21 +3395,6 @@ async function handlePaymentCallback(telegramUserId: number, data: string, messa
 
 function formatRub(amount: number): string {
   return `${amount.toLocaleString("ru-RU")} ₽`;
-}
-
-// Returns Russian short date e.g. "21 февраля".
-// Primary source: lesson_start_at (actual lesson date, matches cabinet).
-// Fallback: due_date, then period text.
-function formatLessonDate(row: PendingPaymentRow): string {
-  const ts = row.lesson_start_at ?? (row.due_date ? `${row.due_date}T00:00:00` : null);
-  if (!ts) return row.period ?? "—";
-  const d = new Date(ts);
-  if (isNaN(d.getTime())) return row.period ?? ts;
-  const months = [
-    "января","февраля","марта","апреля","мая","июня",
-    "июля","августа","сентября","октября","ноября","декабря",
-  ];
-  return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
 function pluralizeStudents(count: number): string {
@@ -3520,23 +3405,23 @@ function pluralizeStudents(count: number): string {
   return "учеников";
 }
 
-async function getPendingPaymentsByTelegram(telegramUserId: number): Promise<PendingPaymentRow[]> {
+async function getBalanceDebtorsByTelegram(telegramUserId: number): Promise<BalanceDebtorRow[]> {
   const { data, error } = await supabase.rpc(
-    "get_tutor_pending_payments_by_telegram",
+    "get_tutor_balance_debtors_by_telegram",
     { _telegram_id: telegramUserId.toString() }
   );
   if (error) {
     console.error("paym_list_rpc_error", { telegramUserId, error });
     return [];
   }
-  return (data ?? []) as PendingPaymentRow[];
+  return (data ?? []) as BalanceDebtorRow[];
 }
 
 async function handlePaymList(telegramUserId: number, messageId?: number) {
-  const rows = await getPendingPaymentsByTelegram(telegramUserId);
+  const debtors = await getBalanceDebtorsByTelegram(telegramUserId);
 
-  if (rows.length === 0) {
-    const text = "✅ <b>Нет должников</b>\n\nВсе оплаты в порядке! Используй кабинет для добавления платежей.";
+  if (debtors.length === 0) {
+    const text = "✅ <b>Нет должников</b>\n\nУ всех учеников баланс в нуле или плюсе. Внести оплату можно в кабинете на странице «Оплаты».";
     if (messageId) {
       await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
         method: "POST",
@@ -3554,36 +3439,19 @@ async function handlePaymList(telegramUserId: number, messageId?: number) {
     return;
   }
 
-  // Group by student
-  const studentMap = new Map<string, { name: string; total: number; ids: string[] }>();
-  for (const row of rows) {
-    const existing = studentMap.get(row.tutor_student_id);
-    if (existing) {
-      existing.total += row.amount;
-      existing.ids.push(row.payment_id);
-    } else {
-      studentMap.set(row.tutor_student_id, {
-        name: row.student_name,
-        total: row.amount,
-        ids: [row.payment_id],
-      });
-    }
-  }
-
-  const summaries = Array.from(studentMap.entries());
-  const totalDebt = summaries.reduce((acc, [, s]) => acc + s.total, 0);
+  const totalDebt = debtors.reduce((acc, d) => acc + d.debt, 0);
 
   // One button per student (single column for mobile readability)
-  const keyboard = summaries.map(([studentId, s]) => [
+  const keyboard = debtors.map((d) => [
     {
-      text: `💳 ${s.name} — ${formatRub(s.total)}`,
-      callback_data: `paym_s:${studentId}`,
+      text: `💳 ${d.student_name} — ${formatRub(d.debt)}`,
+      callback_data: `paym_s:${d.tutor_student_id}`,
     },
   ]);
   keyboard.push([{ text: "🔄 Обновить", callback_data: "paym_list" }]);
 
   const text =
-    `💰 <b>Должники (${summaries.length} ${pluralizeStudents(summaries.length)})</b>\n` +
+    `💰 <b>Должники (${debtors.length} ${pluralizeStudents(debtors.length)})</b>\n` +
     `Итого: <b>${formatRub(totalDebt)}</b>`;
 
   if (messageId) {
@@ -3604,7 +3472,7 @@ async function handlePaymList(telegramUserId: number, messageId?: number) {
     });
   }
 
-  console.log("paym_list_shown", { telegramUserId, studentCount: summaries.length });
+  console.log("paym_list_shown", { telegramUserId, studentCount: debtors.length });
 }
 
 async function handlePaymStudent(
@@ -3612,55 +3480,29 @@ async function handlePaymStudent(
   tutorStudentId: string,
   messageId?: number
 ) {
-  const allRows = await getPendingPaymentsByTelegram(telegramUserId);
-  const studentRows = allRows.filter((r) => r.tutor_student_id === tutorStudentId);
+  const debtors = await getBalanceDebtorsByTelegram(telegramUserId);
+  const student = debtors.find((d) => d.tutor_student_id === tutorStudentId);
 
-  if (studentRows.length === 0) {
-    // Already paid or invalid — refresh list
+  if (!student) {
+    // Долг уже погашен или ученик не найден — обновляем список
     await handlePaymList(telegramUserId, messageId);
     return;
   }
 
-  const studentName = studentRows[0].student_name;
-  const totalDebt = studentRows.reduce((acc, r) => acc + r.amount, 0);
-
-  // Rows are already ordered newest-first by the RPC.
-  // Build bullet list showing actual lesson date per payment.
-  const paymentLines = studentRows.map((r) => {
-    const dateStr = formatLessonDate(r);
-    return `• ${formatRub(r.amount)} — 📅 ${dateStr}`;
-  });
-
-  const headerText =
-    studentRows.length === 1
-      ? `👤 <b>${studentName}</b>\n💰 К оплате: <b>${formatRub(totalDebt)}</b>`
-      : `👤 <b>${studentName}</b>\n💰 Общий долг: <b>${formatRub(totalDebt)}</b>`;
-
-  const text = `${headerText}\n\n${paymentLines.join("\n")}`;
-
-  // One button per payment row (individual lesson date selection)
-  const perPaymentButtons = studentRows.map((r) => [
-    {
-      text: `✅ ${formatLessonDate(r)} — ${formatRub(r.amount)}`,
-      callback_data: `paym_ok:${r.payment_id}`,
-    },
-  ]);
+  const text =
+    `👤 <b>${student.student_name}</b>\n` +
+    `💰 Долг: <b>${formatRub(student.debt)}</b>\n\n` +
+    `Получил оплату? Нажми кнопку — сумма зачислится на баланс ученика и долг закроется.`;
 
   const keyboard: Array<Array<{ text: string; callback_data: string }>> = [
-    ...perPaymentButtons,
-  ];
-
-  // "Mark all" convenience button only when multiple payments
-  if (studentRows.length > 1) {
-    keyboard.push([
+    [
       {
-        text: `✅ Все сразу — ${formatRub(totalDebt)}`,
-        callback_data: `paym_oks:${tutorStudentId}`,
+        text: `✅ Получил оплату — ${formatRub(student.debt)}`,
+        callback_data: `paym_ok:${tutorStudentId}`,
       },
-    ]);
-  }
-
-  keyboard.push([{ text: "◀ Все должники", callback_data: "paym_list" }]);
+    ],
+    [{ text: "◀ Все должники", callback_data: "paym_list" }],
+  ];
 
   if (messageId) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
@@ -3683,94 +3525,38 @@ async function handlePaymStudent(
 
 async function handlePaymOk(
   telegramUserId: number,
-  paymentId: string,
+  tutorStudentId: string,
   messageId?: number
 ) {
-  const { data: success, error } = await supabase.rpc(
-    "mark_payment_as_paid_by_telegram",
-    {
-      _payment_id: paymentId,
-      _telegram_id: telegramUserId.toString(),
-    }
-  );
+  const { data, error } = await supabase.rpc("tutor_settle_debt_by_telegram", {
+    _telegram_id: telegramUserId.toString(),
+    _tutor_student_id: tutorStudentId,
+  });
 
-  if (error || !success) {
-    console.error("paym_ok_error", { telegramUserId, paymentId, error });
+  const result = (data ?? null) as
+    | { ok?: boolean; credited?: number; new_balance?: number }
+    | null;
+
+  if (error || !result?.ok) {
+    console.error("paym_ok_error", { telegramUserId, tutorStudentId, error });
     await sendTelegramMessage(
       telegramUserId,
-      "❌ Не удалось отметить оплату. Попробуй ещё раз или отметь в кабинете."
+      "❌ Не удалось записать оплату. Попробуй ещё раз или внеси оплату в кабинете."
     );
     return;
   }
 
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("ru-RU");
-  const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-
-  const confirmText = `✅ <b>Оплата отмечена!</b>\n📅 ${dateStr}, ${timeStr}`;
-
-  console.log("paym_ok_done", { telegramUserId, paymentId });
-
-  if (messageId) {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: telegramUserId,
-        message_id: messageId,
-        text: confirmText,
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [[{ text: "◀ К должникам", callback_data: "paym_list" }]],
-        },
-      }),
-    });
-  } else {
-    await sendTelegramMessage(telegramUserId, confirmText, {
-      reply_markup: {
-        inline_keyboard: [[{ text: "◀ К должникам", callback_data: "paym_list" }]],
-      },
-    });
-  }
-}
-
-async function handlePaymOkStudent(
-  telegramUserId: number,
-  tutorStudentId: string,
-  messageId?: number
-) {
-  const allRows = await getPendingPaymentsByTelegram(telegramUserId);
-  const studentRows = allRows.filter((r) => r.tutor_student_id === tutorStudentId);
-
-  if (studentRows.length === 0) {
-    await sendTelegramMessage(telegramUserId, "✅ Все оплаты уже отмечены.");
-    return;
-  }
-
-  let markedCount = 0;
-  let totalMarked = 0;
-  for (const row of studentRows) {
-    const { data: success } = await supabase.rpc("mark_payment_as_paid_by_telegram", {
-      _payment_id: row.payment_id,
-      _telegram_id: telegramUserId.toString(),
-    });
-    if (success) {
-      markedCount++;
-      totalMarked += row.amount;
-    }
-  }
-
-  const studentName = studentRows[0].student_name;
+  const credited = result.credited ?? 0;
   const now = new Date();
   const dateStr = now.toLocaleDateString("ru-RU");
   const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 
   const confirmText =
-    `✅ <b>${studentName} — ${formatRub(totalMarked)}</b>\n` +
-    `💰 Оплата отмечена!\n` +
-    `📅 ${dateStr}, ${timeStr}`;
+    credited > 0
+      ? `✅ <b>Оплата записана!</b>\n💰 Зачислено на баланс: <b>${formatRub(credited)}</b>\n📅 ${dateStr}, ${timeStr}`
+      : `ℹ️ <b>Долг уже погашен</b>\nБаланс ученика не отрицательный — записывать нечего.`;
 
-  console.log("paym_oks_done", { telegramUserId, tutorStudentId, markedCount, totalMarked });
+  console.log("paym_ok_done", { telegramUserId, tutorStudentId, credited });
 
   if (messageId) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText`, {
@@ -6731,13 +6517,9 @@ async function handleCallbackQuery(callbackQuery: any) {
     return;
   }
 
+  // paym_ok:{tutorStudentId} — погасить долг ученика (settle = topup на баланс)
   if (data.startsWith("paym_ok:")) {
     await handlePaymOk(telegramUserId, data.slice(8), callbackQuery.message?.message_id);
-    return;
-  }
-
-  if (data.startsWith("paym_oks:")) {
-    await handlePaymOkStudent(telegramUserId, data.slice(9), callbackQuery.message?.message_id);
     return;
   }
   // ──────────────────────────────────────────────────────────────────

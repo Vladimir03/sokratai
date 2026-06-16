@@ -247,3 +247,18 @@ balance=Σ всех signed; debit только через `_sync_lesson_debit` (
 - **2b — Cutover + авто-debit + сводка.** Из `complete_lesson_and_create_payment` убрать payment-write (оставить ledger-debit), заморозить `tutor_payments` (read-only), авто-debit cron (окно start+dur+3ч) + ежедневная сводка + undo; reframe «Оплаты»/`/pay` на баланс. **Старт:** 2a стабильна + Егор подтвердил совпадение баланса.
 - **2c — Отчёт родителю.** Один read-only (прогресс lite R2 + баланс) по share-ссылке (реюз `/p/:slug`, column-whitelist, anti-leak). **Старт:** баланс верен.
 - **2d/3 — Абонемент.** Объект расписания + авто-списание идемпотентно по `period_key` + флаг «покрыто». **Старт:** по запросу репетитора.
+
+---
+
+## Changelog — Phase 2b cutover (2026-06-15, ПОСТРОЕНО, не задеплоено)
+
+Реализован **полный 2b-cutover** (B4 заморозка + B5 `/pay`-reframe), а не только сводка. Канон-инварианты → **rule 60 «Phase 2b cutover»**. План `~/.claude/plans/1-glowing-spindle.md` (Phase 2b). Money-critical, прошёл независимое ревью ChatGPT-5.5 (2×P0 + P1 + P2 закрыты).
+
+- **Биллинг cost-driven, status-independent.** Решает ЦЕНА (`COALESCE(participant override, lesson override, derived)`), не статус занятия. Прошедшее + cost>0 → debit; cost 0 → waive; будущее → нет. Единая TOCTOU-safe точка `_apply_lesson_debit_from_current_cost` (цена под 2-key advisory-lock). Авто-debit cron `tutor_auto_debit_due_lessons` → edge `lesson-auto-debit` (pg_cron через Management API) + lazy-reconcile на загрузке расписания.
+- **Редактируемая стоимость** занятия/участника (`tutor_set_lesson_cost`/`tutor_set_participant_cost`) → пересчёт списания (amount-aware). 0 = waive.
+- **Отмена** = immediate debit на введённую сумму (`tutor_cancel_lesson_with_charge`, individual; берёт 2-key lock — P0 fix). **Удаление** = без списания. Bulk-banner прошедших занятий удалён.
+- **Заморозка `tutor_payments`:** `complete_lesson_and_create_payment` / `update_group_participant_payment_status` — verbatim база `20260615182853` минус `tutor_payments`-INSERT и credit-on-paid, плюс debit через `_apply`. `tutor_confirm_lessons` REVOKE от authenticated.
+- **`/pay`-бот на баланс:** должник = `balance<0` (`get_tutor_balance_debtors_by_telegram`); «Получил оплату» = topup-credit текущего долга (`tutor_settle_debt_by_telegram`, single-key lock против double-tap). `mark_payment_as_paid_by_telegram` dormant.
+- **Legacy per-lesson reminder retired (P0 fix):** `payment-reminder` edge → no-op; bot `payment:*` callbacks → dormant fail-loud (без money-мутации) — иначе «уже оплачено» завершало+списывало без credit, отмена шла мимо cost-driven.
+- **Frontend cost-UX:** `LessonDetailsDialog` (стоимость + cancel-with-amount), `GroupDetailsDialog` (per-participant cost editor вместо paid/pending), `PostLessonSheet` materials-only.
+- **Деплой-гейт:** Lovable применяет миграции `160000→190000→200000` + редеплой `lesson-auto-debit`/`telegram-bot`/`payment-reminder` → `deploy-sokratai` (фронт) → pg_cron провижн → `tutor_auto_debit_due_lessons()` раз + snapshot/diff + Егор sign-off ПЕРЕД включением cron.

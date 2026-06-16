@@ -298,3 +298,61 @@ export async function getReceivedPaymentsTotal(params?: {
   const row = (data ?? {}) as { total?: number | string; count?: number | string };
   return { total: Number(row.total ?? 0), count: Number(row.count ?? 0) };
 }
+
+// ─── Phase 2b — авто-списание занятий (Stage A) ──────────────────────────────
+
+/** RAISE-коды cost-set RPC → RU (rule 97). */
+function mapLessonCostError(rawMsg: string): { code?: string; error: string } {
+  const msg = rawMsg || '';
+  if (msg.includes('INVALID_AMOUNT')) return { code: 'INVALID_AMOUNT', error: 'Стоимость должна быть 0 или больше.' };
+  if (msg.includes('GROUP_LESSON')) return { code: 'GROUP_LESSON', error: 'Это групповое занятие — меняйте стоимость по участнику.' };
+  if (msg.includes('PARTICIPANT_NOT_FOUND')) return { code: 'PARTICIPANT_NOT_FOUND', error: 'Участник не найден в занятии.' };
+  if (msg.includes('NOT_OWNED')) return { code: 'NOT_OWNED', error: 'Занятие не найдено.' };
+  if (msg.includes('NO_STUDENT')) return { code: 'NO_STUDENT', error: 'У занятия нет ученика.' };
+  if (msg.includes('STUDENT_TUTOR_MISMATCH')) return { code: 'STUDENT_TUTOR_MISMATCH', error: 'Ученик принадлежит другому репетитору.' };
+  if (msg.includes('LEDGER_DEBIT_RACE') || msg.includes('LEDGER_DEBIT_LOST')) {
+    return { code: 'LEDGER_CONFLICT', error: 'Не удалось применить — обновите страницу и попробуйте ещё раз.' };
+  }
+  return { error: 'Не удалось изменить стоимость. Попробуйте ещё раз.' };
+}
+
+/**
+ * Lazy-reconcile: досписать прошедшие занятия ТЕКУЩЕГО тутора (scoped по auth.uid()→tutor_id).
+ * Fire-and-forget на загрузке расписания → ощущается «сразу». Тихо (rule 95), не бросает.
+ */
+export async function syncMyDueDebits(): Promise<void> {
+  const { error } = await supabase.rpc('tutor_sync_my_due_debits' as never);
+  if (error) console.error('syncMyDueDebits error:', error.message);
+}
+
+/** Стоимость индивидуального занятия (override). Прошедшее → сразу пересчёт списания. amount 0 = не списывать. */
+export async function setLessonCost(lessonId: string, amount: number): Promise<BalanceMutationResult> {
+  const { error } = await supabase.rpc('tutor_set_lesson_cost' as never, {
+    _lesson_id: lessonId, _amount: amount,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  return { ok: true };
+}
+
+/** Стоимость участника группового занятия. Прошедшее → сразу пересчёт списания. amount 0 = не списывать. */
+export async function setParticipantCost(
+  lessonId: string, tutorStudentId: string, amount: number,
+): Promise<BalanceMutationResult> {
+  const { error } = await supabase.rpc('tutor_set_participant_cost' as never, {
+    _lesson_id: lessonId, _tutor_student_id: tutorStudentId, _amount: amount,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  return { ok: true };
+}
+
+/**
+ * Отмена индивидуального занятия со списанием суммы (immediate, не past-gated).
+ * 0 = не списывать (reverse). Группа → GROUP_LESSON. После — invalidateBalanceCaches.
+ */
+export async function cancelLessonWithCharge(lessonId: string, amount: number): Promise<BalanceMutationResult> {
+  const { error } = await supabase.rpc('tutor_cancel_lesson_with_charge' as never, {
+    _lesson_id: lessonId, _amount: amount,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  return { ok: true };
+}

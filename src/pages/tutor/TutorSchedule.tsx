@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -23,10 +23,11 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import { PastLessonsConfirmBanner } from '@/components/tutor/schedule/PastLessonsConfirmBanner';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
+import { syncMyDueDebits, setLessonCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
+import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import {
   createWeeklySlot,
   toggleSlotAvailability,
@@ -55,7 +56,6 @@ import {
   removeLessonParticipant,
   type MiniGroupCreateResult,
 } from '@/lib/tutorScheduleGroupCreate';
-import { updateGroupParticipantPaymentStatus } from '@/lib/tutorScheduleGroupPayments';
 import {
   runCancelGroupAction,
   runCompleteGroupAction,
@@ -66,7 +66,6 @@ import {
   type GroupActionSummary,
 } from '@/lib/tutorScheduleGroupActions';
 import type {
-  GroupParticipantPaymentStatus,
   LessonType,
   TutorAvailabilityException,
   TutorCalendarSettings,
@@ -288,16 +287,12 @@ function LessonBlock({
   const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents;
 
   const isPast = endDate.getTime() < Date.now();
-  const isCompleted = lesson.status === 'completed';
   const isCancelled = lesson.status === 'cancelled';
-  const needsAction = isPast && lesson.status === 'booked';
+  // Phase 2b: деньги решает ЦЕНА, не статус. Эффективная стоимость = override ∥ ставка×длительность.
+  const effectiveCost = lesson.payment_amount ?? calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
 
-  // Visual state classes
-  const statusClasses = cn(
-    isCompleted && lesson.payment_status === 'paid' && "opacity-60",
-    isCompleted && lesson.payment_status !== 'paid' && "opacity-60",
-    isCancelled && "opacity-40 grayscale",
-  );
+  // Visual state classes (без платёжной окраски — только отменённое приглушаем).
+  const statusClasses = cn(isCancelled && "opacity-40 grayscale");
 
   const isDraggable = lesson.status === 'booked';
 
@@ -307,7 +302,6 @@ function LessonBlock({
         "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm",
         typeColor,
         statusClasses,
-        needsAction && "ring-2 ring-amber-400 ring-offset-0",
       )}
       style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
       draggable={isDraggable}
@@ -326,19 +320,17 @@ function LessonBlock({
           <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
         )}
 
-        {/* Status indicator row */}
-        {height >= 35 && (isCompleted || isCancelled || needsAction) && (
+        {/* Phase 2b: прошедшее → списанная стоимость (решает цена, не статус); будущее → ставка/предмет */}
+        {height >= 35 && (isPast || isCancelled) && (
           <span className="text-[10px] leading-tight mt-0.5 truncate">
-            {needsAction && '⏳ Нужно закрыть'}
-            {isCompleted && lesson.payment_status === 'paid' && '✅ Оплачено'}
-            {isCompleted && lesson.payment_status === 'pending' && '⏳ Жду оплату'}
-            {isCompleted && !lesson.payment_status && '✅ Проведено'}
-            {isCancelled && '❌ Отменено'}
+            {isCancelled
+              ? (isPast && effectiveCost && effectiveCost > 0 ? `Отменено · −${effectiveCost} ₽` : 'Отменено')
+              : (effectiveCost === 0 ? 'Бесплатно' : effectiveCost ? `−${effectiveCost} ₽` : 'Проведено')}
           </span>
         )}
 
-        {/* Rate/subject for normal future lessons */}
-        {!isCompleted && !isCancelled && !needsAction && (
+        {/* Будущее занятие — ставка/предмет */}
+        {!isPast && !isCancelled && (
           <>
             {height >= 50 && hourlyRateCents != null && (
               <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
@@ -388,18 +380,14 @@ function GroupLessonBlock({
 
   const isAllCompleted = bucket.statusCounts.completed === bucket.lessons.length;
   const isAllCancelled = bucket.statusCounts.cancelled === bucket.lessons.length;
-  const needsAction = bucket.lessons.some((lesson) => {
-    const lessonEnd = addMinutes(new Date(lesson.start_at), lesson.duration_min);
-    return lesson.status === 'booked' && lessonEnd.getTime() < Date.now();
-  });
   const isMixedStatuses = !isAllCompleted && !isAllCancelled && (
     bucket.statusCounts.completed > 0 || bucket.statusCounts.cancelled > 0
   );
 
+  // Phase 2b: «требует действия» (amber ring для прошедших booked) убран — авто-debit списывает по стоимости.
   const statusClasses = cn(
     isAllCompleted && 'opacity-70',
     isAllCancelled && 'opacity-40 grayscale',
-    needsAction && 'ring-2 ring-amber-400 ring-offset-0',
   );
 
   const statusLabel = isAllCompleted
@@ -491,7 +479,8 @@ function GroupDetailsDialog({
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const [isParticipantPaymentSaving, setIsParticipantPaymentSaving] = useState(false);
   const [participantPaymentError, setParticipantPaymentError] = useState<string | null>(null);
-  const [lastParticipantActionStatus, setLastParticipantActionStatus] = useState<GroupParticipantPaymentStatus | null>(null);
+  // Phase 2b: per-participant cost editor (cost-driven списание; заменяет paid/pending тумблер)
+  const [participantCostText, setParticipantCostText] = useState('');
 
   // Detect unified group lesson (single lesson row with group_session_id)
   const isUnifiedGroupLesson = !!(bucket?.groupSessionId && bucket.lessons.length === 1 && !bucket.lessons[0].tutor_student_id);
@@ -536,8 +525,6 @@ function GroupDetailsDialog({
 
   const mainLesson = bucket?.lessons[0] ?? null;
   const lessonStatus = mainLesson?.status ?? 'booked';
-  const canManageParticipantPayments = isUnifiedGroupLesson && lessonStatus === 'completed';
-
   const selectedParticipant = useMemo(
     () => participants.find((participant) => participant.id === selectedParticipantId) ?? null,
     [participants, selectedParticipantId],
@@ -844,97 +831,70 @@ function GroupDetailsDialog({
     }
   }, [mainLesson, onActionApplied, onOpenChange]);
 
+  // Phase 2b: эффективная стоимость участника = override ∥ derived (rate × длительность группы).
+  const getParticipantCost = useCallback((participant: TutorLessonParticipantWithStudent): number => {
+    if (participant.payment_amount != null) return participant.payment_amount;
+    return calculateLessonPaymentAmount(
+      mainLesson?.duration_min ?? bucket?.durationMin ?? 0,
+      participant.tutor_students?.hourly_rate_cents ?? null,
+    );
+  }, [mainLesson, bucket]);
+
   const openParticipantPaymentDialog = useCallback((participant: TutorLessonParticipantWithStudent) => {
-    if (!canManageParticipantPayments) return;
     if (!participant.tutor_student_id) return;
     if (isParticipantPaymentSaving) return;
     setSelectedParticipantId(participant.id);
     setParticipantPaymentError(null);
-    setLastParticipantActionStatus(null);
-  }, [canManageParticipantPayments, isParticipantPaymentSaving]);
+    const cost = getParticipantCost(participant);
+    setParticipantCostText(cost > 0 ? String(cost) : '0');
+  }, [isParticipantPaymentSaving, getParticipantCost]);
 
   const closeParticipantPaymentDialog = useCallback((openParticipantDialog: boolean) => {
     if (openParticipantDialog) return;
     if (isParticipantPaymentSaving) return;
     setSelectedParticipantId(null);
     setParticipantPaymentError(null);
-    setLastParticipantActionStatus(null);
   }, [isParticipantPaymentSaving]);
 
-  const applyParticipantPaymentStatus = useCallback(async (targetStatus: GroupParticipantPaymentStatus) => {
+  // Phase 2b: сохранить стоимость занятия для участника (0 = не списывать). Прошедшее → сразу пересчёт.
+  const handleSaveParticipantCost = useCallback(async () => {
     if (!mainLesson || !selectedParticipant) return;
     if (!selectedParticipant.tutor_student_id) {
-      toast.error('Не удалось определить ученика для обновления оплаты');
-      return;
-    }
-    if (!canManageParticipantPayments) {
-      toast.error('Оплату по ученикам можно менять только после завершения занятия');
+      toast.error('Не удалось определить ученика');
       return;
     }
     if (isParticipantPaymentSaving) return;
 
+    const parsed = Number.parseInt((participantCostText || '').replace(/[^\d]/g, ''), 10);
+    const amount = Number.isFinite(parsed) ? parsed : 0;
+    if (amount < 0) { toast.error('Стоимость должна быть 0 или больше'); return; }
+
     const previousParticipant = selectedParticipant;
-    const optimisticPaidAt = targetStatus === 'paid'
-      ? new Date().toISOString()
-      : null;
-
     setParticipantPaymentError(null);
-    setLastParticipantActionStatus(targetStatus);
     setIsParticipantPaymentSaving(true);
-    setParticipants((prev) => prev.map((participant) => (
-      participant.id === previousParticipant.id
-        ? { ...participant, payment_status: targetStatus, paid_at: optimisticPaidAt }
-        : participant
-    )));
-
     try {
-      const result = await updateGroupParticipantPaymentStatus(
-        mainLesson.id,
-        previousParticipant.tutor_student_id,
-        targetStatus,
-      );
-
-      if (!result.ok || !result.status) {
-        setParticipants((prev) => prev.map((participant) => (
-          participant.id === previousParticipant.id ? previousParticipant : participant
-        )));
-        const errorCode = result.error_code ?? 'UPDATE_FAILED';
-        setParticipantPaymentError(errorCode);
-        toast.error('Не удалось обновить оплату ученика');
+      const result = await setParticipantCost(mainLesson.id, previousParticipant.tutor_student_id, amount);
+      if (!result.ok) {
+        setParticipantPaymentError(result.code ?? 'UPDATE_FAILED');
+        toast.error(result.error || 'Не удалось изменить стоимость');
         return;
       }
-
-      setParticipants((prev) => prev.map((participant) => {
-        if (participant.id !== previousParticipant.id) return participant;
-        return {
-          ...participant,
-          payment_status: result.status,
-          paid_at: result.paid_at,
-          payment_amount: result.amount ?? participant.payment_amount,
-        };
-      }));
-
-      if (result.status === 'paid') {
-        toast.success('Оплата ученика отмечена как полученная');
-      } else {
-        toast.success('Оплата ученика отмечена как ожидаемая');
-      }
-
+      setParticipants((prev) => prev.map((participant) => (
+        participant.id === previousParticipant.id
+          ? { ...participant, payment_amount: amount }
+          : participant
+      )));
+      toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
       setSelectedParticipantId(null);
-      setParticipantPaymentError(null);
-      setLastParticipantActionStatus(null);
       onParticipantPaymentUpdated?.();
     } catch (error) {
       console.error(error);
-      setParticipants((prev) => prev.map((participant) => (
-        participant.id === previousParticipant.id ? previousParticipant : participant
-      )));
       setParticipantPaymentError('NETWORK_ERROR');
-      toast.error('Ошибка сети при обновлении оплаты');
+      toast.error('Ошибка сети при сохранении стоимости');
     } finally {
       setIsParticipantPaymentSaving(false);
     }
-  }, [canManageParticipantPayments, isParticipantPaymentSaving, mainLesson, onParticipantPaymentUpdated, selectedParticipant]);
+  }, [isParticipantPaymentSaving, mainLesson, onParticipantPaymentUpdated, participantCostText, selectedParticipant]);
 
   const renderPaymentIndicator = useCallback((lesson: TutorLessonWithStudent) => {
     if (lesson.status !== 'completed') {
@@ -996,12 +956,8 @@ function GroupDetailsDialog({
                   <p className="text-sm text-muted-foreground">Нет участников</p>
                 ) : (
                   participants.map((participant) => {
-                    const isActionable = canManageParticipantPayments && Boolean(participant.tutor_student_id);
-                    const paymentStatusLabel = participant.payment_status === 'paid'
-                      ? 'Оплачено'
-                      : participant.payment_status === 'pending'
-                        ? 'Ожидается'
-                        : 'Не оплачено';
+                    const isActionable = Boolean(participant.tutor_student_id);
+                    const participantCost = getParticipantCost(participant);
                     return (
                     <div
                       key={participant.id}
@@ -1026,7 +982,7 @@ function GroupDetailsDialog({
                           {getParticipantName(participant)}
                         </p>
                         <Badge variant="outline">
-                          {paymentStatusLabel}
+                          {participantCost > 0 ? `${participantCost} ₽` : 'Не списывается'}
                         </Badge>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -1037,19 +993,10 @@ function GroupDetailsDialog({
                         ) : (
                           <span className="text-xs text-amber-600">Ставка не указана</span>
                         )}
-                        {participant.payment_amount != null && (
-                          <span className="text-xs text-muted-foreground">
-                            Сумма: {participant.payment_amount} ₽
-                          </span>
-                        )}
                       </div>
-                      {isActionable ? (
+                      {isActionable && (
                         <p className="text-[11px] text-muted-foreground">
-                          Нажмите, чтобы изменить статус оплаты ученика
-                        </p>
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground">
-                          Сначала отметьте занятие проведенным, затем укажите оплату по ученикам
+                          Нажмите, чтобы изменить стоимость для ученика
                         </p>
                       )}
                     </div>
@@ -1318,52 +1265,38 @@ function GroupDetailsDialog({
                   : 'Ставка не указана'}
               </p>
               <p className="text-xs text-muted-foreground">Ставка ученика</p>
-              <p className="text-sm text-muted-foreground">
-                Сумма: {selectedParticipant.payment_amount != null ? formatCurrency(selectedParticipant.payment_amount) : '—'}
-              </p>
             </div>
-
-            {!canManageParticipantPayments && (
-              <Alert>
-                <AlertDescription>
-                  Сначала отметьте групповое занятие проведенным, затем можно менять оплату по каждому ученику.
-                </AlertDescription>
-              </Alert>
-            )}
 
             {participantPaymentError && (
               <Alert variant="destructive">
-                <AlertDescription className="space-y-2">
-                  <p>Не удалось обновить оплату ({participantPaymentError}).</p>
-                  {lastParticipantActionStatus && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full"
-                      disabled={isParticipantPaymentSaving}
-                      onClick={() => void applyParticipantPaymentStatus(lastParticipantActionStatus)}
-                    >
-                      Повторить
-                    </Button>
-                  )}
+                <AlertDescription>
+                  <p>Не удалось изменить стоимость ({participantPaymentError}).</p>
                 </AlertDescription>
               </Alert>
             )}
 
             <div className="space-y-2">
+              <Label className="text-xs">Стоимость занятия для ученика, ₽</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={participantCostText}
+                onChange={(e) => setParticipantCostText(e.target.value)}
+                className="text-base"
+                placeholder="0"
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                0 — не списывать с баланса (например, ученик не был).
+                {' '}Спишется после занятия; прошедшее — сразу.
+              </p>
               <Button
-                className="w-full bg-amber-500 hover:bg-amber-600 text-white"
-                disabled={!canManageParticipantPayments || isParticipantPaymentSaving || !selectedParticipant.tutor_student_id}
-                onClick={() => void applyParticipantPaymentStatus('pending')}
+                className="w-full"
+                disabled={isParticipantPaymentSaving || !selectedParticipant.tutor_student_id}
+                onClick={() => void handleSaveParticipantCost()}
+                style={{ touchAction: 'manipulation' }}
               >
-                ✅ Проведено, жду оплату
-              </Button>
-              <Button
-                className="w-full bg-green-600 hover:bg-green-700 text-white"
-                disabled={!canManageParticipantPayments || isParticipantPaymentSaving || !selectedParticipant.tutor_student_id}
-                onClick={() => void applyParticipantPaymentStatus('paid')}
-              >
-                💳 Уже оплачено
+                {isParticipantPaymentSaving ? 'Сохранение...' : 'Сохранить стоимость'}
               </Button>
             </div>
           </div>
@@ -1382,7 +1315,7 @@ function GroupDetailsDialog({
                   ? 'Групповое занятие будет отменено для всех участников.'
                   : `Будет попытка отмены запланированных уроков: ${bookedCount}. Завершенные и уже отмененные уроки будут пропущены.`)
               : (isUnifiedGroupLesson
-                  ? 'Групповое занятие будет отмечено как проведенное. Оплаты будут созданы для каждого участника.'
+                  ? 'Групповое занятие будет отмечено как проведенное. Стоимость спишется с баланса каждого участника по его цене (0 — не спишется).'
                   : `Будет попытка завершить уроки, которые уже завершились по времени: ${completeEligibleCount}. Остальные уроки будут пропущены.`)}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -2278,6 +2211,12 @@ function LessonDetailsDialog({
   const [isSeriesCheckLoading, setIsSeriesCheckLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  // Phase 2b cost-driven billing: editable cost + cancel-with-charge
+  const [isEditingCost, setIsEditingCost] = useState(false);
+  const [costText, setCostText] = useState('');
+  const [isSavingCost, setIsSavingCost] = useState(false);
+  const [showCancelCharge, setShowCancelCharge] = useState(false);
+  const [cancelChargeText, setCancelChargeText] = useState('');
 
   // Reset edit state when dialog opens with a new lesson
   useEffect(() => {
@@ -2293,6 +2232,8 @@ function LessonDetailsDialog({
       setEditMinute(lessonStart.getMinutes().toString().padStart(2, '0'));
       setEditDuration((lesson.duration_min ?? 60).toString());
       setSeriesAction(null);
+      setIsEditingCost(false);
+      setShowCancelCharge(false);
     }
   }, [open, lesson]);
 
@@ -2353,6 +2294,55 @@ function LessonDetailsDialog({
 
   const isPast = endDate.getTime() < Date.now();
 
+  // Phase 2b: эффективная стоимость = override (payment_amount) ∥ derived (rate×duration). 0 = не списывать.
+  const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents ?? null;
+  const effectiveCost = lesson.payment_amount ?? calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
+
+  const handleSaveCost = async () => {
+    const parsed = Number.parseInt((costText || '').replace(/[^\d]/g, ''), 10);
+    const amount = Number.isFinite(parsed) ? parsed : 0;
+    if (amount < 0) { toast.error('Стоимость должна быть 0 или больше'); return; }
+    setIsSavingCost(true);
+    try {
+      const res = await setLessonCost(lesson.id, amount);
+      if (res.ok) {
+        toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
+        setIsEditingCost(false);
+        onUpdate();
+      } else {
+        toast.error(res.error || 'Не удалось сохранить стоимость');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Ошибка при сохранении стоимости');
+    } finally {
+      setIsSavingCost(false);
+    }
+  };
+
+  const handleConfirmCancelCharge = async () => {
+    const parsed = Number.parseInt((cancelChargeText || '').replace(/[^\d]/g, ''), 10);
+    const amount = Number.isFinite(parsed) ? parsed : 0;
+    if (amount < 0) { toast.error('Сумма должна быть 0 или больше'); return; }
+    setIsCancelling(true);
+    try {
+      const res = await cancelLessonWithCharge(lesson.id, amount);
+      if (res.ok) {
+        toast.success(amount > 0 ? `Занятие отменено · списано ${amount} ₽` : 'Занятие отменено');
+        setShowCancelCharge(false);
+        onCancel();
+        onOpenChange(false);
+      } else {
+        toast.error(res.error || 'Не удалось отменить');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Ошибка при отмене');
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
   const handleCancelClick = () => {
     if (isSeriesCheckLoading) {
       toast.info('Проверяем серию занятий...');
@@ -2361,7 +2351,9 @@ function LessonDetailsDialog({
     if (isActualSeries) {
       setSeriesAction('cancel');
     } else {
-      doCancel('this');
+      // Одиночное занятие — отмена с суммой списания (rule 2b: репетитор вводит сумму).
+      setCancelChargeText(effectiveCost != null && effectiveCost > 0 ? String(effectiveCost) : '0');
+      setShowCancelCharge(true);
     }
   };
 
@@ -2546,6 +2538,61 @@ function LessonDetailsDialog({
             </div>
           )}
 
+          {/* Phase 2b: стоимость занятия — единственный денежный контрол (cost-driven списание) */}
+          {!isEditing && lesson.status !== 'cancelled' && (
+            <div className="flex items-start gap-3">
+              <Wallet className="h-5 w-5 text-muted-foreground mt-0.5" />
+              <div className="flex-1 min-w-0">
+                {!isEditingCost ? (
+                  <>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-medium">
+                        {effectiveCost != null && effectiveCost > 0 ? `${effectiveCost} ₽` : 'Не списывается'}
+                      </p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        style={{ touchAction: 'manipulation' }}
+                        onClick={() => {
+                          setCostText(effectiveCost != null ? String(effectiveCost) : '0');
+                          setIsEditingCost(true);
+                        }}
+                      >
+                        Изменить
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {isPast ? 'Списано с баланса ученика' : 'Спишется после занятия'}
+                    </p>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <Label className="text-xs">Стоимость занятия, ₽</Label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={costText}
+                        onChange={(e) => setCostText(e.target.value)}
+                        className="text-base w-28"
+                        placeholder="0"
+                        autoFocus
+                      />
+                      <Button size="sm" onClick={handleSaveCost} disabled={isSavingCost}>
+                        {isSavingCost ? '...' : 'Сохранить'}
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setIsEditingCost(false)} disabled={isSavingCost}>
+                        Отмена
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">0 — не списывать с баланса ученика</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {!isEditing ? (
             <>
               <div className="flex flex-wrap gap-2">
@@ -2720,8 +2767,8 @@ function LessonDetailsDialog({
               </Button>
               {lesson.status === 'booked' && (
               isPast ? (
-                /* Past booked lesson — open the guided post-lesson sheet
-                   (provести + оплата + материалы + ДЗ + уведомление). */
+                /* Phase 2b: занятие уже авто-списано (cost-driven) — кнопка ведёт к материалам,
+                   а не «провести+оплата». Стоимость/отмена — в карточке (Редактировать). */
                 <Button
                   className="w-full"
                   style={{ touchAction: 'manipulation' }}
@@ -2729,7 +2776,7 @@ function LessonDetailsDialog({
                   disabled={isCompleting || isCancelling}
                 >
                   <ClipboardCheck className="mr-1.5 h-4 w-4" />
-                  Провести и оформить
+                  Материалы занятия
                 </Button>
               ) : (
                 /* Future booked lesson — edit / cancel */
@@ -2788,6 +2835,35 @@ function LessonDetailsDialog({
             disabled={isCancelling || isSaving}
           >
             Вся серия
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Phase 2b: отмена одиночного занятия с суммой списания */}
+    <AlertDialog open={showCancelCharge} onOpenChange={(open) => { if (!open) setShowCancelCharge(false); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Отменить занятие</AlertDialogTitle>
+          <AlertDialogDescription>
+            Сколько списать с баланса ученика за отменённое занятие? Введите 0, если списывать не нужно.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <div className="space-y-1.5 py-2">
+          <Label className="text-xs">Списать с баланса, ₽</Label>
+          <Input
+            type="text"
+            inputMode="numeric"
+            value={cancelChargeText}
+            onChange={(e) => setCancelChargeText(e.target.value)}
+            className="text-base w-32"
+            placeholder="0"
+          />
+        </div>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setShowCancelCharge(false)} disabled={isCancelling}>Назад</AlertDialogCancel>
+          <Button variant="destructive" onClick={handleConfirmCancelCharge} disabled={isCancelling}>
+            {isCancelling ? 'Отмена...' : 'Отменить занятие'}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -3641,6 +3717,19 @@ function TutorScheduleContent() {
     };
   }, []);
 
+  // Phase 2b lazy-reconcile: при загрузке/смене недели досписываем прошедшие занятия текущего тутора
+  // (cost-driven авто-debit) → ощущается «сразу». Throttle ~2 мин; тихо (rule 95), сетку не блокирует.
+  const lastDueSyncRef = useRef(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (now - lastDueSyncRef.current < 120_000) return;
+    lastDueSyncRef.current = now;
+    void syncMyDueDebits().then(() => {
+      refetchLessons();
+      invalidateBalanceCaches();
+    });
+  }, [weekStart, refetchLessons, invalidateBalanceCaches]);
+
   const visibleHours = useMemo(() => {
     return Array.from(
       { length: scheduleSettings.workDayEnd - scheduleSettings.workDayStart },
@@ -4238,7 +4327,8 @@ function TutorScheduleContent() {
           onRetry={handleRetryAll}
         />
 
-        <PastLessonsConfirmBanner onOpenMaterials={setMaterialsDrawerLesson} />
+        {/* Phase 2b: баннер «Прошедшие занятия» удалён — авто-списание (cost-driven) делает ручное
+            подтверждение ненужным; коррекция сумм — через стоимость в карточке занятия. */}
 
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -4625,7 +4715,7 @@ function TutorScheduleContent() {
           lesson={selectedLesson}
           students={students}
           onCancel={() => { refetchLessons(); invalidateBalanceCaches(); }}
-          onUpdate={() => refetchLessons()}
+          onUpdate={() => { refetchLessons(); invalidateBalanceCaches(); }}
           isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
           onOpenMaterials={() => {
             setLessonDetailsOpen(false);
@@ -4653,9 +4743,6 @@ function TutorScheduleContent() {
               open={!!postLessonSheetLesson}
               onOpenChange={(o) => { if (!o) setPostLessonSheetLesson(null); }}
               lesson={postLessonSheetLesson}
-              onComplete={handleCompleteLesson}
-              isCompleting={Boolean(completingLessonIds[postLessonSheetLesson.id])}
-              onCancelLesson={handleCancelLessonFromSheet}
             />
           </Suspense>
         )}
