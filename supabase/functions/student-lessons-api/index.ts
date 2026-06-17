@@ -448,7 +448,14 @@ async function assembleFeedItems(
     .map((l) => {
       const rawMaterials = (materialsByLesson.get(l.id) ?? [])
         .slice()
-        .sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+        // tie-breaker по created_at (code review P2): несколько homework_ref имеют
+        // sort_order=0 (edge insert не задаёт sort_order) → без tie-breaker порядок
+        // N домашек «плавал» бы между запросами.
+        .sort((a, b) => {
+          const so = Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+          if (so !== 0) return so;
+          return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''));
+        });
       const mappedMaterials = rawMaterials.map((m) => {
         const base = { id: m.id, kind: m.material_kind, title: (m.title as string | null) ?? null };
         if (m.material_kind === "recording") {

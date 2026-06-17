@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit, AlertCircle, Archive, ArchiveRestore } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -32,6 +32,7 @@ import {
 import { 
   updateTutorStudent,
   removeStudentFromTutor,
+  setTutorStudentArchived,
   updateTutorStudentProfile,
   createTutorGroup,
   upsertTutorGroupMembership,
@@ -148,6 +149,7 @@ function TutorStudentProfileContent() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [deleteStudentOpen, setDeleteStudentOpen] = useState(false);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [isArchivingStudent, setIsArchivingStudent] = useState(false);
   const [editStudentOpen, setEditStudentOpen] = useState(false);
   const [isUpdatingStudent, setIsUpdatingStudent] = useState(false);
   const [editFormInitialized, setEditFormInitialized] = useState(false);
@@ -273,6 +275,29 @@ function TutorStudentProfileContent() {
       setDeleteStudentOpen(false);
     }
   }, [navigate, queryClient, tutorStudentId]);
+
+  // Архивирование (запрос Елены 2026-06-17). Обратимо, историю не трогает.
+  const handleToggleArchive = useCallback(async () => {
+    if (!tutorStudentId) return;
+    const nextArchived = !student?.archived_at;
+    setIsArchivingStudent(true);
+    try {
+      const ok = await setTutorStudentArchived(tutorStudentId, nextArchived);
+      if (!ok) {
+        toast.error(nextArchived ? 'Не удалось архивировать' : 'Не удалось вернуть из архива');
+        return;
+      }
+      // Инвалидация рефетчит ['tutor','students'] (+ subkey 'archived') и
+      // ['tutor','student', id] → ученик корректно уходит/возвращается в списки.
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
+      toast.success(nextArchived ? 'Ученик перемещён в архив' : 'Ученик возвращён из архива');
+    } catch (error) {
+      console.error('Error archiving student:', error);
+      toast.error('Не удалось изменить статус архива');
+    } finally {
+      setIsArchivingStudent(false);
+    }
+  }, [tutorStudentId, student?.archived_at, queryClient]);
 
   const handleCreateEditGroup = useCallback(async () => {
     const groupName = editNewGroupName.trim();
@@ -510,6 +535,18 @@ function TutorStudentProfileContent() {
             <Edit className="h-4 w-4 mr-2" />
             Редактировать
           </Button>
+          {/* Архивирование (запрос Елены 2026-06-17) — обратимо. */}
+          <Button
+            variant="outline"
+            onClick={handleToggleArchive}
+            disabled={isArchivingStudent}
+          >
+            {student.archived_at ? (
+              <><ArchiveRestore className="h-4 w-4 mr-2" /> Из архива</>
+            ) : (
+              <><Archive className="h-4 w-4 mr-2" /> В архив</>
+            )}
+          </Button>
           <Button
             variant="destructive"
             onClick={() => setDeleteStudentOpen(true)}
@@ -518,7 +555,27 @@ function TutorStudentProfileContent() {
             Удалить ученика
           </Button>
         </div>
-        
+
+        {/* Баннер «в архиве» (запрос Елены 2026-06-17) */}
+        {student.archived_at && (
+          <div className="flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <span className="flex items-center gap-2">
+              <Archive className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Ученик в архиве — скрыт из активных списков и из выбора при создании занятий и ДЗ. История сохранена.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleArchive}
+              disabled={isArchivingStudent}
+              className="shrink-0 border-amber-300 bg-white hover:bg-amber-100"
+            >
+              <ArchiveRestore className="h-4 w-4 mr-1.5" />
+              Вернуть из архива
+            </Button>
+          </div>
+        )}
+
         {/* Карточка-шапка */}
         <Card>
           <CardContent className="pt-6">

@@ -27,6 +27,7 @@ import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import {
   BookOpen,
+  Check,
   ExternalLink,
   FileText,
   Loader2,
@@ -41,6 +42,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { getSubjectLabel } from '@/types/homework';
 import { listTutorHomeworkAssignments } from '@/lib/tutorHomeworkApi';
+import { useHomeworkFolders } from '@/hooks/useHomeworkFolders';
 import type { TutorLessonWithStudent } from '@/types/tutor';
 import {
   addRecording,
@@ -168,7 +170,15 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
 
     const recordings = useMemo(() => materials.filter((m) => m.material_kind === 'recording'), [materials]);
     const pdfs = useMemo(() => materials.filter((m) => m.material_kind === 'pdf'), [materials]);
-    const homeworkRef = useMemo(() => materials.find((m) => m.material_kind === 'homework_ref') ?? null, [materials]);
+    // Несколько ДЗ на урок (запрос Елены 2026-06-17): filter, не find.
+    const homeworkRefs = useMemo(
+      () => materials.filter((m) => m.material_kind === 'homework_ref'),
+      [materials],
+    );
+    const attachedAssignmentIds = useMemo(
+      () => new Set(homeworkRefs.map((m) => m.homework_assignment_id).filter(Boolean) as string[]),
+      [homeworkRefs],
+    );
 
     // Recording form
     const [recordingUrl, setRecordingUrl] = useState('');
@@ -183,6 +193,10 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
     // Homework picker
     const [pickerOpen, setPickerOpen] = useState(false);
     const [attachingId, setAttachingId] = useState<string | null>(null);
+    // Фильтр пикера по папкам (синергия #1↔#2, запрос Елены 2026-06-17):
+    // 'all' | '__none__' (без папки) | folderId.
+    const [pickerFolderId, setPickerFolderId] = useState<string>('all');
+    const { folders: homeworkFolders } = useHomeworkFolders();
 
     const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -190,7 +204,7 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
     const assignmentsQuery = useQuery({
       queryKey: ['tutor', 'homework', 'assignments', 'all'],
       queryFn: () => listTutorHomeworkAssignments({ filter: 'all' }),
-      enabled: active && (pickerOpen || !!homeworkRef),
+      enabled: active && (pickerOpen || homeworkRefs.length > 0),
       refetchOnWindowFocus: false,
     });
     const assignmentTitleById = useMemo(() => {
@@ -198,6 +212,13 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       for (const a of assignmentsQuery.data ?? []) map.set(a.id, a.title);
       return map;
     }, [assignmentsQuery.data]);
+    // Список пикера, отфильтрованный по выбранной папке.
+    const pickerAssignments = useMemo(() => {
+      const all = assignmentsQuery.data ?? [];
+      if (pickerFolderId === 'all') return all;
+      if (pickerFolderId === '__none__') return all.filter((a) => !a.folder_id);
+      return all.filter((a) => a.folder_id === pickerFolderId);
+    }, [assignmentsQuery.data, pickerFolderId]);
 
     const invalidate = useCallback(
       () => queryClient.invalidateQueries({ queryKey: ['tutor', 'lesson-materials', lessonId] }),
@@ -330,15 +351,21 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
         try {
           await attachHomework(lessonId, assignmentId);
           materialsAddedRef.current = true;
-          setPickerOpen(false);
+          // Несколько ДЗ на урок: пикер НЕ закрываем — можно привязать ещё.
+          // Новая строка появится над пикером после invalidate().
           await invalidate();
           toast.success('ДЗ привязано к занятию');
         } catch (err) {
           if (err instanceof LessonMaterialsApiError && err.code === 'INVALID_HOMEWORK_REF') {
             toast.error('Это ДЗ не назначено ученику этого занятия');
-          } else if (err instanceof LessonMaterialsApiError && err.code === 'HW_REF_EXISTS') {
-            toast.error('К этому занятию уже привязано домашнее задание');
+          } else if (
+            err instanceof LessonMaterialsApiError &&
+            (err.code === 'HW_REF_DUPLICATE' || err.code === 'HW_REF_EXISTS')
+          ) {
+            // HW_REF_EXISTS оставлен для backward-compat со старым edge до деплоя.
+            toast.error('Это ДЗ уже привязано к занятию');
           } else {
+            // LIMIT_REACHED и прочее — серверная рус-фраза через errMessage.
             toast.error(errMessage(err, 'Не удалось привязать ДЗ'));
           }
         } finally {
@@ -542,49 +569,92 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
           <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
             <BookOpen className="h-4 w-4 text-accent" /> Домашка
           </h3>
-          {homeworkRef ? (
+          {/* Привязанные ДЗ — список, каждое удаляемо. */}
+          {homeworkRefs.map((m) => (
             <MaterialRow
-              material={homeworkRef}
+              key={m.id}
+              material={m}
               label={
-                (homeworkRef.homework_assignment_id
-                  ? assignmentTitleById.get(homeworkRef.homework_assignment_id)
+                (m.homework_assignment_id
+                  ? assignmentTitleById.get(m.homework_assignment_id)
                   : null) || 'Домашнее задание'
               }
-              deleting={deletingId === homeworkRef.id}
-              onRemove={() => handleDelete(homeworkRef.id)}
+              deleting={deletingId === m.id}
+              onRemove={() => handleDelete(m.id)}
             />
-          ) : pickerOpen ? (
-            <div className="space-y-1.5">
-              {assignmentsQuery.isLoading ? (
-                <div className="flex items-center justify-center py-4 text-slate-400">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </div>
-              ) : (assignmentsQuery.data ?? []).length === 0 ? (
-                <p className="py-3 text-center text-sm text-slate-400">У вас пока нет домашних заданий</p>
-              ) : (
-                (assignmentsQuery.data ?? []).map((a) => (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => handleAttach(a.id)}
-                    disabled={attachingId !== null}
-                    className="flex w-full items-center gap-3 rounded-lg border border-socrat-border bg-white px-3 py-2.5 text-left transition-colors hover:bg-slate-50 disabled:opacity-60"
-                    style={{ touchAction: 'manipulation' }}
-                  >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                      {attachingId === a.id ? (
-                        <Loader2 className="h-[18px] w-[18px] animate-spin" />
-                      ) : (
-                        <BookOpen className="h-[18px] w-[18px]" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-900">{a.title}</p>
-                      <p className="truncate text-xs text-slate-500">{getSubjectLabel(a.subject as string)}</p>
-                    </div>
-                  </button>
-                ))
+          ))}
+
+          {/* Пикер ИЛИ кнопки действий (secondary — один primary на экран, rule 90). */}
+          {pickerOpen ? (
+            <div className="space-y-2">
+              {/* Фильтр по папкам (синергия #1↔#2) — только если папки есть. */}
+              {homeworkFolders.length > 0 && (
+                <select
+                  value={pickerFolderId}
+                  onChange={(e) => setPickerFolderId(e.target.value)}
+                  aria-label="Фильтр ДЗ по папке"
+                  className="w-full rounded-lg border border-socrat-border bg-white px-3 py-2 text-base focus:outline-none"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <option value="all">Все папки</option>
+                  <option value="__none__">Без папки</option>
+                  {homeworkFolders.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
               )}
+
+              <div className="space-y-1.5">
+                {assignmentsQuery.isLoading ? (
+                  <div className="flex items-center justify-center py-4 text-slate-400">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  </div>
+                ) : pickerAssignments.length === 0 ? (
+                  <p className="py-3 text-center text-sm text-slate-400">
+                    {(assignmentsQuery.data ?? []).length === 0
+                      ? 'У вас пока нет домашних заданий'
+                      : 'В этой папке нет заданий'}
+                  </p>
+                ) : (
+                  pickerAssignments.map((a) => {
+                    const already = attachedAssignmentIds.has(a.id);
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        onClick={() => handleAttach(a.id)}
+                        disabled={already || attachingId !== null}
+                        className="flex w-full items-center gap-3 rounded-lg border border-socrat-border bg-white px-3 py-2.5 text-left transition-colors hover:bg-slate-50 disabled:opacity-60"
+                        style={{ touchAction: 'manipulation' }}
+                      >
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                          {attachingId === a.id ? (
+                            <Loader2 className="h-[18px] w-[18px] animate-spin" />
+                          ) : already ? (
+                            <Check className="h-[18px] w-[18px]" />
+                          ) : (
+                            <BookOpen className="h-[18px] w-[18px]" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-slate-900">{a.title}</p>
+                          <p className="truncate text-xs text-slate-500">{getSubjectLabel(a.subject as string)}</p>
+                        </div>
+                        {already && <span className="shrink-0 text-xs text-slate-400">Привязано</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setPickerOpen(false)}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:text-slate-700"
+                style={{ touchAction: 'manipulation' }}
+              >
+                Готово
+              </button>
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -594,7 +664,7 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
                 className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
                 style={{ touchAction: 'manipulation' }}
               >
-                <BookOpen className="h-4 w-4" /> Выбрать ДЗ
+                <BookOpen className="h-4 w-4" /> {homeworkRefs.length > 0 ? 'Добавить ещё ДЗ' : 'Выбрать ДЗ'}
               </button>
               <button
                 type="button"

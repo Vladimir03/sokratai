@@ -345,12 +345,15 @@ async function handleProgressOverview(
   const tutorPkId = await resolveTutorPkId(db, userId);
   if (!tutorPkId) return jsonOk(cors, { items: [] });
 
-  // Students (active).
+  // Students (active, не в архиве). archived_at ортогонален status (архивный
+  // ученик остаётся status='active') — фильтруем явно, чтобы архив не всплывал
+  // в «Успеваемости» и блоке «Требуют внимания». Запрос Елены (2026-06-17).
   const { data: students, error: studentsErr } = await db
     .from("tutor_students")
     .select("id, student_id, display_name, exam_type, target_score, status")
     .eq("tutor_id", tutorPkId)
     .eq("status", "active")
+    .is("archived_at", null)
     .limit(500);
   if (studentsErr) {
     return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список учеников.");

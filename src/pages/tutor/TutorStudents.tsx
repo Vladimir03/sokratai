@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, lazy, Suspense } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
   Pagination, 
@@ -9,7 +10,7 @@ import {
   PaginationNext, 
   PaginationPrevious 
 } from '@/components/ui/pagination';
-import { UserPlus } from 'lucide-react';
+import { UserPlus, Archive, ArrowLeft } from 'lucide-react';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
@@ -26,13 +27,15 @@ import {
   StudentsEmptyFilters, 
   StudentsError 
 } from '@/components/tutor/StudentsStates';
-import { useTutorStudents, useTutor, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { useTutorStudents, useArchivedTutorStudents, useTutor, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import {
   createTutorGroup,
   deactivateTutorGroupMembership,
   resetStudentPassword,
+  setTutorStudentArchived,
   upsertTutorGroupMembership,
 } from '@/lib/tutors';
+import { invalidateTutorStudentDependentQueries } from '@/lib/tutorStudentCacheSync';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
 import { getTutorInviteWebLink, getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import { toast } from 'sonner';
@@ -115,6 +118,30 @@ function TutorStudentsContent() {
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
   const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
+
+  // Архив учеников (запрос Елены 2026-06-17). Фетчим архив только когда открыт режим.
+  const queryClient = useQueryClient();
+  const [showArchived, setShowArchived] = useState(false);
+  const { students: archivedStudents, loading: archivedLoading } = useArchivedTutorStudents(showArchived);
+  const [unarchivingId, setUnarchivingId] = useState<string | null>(null);
+
+  const handleUnarchive = useCallback(async (tutorStudentId: string) => {
+    setUnarchivingId(tutorStudentId);
+    try {
+      const ok = await setTutorStudentArchived(tutorStudentId, false);
+      if (!ok) {
+        toast.error('Не удалось вернуть из архива');
+        return;
+      }
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
+      toast.success('Ученик возвращён из архива');
+    } catch (err) {
+      console.error('Error unarchiving student:', err);
+      toast.error('Не удалось вернуть из архива');
+    } finally {
+      setUnarchivingId(null);
+    }
+  }, [queryClient]);
   const initialLoading = loading && students.length === 0 && !error;
   const hasErrors = Boolean(error || tutorError || (miniGroupsEnabled && (groupsError || membershipsError)));
   const isPageFetching = isFetching || tutorIsFetching || (miniGroupsEnabled && (groupsIsFetching || membershipsIsFetching));
@@ -481,6 +508,46 @@ function TutorStudentsContent() {
           </Suspense>
         ) : (
         <>
+        {/* Архив-тоггл (запрос Елены 2026-06-17) */}
+        <div className="flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowArchived((v) => !v)}
+            className="text-muted-foreground"
+          >
+            {showArchived ? (
+              <><ArrowLeft className="h-4 w-4 mr-1.5" /> К активным</>
+            ) : (
+              <><Archive className="h-4 w-4 mr-1.5" /> Архив</>
+            )}
+          </Button>
+        </div>
+
+        {showArchived ? (
+          <div className="space-y-3">
+            {archivedLoading ? (
+              <StudentsSkeleton />
+            ) : archivedStudents.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-slate-200 py-10 text-center text-sm text-muted-foreground">
+                В архиве пока нет учеников. Архивировать можно в профиле ученика.
+              </p>
+            ) : (
+              archivedStudents.map((student) => (
+                <StudentCard
+                  key={student.id}
+                  student={student}
+                  onCredentialsClick={() => { void handleResetStudentPassword(student); }}
+                  isResettingCredentials={resettingStudentId === student.student_id}
+                  onClick={() => handleOpenStudent(student.id)}
+                  onUnarchive={() => { void handleUnarchive(student.id); }}
+                  isUnarchiving={unarchivingId === student.id}
+                />
+              ))
+            )}
+          </div>
+        ) : (
+        <>
         {/* Loading state */}
         {initialLoading && <StudentsSkeleton />}
 
@@ -537,6 +604,8 @@ function TutorStudentsContent() {
             {/* Pagination */}
             {renderPagination()}
           </>
+        )}
+        </>
         )}
         </>
         )}

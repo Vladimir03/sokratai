@@ -62,6 +62,7 @@ const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
 const TutorPayments = lazy(() => import("./pages/tutor/TutorPayments"));
 const TutorHomework = lazy(() => import("./pages/tutor/TutorHomework"));
+const TutorHomeworkFolderPage = lazy(() => import("./pages/tutor/HomeworkFolderPage"));
 const TutorHomeworkCreate = lazy(() => import("./pages/tutor/TutorHomeworkCreate"));
 const TutorHomeworkDetail = lazy(() => import("./pages/tutor/TutorHomeworkDetail"));
 const TutorHomeworkPreview = lazy(() => import("./pages/tutor/TutorHomeworkPreview"));
@@ -419,6 +420,8 @@ const App = () => (
               <Route path="homework/:id/edit" element={<TutorHomeworkCreate />} />
               <Route path="homework/:id/preview" element={<TutorHomeworkPreview />} />
               <Route path="homework/:id/results" element={<RedirectHomeworkResultsToDetail />} />
+              {/* folder/:folderId ДО :id — иначе "folder" захватится как :id. */}
+              <Route path="homework/folder/:folderId" element={<TutorHomeworkFolderPage />} />
               <Route path="homework/:id" element={<TutorHomeworkDetail />} />
               <Route path="homework" element={<TutorHomework />} />
               <Route path="mock-exams/new" element={<TutorMockExamCreate />} />

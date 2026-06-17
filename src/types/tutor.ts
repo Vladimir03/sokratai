@@ -76,6 +76,12 @@ export interface TutorStudent {
    * Optional defensively: кэш/старые ответы могли не нести колонку.
    */
   balance?: number;
+  /**
+   * Архивирование (запрос Елены 2026-06-17). NULL = активный, NOT NULL = в архиве
+   * (скрыт из активных списков/пикеров, история сохранена, обратимо). Ортогонально
+   * к status. Optional defensively — старые ответы/кэш могли не нести колонку.
+   */
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -1315,3 +1315,16 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 **Hard rule:** commit, трогающий constructor files, **ОБЯЗАН** содержать строку `Manual QA: checklist в .claude/rules/40-homework-system.md пройден` или эквивалентное явное подтверждение (запрос-гейт, не silent assumption).
 
 Spec: `~/.claude/plans/1-functional-meteor.md` Phase 10.
+
+### Папки для ДЗ — `homework_folders` (запрос Елены, 2026-06-17)
+
+Репетитор раскладывает ДЗ по папкам (`/tutor/homework` стал folder-first, реюз UX «Моей базы»). Миграции `20260617120000` (таблица+колонка) + `20260617140000` (owner-guard триггер).
+
+- **Таблица `homework_folders`:** `tutor_id → auth.users(id)` (FK-дрейф — как assignments, НЕ `tutors.id`), `parent_id` nullable (зарезервировано под вложенность, **v1 плоский**), `name`, `sort_order`. RLS `tutor_id=auth.uid()` → CRUD папок прямым PostgREST (`src/lib/tutorHomeworkFoldersApi.ts` + `src/hooks/useHomeworkFolders.ts`, ключ `['tutor','homework','folders']`).
+- **`homework_tutor_assignments.folder_id` → `ON DELETE SET NULL` (КРИТИЧНО — отличие от KB):** удаление папки переводит ДЗ в «Без папки», **НИКОГДА не удаляет** (в папке живые задания со сдачами). `deleteHomeworkFolder` = `DELETE FROM homework_folders` only; НЕ копировать KB `removeFolder` (тот удаляет задачи). `DeleteHomeworkFolderDialog` несёт безопасный текст «задания не удалятся».
+- **`folder_id` пишется ТОЛЬКО через edge** (`handleCreateAssignment`/`handleUpdateAssignment` → `validateOwnedFolderId`, рус. ошибки rule 97) **+ DB-триггер `hw_assignment_folder_owner_guard`** (defense-in-depth: `folder_id` обязан принадлежать `tutor_id` ДЗ — закрывает прямой PostgREST/import-пути; реюз `homework_folder_owned_by`). `HWDrawer` (path B) `folder_id` НЕ пишет (NULL/«Без папки»).
+- **Список:** `handleListAssignments` отдаёт `folder_id` (tutor-only — student-эндпоинты его НЕ селектят); клиент делит «Без папки» (`folder_id==null`) / по папкам + счётчики (клиентский дерайв из того же списка; отражают текущий статус-фильтр). Нет серверного folder-фильтра. Страница папки `HomeworkFolderPage` фильтрует тот же кэш по `folder_id`.
+- **Конструктор:** селектор «Папка» = **create-only** (отдельный стейт `createFolderId`, НЕ в `meta`) → edit-snapshot/dirty логика не задета, правка ДЗ folder_id не теряет. `FolderCard` обобщён (`taskWord`/`showChildCount`) — реюз для папок ДЗ.
+- **При расширении:** новый write-path к `folder_id` → через edge + триггер уже покрывает; новый surface со списком ДЗ → реюз `folder_id` из ответа, не дублируй серверный фильтр; вложенность → задействуй `parent_id` (UI флэт сейчас).
+
+Build-лог: memory `project_elena_requests_2026_06_17.md`. План: `~/.claude/plans/1-linked-treehouse.md`.

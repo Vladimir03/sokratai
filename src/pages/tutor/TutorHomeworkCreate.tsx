@@ -60,6 +60,7 @@ import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplateP
 import { HWExpandedParams } from '@/components/tutor/homework-create/HWExpandedParams';
 import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSection';
 import { useTutorVoiceSpeakingFeatureFlag } from '@/hooks/useTutorVoiceSpeakingFeatureFlag';
+import { useHomeworkFolders } from '@/hooks/useHomeworkFolders';
 import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
@@ -450,6 +451,13 @@ function TutorHomeworkCreateContent() {
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
   const tasksRef = useRef<DraftTask[]>(tasks);
   const [materials, setMaterials] = useState<DraftMaterial[]>([]);
+
+  // ── Папка (create-only, запрос Елены 2026-06-17) ──
+  // Отдельный стейт (НЕ в meta) — чтобы не трогать чувствительную edit-snapshot/dirty
+  // логику. В edit-режиме селектор скрыт и folder_id не отправляется (папкой управляет
+  // меню «···» на карточке ДЗ). Дефолт — «Без папки».
+  const [createFolderId, setCreateFolderId] = useState<string | null>(null);
+  const { folders: homeworkFolders } = useHomeworkFolders();
 
   // ── Deferred image deletes (edit mode: only delete after successful save) ──
   const deferredImageDeletesRef = useRef<string[]>([]);
@@ -1105,6 +1113,8 @@ function TutorHomeworkCreateContent() {
           exam_type: meta.exam_type ?? 'ege',
           // Phase 11 (2026-05-31): assignment-level AI feedback language.
           feedback_language: meta.feedback_language ?? 'auto',
+          // Папка (create-only, запрос Елены 2026-06-17). null = «Без папки».
+          folder_id: createFolderId,
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
@@ -1172,8 +1182,9 @@ function TutorHomeworkCreateContent() {
               toast.success('ДЗ привязано к занятию');
             } catch (linkErr) {
               const code = linkErr instanceof LessonMaterialsApiError ? linkErr.code : null;
-              if (code === 'HW_REF_EXISTS') {
-                // Idempotent — already linked.
+              // HW_REF_DUPLICATE — новый код после «несколько ДЗ на урок» (2026-06-17);
+              // HW_REF_EXISTS — старый edge до деплоя (backward-compat). Оба = идемпотентно.
+              if (code === 'HW_REF_DUPLICATE' || code === 'HW_REF_EXISTS') {
                 toast.success('ДЗ уже привязано к занятию');
                 return;
               }
@@ -1902,7 +1913,7 @@ function TutorHomeworkCreateContent() {
               the dot. Default for disable_ai_bootstrap is true (toggle OFF);
               the dot lights when the tutor has flipped it ON (=== false).
             */}
-            {!showAdvanced && (materials.length > 0 || meta.disable_ai_bootstrap === false) && (
+            {!showAdvanced && (materials.length > 0 || meta.disable_ai_bootstrap === false || (!isEditMode && createFolderId !== null)) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>
@@ -1917,6 +1928,34 @@ function TutorHomeworkCreateContent() {
                   meta={meta}
                   onChange={setMeta}
                 />
+
+                {/* Папка (create-only, запрос Елены 2026-06-17). В edit-режиме
+                    скрыто — папкой управляет меню «···» на карточке ДЗ. */}
+                {!isEditMode && (
+                  <div>
+                    <label
+                      htmlFor="hw-folder-select"
+                      className="block text-sm font-medium text-slate-700 mb-1.5"
+                    >
+                      Папка
+                    </label>
+                    <select
+                      id="hw-folder-select"
+                      value={createFolderId ?? ''}
+                      onChange={(e) => setCreateFolderId(e.target.value || null)}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+                      style={{ touchAction: 'manipulation' }}
+                    >
+                      <option value="">Без папки</option>
+                      {homeworkFolders.map((f) => (
+                        <option key={f.id} value={f.id}>{f.name}</option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Для порядка в списке ДЗ. Папку можно создать на странице «Домашние задания».
+                    </p>
+                  </div>
+                )}
 
                 <HWMaterialsSection
                   materials={materials}

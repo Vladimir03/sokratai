@@ -50,6 +50,8 @@ const LESSON_MATERIAL_BUCKET = "lesson-materials";
 // plus a client-side pre-check (lessonMaterialsApi MAX_LESSON_PDF_BYTES). No edge byte-check needed.
 const MAX_RECORDINGS = 3;
 const MAX_PDFS = 5;
+// Несколько ДЗ на урок (запрос Елены, 2026-06-17): мягкий кап. Раньше был жёсткий 1:1.
+const MAX_HOMEWORK_REFS = 10;
 const MAX_TITLE_LEN = 200;
 const MAX_URL_LEN = 2048;
 
@@ -356,15 +358,16 @@ async function handleCreateMaterial(
     if (!match || match.length === 0) {
       return jsonError(cors, 403, "INVALID_HOMEWORK_REF", "Это ДЗ не назначено ученику этого занятия.");
     }
-    // 1:1 pre-check for a clean message (unique index is the authoritative guard).
-    const { data: existingHw } = await db
+    // Несколько ДЗ на урок (2026-06-17): мягкий кап (раньше был жёсткий 1:1).
+    // Гард от дубля (одно ДЗ дважды) — уникальный индекс uq_tlm_one_hw_pair_per_lesson,
+    // ловится как 23505 в insertMaterial → HW_REF_DUPLICATE.
+    const { count } = await db
       .from("tutor_lesson_materials")
-      .select("id")
+      .select("id", { count: "exact", head: true })
       .eq("lesson_id", lessonId)
-      .eq("material_kind", "homework_ref")
-      .limit(1);
-    if (existingHw && existingHw.length > 0) {
-      return jsonError(cors, 409, "HW_REF_EXISTS", "К этому занятию уже привязано домашнее задание.");
+      .eq("material_kind", "homework_ref");
+    if ((count ?? 0) >= MAX_HOMEWORK_REFS) {
+      return jsonError(cors, 409, "LIMIT_REACHED", `Можно привязать не более ${MAX_HOMEWORK_REFS} домашних заданий.`);
     }
     return await insertMaterial(
       db,
@@ -387,8 +390,11 @@ async function insertMaterial(
     .select(MATERIAL_SELECT)
     .single();
   if (error) {
+    // 23505 на tutor_lesson_materials может прийти только от uq_tlm_one_hw_pair_per_lesson
+    // (homework_ref дубль — одно и то же ДЗ привязывают к уроку дважды). recording/pdf
+    // уникальных индексов не имеют.
     if (error.code === "23505") {
-      return jsonError(cors, 409, "HW_REF_EXISTS", "К этому занятию уже привязано домашнее задание.");
+      return jsonError(cors, 409, "HW_REF_DUPLICATE", "Это домашнее задание уже привязано к занятию.");
     }
     console.error("lesson_materials_api_db_error", {
       route: "POST materials",

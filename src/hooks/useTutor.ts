@@ -4,6 +4,7 @@ import {
   getCurrentTutor,
   getTutorGroupMemberships,
   getTutorStudents,
+  getArchivedTutorStudents,
   getTutorStudent,
   getMockExams,
   getStudentChats,
@@ -165,6 +166,34 @@ export function useTutorStudents() {
     defaultValue: [],
     errorMessage: 'Не удалось загрузить учеников',
     hasData: (data) => data !== undefined,
+  });
+
+  return {
+    students: result.data,
+    loading: result.loading,
+    error: result.error,
+    refetch: result.refetch,
+    isFetching: result.isFetching,
+    isRecovering: result.isRecovering,
+    failureCount: result.failureCount,
+  };
+}
+
+/**
+ * Архивные ученики (запрос Елены 2026-06-17). Ключ — субключ ['tutor','students'],
+ * поэтому invalidateTutorStudentDependentQueries (инвалидирует ['tutor','students'])
+ * освежает и активный, и архивный список. enabled=false по умолчанию — фетчим
+ * только когда открыт режим «Архив».
+ */
+export function useArchivedTutorStudents(enabled = false) {
+  const queryKey = useMemo(() => ['tutor', 'students', 'archived'] as const, []);
+  const result = useTutorQuery<TutorStudentWithProfile[]>({
+    queryKey,
+    queryFn: getArchivedTutorStudents,
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить архив',
+    hasData: (data) => data !== undefined,
+    enabled,
   });
 
   return {

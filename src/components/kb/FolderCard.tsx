@@ -13,10 +13,29 @@ interface FolderCardProps {
   onClick: () => void;
   onRename?: () => void;
   onDelete?: () => void;
+  /**
+   * Слово для счётчика элементов (3 формы для pluralizeRu). Default — задачи (KB).
+   * Папки ДЗ передают ['задание','задания','заданий'].
+   */
+  taskWord?: [string, string, string];
+  /**
+   * Показывать ли счётчик подпапок. Default true (KB вложенные). Плоские папки
+   * ДЗ передают false → счётчик только по элементам.
+   */
+  showChildCount?: boolean;
 }
 
-export const FolderCard = memo(function FolderCard({ folder, childCount = null, taskCount = null, onClick, onRename, onDelete }: FolderCardProps) {
-  const hasCounts = childCount !== null || taskCount !== null;
+export const FolderCard = memo(function FolderCard({
+  folder,
+  childCount = null,
+  taskCount = null,
+  onClick,
+  onRename,
+  onDelete,
+  taskWord = ['задача', 'задачи', 'задач'],
+  showChildCount = true,
+}: FolderCardProps) {
+  const hasCounts = (showChildCount && childCount !== null) || taskCount !== null;
   const hasActions = Boolean(onRename || onDelete);
 
   return (
@@ -37,8 +56,12 @@ export const FolderCard = memo(function FolderCard({ folder, childCount = null, 
         <div className="truncate text-[15px] font-semibold text-slate-950">{folder.name}</div>
         {hasCounts ? (
           <div className="mt-0.5 text-xs text-slate-500">
-            {childCount ?? 0} {pluralizeRu(childCount ?? 0, ['папка', 'папки', 'папок'])} ·{' '}
-            {taskCount ?? 0} {pluralizeRu(taskCount ?? 0, ['задача', 'задачи', 'задач'])}
+            {showChildCount ? (
+              <>
+                {childCount ?? 0} {pluralizeRu(childCount ?? 0, ['папка', 'папки', 'папок'])} ·{' '}
+              </>
+            ) : null}
+            {taskCount ?? 0} {pluralizeRu(taskCount ?? 0, taskWord)}
           </div>
         ) : null}
       </div>

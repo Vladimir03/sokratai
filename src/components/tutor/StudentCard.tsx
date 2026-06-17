@@ -15,6 +15,7 @@ import {
   Bot,
   Mail,
   MessageCircle,
+  ArchiveRestore,
 } from 'lucide-react';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import {
@@ -32,6 +33,9 @@ interface StudentCardProps {
   onCredentialsClick: () => void;
   isResettingCredentials?: boolean;
   groupLabel?: string | null;
+  /** Если задан — карточка архивная: показать «Вернуть из архива» (запрос Елены 2026-06-17). */
+  onUnarchive?: () => void;
+  isUnarchiving?: boolean;
 }
 
 export const StudentCard = memo(function StudentCard({
@@ -40,6 +44,8 @@ export const StudentCard = memo(function StudentCard({
   onCredentialsClick,
   isResettingCredentials = false,
   groupLabel,
+  onUnarchive,
+  isUnarchiving = false,
 }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
@@ -320,6 +326,26 @@ export const StudentCard = memo(function StudentCard({
               <Badge variant={student.status === 'paused' ? 'secondary' : 'outline'}>
                 {student.status === 'paused' ? 'Пауза' : 'Завершён'}
               </Badge>
+            )}
+
+            {/* Архив (запрос Елены 2026-06-17) */}
+            {student.archived_at && (
+              <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">
+                Архив
+              </Badge>
+            )}
+            {onUnarchive && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => { e.stopPropagation(); onUnarchive(); }}
+                disabled={isUnarchiving}
+                className="h-8"
+                style={{ touchAction: 'manipulation' }}
+              >
+                <ArchiveRestore className="h-4 w-4 mr-1.5" />
+                Вернуть
+              </Button>
             )}
 
             {/* Hourly Rate */}

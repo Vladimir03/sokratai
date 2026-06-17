@@ -51,6 +51,11 @@ export interface TutorHomeworkAssignmentListItem {
   max_score_total?: number | null;
   delivered_count?: number;
   not_connected_count?: number;
+  /**
+   * Папка-организация ДЗ (homework_folders). null = «Без папки». Tutor-only.
+   * Optional — старый backend мог не вернуть (backward-compat). Запрос Елены 2026-06-17.
+   */
+  folder_id?: string | null;
 }
 
 export interface CreateAssignmentTask {
@@ -105,6 +110,8 @@ export interface CreateAssignmentPayload {
   exam_type?: 'ege' | 'oge';
   /** Phase 11 (2026-05-31): assignment-level AI feedback language (language subjects). */
   feedback_language?: 'auto' | 'russian' | 'target';
+  /** Папка-организация (homework_folders). null/undefined → «Без папки». Запрос Елены 2026-06-17. */
+  folder_id?: string | null;
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -1366,6 +1373,8 @@ export async function updateTutorHomeworkAssignment(
     /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
     feedback_language?: 'auto' | 'russian' | 'target';
     source_group_id?: string | null;
+    /** Перемещение ДЗ в папку (homework_folders). null = «Без папки». Запрос Елены 2026-06-17. */
+    folder_id?: string | null;
     tasks?: UpdateAssignmentTask[];
   },
 ): Promise<void> {

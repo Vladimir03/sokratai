@@ -586,6 +586,38 @@ async function validateOwnedSourceGroupId(
   return sourceGroupId as string;
 }
 
+// folder_id ownership (homework_folders). rule 40 FK-drift: homework_folders.tutor_id
+// → auth.users(id), поэтому ключ — tutorUserId (auth.uid), НЕ tutors.id PK.
+// Возврат: undefined = поле не передано (не трогать), null = «Без папки», string = валидный folder_id.
+async function validateOwnedFolderId(
+  db: SupabaseClient,
+  tutorUserId: string,
+  folderId: unknown,
+  cors: Record<string, string>,
+): Promise<string | null | undefined | Response> {
+  if (folderId === undefined) return undefined;
+  if (folderId === null) return null;
+  if (!isUUID(folderId)) {
+    return jsonError(cors, 400, "VALIDATION", "Папка указана неверно.");
+  }
+
+  const { data, error } = await db
+    .from("homework_folders")
+    .select("id")
+    .eq("id", folderId)
+    .eq("tutor_id", tutorUserId)
+    .maybeSingle();
+
+  if (error) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить папку.");
+  }
+  if (!data) {
+    return jsonError(cors, 403, "FORBIDDEN", "Эта папка вам не принадлежит.");
+  }
+
+  return folderId as string;
+}
+
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
 interface RouteMatch {
@@ -706,6 +738,10 @@ async function handleCreateAssignment(
   );
   if (sourceGroupIdOrErr instanceof Response) return sourceGroupIdOrErr;
 
+  // folder_id — необязательная папка-организация (homework_folders). Запрос Елены.
+  const folderIdOrErr = await validateOwnedFolderId(db, tutorUserId, b.folder_id, cors);
+  if (folderIdOrErr instanceof Response) return folderIdOrErr;
+
   const { data: assignment, error: assignErr } = await db
     .from("homework_tutor_assignments")
     .insert({
@@ -721,6 +757,8 @@ async function handleCreateAssignment(
       // Phase 11 (2026-05-31): assignment-level AI feedback language (null → DB default 'auto').
       feedback_language: normalizeFeedbackLanguage(b.feedback_language) ?? "auto",
       source_group_id: sourceGroupIdOrErr ?? null,
+      // folder_id: undefined (поле не передано) → NULL «Без папки».
+      folder_id: folderIdOrErr ?? null,
     })
     .select("id")
     .single();
@@ -866,7 +904,9 @@ async function handleListAssignments(
 
   let query = db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, topic, deadline, status, created_at, source_group_id")
+    // folder_id — tutor-only organization (homework_folders). Безопасно для tutor
+    // list; в student-эндпоинтах (handleGetStudentAssignment и т.п.) НЕ селектится.
+    .select("id, title, subject, topic, deadline, status, created_at, source_group_id, folder_id")
     .eq("tutor_id", tutorUserId)
     .order("created_at", { ascending: false });
 
@@ -1054,6 +1094,7 @@ async function handleListAssignments(
     source_group_id: a.source_group_id ?? null,
     source_group_name: groupMetaById[a.source_group_id ?? ""]?.name ?? null,
     source_group_color: groupMetaById[a.source_group_id ?? ""]?.color ?? null,
+    folder_id: a.folder_id ?? null,
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
     started_count: startedMap[a.id] ?? 0,
@@ -1374,6 +1415,12 @@ async function handleUpdateAssignment(
     );
     if (sourceGroupIdOrErr instanceof Response) return sourceGroupIdOrErr;
     patch.source_group_id = sourceGroupIdOrErr ?? null;
+  }
+  // folder_id — перемещение ДЗ в папку (homework_folders) / null = «Без папки». Запрос Елены.
+  if (b.folder_id !== undefined) {
+    const folderIdOrErr = await validateOwnedFolderId(db, tutorUserId, b.folder_id, cors);
+    if (folderIdOrErr instanceof Response) return folderIdOrErr;
+    patch.folder_id = folderIdOrErr ?? null;
   }
 
   if (Object.keys(patch).length > 0) {

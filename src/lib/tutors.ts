@@ -209,17 +209,21 @@ function enrichWithChannelFlags(
 }
 
 /**
- * Получить список учеников репетитора
+ * Общий fetch учеников репетитора с обогащением (долг + каналы связи).
+ * `archived=false` → активные (archived_at IS NULL); `archived=true` → архив.
+ * Архивирование (запрос Елены 2026-06-17).
  */
-export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
+async function fetchTutorStudentsByArchived(archived: boolean): Promise<TutorStudentWithProfile[]> {
   const tutor = await getCurrentTutor();
   if (!tutor) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('tutor_students')
     .select(STUDENT_PROFILE_SELECT)
-    .eq('tutor_id', tutor.id)
-    .order('created_at', { ascending: false });
+    .eq('tutor_id', tutor.id);
+  query = archived ? query.not('archived_at', 'is', null) : query.is('archived_at', null);
+
+  const { data, error } = await query.order('created_at', { ascending: false });
 
   if (error) {
     console.error('Error fetching students:', error);
@@ -239,6 +243,19 @@ export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
 
   const withDebt = enrichWithDebt(students, debtMap);
   return enrichWithChannelFlags(withDebt, contactInfo);
+}
+
+/**
+ * Активные ученики репетитора (archived_at IS NULL). Канонический источник для
+ * всех пикеров/списков/home-блоков — фильтр архива здесь покрывает их все.
+ */
+export async function getTutorStudents(): Promise<TutorStudentWithProfile[]> {
+  return fetchTutorStudentsByArchived(false);
+}
+
+/** Архивные ученики репетитора (для управления архивом + восстановления). */
+export async function getArchivedTutorStudents(): Promise<TutorStudentWithProfile[]> {
+  return fetchTutorStudentsByArchived(true);
 }
 
 /**
@@ -636,6 +653,25 @@ export async function removeStudentFromTutor(id: string): Promise<boolean> {
 
   if (error) {
     console.error('Error removing student:', error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Архивировать / вернуть ученика (запрос Елены 2026-06-17). archived=true →
+ * archived_at=now() (скрыт из активных поверхностей); false → NULL (вернуть).
+ * Direct PostgREST + RLS (репетитор владеет своей строкой). Историю не трогает.
+ */
+export async function setTutorStudentArchived(id: string, archived: boolean): Promise<boolean> {
+  const { error } = await supabase
+    .from('tutor_students')
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error archiving student:', error);
     return false;
   }
 

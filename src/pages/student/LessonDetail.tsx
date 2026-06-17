@@ -99,8 +99,9 @@ const LessonDetail = () => {
     [lesson],
   );
   const pdfs = useMemo(() => (lesson?.materials ?? []).filter((m) => m.kind === 'pdf'), [lesson]);
-  const homework = useMemo(
-    () => (lesson?.materials ?? []).find((m) => m.kind === 'homework_ref') ?? null,
+  // Несколько ДЗ на урок (запрос Елены 2026-06-17): filter, не find.
+  const homeworks = useMemo(
+    () => (lesson?.materials ?? []).filter((m) => m.kind === 'homework_ref'),
     [lesson],
   );
 
@@ -170,32 +171,38 @@ const LessonDetail = () => {
                   </Section>
 
                   <Section icon={<BookOpen className="h-4 w-4 text-accent" />} title="Домашка">
-                    {homework?.assignment_id ? (
-                      <div className="space-y-2.5">
-                        <div className="flex items-center gap-2">
-                          <Badge className={HW_REF_STATUS_CONFIG[homework.status ?? 'assigned'].className}>
-                            {HW_REF_STATUS_CONFIG[homework.status ?? 'assigned'].label}
-                          </Badge>
-                          {homework.title && (
-                            <span className="truncate text-sm text-slate-700">{homework.title}</span>
-                          )}
-                        </div>
-                        <Button
-                          className="w-full"
-                          style={{ touchAction: 'manipulation' }}
-                          onClick={() =>
-                            navigate(
-                              homework.entry_task_id
-                                ? `/student/homework/${homework.assignment_id}/problem/${homework.entry_task_id}`
-                                : `/homework/${homework.assignment_id}`,
-                            )
-                          }
-                        >
-                          Открыть домашнее задание
-                        </Button>
-                      </div>
-                    ) : (
+                    {homeworks.length === 0 ? (
                       <EmptyHint />
+                    ) : (
+                      <div className="space-y-3">
+                        {homeworks.map((hw) =>
+                          hw.assignment_id ? (
+                            <div key={hw.id} className="space-y-2.5">
+                              <div className="flex items-center gap-2">
+                                <Badge className={HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].className}>
+                                  {HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].label}
+                                </Badge>
+                                {hw.title && (
+                                  <span className="truncate text-sm text-slate-700">{hw.title}</span>
+                                )}
+                              </div>
+                              <Button
+                                className="w-full"
+                                style={{ touchAction: 'manipulation' }}
+                                onClick={() =>
+                                  navigate(
+                                    hw.entry_task_id
+                                      ? `/student/homework/${hw.assignment_id}/problem/${hw.entry_task_id}`
+                                      : `/homework/${hw.assignment_id}`,
+                                  )
+                                }
+                              >
+                                Открыть домашнее задание
+                              </Button>
+                            </div>
+                          ) : null,
+                        )}
+                      </div>
                     )}
                   </Section>
                 </>

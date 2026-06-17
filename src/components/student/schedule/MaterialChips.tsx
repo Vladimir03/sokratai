@@ -34,7 +34,8 @@ export const MaterialChips = memo(function MaterialChips({
 
   const recordings = materials.filter((m) => m.kind === 'recording');
   const pdfs = materials.filter((m) => m.kind === 'pdf');
-  const homework = materials.find((m) => m.kind === 'homework_ref') ?? null;
+  // Несколько ДЗ на урок (запрос Елены 2026-06-17): filter, не find.
+  const homeworks = materials.filter((m) => m.kind === 'homework_ref');
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -90,18 +91,28 @@ export const MaterialChips = memo(function MaterialChips({
           </button>
         ))}
 
-      {homework?.assignment_id && (
-        <button
-          type="button"
-          onClick={(e) => {
-            stop(e);
-            onOpenHomework(homework.assignment_id!, homework.entry_task_id ?? null);
-          }}
-          className={cn(CHIP_BASE, HW_REF_STATUS_CONFIG[homework.status ?? 'assigned'].className)}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <BookOpen className="h-3.5 w-3.5" /> {HW_REF_STATUS_CONFIG[homework.status ?? 'assigned'].label}
-        </button>
+      {homeworks.map((hw) =>
+        hw.assignment_id ? (
+          <button
+            key={hw.id}
+            type="button"
+            onClick={(e) => {
+              stop(e);
+              onOpenHomework(hw.assignment_id!, hw.entry_task_id ?? null);
+            }}
+            className={cn(CHIP_BASE, HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].className)}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            {/* Один ДЗ — статус-лейбл (как раньше); несколько — название, чтобы
+                чипы различались (статус всё равно передан цветом). */}
+            <span className="max-w-[140px] truncate">
+              {homeworks.length > 1 && hw.title?.trim()
+                ? hw.title
+                : HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].label}
+            </span>
+          </button>
+        ) : null,
       )}
     </div>
   );
