@@ -10,7 +10,9 @@ import {
   Send,
   Mail,
   Lightbulb,
+  BadgeCheck,
 } from 'lucide-react';
+import { isStudentWorkFullyReviewed } from '@/lib/homeworkReview';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -159,6 +161,8 @@ interface HeatmapRowProps {
   totalMax: number;
   totalTimeMinutes: number | null;
   displayStatus: StudentDisplayStatus;
+  /** Все задачи ученика подтверждены (tutor_reviewed_at). Запрос Елены 2026-06-18. */
+  fullyReviewed: boolean;
   onToggle: (studentId: string) => void;
   onCellClick?: (studentId: string, taskId: string) => void;
   selectedTaskId: string | null;
@@ -175,6 +179,7 @@ const HeatmapRow = memo(function HeatmapRow({
   totalMax,
   totalTimeMinutes,
   displayStatus,
+  fullyReviewed,
   onToggle,
   onCellClick,
   selectedTaskId,
@@ -267,12 +272,22 @@ const HeatmapRow = memo(function HeatmapRow({
             data in muted style, not_started → em-dash.
           - text-sm (14px) on every cell — task guardrail. */}
 
-      {/* Балл */}
+      {/* Балл (+ отметка «✓ Проверено» — запрос Елены 2026-06-18, куда показала) */}
       <td className="border-b border-l-2 border-slate-200 px-3 py-2 align-middle text-right text-sm tabular-nums">
         {displayStatus === 'completed' && totalMax > 0 ? (
-          <span className="font-semibold text-slate-900">
-            {formatScore(totalScore)}/{formatScore(totalMax)}
-          </span>
+          <div className="flex flex-col items-end gap-0.5">
+            <span className="font-semibold text-slate-900">
+              {formatScore(totalScore)}/{formatScore(totalMax)}
+            </span>
+            {fullyReviewed && (
+              <span
+                title="Полностью проверено — можно не возвращаться"
+                className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-600"
+              >
+                <BadgeCheck className="h-3 w-3" aria-hidden="true" /> Проверено
+              </span>
+            )}
+          </div>
         ) : displayStatus === 'in_progress' && totalMax > 0 ? (
           <span className="text-slate-500">
             {formatScore(totalScore)}/{formatScore(totalMax)}
@@ -525,6 +540,13 @@ export function HeatmapGrid({
                   : totalTimeMinutes !== null
                     ? 'in_progress'
                     : 'not_started';
+                // Отметка «✓ Проверено» — все задачи подтверждены (запрос Елены 2026-06-18).
+                const fullyReviewed =
+                  displayStatus === 'completed' &&
+                  isStudentWorkFullyReviewed(
+                    tasks.map((t) => ({ task_id: t.id })),
+                    summary?.task_scores ?? [],
+                  );
 
                 return (
                   <HeatmapRow
@@ -539,6 +561,7 @@ export function HeatmapGrid({
                     totalMax={totalMax}
                     totalTimeMinutes={totalTimeMinutes}
                     displayStatus={displayStatus}
+                    fullyReviewed={fullyReviewed}
                     onToggle={onToggleExpand}
                     onCellClick={onCellClick}
                     selectedTaskId={

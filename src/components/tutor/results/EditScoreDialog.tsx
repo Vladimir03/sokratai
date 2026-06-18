@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { setTutorScoreOverride } from '@/lib/tutorHomeworkApi';
 import { reopenReview, reviewTask } from '@/lib/tutorProgressApi';
+import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 
 // ─── EditScoreDialog (Homework Results v2 P0-5 / AC-5 + 2026-05-16 force-complete) ─
@@ -326,18 +327,9 @@ export function EditScoreDialog({
         });
       }
 
-      // Invalidate the three React Query keys required by AC-5.
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'results', assignmentId],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'detail', assignmentId],
-      });
-      // Precise key — GuidedThreadViewer keys its query by
-      // [..., assignmentId, studentId] (see GuidedThreadViewer.tsx).
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId],
-      });
+      // Invalidate detail/results/thread + главная (review-queue) + список ДЗ
+      // (review_pending_count). См. tutorReviewCacheSync (запрос Елены 2026-06-18).
+      invalidateAfterReview(queryClient, { assignmentId, studentId });
 
       if (mode === 'save' && willReview) {
         toast.success(reviewWantsOverride ? 'Балл сохранён, задача подтверждена' : 'Задача подтверждена');

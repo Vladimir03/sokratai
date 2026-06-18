@@ -46,6 +46,12 @@ export interface TutorHomeworkAssignmentListItem {
    * на карточке ДЗ. Optional — backend может не вернуть при старых клиентах.
    */
   started_count?: number;
+  /**
+   * Сдавшие ученики, чья работа НЕ полностью проверена (есть задача с
+   * tutor_reviewed_at IS NULL). 0 + есть сдачи → «✓ Проверено» на карточке;
+   * >0 → «N на проверку». Optional (backward-compat). Запрос Елены 2026-06-18.
+   */
+  review_pending_count?: number;
   avg_score: number | null;
   /** Sum of max_score for all tasks in this assignment. Used to display "X/Y" format. */
   max_score_total?: number | null;

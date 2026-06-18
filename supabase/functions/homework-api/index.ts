@@ -975,6 +975,9 @@ async function handleListAssignments(
   const submittedMap: Record<string, number> = {};
   const startedMap: Record<string, number> = {};
   const scoreMap: Record<string, { sum: number; count: number }> = {};
+  // Отметка «Проверено» на карточке ДЗ (запрос Елены 2026-06-18): число сдавших
+  // учеников, чья работа НЕ полностью проверена (есть задача с tutor_reviewed_at IS NULL).
+  const reviewPendingMap: Record<string, number> = {};
   let totalMaxByAssignment: Record<string, number> = {};
 
   // "Started" count = distinct student_assignment_id with at least one user
@@ -1034,7 +1037,7 @@ async function handleListAssignments(
       // contribute 0/max to the average, matching handleGetResults behaviour).
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status")
+        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status, tutor_reviewed_at")
         .in("thread_id", threadIds);
 
       // Fetch max_score from tasks for guided assignments
@@ -1044,11 +1047,24 @@ async function handleListAssignments(
         .in("assignment_id", assignmentIds);
 
       const guidedTaskMaxScore: Record<string, number> = {};
+      const tasksByAssignment: Record<string, string[]> = {};
       totalMaxByAssignment = {};
       for (const t of guidedTasks ?? []) {
         guidedTaskMaxScore[t.id] = t.max_score ?? 1;
+        if (!tasksByAssignment[t.assignment_id]) tasksByAssignment[t.assignment_id] = [];
+        tasksByAssignment[t.assignment_id].push(t.id as string);
         totalMaxByAssignment[t.assignment_id] =
           (totalMaxByAssignment[t.assignment_id] ?? 0) + (t.max_score ?? 1);
+      }
+
+      // Множество подтверждённых задач (tutor_reviewed_at != null) на каждый тред.
+      const reviewedTasksByThread: Record<string, Set<string>> = {};
+      for (const ts of taskStates ?? []) {
+        if (ts.tutor_reviewed_at != null) {
+          const tid = ts.thread_id as string;
+          if (!reviewedTasksByThread[tid]) reviewedTasksByThread[tid] = new Set();
+          reviewedTasksByThread[tid].add(ts.task_id as string);
+        }
       }
 
       // Aggregate scores per thread using the same computeFinalScore chain as
@@ -1079,6 +1095,18 @@ async function handleListAssignments(
           scoreMap[aId].sum += scores.earned;
           scoreMap[aId].count += 1;
         }
+
+        // «Полностью проверено» = каждая задача ДЗ подтверждена для этого ученика
+        // (mirror frontend isStudentWorkFullyReviewed). Иначе работа на проверку.
+        // ДЗ без задач (edge, code review P2) → vacuously reviewed, не «на проверку».
+        const assignmentTaskIds = tasksByAssignment[aId] ?? [];
+        const reviewedSet = reviewedTasksByThread[thread.id] ?? new Set<string>();
+        const fullyReviewed =
+          assignmentTaskIds.length === 0 ||
+          assignmentTaskIds.every((tid) => reviewedSet.has(tid));
+        if (!fullyReviewed) {
+          reviewPendingMap[aId] = (reviewPendingMap[aId] ?? 0) + 1;
+        }
       }
     }
   }
@@ -1098,6 +1126,8 @@ async function handleListAssignments(
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
     started_count: startedMap[a.id] ?? 0,
+    // Запрос Елены (2026-06-18): сдавшие, чья работа НЕ полностью проверена → бейдж на карточке.
+    review_pending_count: reviewPendingMap[a.id] ?? 0,
     delivered_count: deliveredMap[a.id] ?? 0,
     not_connected_count: notConnectedMap[a.id] ?? 0,
     // Absolute average score (e.g. 3.2 out of 5). Use max_score_total for display.
@@ -1437,6 +1467,11 @@ async function handleUpdateAssignment(
   if (b.tasks !== undefined) {
     if (!Array.isArray(b.tasks)) {
       return jsonError(cors, 400, "VALIDATION", "tasks must be an array");
+    }
+    // ДЗ обязано иметь ≥1 задачу (mirror CREATE). Иначе 0-task ДЗ ломает рассчёты
+    // (review_pending_count, очередь проверки — code review P2). UI так не делает.
+    if (b.tasks.length === 0) {
+      return jsonError(cors, 400, "VALIDATION", "В домашнем задании должна быть хотя бы одна задача.");
     }
 
     // Phase 11 review fix R2 (2026-06-01): зеркалим CREATE-валидацию CEFR на UPDATE.

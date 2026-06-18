@@ -20,6 +20,7 @@ import {
   getStudentProgress, updateStudentTarget, reviewAllAi,
   type ProgressWork, type StudentProgress,
 } from '@/lib/tutorProgressApi';
+import { invalidateReviewHomeSurfaces } from '@/lib/tutorReviewCacheSync';
 import {
   rollupByScoreKind, formatScoreNumber, goalScaleForTrack, type ScoreKind,
 } from '@/lib/scoreScales';
@@ -279,6 +280,8 @@ export default function StudentProgressPanel({ tutorStudentId }: { tutorStudentI
     onSuccess: (reviewed) => {
       queryClient.invalidateQueries({ queryKey: ['tutor', 'students', 'progress', tutorStudentId] });
       queryClient.invalidateQueries({ queryKey: ['tutor', 'students', 'overview'] });
+      // Главная (блок «Требует проверки») + список ДЗ — bulk затронул несколько ДЗ.
+      invalidateReviewHomeSurfaces(queryClient);
       toast.success(reviewed > 0 ? `Подтверждено задач: ${reviewed}` : 'Нечего подтверждать — обновлено');
       setBulkConfirmOpen(false);
     },

@@ -4,6 +4,7 @@ import { format, parseISO, subHours } from 'date-fns';
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
 import { getTutorHomeworkResults } from '@/lib/tutorHomeworkApi';
+import { isStudentWorkFullyReviewed } from '@/lib/homeworkReview';
 import {
   createTutorRetry,
   toTutorErrorMessage,
@@ -36,7 +37,11 @@ export interface ReviewItem {
 }
 
 const REVIEW_LOOKBACK_HOURS = 48;
-const MAX_THREADS_PREFETCH = 10; // pre-limit before enrichment & dedup to 5
+// Overfetch: фильтр «полностью проверено» дешёвый (task_states), поэтому берём с
+// запасом — иначе пачка свежих ПРОВЕРЕННЫХ работ вытеснила бы из выборки старую
+// непроверенную, и очередь занижалась бы (code review P1, 2026-06-18). Тяжёлый
+// getTutorHomeworkResults дёргаем только для финальных ≤ MAX_REVIEW_ITEMS.
+const REVIEW_PREFETCH_THREADS = 60;
 const MAX_REVIEW_ITEMS = 5;
 
 const STREAM_LABEL: Record<string, 'ЕГЭ' | 'ОГЭ'> = {
@@ -63,9 +68,8 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
   const tutorUserId = tutor.user_id;
   const cutoff = subHours(new Date(), REVIEW_LOOKBACK_HOURS).toISOString();
 
-  // Step 1: pull completed threads for this tutor within the 48h window. The
-  // nested !inner filter relies on PostgREST dot-path filtering — this returns
-  // only rows whose joined assignment belongs to the current tutor.
+  // Step 1: completed-треды репетитора в окне 48ч (overfetch — см. REVIEW_PREFETCH_THREADS).
+  // Nested !inner — PostgREST dot-path фильтр: только треды чужого assignment отсекаются.
   const { data, error } = await supabase
     .from('homework_tutor_threads')
     .select(`
@@ -91,7 +95,7 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
       tutorUserId,
     )
     .order('updated_at', { ascending: false })
-    .limit(MAX_THREADS_PREFETCH);
+    .limit(REVIEW_PREFETCH_THREADS);
 
   if (error) {
     throw new Error(error.message ?? 'failed to load review queue');
@@ -117,50 +121,102 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
   const rows = (data ?? []) as unknown as Row[];
   if (rows.length === 0) return [];
 
-  // Step 2: lookup tutor_students for display name + fallback stream per
-  // student_id (exam_type on assignment is the primary source, tutor_students
-  // is the fallback used only when assignment.exam_type is null).
-  const studentIds = Array.from(
-    new Set(rows.map((r) => r.homework_tutor_student_assignments.student_id)),
+  const threadIds = rows.map((r) => r.id);
+  const prefetchAssignmentIds = Array.from(
+    new Set(rows.map((r) => r.homework_tutor_student_assignments.assignment_id)),
   );
-  const { data: studentsData, error: studentsError } = await supabase
-    .from('tutor_students')
-    .select('student_id, display_name, exam_type, profiles ( username )')
-    .eq('tutor_id', tutor.id)
-    .in('student_id', studentIds);
 
-  if (studentsError) {
-    throw new Error(studentsError.message ?? 'failed to load students for review queue');
+  // Step 2: ДЕШЁВЫЙ reviewed-чек по ВСЕМ prefetched тредам (без тяжёлого
+  // getTutorHomeworkResults): состояния задач (tutor_reviewed_at) + список задач ДЗ.
+  const [statesRes, tasksRes] = await Promise.all([
+    supabase
+      .from('homework_tutor_task_states')
+      .select('thread_id, task_id, tutor_reviewed_at')
+      .in('thread_id', threadIds),
+    supabase
+      .from('homework_tutor_tasks')
+      .select('id, assignment_id')
+      .in('assignment_id', prefetchAssignmentIds),
+  ]);
+  if (statesRes.error) {
+    throw new Error(statesRes.error.message ?? 'failed to load review states');
+  }
+  if (tasksRes.error) {
+    throw new Error(tasksRes.error.message ?? 'failed to load tasks for review queue');
   }
 
+  const tasksByAssignment = new Map<string, { task_id: string }[]>();
+  for (const t of (tasksRes.data ?? []) as { id: string; assignment_id: string }[]) {
+    const list = tasksByAssignment.get(t.assignment_id) ?? [];
+    list.push({ task_id: t.id });
+    tasksByAssignment.set(t.assignment_id, list);
+  }
+  const taskScoresByThread = new Map<
+    string,
+    { task_id: string; tutor_reviewed_at: string | null }[]
+  >();
+  for (const ts of (statesRes.data ?? []) as {
+    thread_id: string;
+    task_id: string;
+    tutor_reviewed_at: string | null;
+  }[]) {
+    const list = taskScoresByThread.get(ts.thread_id) ?? [];
+    list.push({ task_id: ts.task_id, tutor_reviewed_at: ts.tutor_reviewed_at });
+    taskScoresByThread.set(ts.thread_id, list);
+  }
+
+  // Step 3: dedup по ученику (свежие первыми), пропустить ПОЛНОСТЬЮ проверенные,
+  // набрать до MAX_REVIEW_ITEMS кандидатов. Проверенную работу пропускаем БЕЗ
+  // отметки seen — чтобы более старая непроверенная работа того же ученика всплыла.
+  const candidates: Row[] = [];
+  const seenStudents = new Set<string>();
+  for (const row of rows) {
+    const sa = row.homework_tutor_student_assignments;
+    if (seenStudents.has(sa.student_id)) continue;
+    const allTasks = tasksByAssignment.get(sa.assignment_id) ?? [];
+    const tScores = taskScoresByThread.get(row.id) ?? [];
+    if (isStudentWorkFullyReviewed(allTasks, tScores)) continue;
+    candidates.push(row);
+    seenStudents.add(sa.student_id);
+    if (candidates.length >= MAX_REVIEW_ITEMS) break;
+  }
+  if (candidates.length === 0) return [];
+
+  // Step 4: имена учеников + ТЯЖЁЛЫЕ результаты ТОЛЬКО для кандидатов (≤5 ДЗ).
   type StudentRow = {
     student_id: string;
     display_name: string | null;
     exam_type: string | null;
     profiles: { username: string } | null;
   };
+  const candStudentIds = Array.from(
+    new Set(candidates.map((r) => r.homework_tutor_student_assignments.student_id)),
+  );
+  const candAssignmentIds = Array.from(
+    new Set(candidates.map((r) => r.homework_tutor_student_assignments.assignment_id)),
+  );
+
+  const { data: studentsData, error: studentsError } = await supabase
+    .from('tutor_students')
+    .select('student_id, display_name, exam_type, profiles ( username )')
+    .eq('tutor_id', tutor.id)
+    .in('student_id', candStudentIds);
+  if (studentsError) {
+    throw new Error(studentsError.message ?? 'failed to load students for review queue');
+  }
   const studentMap = new Map<string, StudentRow>();
   for (const s of (studentsData ?? []) as unknown as StudentRow[]) {
     studentMap.set(s.student_id, s);
   }
 
-  // Step 3: fetch aggregated results per unique assignment. Limit = 5 after
-  // dedup so the worst case is 10 assignments (pre-limit) in parallel.
-  const assignmentIds = Array.from(
-    new Set(rows.map((r) => r.homework_tutor_student_assignments.assignment_id)),
-  );
   const resultsByAssignment = new Map<
     string,
     Awaited<ReturnType<typeof getTutorHomeworkResults>>
   >();
-
-  // Parallel fetch — each call hits the homework-api edge function and is
-  // cached transparently by react-query downstream consumers.
   await Promise.all(
-    assignmentIds.map(async (aid) => {
+    candAssignmentIds.map(async (aid) => {
       try {
-        const res = await getTutorHomeworkResults(aid);
-        resultsByAssignment.set(aid, res);
+        resultsByAssignment.set(aid, await getTutorHomeworkResults(aid));
       } catch (err) {
         console.warn('tutor_home_review_queue_results_failed', {
           assignmentId: aid,
@@ -170,30 +226,22 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
     }),
   );
 
-  // Step 4: assemble ReviewItem shape, dedup (prefer latest per student),
-  // cap at MAX_REVIEW_ITEMS.
+  // Step 5: собрать ReviewItem из кандидатов (фильтр reviewed уже применён в Step 3).
   const items: ReviewItem[] = [];
-  const seenStudents = new Set<string>();
-
-  for (const row of rows) {
+  for (const row of candidates) {
     const sa = row.homework_tutor_student_assignments;
-    const studentId = sa.student_id;
-    if (seenStudents.has(studentId)) continue;
     const assignment = sa.homework_tutor_assignments;
     const results = resultsByAssignment.get(assignment.id);
     if (!results) continue;
 
-    const perStudent = results.per_student.find((p) => p.student_id === studentId);
+    const perStudent = results.per_student.find((p) => p.student_id === sa.student_id);
     if (!perStudent) continue;
 
-    const student = studentMap.get(studentId);
-    const streamKey =
-      (assignment.exam_type ?? student?.exam_type ?? '').toLowerCase();
+    const student = studentMap.get(sa.student_id);
+    const streamKey = (assignment.exam_type ?? student?.exam_type ?? '').toLowerCase();
     const stream = STREAM_LABEL[streamKey] ?? 'ЕГЭ';
     const name =
-      student?.display_name?.trim() ||
-      student?.profiles?.username?.trim() ||
-      'Ученик';
+      student?.display_name?.trim() || student?.profiles?.username?.trim() || 'Ученик';
 
     const perTaskMap = new Map<string, number>();
     for (const t of results.per_task) {
@@ -204,10 +252,7 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
       .sort((a, b) => a.order_num - b.order_num)
       .map((t) => {
         const match = perStudent.task_scores.find((ts) => ts.task_id === t.task_id);
-        return classifyAnswerRatio(
-          match ? match.final_score : null,
-          t.max_score,
-        );
+        return classifyAnswerRatio(match ? match.final_score : null, t.max_score);
       });
 
     const warnTasks = perStudent.task_scores.filter((ts) => {
@@ -215,9 +260,7 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
       return classifyAnswerRatio(ts.final_score, max) !== 'ok';
     }).length;
 
-    const aiFlag: ReviewItem['aiFlag'] = perStudent.needs_attention
-      ? 'warn'
-      : 'ok';
+    const aiFlag: ReviewItem['aiFlag'] = perStudent.needs_attention ? 'warn' : 'ok';
 
     items.push({
       id: sa.id,
@@ -231,9 +274,6 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
       aiWarnCount: aiFlag === 'warn' ? warnTasks : undefined,
       assignmentId: assignment.id,
     });
-
-    seenStudents.add(studentId);
-    if (items.length >= MAX_REVIEW_ITEMS) break;
   }
 
   return items;

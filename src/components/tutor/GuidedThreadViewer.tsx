@@ -31,6 +31,7 @@ import CriteriaBreakdownTable, {
 } from '@/components/homework/CriteriaBreakdownTable';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { reviewTask } from '@/lib/tutorProgressApi';
+import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/integrations/supabase/types';
@@ -292,8 +293,7 @@ export function GuidedThreadViewer({
         source: 'single',
         hadOverride: false,
       });
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'results', assignmentId] });
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
+      invalidateAfterReview(queryClient, { assignmentId, studentId });
       queryClient.invalidateQueries({ queryKey: threadQueryKey });
       toast.success('Задача подтверждена');
     },

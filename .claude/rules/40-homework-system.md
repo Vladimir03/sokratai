@@ -1328,3 +1328,16 @@ Spec: `~/.claude/plans/1-functional-meteor.md` Phase 10.
 - **При расширении:** новый write-path к `folder_id` → через edge + триггер уже покрывает; новый surface со списком ДЗ → реюз `folder_id` из ответа, не дублируй серверный фильтр; вложенность → задействуй `parent_id` (UI флэт сейчас).
 
 Build-лог: memory `project_elena_requests_2026_06_17.md`. План: `~/.claude/plans/1-linked-treehouse.md`.
+
+### Главная «Требует проверки» — точность по `tutor_reviewed_at` + отметка «Проверено» (запрос Елены, 2026-06-18)
+
+Репорт Елены: блок **«Требует проверки»** на `/tutor/home` показывал ДЗ, которые она **уже подтвердила**. Корень: `useTutorReviewQueue` включал работы только по `thread.status='completed'`+48ч, **не сверяясь с `tutor_reviewed_at`**; review-мутации не инвалидировали ключ блока.
+
+- **Единый source of truth «полностью проверено»** — `src/lib/homeworkReview.ts::isStudentWorkFullyReviewed(allTasks, taskScores)`: каждая задача ДЗ имеет task_score с непустым `tutor_reviewed_at`. **Пустой `allTasks` (ДЗ без задач, edge) → `true`** (vacuously — нечего проверять, иначе висит вечно). Mirror в Deno-роллапе (`handleListAssignments`). Реюз в очереди + heatmap-бейдже.
+- **Очередь (`useTutorReviewQueue.fetchReviewQueue`) — двухшагово (P1 фикс):** overfetch `REVIEW_PREFETCH_THREADS=60` completed-тредов → **дешёвый** reviewed-чек (1 запрос `task_states.tutor_reviewed_at` + 1 `homework_tutor_tasks`) фильтрует проверенные **ДО** display-лимита → тяжёлый `getTutorHomeworkResults` только для финальных ≤`MAX_REVIEW_ITEMS=5`. Не фильтровать ПОСЛЕ limit (иначе пачка свежих проверенных вытеснит старую непроверенную → очередь занижается). Дедуп по ученику: проверенную работу пропускаем БЕЗ `seen` (старшая непроверенная всплывёт).
+- **Инвалидация (`src/lib/tutorReviewCacheSync.ts`):** `invalidateAfterReview` (results+detail+thread+`['tutor','home','review-queue']`+`['tutor','homework','assignments']`) / `invalidateReviewHomeSurfaces` (только home, для bulk по неск. ДЗ). Подключён во ВСЕ review-мутации: `EditScoreDialog`, `StudentDrillDown` (reviewAllAi + bulkForceComplete), `GuidedThreadViewer`, `StudentProgressPanel`. Любая новая review/score/complete-мутация ДЗ → звать helper (иначе главная/карточка отстают).
+- **Отметка «✓ Проверено»:** `HeatmapGrid` — emerald-бейдж у ячейки «Балл» при `displayStatus==='completed' && fullyReviewed`; `AssignmentCard` (список ДЗ) — чип «✓ Проверено»/«N на проверку» из бэкенд-роллапа `review_pending_count` (`handleListAssignments` SELECT'ит `tutor_reviewed_at`, считает сдавших-непроверенных). `review_pending_count?` optional (backward-compat).
+- **0-task guard:** `handleUpdateAssignment` теперь **отклоняет `tasks: []`** (mirror create) — иначе 0-task ДЗ ломает рассчёты очереди/роллапа (review P2).
+- **При расширении:** новый источник «проверено» → `isStudentWorkFullyReviewed` (не дублировать определение); новая мутация, меняющая review/completion → `invalidateAfterReview`; фильтровать reviewed дёшево ДО display-лимита, тяжёлые results — только для финальных.
+
+Build-лог: memory `project_elena_requests_2026_06_17.md` (секция 2026-06-18). План: `~/.claude/plans/1-linked-treehouse.md`.

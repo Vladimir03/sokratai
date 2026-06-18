@@ -19,7 +19,7 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from '@/components/ui/dropdown-menu';
-import { Users, BarChart3, Clock, CheckCircle2, WifiOff, MoreVertical, FolderInput } from 'lucide-react';
+import { Users, BarChart3, Clock, CheckCircle2, WifiOff, MoreVertical, FolderInput, BadgeCheck, ClipboardCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getSubjectLabel } from '@/types/homework';
 import { HOMEWORK_STATUS_CONFIG, formatHomeworkScore } from '@/lib/homeworkStatus';
@@ -143,6 +143,29 @@ export const AssignmentCard = memo(function AssignmentCard({ item, onMoveToFolde
                 </ul>
               </TooltipContent>
             </Tooltip>
+
+            {/* Отметка проверки (запрос Елены 2026-06-18): «✓ Проверено», когда все
+                сдавшие подтверждены; «N на проверку» — пока есть неподтверждённые. */}
+            {typeof item.review_pending_count === 'number' && item.submitted_count > 0 && (
+              item.review_pending_count === 0 ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
+                  title="Все сданные работы проверены"
+                  aria-label="Все сданные работы проверены"
+                >
+                  <BadgeCheck className="h-3.5 w-3.5" aria-hidden="true" /> Проверено
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700"
+                  title={`${item.review_pending_count} работ ждут вашей проверки`}
+                  aria-label={`${item.review_pending_count} на проверку`}
+                >
+                  <ClipboardCheck className="h-3.5 w-3.5" aria-hidden="true" />
+                  {item.review_pending_count} на проверку
+                </span>
+              )
+            )}
 
             {(item.delivered_count ?? 0) > 0 && (
               <span

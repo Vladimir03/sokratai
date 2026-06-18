@@ -24,6 +24,7 @@ import {
   type TutorHomeworkResultsPerStudent,
 } from '@/lib/tutorHomeworkApi';
 import { reviewAllAi } from '@/lib/tutorProgressApi';
+import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { useAutoResizeTextarea } from '@/hooks/useAutoResizeTextarea';
 
@@ -334,15 +335,7 @@ export function StudentDrillDown({
         studentId,
         closedCount: data.closed_count,
       });
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'results', assignmentId],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'detail', assignmentId],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId],
-      });
+      invalidateAfterReview(queryClient, { assignmentId, studentId });
       toast.success(
         data.closed_count > 0
           ? `Закрыто ${data.closed_count} ${data.closed_count === 1 ? 'задача' : 'задач'}`
@@ -369,9 +362,7 @@ export function StudentDrillDown({
         hadOverride: false,
         reviewedCount: data.reviewed_count,
       });
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'results', assignmentId] });
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
-      queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'thread', assignmentId, studentId] });
+      invalidateAfterReview(queryClient, { assignmentId, studentId });
       toast.success(
         data.reviewed_count > 0
           ? `Подтверждено задач: ${data.reviewed_count}`
