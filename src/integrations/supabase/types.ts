@@ -675,6 +675,41 @@ export type Database = {
           },
         ]
       }
+      homework_folders: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          parent_id: string | null
+          sort_order: number | null
+          tutor_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          parent_id?: string | null
+          sort_order?: number | null
+          tutor_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          parent_id?: string | null
+          sort_order?: number | null
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_folders_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "homework_folders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_kb_tasks: {
         Row: {
           added_at: string | null
@@ -840,41 +875,6 @@ export type Database = {
             columns: ["homework_set_id"]
             isOneToOne: false
             referencedRelation: "homework_sets"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      homework_folders: {
-        Row: {
-          created_at: string | null
-          id: string
-          name: string
-          parent_id: string | null
-          sort_order: number | null
-          tutor_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          name: string
-          parent_id?: string | null
-          sort_order?: number | null
-          tutor_id: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          name?: string
-          parent_id?: string | null
-          sort_order?: number | null
-          tutor_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "homework_folders_parent_id_fkey"
-            columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "homework_folders"
             referencedColumns: ["id"]
           },
         ]
@@ -4234,6 +4234,10 @@ export type Database = {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
+        Returns: boolean
+      }
+      homework_folder_owned_by: {
+        Args: { _folder_id: string; _tutor_id: string }
         Returns: boolean
       }
       hw_reorder_tasks: {
