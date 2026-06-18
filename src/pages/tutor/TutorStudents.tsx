@@ -537,7 +537,7 @@ function TutorStudentsContent() {
                 <StudentCard
                   key={student.id}
                   student={student}
-                  onCredentialsClick={() => { void handleResetStudentPassword(student); }}
+                  onCredentialsClick={() => { void handleResetStudentPassword(student as StudentWithExtras); }}
                   isResettingCredentials={resettingStudentId === student.student_id}
                   onClick={() => handleOpenStudent(student.id)}
                   onUnarchive={() => { void handleUnarchive(student.id); }}
