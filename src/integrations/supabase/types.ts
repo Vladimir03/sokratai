@@ -844,41 +844,6 @@ export type Database = {
           },
         ]
       }
-      homework_folders: {
-        Row: {
-          created_at: string | null
-          id: string
-          name: string
-          parent_id: string | null
-          sort_order: number | null
-          tutor_id: string
-        }
-        Insert: {
-          created_at?: string | null
-          id?: string
-          name: string
-          parent_id?: string | null
-          sort_order?: number | null
-          tutor_id: string
-        }
-        Update: {
-          created_at?: string | null
-          id?: string
-          name?: string
-          parent_id?: string | null
-          sort_order?: number | null
-          tutor_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "homework_folders_parent_id_fkey"
-            columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "homework_folders"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       homework_tutor_assignments: {
         Row: {
           created_at: string
@@ -887,7 +852,6 @@ export type Database = {
           disable_ai_bootstrap: boolean
           exam_type: string
           feedback_language: string | null
-          folder_id: string | null
           group_id: string | null
           id: string
           max_attempts: number
@@ -905,7 +869,6 @@ export type Database = {
           disable_ai_bootstrap?: boolean
           exam_type?: string
           feedback_language?: string | null
-          folder_id?: string | null
           group_id?: string | null
           id?: string
           max_attempts?: number
@@ -923,7 +886,6 @@ export type Database = {
           disable_ai_bootstrap?: boolean
           exam_type?: string
           feedback_language?: string | null
-          folder_id?: string | null
           group_id?: string | null
           id?: string
           max_attempts?: number
@@ -935,13 +897,6 @@ export type Database = {
           tutor_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "homework_tutor_assignments_folder_id_fkey"
-            columns: ["folder_id"]
-            isOneToOne: false
-            referencedRelation: "homework_folders"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "homework_tutor_assignments_group_id_fkey"
             columns: ["group_id"]
@@ -3583,7 +3538,6 @@ export type Database = {
       }
       tutor_students: {
         Row: {
-          archived_at: string | null
           balance: number
           created_at: string | null
           current_score: number | null
@@ -3606,7 +3560,6 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
-          archived_at?: string | null
           balance?: number
           created_at?: string | null
           current_score?: number | null
@@ -3629,7 +3582,6 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
-          archived_at?: string | null
           balance?: number
           created_at?: string | null
           current_score?: number | null
