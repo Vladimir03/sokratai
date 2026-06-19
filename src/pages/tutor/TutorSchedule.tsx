@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet, Ban } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -24,10 +24,19 @@ import { supabase } from '@/lib/supabaseClient';
 import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
-import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorCalendarEvents, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
 import { syncMyDueDebits, setLessonCost, setParticipantCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
+import {
+  createCalendarEvent,
+  createCalendarEventSeries,
+  updateCalendarEvent,
+  updateCalendarEventSeries,
+  deleteCalendarEventsScoped,
+  findConflicts,
+  type DeleteCalendarEventScope,
+} from '@/lib/tutorCalendarEvents';
 import {
   createWeeklySlot,
   toggleSlotAvailability,
@@ -46,6 +55,7 @@ import {
   updateLessonSeries,
   cancelLessonSeries,
   deleteLessonsScoped,
+  getLastLessonPriceForStudent,
   type DeleteLessonScope
 } from '@/lib/tutorSchedule';
 import {
@@ -68,6 +78,7 @@ import {
 import type {
   LessonType,
   TutorAvailabilityException,
+  TutorCalendarEvent,
   TutorCalendarSettings,
   TutorGroup,
   TutorGroupMembership,
@@ -294,7 +305,8 @@ function LessonBlock({
   // Visual state classes (без платёжной окраски — только отменённое приглушаем).
   const statusClasses = cn(isCancelled && "opacity-40 grayscale");
 
-  const isDraggable = lesson.status === 'booked';
+  // Прошедшие занятия не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
+  const isDraggable = lesson.status === 'booked' && !isPast;
 
   return (
     <div
@@ -345,6 +357,58 @@ function LessonBlock({
   );
 }
 
+// =============================================
+// CalendarEventBlock — личное дело (busy block) на сетке
+// =============================================
+
+interface CalendarEventBlockProps {
+  event: TutorCalendarEvent;
+  workDayStart: number;
+  onClick: () => void;
+  onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+}
+
+function CalendarEventBlock({ event, workDayStart, onClick, onDragStart, onDragEnd }: CalendarEventBlockProps) {
+  const startDate = new Date(event.start_at);
+  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
+  const offsetMinutes = startMinutes - (workDayStart * 60);
+  const top = offsetMinutes * PIXELS_PER_MINUTE;
+  const height = Math.max(event.duration_min * PIXELS_PER_MINUTE, 20);
+  const endDate = addMinutes(startDate, event.duration_min);
+  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
+
+  return (
+    <div
+      // z-0: под занятиями (наложение лесона на дело = разрешённое мягкое предупреждение).
+      className="absolute left-0.5 right-0.5 z-0 rounded-md px-1.5 py-0.5 cursor-pointer overflow-hidden border border-dashed border-slate-400 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+      style={{
+        top: `${top}px`,
+        height: `${height}px`,
+        minHeight: '20px',
+        backgroundImage:
+          'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(100,116,139,0.12) 6px, rgba(100,116,139,0.12) 12px)',
+        touchAction: 'manipulation',
+      }}
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+    >
+      <div className="flex flex-col h-full justify-center">
+        <span className="flex items-center gap-1 text-xs font-medium truncate leading-tight">
+          <Ban className="h-3 w-3 shrink-0 opacity-70" />
+          {/* notes НЕ показываем на блоке (приватно) — только в диалоге */}
+          {event.title}
+        </span>
+        {height >= 35 && (
+          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface GroupLessonBlockProps {
   bucket: GroupLessonBucket;
   workDayStart: number;
@@ -366,7 +430,9 @@ function GroupLessonBlock({
   const isDraggable = !bucket.isLegacyFallback
     && !!bucket.groupSessionId
     && bucket.lessons.length === 1
-    && bucket.lessons[0].status === 'booked';
+    && bucket.lessons[0].status === 'booked'
+    // Прошедшую группу не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
+    && (new Date(bucket.startAt).getTime() + bucket.durationMin * 60000) >= Date.now();
   const startDate = new Date(bucket.startAt);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   const offsetMinutes = startMinutes - (workDayStart * 60);
@@ -473,6 +539,7 @@ function GroupDetailsDialog({
   const [editGroupSubject, setEditGroupSubject] = useState('');
   const [editGroupNotes, setEditGroupNotes] = useState('');
   const [groupSeriesAction, setGroupSeriesAction] = useState<'save' | 'cancel' | null>(null);
+  const [groupMoveScopeOpen, setGroupMoveScopeOpen] = useState(false);
   const [isGroupSaving, setIsGroupSaving] = useState(false);
   const [participants, setParticipants] = useState<TutorLessonParticipantWithStudent[]>([]);
   const [participantsLoading, setParticipantsLoading] = useState(false);
@@ -681,6 +748,48 @@ function GroupDetailsDialog({
   }, [actionSummary, retryableFailedItems, runAction]);
 
   const groupIsRecurring = !!mainLesson?.is_recurring;
+
+  // Перенос группы со scope (паритет с одиночным переносом + drag, request 3.1).
+  // 'this' → существующий одиночный перенос; following/all → updateLessonSeries (shift всей серии).
+  const doMoveGroup = useCallback(async (scope: DeleteLessonScope) => {
+    setGroupMoveScopeOpen(false);
+    if (scope === 'this') {
+      await runAction('move');
+      return;
+    }
+    if (!mainLesson) return;
+    const newStartAt = fromDateTimeLocalValue(moveDateTimeValue);
+    if (!newStartAt) {
+      toast.error('Выберите корректную дату и время переноса');
+      return;
+    }
+    const shiftMinutes = Math.round(
+      (new Date(newStartAt).getTime() - new Date(mainLesson.start_at).getTime()) / 60000,
+    );
+    if (shiftMinutes === 0) return;
+    setIsActionSaving(true);
+    try {
+      // 'all' клампим к now — не двигаем прошедшие занятия серии (висящий debit, review #5).
+      const fromStartAtOverride = scope === 'all' ? new Date().toISOString() : undefined;
+      const res = await updateLessonSeries(mainLesson, { applyTimeShift: true, shiftMinutes, scope, fromStartAtOverride });
+      if (res.ok) {
+        toast.success(
+          scope === 'all'
+            ? `Перенесена вся серия (${res.updatedCount})`
+            : `Перенесено занятий: ${res.updatedCount}`,
+        );
+        onActionApplied?.();
+        onOpenChange(false);
+      } else {
+        toast.error('Не удалось перенести серию');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при переносе серии');
+    } finally {
+      setIsActionSaving(false);
+    }
+  }, [mainLesson, moveDateTimeValue, runAction, onActionApplied, onOpenChange]);
 
   const doDeleteGroup = useCallback(async (scope: DeleteLessonScope) => {
     if (!mainLesson) return;
@@ -1060,7 +1169,21 @@ function GroupDetailsDialog({
                   variant="outline"
                   className="w-full"
                   disabled={isActionSaving || bookedCount === 0 || !moveDateTimeValue}
-                  onClick={() => void runAction('move')}
+                  onClick={() => {
+                    // Прошедшую группу не переносим (review #5: висящий debit на участниках).
+                    if (mainLesson) {
+                      const endMs = new Date(mainLesson.start_at).getTime() + (mainLesson.duration_min ?? 60) * 60000;
+                      if (endMs < Date.now()) {
+                        toast.error('Прошедшее занятие нельзя перенести');
+                        return;
+                      }
+                    }
+                    if (groupIsRecurring && isUnifiedGroupLesson) {
+                      setGroupMoveScopeOpen(true);
+                    } else {
+                      void runAction('move');
+                    }
+                  }}
                 >
                   {isActionSaving ? 'Перенос...' : 'Перенести группу'}
                 </Button>
@@ -1401,6 +1524,24 @@ function GroupDetailsDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    {/* Group move — series 3-way (паритет с одиночным переносом и drag) */}
+    <AlertDialog open={groupMoveScopeOpen} onOpenChange={(open) => { if (!open) setGroupMoveScopeOpen(false); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Перенести группу</AlertDialogTitle>
+          <AlertDialogDescription>
+            Это групповое занятие входит в серию. Перенести только это, это и последующие, или всю серию?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setGroupMoveScopeOpen(false)} disabled={isActionSaving}>Назад</AlertDialogCancel>
+          <Button variant="outline" onClick={() => doMoveGroup('this')} disabled={isActionSaving}>Только это</Button>
+          <Button variant="outline" onClick={() => doMoveGroup('this_and_following')} disabled={isActionSaving}>Это и последующие</Button>
+          <Button onClick={() => doMoveGroup('all')} disabled={isActionSaving}>Вся серия</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 }
@@ -1506,6 +1647,20 @@ function WorkHoursSettings({ settings, onChange }: WorkHoursSettingsProps) {
   );
 }
 
+/**
+ * Парсинг поля «Стоимость занятия» при создании.
+ * Пусто/мусор/отрицательное → null (= цена выводится из ставки×длительности при списании).
+ * «0» → 0 (waive, не списывать). «1700» → 1700. РУБЛИ.
+ * Отличается от `parseRubleAmount` (тот отбрасывает 0) — здесь 0 значим.
+ */
+function parseLessonPriceInput(raw: string): number | null {
+  const s = (raw ?? '').trim().replace(/\s+/g, '');
+  if (s === '') return null;
+  if (!/^\d{1,7}$/.test(s)) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 // =============================================
 // AddLessonDialog
 // =============================================
@@ -1524,6 +1679,9 @@ interface AddLessonDialogProps {
   initialDate: Date | null;
   initialHour: number | null;
   initialMinute?: number;
+  /** Занятия + личные дела видимой недели — для мягкого предупреждения о наложении. */
+  weekLessons: TutorLessonWithStudent[];
+  weekEvents: TutorCalendarEvent[];
   onSuccess: () => void;
 }
 
@@ -1543,6 +1701,8 @@ function AddLessonDialog({
   initialDate,
   initialHour,
   initialMinute = 0,
+  weekLessons,
+  weekEvents,
   onSuccess
 }: AddLessonDialogProps) {
   const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
@@ -1558,6 +1718,12 @@ function AddLessonDialog({
   const [isRecurring, setIsRecurring] = useState(false);
   const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
   const [isSaving, setIsSaving] = useState(false);
+  // Ручная цена занятия (РУБЛИ). Индивидуальное — строка; группа — по участнику (key=tutor_student_id).
+  // Предзаполняется последней ценой ученика (UX-решение владельца), редактируемо.
+  const [priceText, setPriceText] = useState('');
+  const [memberPrices, setMemberPrices] = useState<Record<string, string>>({});
+  // Тутор уже трогал поле цены? Тогда поздний async-prefill не должен затирать ввод (review fix).
+  const priceTouchedRef = useRef(false);
 
   useEffect(() => {
     if (open) {
@@ -1573,6 +1739,9 @@ function AddLessonDialog({
       setSubject('');
       setIsRecurring(false);
       setRepeatUntil(undefined);
+      setPriceText('');
+      setMemberPrices({});
+      priceTouchedRef.current = false;
     }
   }, [open, initialDate, initialHour, initialMinute]);
 
@@ -1581,8 +1750,15 @@ function AddLessonDialog({
       setIsRecurring(false);
       setRepeatUntil(undefined);
       setStudentId('');
+      setPriceText('');
+      priceTouchedRef.current = false;
     }
   }, [lessonMode]);
+
+  // Сброс цен участников при смене группы (новый состав → свежий предзаполнённый прайс).
+  useEffect(() => {
+    setMemberPrices({});
+  }, [groupId]);
 
   // Auto-fill subject from student profile
   useEffect(() => {
@@ -1658,6 +1834,72 @@ function AddLessonDialog({
     [resolvedGroupMembers]
   );
 
+  // Предзаполнение цены индивидуального занятия последней ценой ученика (fallback — ставка×длит).
+  useEffect(() => {
+    if (isMiniGroupMode || !studentId) return;
+    const tutorStudent = students.find((s) => s.student_id === studentId);
+    if (!tutorStudent) return;
+    priceTouchedRef.current = false; // новый ученик → можно предзаполнить заново
+    let cancelled = false;
+    void (async () => {
+      const last = await getLastLessonPriceForStudent(tutorStudent.id);
+      // Не затираем, если тутор уже ввёл цену пока шёл запрос (review fix #3).
+      if (cancelled || priceTouchedRef.current) return;
+      const derived = calculateLessonPaymentAmount(
+        parseInt(duration) || 60,
+        tutorStudent.hourly_rate_cents ?? null,
+      );
+      const prefill = last ?? derived;
+      setPriceText(prefill != null ? String(prefill) : '');
+    })();
+    return () => { cancelled = true; };
+    // duration намеренно вне deps — иначе смена длительности затёрла бы ручную правку цены.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentId, isMiniGroupMode, students]);
+
+  // Предзаполнение цены каждого участника группы (последняя цена ученика → ставка×длит).
+  // Guard: уже введённые цены не затираем (эффект может перезапуститься при рефетче состава).
+  useEffect(() => {
+    if (!isMiniGroupMode || resolvedGroupMembers.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const entries = await Promise.all(
+        resolvedGroupMembers.map(async (m) => {
+          const ts = m.student!;
+          const last = await getLastLessonPriceForStudent(ts.id);
+          const derived = calculateLessonPaymentAmount(
+            parseInt(duration) || 60,
+            ts.hourly_rate_cents ?? null,
+          );
+          const prefill = last ?? derived;
+          return [ts.id, prefill != null ? String(prefill) : ''] as const;
+        }),
+      );
+      if (cancelled) return;
+      setMemberPrices((prev) => {
+        const next = { ...prev };
+        for (const [id, val] of entries) {
+          if (next[id] === undefined) next[id] = val;
+        }
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMiniGroupMode, resolvedGroupMembers]);
+
+  // Мягкое предупреждение о наложении на личное дело ИЛИ другое занятие (не блокирует создание).
+  const conflictInfo = useMemo(() => {
+    if (!date) return null;
+    const start = new Date(date);
+    start.setHours(parseInt(hour), parseInt(minute), 0, 0);
+    const dur = parseInt(duration) || 60;
+    const end = new Date(start.getTime() + dur * 60000);
+    const { lessons: lc, events: ec } = findConflicts(start, end, weekLessons, weekEvents);
+    if (lc.length === 0 && ec.length === 0) return null;
+    return { lessons: lc, events: ec };
+  }, [date, hour, minute, duration, weekLessons, weekEvents]);
+
   const handleSubmit = async () => {
     if (!date) {
       toast.error('Выберите дату');
@@ -1714,6 +1956,8 @@ function AddLessonDialog({
         hourlyRateCents: resolvedGroupMembers.find(
           (rm) => rm.student?.id === m.tutorStudentId
         )?.student?.hourly_rate_cents ?? null,
+        // Ручная цена участника (null = derived из ставки, 0 = waive). Применится ко всей серии.
+        overrideAmount: parseLessonPriceInput(memberPrices[m.tutorStudentId] ?? ''),
       }));
 
       setIsSaving(true);
@@ -1774,11 +2018,14 @@ function AddLessonDialog({
     try {
       const tutorStudent = students.find(s => s.student_id === studentId);
 
+      const individualPrice = parseLessonPriceInput(priceText);
+
       if (isRecurring && repeatUntil) {
         const { root, count } = await createLessonSeries(
           {
             tutor_student_id: tutorStudent?.id,
             student_id: studentId,
+            payment_amount: individualPrice,
             ...baseLessonInput,
           },
           repeatUntil.toISOString()
@@ -1795,6 +2042,7 @@ function AddLessonDialog({
         const result = await createLesson({
           tutor_student_id: tutorStudent?.id,
           student_id: studentId,
+          payment_amount: individualPrice,
           ...baseLessonInput,
         });
 
@@ -1877,6 +2125,23 @@ function AddLessonDialog({
               </div>
             </div>
           </div>
+
+          {conflictInfo && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-900">
+              <AlertDescription className="text-sm">
+                <div className="font-medium">⚠️ В это время уже есть записи:</div>
+                <ul className="mt-1 list-disc pl-4 space-y-0.5">
+                  {conflictInfo.events.map((ev) => (
+                    <li key={ev.id}>Занято: {ev.title} ({format(new Date(ev.start_at), 'HH:mm')})</li>
+                  ))}
+                  {conflictInfo.lessons.map((l) => (
+                    <li key={l.id}>Занятие: {getLessonStudentName(l)} ({format(new Date(l.start_at), 'HH:mm')})</li>
+                  ))}
+                </ul>
+                <div className="mt-1 text-xs opacity-80">Создать занятие всё равно можно.</div>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {canUseMiniGroupMode && (
             <div className="space-y-2">
@@ -1979,19 +2244,36 @@ function AddLessonDialog({
                   </div>
 
                   {resolvedGroupMembers.length > 0 && (
-                    <div className="max-h-28 overflow-auto rounded border bg-muted/20 p-2 text-sm">
-                      <ul className="space-y-1">
-                        {resolvedGroupMembers.map((member) => (
-                          <li key={member.student!.id} className="flex items-center justify-between gap-2">
-                            <span>{member.student?.profiles?.username || 'Без имени'}</span>
-                            <span className="text-xs text-muted-foreground">
-                              {member.student?.hourly_rate_cents != null
-                                ? `${member.student.hourly_rate_cents / 100} ₽/ч`
-                                : 'Ставка не указана'}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="space-y-2">
+                      <div className="max-h-60 overflow-auto rounded border bg-muted/20 p-2 text-sm">
+                        <ul className="space-y-2">
+                          {resolvedGroupMembers.map((member) => (
+                            <li key={member.student!.id} className="space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="min-w-0 truncate">{member.student?.profiles?.username || 'Без имени'}</span>
+                                <span className="shrink-0 text-xs text-muted-foreground">
+                                  {member.student?.hourly_rate_cents != null
+                                    ? `${member.student.hourly_rate_cents / 100} ₽/ч`
+                                    : 'Ставка не указана'}
+                                </span>
+                              </div>
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                value={memberPrices[member.student!.id] ?? ''}
+                                onChange={(e) =>
+                                  setMemberPrices((prev) => ({ ...prev, [member.student!.id]: e.target.value }))
+                                }
+                                placeholder="Стоимость, ₽"
+                                className="h-9 text-base"
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Цена за занятие для каждого ученика спишется с баланса после занятия. 0 — не списывать. Пусто — из ставки. Применится ко всей серии.
+                      </p>
                     </div>
                   )}
 
@@ -2063,6 +2345,23 @@ function AddLessonDialog({
               </Select>
             </div>
           </div>
+
+          {!isMiniGroupMode && (
+            <div className="space-y-2">
+              <Label>Стоимость занятия, ₽</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={priceText}
+                onChange={(e) => { priceTouchedRef.current = true; setPriceText(e.target.value); }}
+                placeholder="напр. 1700"
+                className="text-base"
+              />
+              <p className="text-xs text-muted-foreground">
+                Спишется с баланса ученика после занятия. 0 — не списывать. Пусто — посчитать из ставки. Применится ко всей серии.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label>Предмет</Label>
@@ -2164,6 +2463,426 @@ function AddLessonDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// =============================================
+// AddEventDialog — создание личного дела
+// =============================================
+
+interface AddEventDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialDate: Date | null;
+  initialHour: number | null;
+  initialMinute?: number;
+  onSuccess: () => void;
+}
+
+function AddEventDialog({ open, onOpenChange, initialDate, initialHour, initialMinute = 0, onSuccess }: AddEventDialogProps) {
+  const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
+  const [hour, setHour] = useState(initialHour?.toString() || new Date().getHours().toString());
+  const [minute, setMinute] = useState(initialMinute.toString().padStart(2, '0'));
+  const [title, setTitle] = useState('');
+  const [notes, setNotes] = useState('');
+  const [duration, setDuration] = useState('60');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setDate(initialDate || new Date());
+      setHour(initialHour?.toString() || new Date().getHours().toString());
+      setMinute(initialMinute.toString().padStart(2, '0'));
+      setTitle('');
+      setNotes('');
+      setDuration('60');
+      setIsRecurring(false);
+      setRepeatUntil(undefined);
+    }
+  }, [open, initialDate, initialHour, initialMinute]);
+
+  const handleSubmit = async () => {
+    if (!date) { toast.error('Выберите дату'); return; }
+    if (!title.trim()) { toast.error('Введите название'); return; }
+    if (isRecurring && !repeatUntil) { toast.error('Выберите дату окончания повторений'); return; }
+
+    const startAt = new Date(date);
+    startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
+    const input = {
+      start_at: startAt.toISOString(),
+      duration_min: parseInt(duration),
+      title: title.trim(),
+      notes: notes.trim() ? notes.trim() : null,
+    };
+
+    setIsSaving(true);
+    try {
+      if (isRecurring && repeatUntil) {
+        const { root, count } = await createCalendarEventSeries(input, repeatUntil.toISOString());
+        if (root) {
+          toast.success(`Создано ${count} дел (еженедельно)`);
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось создать серию');
+        }
+      } else {
+        const res = await createCalendarEvent(input);
+        if (res) {
+          toast.success('Личное дело добавлено');
+          onSuccess();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось создать');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Ошибка при создании');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Личное дело</DialogTitle>
+          <DialogDescription>
+            Это время будет занято: новые занятия на него не поставятся, а ученик не сможет записаться.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-2">
+            <Label>Название *</Label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Спорт, врач, дела..."
+              className="text-base"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Дата и время *</Label>
+            <div className="flex flex-wrap gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={date} onSelect={setDate} locale={ru} className="pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+              <div className="flex items-center gap-1">
+                <Select value={hour} onValueChange={setHour}>
+                  <SelectTrigger className="w-[70px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <SelectItem key={i} value={i.toString()}>{i.toString().padStart(2, '0')}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">:</span>
+                <Select value={minute} onValueChange={setMinute}>
+                  <SelectTrigger className="w-[70px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['00', '15', '30', '45'].map(m => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Длительность</Label>
+            <Select value={duration} onValueChange={setDuration}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">30 мин</SelectItem>
+                <SelectItem value="45">45 мин</SelectItem>
+                <SelectItem value="60">60 мин</SelectItem>
+                <SelectItem value="90">90 мин</SelectItem>
+                <SelectItem value="120">120 мин</SelectItem>
+                <SelectItem value="180">3 часа</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-3 border-t pt-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm">Повторять еженедельно</Label>
+                <p className="text-xs text-muted-foreground">Создать серию дел каждую неделю</p>
+              </div>
+              <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
+            </div>
+            {isRecurring && (
+              <div className="space-y-2">
+                <Label>Повторять до *</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !repeatUntil && "text-muted-foreground")}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {repeatUntil ? format(repeatUntil, 'dd.MM.yyyy') : 'Выберите дату окончания'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar mode="single" selected={repeatUntil} onSelect={setRepeatUntil} locale={ru} disabled={(d) => d < (date || new Date())} className="pointer-events-auto" />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>Комментарий (опц.)</Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Заметка для себя..." rows={2} className="text-base" />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Отмена</Button>
+          <Button onClick={handleSubmit} disabled={isSaving || !title.trim()}>
+            {isSaving ? 'Сохранение...' : (isRecurring ? 'Создать серию' : 'Создать')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// =============================================
+// EventDetailsDialog — правка / удаление личного дела (со scope для серий)
+// =============================================
+
+interface EventDetailsDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  event: TutorCalendarEvent | null;
+  onUpdated: () => void;
+}
+
+function EventDetailsDialog({ open, onOpenChange, event, onUpdated }: EventDetailsDialogProps) {
+  const [title, setTitle] = useState('');
+  const [notes, setNotes] = useState('');
+  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [hour, setHour] = useState('0');
+  const [minute, setMinute] = useState('00');
+  const [duration, setDuration] = useState('60');
+  const [isSaving, setIsSaving] = useState(false);
+  const [seriesAction, setSeriesAction] = useState<'save' | 'delete' | null>(null);
+
+  const isSeries = !!event && (event.is_recurring || event.parent_event_id != null);
+
+  useEffect(() => {
+    if (event) {
+      const d = new Date(event.start_at);
+      setTitle(event.title);
+      setNotes(event.notes ?? '');
+      setDate(d);
+      setHour(d.getHours().toString());
+      setMinute(d.getMinutes().toString().padStart(2, '0'));
+      setDuration(String(event.duration_min));
+      setSeriesAction(null);
+    }
+  }, [event]);
+
+  if (!event) return null;
+
+  const buildStartIso = () => {
+    const d = new Date(date || new Date(event.start_at));
+    d.setHours(parseInt(hour), parseInt(minute), 0, 0);
+    return d.toISOString();
+  };
+
+  const doSave = async (scope: 'single' | 'this_and_following' | 'all') => {
+    setIsSaving(true);
+    try {
+      const newStartIso = buildStartIso();
+      const durationMin = parseInt(duration);
+      if (scope === 'single' || !isSeries) {
+        const res = await updateCalendarEvent(event.id, {
+          title: title.trim() || event.title,
+          notes: notes.trim() ? notes.trim() : null,
+          start_at: newStartIso,
+          duration_min: durationMin,
+        });
+        if (res) { toast.success('Сохранено'); onUpdated(); onOpenChange(false); }
+        else toast.error('Не удалось сохранить');
+      } else {
+        const shiftMinutes = Math.round((new Date(newStartIso).getTime() - new Date(event.start_at).getTime()) / 60000);
+        const res = await updateCalendarEventSeries(event, {
+          title: title.trim() || undefined,
+          notes: notes.trim() ? notes.trim() : '',
+          duration_min: durationMin,
+          applyTimeShift: shiftMinutes !== 0,
+          shiftMinutes,
+          scope,
+        });
+        if (res.ok) {
+          toast.success(scope === 'all' ? `Обновлена вся серия (${res.updatedCount})` : `Обновлено: ${res.updatedCount}`);
+          onUpdated();
+          onOpenChange(false);
+        } else {
+          toast.error('Не удалось сохранить серию');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Ошибка при сохранении');
+    } finally {
+      setIsSaving(false);
+      setSeriesAction(null);
+    }
+  };
+
+  const doDelete = async (scope: DeleteCalendarEventScope) => {
+    setIsSaving(true);
+    try {
+      const res = await deleteCalendarEventsScoped(event.id, scope);
+      if (res.ok) { toast.success('Удалено'); onUpdated(); onOpenChange(false); }
+      else toast.error('Не удалось удалить');
+    } catch (e) {
+      console.error(e);
+      toast.error('Ошибка при удалении');
+    } finally {
+      setIsSaving(false);
+      setSeriesAction(null);
+    }
+  };
+
+  return (
+    <>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Ban className="h-4 w-4" /> Личное дело
+            {isSeries && <Badge variant="outline"><Repeat className="h-3 w-3 mr-1" />Серия</Badge>}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-2">
+            <Label>Название</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} className="text-base" />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Дата и время</Label>
+            <div className="flex flex-wrap gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar mode="single" selected={date} onSelect={setDate} locale={ru} className="pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+              <div className="flex items-center gap-1">
+                <Select value={hour} onValueChange={setHour}>
+                  <SelectTrigger className="w-[70px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 24 }, (_, i) => (
+                      <SelectItem key={i} value={i.toString()}>{i.toString().padStart(2, '0')}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <span className="text-muted-foreground">:</span>
+                <Select value={minute} onValueChange={setMinute}>
+                  <SelectTrigger className="w-[70px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {['00', '15', '30', '45'].map(m => (<SelectItem key={m} value={m}>{m}</SelectItem>))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Длительность</Label>
+            <Select value={duration} onValueChange={setDuration}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="30">30 мин</SelectItem>
+                <SelectItem value="45">45 мин</SelectItem>
+                <SelectItem value="60">60 мин</SelectItem>
+                <SelectItem value="90">90 мин</SelectItem>
+                <SelectItem value="120">120 мин</SelectItem>
+                <SelectItem value="180">3 часа</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Комментарий</Label>
+            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="text-base" />
+          </div>
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="destructive"
+            disabled={isSaving}
+            onClick={() => { if (isSeries) setSeriesAction('delete'); else doDelete('this'); }}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />Удалить
+          </Button>
+          <Button
+            disabled={isSaving}
+            onClick={() => { if (isSeries) setSeriesAction('save'); else doSave('single'); }}
+          >
+            {isSaving ? 'Сохранение...' : 'Сохранить'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <AlertDialog open={seriesAction === 'save'} onOpenChange={(o) => { if (!o) setSeriesAction(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Сохранить изменения</AlertDialogTitle>
+          <AlertDialogDescription>
+            Это дело — часть серии. Применить только к этому, к этому и последующим, или ко всей серии?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setSeriesAction(null)}>Назад</AlertDialogCancel>
+          <Button variant="outline" onClick={() => doSave('single')} disabled={isSaving}>Только это</Button>
+          <Button variant="outline" onClick={() => doSave('this_and_following')} disabled={isSaving}>Это и последующие</Button>
+          <Button onClick={() => doSave('all')} disabled={isSaving}>Вся серия</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={seriesAction === 'delete'} onOpenChange={(o) => { if (!o) setSeriesAction(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Удалить дело</AlertDialogTitle>
+          <AlertDialogDescription>
+            Это дело — часть серии. Удалить только это, это и последующие, или всю серию?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel onClick={() => setSeriesAction(null)}>Назад</AlertDialogCancel>
+          <Button variant="outline" onClick={() => doDelete('this')} disabled={isSaving}>Только это</Button>
+          <Button variant="outline" onClick={() => doDelete('this_and_following')} disabled={isSaving}>Это и последующие</Button>
+          <Button variant="destructive" onClick={() => doDelete('all')} disabled={isSaving}>Всю серию</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
 
@@ -3526,8 +4245,13 @@ function TutorScheduleContent() {
     failureCount: lessonsFailureCount,
   } = useTutorLessons(weekStart);
 
+  // Личные дела (busy blocks) той же недели.
+  const { events: calendarEvents, refetch: refetchEvents } = useTutorCalendarEvents(weekStart);
+
   // Dialogs
   const [addLessonOpen, setAddLessonOpen] = useState(false);
+  const [addEventOpen, setAddEventOpen] = useState(false);
+  const [detailsEvent, setDetailsEvent] = useState<TutorCalendarEvent | null>(null);
   const [lessonDetailsOpen, setLessonDetailsOpen] = useState(false);
   const [groupDetailsOpen, setGroupDetailsOpen] = useState(false);
   const [reminderSettingsOpen, setReminderSettingsOpen] = useState(false);
@@ -3545,6 +4269,14 @@ function TutorScheduleContent() {
   const draggedLessonDurationRef = useRef<number>(60);
   const isLessonDragInProgressRef = useRef(false);
   const suppressNextGridClickRef = useRef(false);
+  // Перенос занятия из серии: спрашиваем scope (это / это и далее / вся серия) перед применением.
+  const [pendingMove, setPendingMove] = useState<{ lesson: TutorLessonWithStudent; newStartIso: string } | null>(null);
+  const [isMovingSeries, setIsMovingSeries] = useState(false);
+  // Drag/перенос личных дел (mirror занятий): свой ref + оптимистичная позиция + scope-серии.
+  const draggedEventIdRef = useRef<string | null>(null);
+  const [optimisticEventStartsById, setOptimisticEventStartsById] = useState<Record<string, string>>({});
+  const [pendingEventMove, setPendingEventMove] = useState<{ event: TutorCalendarEvent; newStartIso: string } | null>(null);
+  const [isMovingEventSeries, setIsMovingEventSeries] = useState(false);
 
   const [copiedLink, setCopiedLink] = useState(false);
 
@@ -3753,8 +4485,19 @@ function TutorScheduleContent() {
     ));
   }, [lessons, optimisticStartsByLessonId]);
 
+  const effectiveEvents = useMemo(() => {
+    if (Object.keys(optimisticEventStartsById).length === 0) return calendarEvents;
+    return calendarEvents.map((ev) => (
+      optimisticEventStartsById[ev.id]
+        ? { ...ev, start_at: optimisticEventStartsById[ev.id] }
+        : ev
+    ));
+  }, [calendarEvents, optimisticEventStartsById]);
+
   useEffect(() => {
     setOptimisticStartsByLessonId({});
+    setOptimisticEventStartsById({});
+    draggedEventIdRef.current = null;
     setDragPreview(null);
     draggedLessonIdRef.current = null;
     draggedLessonDurationRef.current = 60;
@@ -3780,6 +4523,22 @@ function TutorScheduleContent() {
 
     return byDay;
   }, [effectiveLessons, scheduleSettings]);
+
+  const eventsByDay = useMemo(() => {
+    const byDay: Record<number, TutorCalendarEvent[]> = {};
+    for (let i = 0; i < 7; i++) byDay[i] = [];
+
+    for (const ev of effectiveEvents) {
+      const startDate = new Date(ev.start_at);
+      const dayOfWeek = (startDate.getDay() + 6) % 7;
+      const evHour = startDate.getHours();
+      if (evHour >= scheduleSettings.workDayStart && evHour < scheduleSettings.workDayEnd) {
+        byDay[dayOfWeek].push(ev);
+      }
+    }
+
+    return byDay;
+  }, [effectiveEvents, scheduleSettings]);
 
   const activeMembershipByTutorStudentId = useMemo(() => {
     const map = new Map<string, TutorGroupMembership>();
@@ -4111,6 +4870,7 @@ function TutorScheduleContent() {
 
   const handleLessonDragStart = useCallback((lessonId: string, durationMin: number, event: React.DragEvent<HTMLDivElement>) => {
     isLessonDragInProgressRef.current = true;
+    draggedEventIdRef.current = null; // не смешивать с drag личного дела
     draggedLessonIdRef.current = lessonId;
     draggedLessonDurationRef.current = durationMin;
     setDragPreview(null);
@@ -4124,6 +4884,25 @@ function TutorScheduleContent() {
     // Reset immediately so click handler is not blocked
     isLessonDragInProgressRef.current = false;
     draggedLessonIdRef.current = null;
+    suppressNextGridClickRef.current = true;
+  }, []);
+
+  // Drag личных дел — отдельный ref (драг-овер/preview переиспользуют общий duration-ref).
+  const handleEventDragStart = useCallback((eventId: string, durationMin: number, event: React.DragEvent<HTMLDivElement>) => {
+    isLessonDragInProgressRef.current = true;
+    draggedLessonIdRef.current = null; // не смешивать с drag занятия
+    draggedEventIdRef.current = eventId;
+    draggedLessonDurationRef.current = durationMin;
+    setDragPreview(null);
+    event.dataTransfer.setData('text/plain', eventId);
+    event.dataTransfer.effectAllowed = 'move';
+  }, []);
+
+  const handleEventDragEnd = useCallback(() => {
+    setDragPreview(null);
+    draggedLessonDurationRef.current = 60;
+    isLessonDragInProgressRef.current = false;
+    draggedEventIdRef.current = null;
     suppressNextGridClickRef.current = true;
   }, []);
 
@@ -4167,6 +4946,152 @@ function TutorScheduleContent() {
     });
   }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, scheduleSettings.workDayStart]);
 
+  // Перенос одиночного занятия (оптимистично) — для не-серийных и выбора «Только это».
+  const moveSingleLessonOptimistic = useCallback(async (
+    lesson: TutorLessonWithStudent,
+    newStartIso: string,
+  ) => {
+    suppressNextGridClickRef.current = true;
+    setOptimisticStartsByLessonId((prev) => ({ ...prev, [lesson.id]: newStartIso }));
+    const clearOptimistic = () =>
+      setOptimisticStartsByLessonId((prev) => {
+        const { [lesson.id]: _removed, ...rest } = prev;
+        return rest;
+      });
+    try {
+      const result = await updateLesson(lesson.id, { start_at: newStartIso });
+      clearOptimistic();
+      if (result) {
+        toast.success('Занятие перенесено');
+        refetchLessons();
+      } else {
+        toast.error('Не удалось перенести');
+      }
+    } catch (error) {
+      console.error(error);
+      clearOptimistic();
+      toast.error('Ошибка при переносе');
+    }
+  }, [refetchLessons]);
+
+  // Перенос серии на ту же дельту времени (день недели и шаг сохраняются) — «Это и последующие» / «Вся серия».
+  const moveLessonSeries = useCallback(async (
+    lesson: TutorLessonWithStudent,
+    newStartIso: string,
+    scope: 'this_and_following' | 'all',
+  ) => {
+    const shiftMinutes = Math.round(
+      (new Date(newStartIso).getTime() - new Date(lesson.start_at).getTime()) / 60000,
+    );
+    if (shiftMinutes === 0) return;
+    setIsMovingSeries(true);
+    try {
+      // 'all' клампим к now — перенос не двигает уже прошедшие занятия (висящий debit, review #5).
+      const fromStartAtOverride = scope === 'all' ? new Date().toISOString() : undefined;
+      const res = await updateLessonSeries(lesson, { applyTimeShift: true, shiftMinutes, scope, fromStartAtOverride });
+      if (res.ok) {
+        toast.success(
+          scope === 'all'
+            ? `Перенесена вся серия (${res.updatedCount})`
+            : `Перенесено занятий: ${res.updatedCount}`,
+        );
+        refetchLessons();
+      } else {
+        toast.error('Не удалось перенести серию');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при переносе серии');
+    } finally {
+      setIsMovingSeries(false);
+    }
+  }, [refetchLessons]);
+
+  // ── Перенос личных дел (mirror занятий) ──────────────────────────────────
+  const moveSingleEventOptimistic = useCallback(async (
+    ev: TutorCalendarEvent,
+    newStartIso: string,
+  ) => {
+    suppressNextGridClickRef.current = true;
+    setOptimisticEventStartsById((prev) => ({ ...prev, [ev.id]: newStartIso }));
+    const clearOptimistic = () =>
+      setOptimisticEventStartsById((prev) => {
+        const { [ev.id]: _removed, ...rest } = prev;
+        return rest;
+      });
+    try {
+      const result = await updateCalendarEvent(ev.id, { start_at: newStartIso });
+      clearOptimistic();
+      if (result) {
+        toast.success('Дело перенесено');
+        refetchEvents();
+      } else {
+        toast.error('Не удалось перенести');
+      }
+    } catch (error) {
+      console.error(error);
+      clearOptimistic();
+      toast.error('Ошибка при переносе');
+    }
+  }, [refetchEvents]);
+
+  const moveEventSeries = useCallback(async (
+    ev: TutorCalendarEvent,
+    newStartIso: string,
+    scope: 'this_and_following' | 'all',
+  ) => {
+    const shiftMinutes = Math.round(
+      (new Date(newStartIso).getTime() - new Date(ev.start_at).getTime()) / 60000,
+    );
+    if (shiftMinutes === 0) return;
+    setIsMovingEventSeries(true);
+    try {
+      const res = await updateCalendarEventSeries(ev, { applyTimeShift: true, shiftMinutes, scope });
+      if (res.ok) {
+        toast.success(
+          scope === 'all'
+            ? `Перенесена вся серия (${res.updatedCount})`
+            : `Перенесено дел: ${res.updatedCount}`,
+        );
+        refetchEvents();
+      } else {
+        toast.error('Не удалось перенести серию');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error('Ошибка при переносе серии');
+    } finally {
+      setIsMovingEventSeries(false);
+    }
+  }, [refetchEvents]);
+
+  const handleEventDrop = useCallback(async (dayIndex: number, event: React.DragEvent<HTMLDivElement>) => {
+    const draggedEventId = draggedEventIdRef.current;
+    if (!draggedEventId) return;
+    const draggedEvent = effectiveEvents.find((ev) => ev.id === draggedEventId);
+    if (!draggedEvent) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
+    const { hour, minute } = getSnappedTimeFromPosition(positionY, draggedEvent.duration_min);
+    const newStart = getDateForDayOfWeek(weekStart, dayIndex);
+    newStart.setHours(hour, minute, 0, 0);
+
+    if (newStart.getTime() === new Date(draggedEvent.start_at).getTime()) {
+      suppressNextGridClickRef.current = true;
+      return;
+    }
+
+    const newStartIso = newStart.toISOString();
+    const isSeries = draggedEvent.is_recurring || draggedEvent.parent_event_id != null;
+    if (isSeries) {
+      suppressNextGridClickRef.current = true;
+      setPendingEventMove({ event: draggedEvent, newStartIso });
+      return;
+    }
+    await moveSingleEventOptimistic(draggedEvent, newStartIso);
+  }, [effectiveEvents, getSnappedTimeFromPosition, gridHeight, weekStart, moveSingleEventOptimistic]);
+
   const handleLessonDrop = useCallback(async (dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
     if (!isWorkDay) {
       setDragPreview(null);
@@ -4176,11 +5101,25 @@ function TutorScheduleContent() {
     event.preventDefault();
     setDragPreview(null);
 
+    // Перетаскивают личное дело? Обрабатываем отдельно (тот же drop-target).
+    if (draggedEventIdRef.current) {
+      await handleEventDrop(dayIndex, event);
+      return;
+    }
+
     const draggedLessonId = event.dataTransfer.getData('text/plain') || draggedLessonIdRef.current;
     if (!draggedLessonId) return;
 
     const draggedLesson = effectiveLessons.find(l => l.id === draggedLessonId && l.status === 'booked');
     if (!draggedLesson) return;
+
+    // Прошедшее занятие не переносим (review #5: иначе past→future оставит висящий debit).
+    const draggedEndMs = new Date(draggedLesson.start_at).getTime() + (draggedLesson.duration_min ?? 60) * 60000;
+    if (draggedEndMs < Date.now()) {
+      suppressNextGridClickRef.current = true;
+      toast.error('Прошедшее занятие нельзя перенести');
+      return;
+    }
 
     const rect = event.currentTarget.getBoundingClientRect();
     const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
@@ -4193,41 +5132,41 @@ function TutorScheduleContent() {
       return;
     }
 
-    suppressNextGridClickRef.current = true;
-    const optimisticStartIso = newStart.toISOString();
-    setOptimisticStartsByLessonId((prev) => ({
-      ...prev,
-      [draggedLesson.id]: optimisticStartIso
-    }));
-
-    try {
-      const result = await updateLesson(draggedLesson.id, {
-        start_at: optimisticStartIso
-      });
-
-      if (result) {
-        setOptimisticStartsByLessonId((prev) => {
-          const { [draggedLesson.id]: _removed, ...rest } = prev;
-          return rest;
-        });
-        toast.success('Занятие перенесено');
-        refetchLessons();
-      } else {
-        setOptimisticStartsByLessonId((prev) => {
-          const { [draggedLesson.id]: _removed, ...rest } = prev;
-          return rest;
-        });
-        toast.error('Не удалось перенести');
-      }
-    } catch (error) {
-      console.error(error);
-      setOptimisticStartsByLessonId((prev) => {
-        const { [draggedLesson.id]: _removed, ...rest } = prev;
-        return rest;
-      });
-      toast.error('Ошибка при переносе');
+    const newStartIso = newStart.toISOString();
+    const isSeries = draggedLesson.is_recurring || draggedLesson.parent_lesson_id != null;
+    if (isSeries) {
+      // Серия (индивид. или группа) → спросить scope, как в Google Calendar, перед переносом.
+      suppressNextGridClickRef.current = true;
+      setPendingMove({ lesson: draggedLesson, newStartIso });
+      return;
     }
-  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, refetchLessons, weekStart]);
+
+    await moveSingleLessonOptimistic(draggedLesson, newStartIso);
+  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, weekStart, moveSingleLessonOptimistic, handleEventDrop]);
+
+  // Применение выбора scope из диалога переноса серии (занятия).
+  const handleMoveScopeChoice = useCallback(async (scope: 'this' | 'this_and_following' | 'all') => {
+    if (!pendingMove) return;
+    const { lesson, newStartIso } = pendingMove;
+    setPendingMove(null);
+    if (scope === 'this') {
+      await moveSingleLessonOptimistic(lesson, newStartIso);
+    } else {
+      await moveLessonSeries(lesson, newStartIso, scope);
+    }
+  }, [pendingMove, moveSingleLessonOptimistic, moveLessonSeries]);
+
+  // Применение выбора scope из диалога переноса серии (личные дела).
+  const handleEventMoveScopeChoice = useCallback(async (scope: 'this' | 'this_and_following' | 'all') => {
+    if (!pendingEventMove) return;
+    const { event, newStartIso } = pendingEventMove;
+    setPendingEventMove(null);
+    if (scope === 'this') {
+      await moveSingleEventOptimistic(event, newStartIso);
+    } else {
+      await moveEventSeries(event, newStartIso, scope);
+    }
+  }, [pendingEventMove, moveSingleEventOptimistic, moveEventSeries]);
 
   const handleCompleteLesson = useCallback(async (lessonId: string, amount: number, paymentStatus: string) => {
     if (completingLessonIdsRef.current[lessonId]) {
@@ -4670,6 +5609,18 @@ function TutorScheduleContent() {
                               />
                             );
                           })}
+
+                          {/* Личные дела (busy blocks) */}
+                          {(eventsByDay[dayIndex] || []).map((ev) => (
+                            <CalendarEventBlock
+                              key={ev.id}
+                              event={ev}
+                              workDayStart={scheduleSettings.workDayStart}
+                              onClick={() => setDetailsEvent(ev)}
+                              onDragStart={(event) => handleEventDragStart(ev.id, ev.duration_min, event)}
+                              onDragEnd={handleEventDragEnd}
+                            />
+                          ))}
                         </div>
                       );
                     })}
@@ -4680,8 +5631,8 @@ function TutorScheduleContent() {
           </CardContent>
         </Card>
 
-        {/* Quick add button */}
-        <div className="flex justify-center">
+        {/* Quick add buttons */}
+        <div className="flex flex-wrap justify-center gap-2">
           <Button
             variant="outline"
             onClick={() => {
@@ -4693,6 +5644,18 @@ function TutorScheduleContent() {
           >
             <Plus className="h-4 w-4 mr-2" />
             Добавить занятие
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setSelectedDate(new Date());
+              setSelectedHour(new Date().getHours());
+              setSelectedMinute(0);
+              setAddEventOpen(true);
+            }}
+          >
+            <Ban className="h-4 w-4 mr-2" />
+            Личное дело
           </Button>
         </div>
 
@@ -4711,7 +5674,25 @@ function TutorScheduleContent() {
           initialDate={selectedDate}
           initialHour={selectedHour}
           initialMinute={selectedMinute}
+          weekLessons={effectiveLessons}
+          weekEvents={effectiveEvents}
           onSuccess={() => refetchLessons()}
+        />
+
+        <AddEventDialog
+          open={addEventOpen}
+          onOpenChange={setAddEventOpen}
+          initialDate={selectedDate}
+          initialHour={selectedHour}
+          initialMinute={selectedMinute}
+          onSuccess={() => refetchEvents()}
+        />
+
+        <EventDetailsDialog
+          open={detailsEvent !== null}
+          onOpenChange={(o) => { if (!o) setDetailsEvent(null); }}
+          event={detailsEvent}
+          onUpdated={() => { refetchEvents(); refetchLessons(); }}
         />
 
         <LessonDetailsDialog
@@ -4764,6 +5745,71 @@ function TutorScheduleContent() {
           }}
           students={students}
         />
+
+        {/* Перенос серии — выбор scope (Google-Calendar-style), общий для индивид. и групп */}
+        <AlertDialog
+          open={pendingMove !== null}
+          onOpenChange={(open) => { if (!open) setPendingMove(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Перенести занятие</AlertDialogTitle>
+              <AlertDialogDescription>
+                Это занятие входит в повторяющуюся серию. Что перенести?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+              <AlertDialogCancel disabled={isMovingSeries}>Отмена</AlertDialogCancel>
+              <Button
+                variant="outline"
+                disabled={isMovingSeries}
+                onClick={() => handleMoveScopeChoice('this')}
+              >
+                Только это
+              </Button>
+              <Button
+                variant="outline"
+                disabled={isMovingSeries}
+                onClick={() => handleMoveScopeChoice('this_and_following')}
+              >
+                Это и последующие
+              </Button>
+              <AlertDialogAction
+                disabled={isMovingSeries}
+                onClick={() => handleMoveScopeChoice('all')}
+              >
+                Вся серия
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Перенос серии личных дел — выбор scope */}
+        <AlertDialog
+          open={pendingEventMove !== null}
+          onOpenChange={(open) => { if (!open) setPendingEventMove(null); }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Перенести личное дело</AlertDialogTitle>
+              <AlertDialogDescription>
+                Это дело входит в повторяющуюся серию. Что перенести?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+              <AlertDialogCancel disabled={isMovingEventSeries}>Отмена</AlertDialogCancel>
+              <Button variant="outline" disabled={isMovingEventSeries} onClick={() => handleEventMoveScopeChoice('this')}>
+                Только это
+              </Button>
+              <Button variant="outline" disabled={isMovingEventSeries} onClick={() => handleEventMoveScopeChoice('this_and_following')}>
+                Это и последующие
+              </Button>
+              <AlertDialogAction disabled={isMovingEventSeries} onClick={() => handleEventMoveScopeChoice('all')}>
+                Вся серия
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <ReminderSettingsDialog
           open={reminderSettingsOpen}

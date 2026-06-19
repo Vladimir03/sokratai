@@ -12,6 +12,13 @@ export interface MiniGroupCreateMember {
   studentId: string;
   studentName: string;
   hourlyRateCents?: number | null;
+  /**
+   * Ручная цена участника (РУБЛИ, override). Если задана — пишется в
+   * `tutor_lesson_participants.payment_amount` вместо derived (ставка×длит).
+   * 0 = не списывать (waive). null/undefined → derived. Применяется ко всем
+   * повторам серии (member прокидывается в каждый occurrence без изменений).
+   */
+  overrideAmount?: number | null;
 }
 
 export interface MiniGroupCreateLessonInput {
@@ -81,7 +88,8 @@ export async function createMiniGroupLesson({
     lesson_id: lesson.id,
     tutor_student_id: member.tutorStudentId,
     student_id: member.studentId,
-    payment_amount: calculateLessonPaymentAmount(
+    // Ручной override побеждает (включая 0 = waive); иначе derived (ставка×длит).
+    payment_amount: member.overrideAmount ?? calculateLessonPaymentAmount(
       lessonInput.duration_min,
       member.hourlyRateCents ?? null,
     ),

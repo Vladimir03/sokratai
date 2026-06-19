@@ -20,6 +20,7 @@ import {
   getTutorPublicInfo,
   getAvailableBookingSlots,
 } from '@/lib/tutorSchedule';
+import { getTutorCalendarEvents } from '@/lib/tutorCalendarEvents';
 import {
   createTutorRetry,
   getTutorBackgroundRefetchInterval,
@@ -44,6 +45,7 @@ import type {
   TutorReminderSettings,
   TutorCalendarSettings,
   TutorAvailabilityException,
+  TutorCalendarEvent,
   TutorPublicInfo,
   BookingSlot,
 } from '@/types/tutor';
@@ -513,6 +515,41 @@ export function useTutorLessons(weekStartDate: Date) {
     isFetching: result.isFetching,
     isRecovering: result.isRecovering,
     failureCount: result.failureCount,
+  };
+}
+
+/**
+ * Хук для личных дел репетитора (busy blocks) той же недели.
+ */
+export function useTutorCalendarEvents(weekStartDate: Date) {
+  const { startDate, endDate } = useMemo(() => {
+    const start = new Date(weekStartDate);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+
+    return {
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+    };
+  }, [weekStartDate]);
+
+  const queryKey = useMemo(() => ['tutor', 'calendar-events', startDate, endDate] as const, [startDate, endDate]);
+  const result = useTutorQuery<TutorCalendarEvent[]>({
+    queryKey,
+    queryFn: () => getTutorCalendarEvents(startDate, endDate),
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить личные дела',
+    hasData: (data) => data !== undefined,
+  });
+
+  return {
+    events: result.data,
+    loading: result.loading,
+    error: result.error,
+    refetch: result.refetch,
+    isFetching: result.isFetching,
   };
 }
 

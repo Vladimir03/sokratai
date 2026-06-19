@@ -281,3 +281,33 @@ Build-лог: memory `project_elena_requests_2026_06_17.md` (секция 2026-0
 - **Phase 2 (отложено):** экран управления группами (создать/переименовать/удалить/состав, `sort_order`) + массовое выделение (галочки → архив/метка/ДЗ).
 
 Build-лог: memory `project_student_groups_tags_2026_06_18.md`. План `~/.claude/plans/crispy-soaring-lobster.md`.
+
+## Ручная цена при создании + единый перенос серии + личные дела (запросы Егора/др., 2026-06-19)
+
+Три группы по календарю `/tutor/schedule`. НЕ задеплоено. Миграция `20260620120000_tutor_calendar_events.sql` (только Группа C). План `~/.claude/plans/1-recursive-bentley.md`. Build-лог: memory `project_schedule_cost_move_events_2026_06_19.md`.
+
+### A — ручная цена занятия при создании (money-critical)
+- `AddLessonDialog` (`TutorSchedule.tsx`): поле «Стоимость, ₽» (индивид. — одно; группа — по каждому участнику), **предзаполняется последней ценой ученика**, редактируемо. `0`=waive, пусто=derived. `parseLessonPriceInput` (распознаёт `0`, в отличие от `parseRubleAmount`).
+- Бэкенд дебета НЕ менялся: списание читает `COALESCE(participant.payment_amount, lesson.payment_amount, ставка×длит)` в `_apply_lesson_debit_from_current_cost` (Phase 2b). Поэтому запись `payment_amount` при создании = цена списания (рубли).
+- **Write-path (rule 40, оба):** `CreateLessonInput.payment_amount` + `createLessonSeries` копирует его в КАЖДЫЙ повтор (иначе цена только в корне); `MiniGroupCreateMember.overrideAmount ?? derived` в `createMiniGroupLesson` (серия прокидывает member во все повторы).
+- **`getLastLessonPriceForStudent` (`tutorSchedule.ts`)** — последняя цена для предзаполнения: **ТОЛЬКО `payment_amount > 0` И НЕ `cancelled`** (review P0×2; иначе waived-0 заморозил бы «не списывать», а отменённое дало бы неверный дефолт). Индивид. + групповой источник, самое позднее по `start_at`, best-effort (ошибка→null).
+- **Семантика freeze (решение владельца):** показанная цена замораживается в `payment_amount` (WYSIWYG; смена ставки потом НЕ влияет на созданные занятия — «цена на год»). `priceTouchedRef` — поздний async-prefill не затирает уже введённую тутором цену (review P1).
+
+### B — единый перенос серии со scope (frontend-only)
+- Drag занятия из серии (индивид. **и** unified-группа, общий `handleLessonDrop`) → диалог «Только это / Это и последующие / Вся серия» (Google Calendar). `this`→`updateLesson(start_at)`; следующие/вся→`updateLessonSeries({applyTimeShift, shiftMinutes, scope})` (RPC `update_lesson_series` уже умеет time-shift). Кнопка «Перенести группу» — тот же scope (`doMoveGroup`).
+- **Money-guard переноса (review P1 #5, интерим):** прошедшие booked-занятия/группы **НЕ перетаскиваются** (`isDraggable && !isPast` в `LessonBlock`/`GroupLessonBlock` + defensive-guard в `handleLessonDrop` + guard на кнопке группы), а **scope='all' клампится к `now`** через `updateLessonSeries({fromStartAtOverride})` — перенос серии НЕ сдвигает уже прошедшее занятие (иначе past→future оставил бы висящий debit). Полный money-aware reconcile переноса (reverse/reapply под lock) — follow-up под v2 balance.
+
+### C — личные дела (busy blocks), таблица `tutor_calendar_events`
+- Схема: `tutor_id→tutors.id` (FK-дрейф как у занятий), `start_at`, `duration_min`, `title`, `notes`, `is_recurring`, `recurrence_rule 'weekly'`, `parent_event_id` (self-FK) — серийная модель зеркалит занятия (тот же 3-way scope). RLS tutor-owns-own, **GRANT только authenticated, БЕЗ anon-grant и публичной SELECT-политики** (anti-leak).
+- RPC `tutor_delete_calendar_events(_event_id,_scope)` (зеркало `tutor_delete_lessons` минус money-guard, с re-parent серии) + `update_calendar_event_series(...)` (зеркало `update_lesson_series`).
+- **Скрытие из публичной записи (anti-leak ключевое):** `CREATE OR REPLACE` `get_available_booking_slots` + `book_lesson_slot` — добавлен второй `EXISTS` против `tutor_calendar_events` (CTE `booked` + conflict-check брони). Обе SECURITY DEFINER → читают время событий в обход RLS, наружу отдают **только `is_booked`/uuid** (title/notes не проецируются, anon-grant не нужен).
+- Клиент `src/lib/tutorCalendarEvents.ts` (CRUD/series/чистый `findConflicts`), хук `useTutorCalendarEvents` (key `['tutor','calendar-events',...]`), `CalendarEventBlock` (штрихованный, `z-0` под занятиями), `AddEventDialog`/`EventDetailsDialog` (drag+правка+удаление со scope). **`db = supabase as unknown as {...}` escape-hatch** — types.ts ещё без таблицы/RPC (регенерация Lovable после миграции).
+- **Детект конфликтов (мягко):** амбер-баннер в `AddLessonDialog` при наложении на личное дело **или другое занятие** (новое — раньше lesson↔lesson не проверялось). НЕ блокирует создание (решение владельца). Публичная запись — жёстко скрыта server-side.
+
+### Известные follow-ups (пред-существующее, не блокеры)
+- `book_lesson_slot` не валидирует availability/exception/min_notice (пред-существующий зазор публичной брони) — отдельный hardening-PR.
+- Событие/занятие через полночь: `start_at::date = slot_date` пропускает overlap (book_lesson_slot ловит fallback'ом) — range-overlap фиксить заодно для занятий.
+
+**Deploy:** миграция ПЕРВОЙ (Lovable на push — фронт C зависит от таблицы+booking-RPC) → регенерация `types.ts` → `deploy-sokratai`. Группа A опирается на задеплоенный Phase 2b. Manual QA (money/Safari/конструктор расписания high-risk) перед прод-анонсом.
+
+Build-лог: memory `project_schedule_cost_move_events_2026_06_19.md`.

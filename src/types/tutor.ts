@@ -528,6 +528,24 @@ export interface CreateAvailabilityExceptionInput {
 }
 
 // =============================================
+// Личные дела репетитора (busy blocks) — tutor_calendar_events
+// =============================================
+
+export interface TutorCalendarEvent {
+  id: string;
+  tutor_id: string;
+  start_at: string;            // ISO timestamptz
+  duration_min: number;
+  title: string;
+  notes: string | null;
+  is_recurring: boolean;
+  recurrence_rule: 'weekly' | null;
+  parent_event_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// =============================================
 // Public Booking (Calendly-like)
 // =============================================
 

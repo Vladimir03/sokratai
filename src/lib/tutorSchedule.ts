@@ -196,6 +196,14 @@ export async function getTutorLessons(
 
 interface CreateLessonInput {
   tutor_id?: string;
+  /**
+   * Ручная цена занятия (РУБЛИ, override). Пишется в `tutor_lessons.payment_amount`
+   * для индивидуальных занятий и становится ценой списания (rule 60:
+   * `_apply_lesson_debit_from_current_cost` читает COALESCE(participant, lesson, ставка×длит)).
+   * null/undefined → колонка NULL → цена выводится из ставки×длительности при списании.
+   * 0 → не списывать (waive).
+   */
+  payment_amount?: number | null;
   tutor_student_id?: string;
   student_id?: string;
   group_session_id?: string;
@@ -307,6 +315,9 @@ export async function createLessonSeries(
     lesson_type: input.lesson_type,
     subject: input.subject,
     notes: input.notes,
+    // Ручная цена применяется ко ВСЕЙ серии (иначе override попал бы только в корень —
+    // тот же класс, что баг «cefr только в первой задаче», rule 40).
+    payment_amount: input.payment_amount,
     source: input.source || 'manual' as const,
     is_recurring: true,
     recurrence_rule: recurrenceRule,
@@ -324,6 +335,79 @@ export async function createLessonSeries(
   }
 
   return { root: rootLesson, count: dates.length };
+}
+
+/**
+ * Последняя положительная цена занятия для ученика — для предзаполнения поля «Стоимость»
+ * при создании нового занятия (UX-решение владельца: «каждую среду беру 1700»).
+ * Смотрит и индивидуальные занятия (`tutor_lessons.payment_amount`), и групповые
+ * (`tutor_lesson_participants.payment_amount`), возвращает цену самого позднего по `start_at`.
+ *
+ * Берётся ТОЛЬКО `payment_amount > 0` и НЕ `cancelled` (review fix): иначе прошлое
+ * waived/no-charge занятие (цена 0) предзаполнило бы «0» → тутор молча заморозил бы
+ * «не списывать»; а отменённое с частичной суммой дало бы неверный дефолт.
+ * Read-only под RLS (тутор видит свои занятия). Best-effort: ошибка → null (UI берёт ставка×длит).
+ * Цена в РУБЛЯХ (как `payment_amount`/`calculateLessonPaymentAmount`).
+ */
+export async function getLastLessonPriceForStudent(
+  tutorStudentId: string
+): Promise<number | null> {
+  if (!tutorStudentId) return null;
+
+  // Индивидуальные: самое позднее НЕ отменённое занятие с положительной ценой.
+  const individualPromise = supabase
+    .from('tutor_lessons')
+    .select('payment_amount, start_at')
+    .eq('tutor_student_id', tutorStudentId)
+    .gt('payment_amount', 0)
+    .neq('status', 'cancelled')
+    .order('start_at', { ascending: false })
+    .limit(1);
+
+  // Групповые: цена участника живёт в junction; сортировать parent-строки по дате
+  // занятия PostgREST не умеет (это дочерняя таблица) — берём все положительные и выбираем
+  // самое позднее НЕ отменённое в JS. На ученика их немного (мини-группы, еженедельно).
+  const groupPromise = supabase
+    .from('tutor_lesson_participants')
+    .select('payment_amount, tutor_lessons!inner(start_at, status)')
+    .eq('tutor_student_id', tutorStudentId)
+    .gt('payment_amount', 0);
+
+  const [individualRes, groupRes] = await Promise.all([individualPromise, groupPromise]);
+
+  let bestAt = -Infinity;
+  let bestAmount: number | null = null;
+
+  if (!individualRes.error && individualRes.data?.[0]) {
+    const row = individualRes.data[0] as { payment_amount: number | null; start_at: string | null };
+    if (row.payment_amount != null && row.payment_amount > 0 && row.start_at) {
+      const t = new Date(row.start_at).getTime();
+      if (Number.isFinite(t) && t > bestAt) {
+        bestAt = t;
+        bestAmount = row.payment_amount;
+      }
+    }
+  }
+
+  if (!groupRes.error && Array.isArray(groupRes.data)) {
+    for (const raw of groupRes.data) {
+      const row = raw as {
+        payment_amount: number | null;
+        tutor_lessons: { start_at: string; status?: string } | { start_at: string; status?: string }[] | null;
+      };
+      const lessonRel = Array.isArray(row.tutor_lessons) ? row.tutor_lessons[0] : row.tutor_lessons;
+      const startAt = lessonRel?.start_at;
+      if (row.payment_amount == null || row.payment_amount <= 0 || !startAt) continue;
+      if (lessonRel?.status === 'cancelled') continue; // отменённые не задают «последнюю цену»
+      const t = new Date(startAt).getTime();
+      if (Number.isFinite(t) && t > bestAt) {
+        bestAt = t;
+        bestAmount = row.payment_amount;
+      }
+    }
+  }
+
+  return bestAmount;
 }
 
 interface UpdateLessonInput {
@@ -475,14 +559,21 @@ export async function updateLessonSeries(
     shiftMinutes?: number;
     /** 'this_and_following' (default) = selected + future; 'all' = whole series. */
     scope?: 'this_and_following' | 'all';
+    /**
+     * Явная нижняя граница `_from_start_at` (перебивает scope-дефолт). Move-пути передают
+     * `now` для scope='all', чтобы перенос НЕ сдвигал уже прошедшие занятия (по которым
+     * списание могло пройти → иначе «висящий» debit). Метаданные-правки override не шлют.
+     */
+    fromStartAtOverride?: string;
   }
 ): Promise<UpdateLessonSeriesResult> {
   const rootId = getSeriesRootId(lesson);
   // 'all' widens the RPC's (id=selected OR start_at>=from) filter to every booked
   // occurrence by passing an epoch lower bound; 'this_and_following' keeps from=selected.
-  const fromStartAt = input.scope === 'all'
-    ? '1970-01-01T00:00:00.000Z'
-    : lesson.start_at;
+  const fromStartAt = input.fromStartAtOverride
+    ?? (input.scope === 'all'
+      ? '1970-01-01T00:00:00.000Z'
+      : lesson.start_at);
   const rpcArgs = {
     _root_lesson_id: rootId,
     _selected_lesson_id: lesson.id,
