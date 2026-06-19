@@ -465,7 +465,11 @@ export function generateBuildFormula(formula: Formula, pool: Formula[] = []): Fo
   const allTokens = [...recipe.numeratorTokens, ...recipe.denominatorTokens];
   const distractorCount = Math.min(3, Math.max(2, formula.relatedFormulas.length > 1 ? 3 : 2));
   const distractors = getDistractorTokens(formula, distractorCount, pool.length > 0 ? pool : [formula]);
-  const options = shuffle(unique([...allTokens, ...distractors]));
+  // НЕ дедупим: формула вида `A + B + C` нуждается в ДВУХ токенах `+`. distractors
+  // уже uniq и не пересекаются с correctTokens (getDistractorTokens), поэтому
+  // единственные дубли в пуле — намеренные (повторные операторы). BuildFormulaCard
+  // различает их по instance-key.
+  const options = shuffle([...allTokens, ...distractors]);
 
   return {
     id: createQuestionId('build_formula', formula.id),

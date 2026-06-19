@@ -1107,10 +1107,11 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: [],
   },
   'kin.28_e': {
-    // `-` разделяет y_0 и (g·t²/2). Знаменатель = 2.
+    // Дробное слагаемое (g·t²/2) — единый токен-чип, иначе сборщик с одним
+    // знаменателем дал бы (y_0 − g·t²)/2 (неверно).
     displayFormula: 'y = y_0 - \\frac{g t^2}{2}',
-    numeratorTokens: ['y_0', '-', 'g', 't^2'],
-    denominatorTokens: ['2'],
+    numeratorTokens: ['y_0', '-', '\\frac{g t^2}{2}'],
+    denominatorTokens: [],
   },
   'kin.31_e': {
     displayFormula: 'v_x = v_0 \\cos(\\alpha)',
@@ -1128,10 +1129,10 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: [],
   },
   'kin.34_e': {
-    // Три сегмента: y_0, (+) v_0 sin(α) t, (−) g t²/2. Знаменатель = 2.
+    // Дробное слагаемое (g·t²/2) — единый токен-чип; остальное — сумма.
     displayFormula: 'y = y_0 + v_0 \\sin(\\alpha) \\cdot t - \\frac{g t^2}{2}',
-    numeratorTokens: ['y_0', '+', 'v_0', '\\sin(\\alpha)', 't', '-', 'g', 't^2'],
-    denominatorTokens: ['2'],
+    numeratorTokens: ['y_0', '+', 'v_0', '\\sin(\\alpha)', 't', '-', '\\frac{g t^2}{2}'],
+    denominatorTokens: [],
   },
   'kin.35_e': {
     displayFormula: 'v_{\\text{верх}} = v_0 \\cos(\\alpha)',
@@ -1165,10 +1166,10 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: [],
   },
   'kin.66_e': {
-    // `+` разделяет v_{0x}·t и (a_x·t²/2). Знаменатель = 2.
+    // Дробное слагаемое (a_x·t²/2) — единый токен-чип, иначе всё ушло бы под /2.
     displayFormula: 's_x = v_{0x} t + \\frac{a_x t^2}{2}',
-    numeratorTokens: ['v_{0x}', 't', '+', 'a_x', 't^2'],
-    denominatorTokens: ['2'],
+    numeratorTokens: ['v_{0x}', 't', '+', '\\frac{a_x t^2}{2}'],
+    denominatorTokens: [],
   },
   'kin.67_e': {
     displayFormula: 's_x = \\frac{v_x^2 - v_{0x}^2}{2 a_x}',
@@ -1176,15 +1177,17 @@ export const EGOR_BUILD_RECIPES: Record<string, BuildRecipe> = {
     denominatorTokens: ['2', 'a_x'],
   },
   'kin.68_e': {
-    // Три слагаемых; последнее (a_x·t²) над знаменателем 2.
+    // Три слагаемых; дробное (a_x·t²/2) — единый токен-чип. Нужны ДВА `+`
+    // (BuildFormulaCard различает их по instance-key).
     displayFormula: 'x = x_0 + v_{0x} t + \\frac{a_x t^2}{2}',
-    numeratorTokens: ['x_0', '+', 'v_{0x}', 't', '+', 'a_x', 't^2'],
-    denominatorTokens: ['2'],
+    numeratorTokens: ['x_0', '+', 'v_{0x}', 't', '+', '\\frac{a_x t^2}{2}'],
+    denominatorTokens: [],
   },
   'kin.69_e': {
-    // (v + v_0)·t над знаменателем 2 (средняя скорость × время).
+    // Сумма (v + v_0) — единый токен-чип (средняя скорость), × t, над /2.
+    // Иначе сборщик дал бы (v + v_0·t)/2 вместо ((v+v_0)·t)/2.
     displayFormula: 'l = \\frac{(v + v_0) t}{2}',
-    numeratorTokens: ['v', '+', 'v_0', 't'],
+    numeratorTokens: ['(v + v_0)', 't'],
     denominatorTokens: ['2'],
   },
 };

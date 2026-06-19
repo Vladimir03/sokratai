@@ -11,6 +11,16 @@ interface BuildFormulaCardProps {
 }
 
 /**
+ * Один вариант пула = instance с уникальным `key`. Это позволяет размещать
+ * повторяющиеся токены независимо — формула вида `A + B + C` нуждается в ДВУХ
+ * токенах `+`, а сравнение по значению (Set) их бы схлопнуло.
+ */
+interface TokenInstance {
+  key: string;
+  token: string;
+}
+
+/**
  * Layer 2 card: "Собери формулу" — student assembles a formula from token blocks.
  *
  * GDD §4.5: tap-to-select (mobile-first, no drag-and-drop).
@@ -25,39 +35,53 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
   question,
   onAnswer,
 }: BuildFormulaCardProps) {
-  const [numerator, setNumerator] = useState<string[]>([]);
-  const [denominator, setDenominator] = useState<string[]>([]);
-  const [selectedToken, setSelectedToken] = useState<string | null>(null);
+  const [numerator, setNumerator] = useState<TokenInstance[]>([]);
+  const [denominator, setDenominator] = useState<TokenInstance[]>([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const formula = getFormulaById(question.formulaId);
 
-  // Pool = options minus placed tokens
-  const pool = useMemo(() => {
-    const placed = new Set([...numerator, ...denominator]);
-    return (question.options ?? []).filter((t) => !placed.has(t));
-  }, [question.options, numerator, denominator]);
+  // Каждый вариант пула — отдельный instance с уникальным key (по позиции),
+  // чтобы повторяющиеся токены (напр. два `+`) размещались независимо.
+  const optionInstances = useMemo<TokenInstance[]>(
+    () => (question.options ?? []).map((token, index) => ({ key: `${index}::${token}`, token })),
+    [question.options],
+  );
 
-  const handlePoolTap = useCallback((token: string) => {
+  const placedKeys = useMemo(
+    () => new Set([...numerator, ...denominator].map((inst) => inst.key)),
+    [numerator, denominator],
+  );
+
+  // Pool = instances minus placed ones.
+  const pool = useMemo(
+    () => optionInstances.filter((inst) => !placedKeys.has(inst.key)),
+    [optionInstances, placedKeys],
+  );
+
+  const handlePoolTap = useCallback((key: string) => {
     if (submitted) return;
-    setSelectedToken((prev) => (prev === token ? null : token));
+    setSelectedKey((prev) => (prev === key ? null : key));
   }, [submitted]);
 
   const placeToken = useCallback((zone: 'numerator' | 'denominator') => {
-    if (!selectedToken || submitted) return;
+    if (!selectedKey || submitted) return;
+    const inst = optionInstances.find((i) => i.key === selectedKey);
+    if (!inst) return;
     if (zone === 'numerator') {
-      setNumerator((prev) => [...prev, selectedToken]);
+      setNumerator((prev) => [...prev, inst]);
     } else {
-      setDenominator((prev) => [...prev, selectedToken]);
+      setDenominator((prev) => [...prev, inst]);
     }
-    setSelectedToken(null);
-  }, [selectedToken, submitted]);
+    setSelectedKey(null);
+  }, [selectedKey, submitted, optionInstances]);
 
-  const removeToken = useCallback((token: string, zone: 'numerator' | 'denominator') => {
+  const removeToken = useCallback((key: string, zone: 'numerator' | 'denominator') => {
     if (submitted) return;
     if (zone === 'numerator') {
-      setNumerator((prev) => prev.filter((t) => t !== token));
+      setNumerator((prev) => prev.filter((inst) => inst.key !== key));
     } else {
-      setDenominator((prev) => prev.filter((t) => t !== token));
+      setDenominator((prev) => prev.filter((inst) => inst.key !== key));
     }
   }, [submitted]);
 
@@ -83,8 +107,8 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
   // пробел, между множителями — неявный `\\cdot`.
   const assembledLatex = useMemo(() => {
     if (numerator.length === 0 && denominator.length === 0) return null;
-    const numStr = joinTokensWithOperators(numerator);
-    const denStr = joinTokensWithOperators(denominator);
+    const numStr = joinTokensWithOperators(numerator.map((inst) => inst.token));
+    const denStr = joinTokensWithOperators(denominator.map((inst) => inst.token));
 
     let rightSide = '';
     if (denStr && numStr) {
@@ -105,8 +129,11 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
   const handleCheck = useCallback(() => {
     if (submitted) return;
     setSubmitted(true);
-    setSelectedToken(null);
-    onAnswer({ numerator, denominator });
+    setSelectedKey(null);
+    onAnswer({
+      numerator: numerator.map((inst) => inst.token),
+      denominator: denominator.map((inst) => inst.token),
+    });
   }, [submitted, numerator, denominator, onAnswer]);
 
   return (
@@ -134,20 +161,20 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
 
         {/* Token pool */}
         <div className="flex flex-wrap gap-2 justify-center">
-          {pool.map((token) => (
+          {pool.map((inst) => (
             <button
-              key={token}
+              key={inst.key}
               type="button"
               disabled={submitted}
-              onClick={() => handlePoolTap(token)}
+              onClick={() => handlePoolTap(inst.key)}
               className={`px-3 py-2 rounded-lg border-2 text-base font-medium transition-colors ${
-                selectedToken === token
+                selectedKey === inst.key
                   ? 'border-accent bg-accent/10 text-accent'
                   : 'border-slate-200 text-slate-700 hover:border-slate-300'
               } disabled:opacity-50`}
               style={{ touchAction: 'manipulation' }}
             >
-              <MathText text={`$${token}$`} as="span" />
+              <MathText text={`$${inst.token}$`} as="span" />
             </button>
           ))}
           {pool.length === 0 && hasTokensPlaced && (
@@ -170,7 +197,7 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
         )}
 
         {/* Placement buttons — visible when token selected */}
-        {selectedToken && !submitted && (
+        {selectedKey && !submitted && (
           <div className="flex gap-2 justify-center animate-in fade-in duration-150">
             <button
               type="button"
@@ -207,16 +234,16 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
           <p className="text-xs font-medium text-slate-400 mb-1.5">Числитель</p>
           <div className="flex flex-wrap gap-1.5">
             {numerator.length > 0 ? (
-              numerator.map((token) => (
+              numerator.map((inst) => (
                 <button
-                  key={token}
+                  key={inst.key}
                   type="button"
                   disabled={submitted}
-                  onClick={() => removeToken(token, 'numerator')}
+                  onClick={() => removeToken(inst.key, 'numerator')}
                   className="px-3 py-1.5 rounded-md bg-accent/10 border border-accent/30 text-accent text-sm font-medium transition-colors hover:bg-accent/20 disabled:opacity-50"
                   style={{ touchAction: 'manipulation' }}
                 >
-                  <MathText text={`$${token}$`} as="span" />
+                  <MathText text={`$${inst.token}$`} as="span" />
                 </button>
               ))
             ) : (
@@ -233,16 +260,16 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
           <p className="text-xs font-medium text-slate-400 mb-1.5">Знаменатель</p>
           <div className="flex flex-wrap gap-1.5">
             {denominator.length > 0 ? (
-              denominator.map((token) => (
+              denominator.map((inst) => (
                 <button
-                  key={token}
+                  key={inst.key}
                   type="button"
                   disabled={submitted}
-                  onClick={() => removeToken(token, 'denominator')}
+                  onClick={() => removeToken(inst.key, 'denominator')}
                   className="px-3 py-1.5 rounded-md bg-slate-100 border border-slate-300 text-slate-600 text-sm font-medium transition-colors hover:bg-slate-200 disabled:opacity-50"
                   style={{ touchAction: 'manipulation' }}
                 >
-                  <MathText text={`$${token}$`} as="span" />
+                  <MathText text={`$${inst.token}$`} as="span" />
                 </button>
               ))
             ) : (
