@@ -208,30 +208,36 @@ export function FormulaRoundScreen({
         </div>
       </div>
 
-      {/* Question area */}
-      <div className="flex-1 flex flex-col items-center justify-center px-4 py-6 overflow-y-auto">
-        {currentQuestion.type === 'true_or_false' && (
-          <TrueOrFalseCard
-            key={currentQuestion.id}
-            question={currentQuestion}
-            onAnswer={handleAnswer}
-            disabled={phase === 'feedback'}
-          />
-        )}
-        {currentQuestion.type === 'build_formula' && (
-          <BuildFormulaCard
-            key={currentQuestion.id}
-            question={currentQuestion}
-            onAnswer={handleAnswer}
-          />
-        )}
-        {currentQuestion.type === 'situation_to_formula' && (
-          <SituationCard
-            key={currentQuestion.id}
-            question={currentQuestion}
-            onAnswer={handleAnswer}
-          />
-        )}
+      {/* Question area. Внешний слой ТОЛЬКО скроллит, внутренний центрирует.
+          `min-h-full` + `justify-center`: короткая карточка центрируется, а высокая
+          (BuildFormula с раскрытыми панелями) растёт и скроллится сверху, не заезжая
+          под шапку с прогрессом. Без этого `flex justify-center` + `overflow-y-auto`
+          на одном элементе обрезает верх контента (rule 80). */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="min-h-full flex flex-col items-center justify-center px-4 py-6">
+          {currentQuestion.type === 'true_or_false' && (
+            <TrueOrFalseCard
+              key={currentQuestion.id}
+              question={currentQuestion}
+              onAnswer={handleAnswer}
+              disabled={phase === 'feedback'}
+            />
+          )}
+          {currentQuestion.type === 'build_formula' && (
+            <BuildFormulaCard
+              key={currentQuestion.id}
+              question={currentQuestion}
+              onAnswer={handleAnswer}
+            />
+          )}
+          {currentQuestion.type === 'situation_to_formula' && (
+            <SituationCard
+              key={currentQuestion.id}
+              question={currentQuestion}
+              onAnswer={handleAnswer}
+            />
+          )}
+        </div>
       </div>
 
       {/* Feedback overlay */}
