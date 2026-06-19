@@ -10,7 +10,7 @@ import {
   PaginationNext, 
   PaginationPrevious 
 } from '@/components/ui/pagination';
-import { UserPlus, Archive, ArrowLeft } from 'lucide-react';
+import { UserPlus, Archive, ArrowLeft, Users } from 'lucide-react';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
@@ -50,9 +50,16 @@ const PAGE_SIZE = 10;
 type StudentWithExtras = TutorStudentWithProfile & {
   paid_until?: string | null;
   last_activity_at?: string | null;
+  /** Основная (учебная) группа ученика — для группировки списка + groupLabel. */
+  primary_group: TutorGroup | null;
+  /** Метки (доп. группы, is_primary=false) — для фильтра и чипов. */
+  tags: TutorGroup[];
+  /** Алиас primary_group для обратной совместимости (groupLabel/фильтр). */
   mini_group: TutorGroup | null;
   mini_group_membership: TutorGroupMembership | null;
 };
+
+const UNASSIGNED_GROUP_KEY = '__unassigned__';
 
 type StudentCredentialsData = {
   studentName: string;
@@ -107,12 +114,14 @@ function TutorStudentsContent() {
   // State
   const [sortBy, setSortBy] = useState<SortField>('activity');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<FilterValues>({
     paymentStatus: null,
     examType: null,
     subject: null,
     groupMode: 'all',
     groupId: null,
+    tagId: null,
   });
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -159,13 +168,14 @@ function TutorStudentsContent() {
       ...prev,
       groupMode: 'all',
       groupId: null,
+      tagId: null,
     }));
   }, [miniGroupsEnabled]);
 
-  // Reset page when filters change
+  // Reset page when filters / search change
   useEffect(() => {
     setPage(1);
-  }, [filters, sortBy, sortOrder]);
+  }, [filters, sortBy, sortOrder, search]);
 
   // Get unique subjects for filter
   const groupsById = useMemo(() => {
@@ -176,28 +186,56 @@ function TutorStudentsContent() {
     return map;
   }, [groups]);
 
+  // Несколько групп на ученика (запрос Елены/Егора 2026-06-18): Map<id, membership[]>.
   const membershipsByStudentId = useMemo(() => {
-    const map = new Map<string, TutorGroupMembership>();
+    const map = new Map<string, TutorGroupMembership[]>();
     memberships.forEach((membership) => {
       if (!membership.is_active) return;
-      map.set(membership.tutor_student_id, membership);
+      const list = map.get(membership.tutor_student_id);
+      if (list) list.push(membership);
+      else map.set(membership.tutor_student_id, [membership]);
     });
     return map;
   }, [memberships]);
 
-  // Cast students to extended type + merge mini-group metadata
+  // Основные группы (учебные) vs метки (теги). primary → группировка + groupLabel;
+  // метки → фильтр + чипы. См. план crispy-soaring-lobster.md.
+  const primaryGroups = useMemo(() => groups.filter((g) => g.is_primary), [groups]);
+  const tagGroups = useMemo(() => groups.filter((g) => !g.is_primary), [groups]);
+
+  // Cast students to extended type + derive primary group + tags from memberships.
   const studentsWithExtras = useMemo(() => {
     return (students as (TutorStudentWithProfile & {
       paid_until?: string | null;
       last_activity_at?: string | null;
     })[]).map((student) => {
-      const membership = membershipsByStudentId.get(student.id) ?? null;
-      const groupFromMembership = membership?.tutor_group ?? null;
-      const groupFromMap = membership ? groupsById.get(membership.tutor_group_id) ?? null : null;
+      const ms = membershipsByStudentId.get(student.id) ?? [];
+      let primaryGroup: TutorGroup | null = null;
+      let primaryMembership: TutorGroupMembership | null = null;
+      const tags: TutorGroup[] = [];
+      for (const m of ms) {
+        // is_primary берём из groupsById (getTutorGroups select('*') — не зависит от
+        // nested-select, который deploy-skew мог бы уронить 400, review P1).
+        const g = groupsById.get(m.tutor_group_id) ?? m.tutor_group ?? null;
+        if (!g) continue;
+        if (g.is_primary) {
+          if (!primaryGroup) {
+            primaryGroup = g;
+            primaryMembership = m;
+          }
+        } else {
+          tags.push(g);
+        }
+      }
+      tags.sort((a, b) =>
+        (a.short_name?.trim() || a.name).localeCompare(b.short_name?.trim() || b.name, 'ru'),
+      );
       return {
         ...student,
-        mini_group_membership: membership,
-        mini_group: groupFromMembership ?? groupFromMap,
+        mini_group_membership: primaryMembership,
+        mini_group: primaryGroup,
+        primary_group: primaryGroup,
+        tags,
       } as StudentWithExtras;
     });
   }, [students, membershipsByStudentId, groupsById]);
@@ -213,30 +251,47 @@ function TutorStudentsContent() {
 
   // Filter students
   const filteredStudents = useMemo(() => {
+    const q = search.trim().toLowerCase();
     return studentsWithExtras.filter(student => {
+      // Поиск по имени / username / telegram (маркировка репетитора, не данные ученика).
+      if (q) {
+        const hay = [
+          student.display_name,
+          student.profiles?.username,
+          student.profiles?.full_name,
+          student.profiles?.telegram_username,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
       // Payment filter
       if (filters.paymentStatus) {
         const { isPaid } = getPaymentStatus(student.paid_until ?? null);
         if (filters.paymentStatus === 'paid' && !isPaid) return false;
         if (filters.paymentStatus === 'unpaid' && isPaid) return false;
       }
-      
+
       // Exam type filter
       if (filters.examType && student.exam_type !== filters.examType) return false;
-      
+
       // Subject filter
       if (filters.subject && student.subject !== filters.subject) return false;
 
       if (miniGroupsEnabled) {
-        const hasGroup = Boolean(student.mini_group);
+        const hasGroup = Boolean(student.primary_group);
         if (filters.groupMode === 'grouped' && !hasGroup) return false;
         if (filters.groupMode === 'individual' && hasGroup) return false;
-        if (filters.groupId && student.mini_group?.id !== filters.groupId) return false;
+        if (filters.groupId && student.primary_group?.id !== filters.groupId) return false;
+        // Фильтр по метке (#интенсив и т.п.).
+        if (filters.tagId && !student.tags.some((t) => t.id === filters.tagId)) return false;
       }
-      
+
       return true;
     });
-  }, [studentsWithExtras, filters, miniGroupsEnabled]);
+  }, [studentsWithExtras, filters, search, miniGroupsEnabled]);
 
   // Sort students
   const sortedStudents = useMemo(() => {
@@ -279,6 +334,37 @@ function TutorStudentsContent() {
     return sortedStudents.slice(start, start + PAGE_SIZE);
   }, [sortedStudents, page]);
 
+  // Группировка по основной группе (дефолт): когда нет поиска / фильтра по метке /
+  // конкретной группе / режиму — список бьётся секциями по основной группе
+  // («Без группы» в конце). Иначе плоский (пагинированный) список. Запрос Егора (скрин 5).
+  const isGroupedView =
+    miniGroupsEnabled &&
+    !search.trim() &&
+    !filters.tagId &&
+    !filters.groupId &&
+    filters.groupMode === 'all' &&
+    primaryGroups.length > 0;
+
+  const groupSections = useMemo(() => {
+    if (!isGroupedView) return null;
+    const byKey = new Map<string, { key: string; label: string; students: StudentWithExtras[] }>();
+    for (const s of sortedStudents) {
+      const g = s.primary_group;
+      const key = g?.id ?? UNASSIGNED_GROUP_KEY;
+      const label = g ? (g.short_name?.trim() || g.name.trim()) : 'Без группы';
+      const sec = byKey.get(key);
+      if (sec) sec.students.push(s);
+      else byKey.set(key, { key, label, students: [s] });
+    }
+    const sections = [...byKey.values()];
+    sections.sort((a, b) => {
+      if (a.key === UNASSIGNED_GROUP_KEY) return 1;
+      if (b.key === UNASSIGNED_GROUP_KEY) return -1;
+      return a.label.localeCompare(b.label, 'ru');
+    });
+    return sections;
+  }, [isGroupedView, sortedStudents]);
+
   // Handlers
   const handleSortChange = useCallback((field: SortField) => {
     setSortBy(field);
@@ -293,7 +379,8 @@ function TutorStudentsContent() {
   }, []);
 
   const handleCreateGroup = useCallback(async (name: string) => {
-    const createdGroup = await createTutorGroup({ name });
+    // Создаётся из AddStudentDialog = учебная (основная) группа → is_primary: true.
+    const createdGroup = await createTutorGroup({ name, is_primary: true });
     if (!createdGroup) {
       return null;
     }
@@ -323,12 +410,14 @@ function TutorStudentsContent() {
   }, [miniGroupsEnabled, refetchMemberships]);
 
   const handleReset = useCallback(() => {
+    setSearch('');
     setFilters({
       paymentStatus: null,
       examType: null,
       subject: null,
       groupMode: 'all',
       groupId: null,
+      tagId: null,
     });
     setSortBy('activity');
     setSortOrder('desc');
@@ -470,7 +559,7 @@ function TutorStudentsContent() {
           inviteWebLink={inviteWebLink}
           inviteTelegramLink={inviteTelegramLink}
           miniGroupsEnabled={miniGroupsEnabled}
-          groups={groups}
+          groups={primaryGroups}
           onCreateGroup={handleCreateGroup}
           onSyncStudentMembership={handleSyncStudentMembership}
           onManualAdded={(tutorStudentId) => {
@@ -566,12 +655,15 @@ function TutorStudentsContent() {
             <StudentsToolbar
               sortBy={sortBy}
               sortOrder={sortOrder}
+              search={search}
               filters={filters}
               subjects={subjects}
-              groups={groups}
+              groups={primaryGroups}
+              tags={tagGroups}
               showGroupControls={miniGroupsEnabled}
               totalCount={studentsWithExtras.length}
               filteredCount={filteredStudents.length}
+              onSearchChange={setSearch}
               onSortChange={handleSortChange}
               onSortOrderToggle={handleSortOrderToggle}
               onFilterChange={handleFilterChange}
@@ -583,26 +675,66 @@ function TutorStudentsContent() {
               <StudentsEmptyFilters onReset={handleReset} />
             )}
 
-            {/* Student cards */}
-            {filteredStudents.length > 0 && (
-              <div className="space-y-3">
-                {paginatedStudents.map(student => (
-                  <StudentCard
-                    key={student.id}
-                    student={student}
-                    groupLabel={miniGroupsEnabled ? (student.mini_group?.short_name || student.mini_group?.name || null) : null}
-                    onCredentialsClick={() => {
-                      void handleResetStudentPassword(student);
-                    }}
-                    isResettingCredentials={resettingStudentId === student.student_id}
-                    onClick={() => handleOpenStudent(student.id)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Pagination */}
-            {renderPagination()}
+            {/* Student cards — сгруппированы по основной группе (дефолт) или плоский список */}
+            {filteredStudents.length > 0 &&
+              (groupSections ? (
+                <div className="space-y-5">
+                  {groupSections.map((section) => (
+                    <div key={section.key} className="space-y-2.5">
+                      <div className="flex items-center gap-2 px-1">
+                        <Users className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                        <h3 className="text-sm font-semibold text-slate-700">{section.label}</h3>
+                        <span className="text-xs text-slate-400">{section.students.length}</span>
+                      </div>
+                      <div className="space-y-3">
+                        {section.students.map((student) => (
+                          <StudentCard
+                            key={student.id}
+                            student={student}
+                            tags={student.tags.map((t) => ({
+                              id: t.id,
+                              name: t.short_name?.trim() || t.name,
+                              color: t.color,
+                            }))}
+                            onCredentialsClick={() => {
+                              void handleResetStudentPassword(student);
+                            }}
+                            isResettingCredentials={resettingStudentId === student.student_id}
+                            onClick={() => handleOpenStudent(student.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {paginatedStudents.map((student) => (
+                      <StudentCard
+                        key={student.id}
+                        student={student}
+                        groupLabel={
+                          miniGroupsEnabled
+                            ? student.primary_group?.short_name || student.primary_group?.name || null
+                            : null
+                        }
+                        tags={student.tags.map((t) => ({
+                          id: t.id,
+                          name: t.short_name?.trim() || t.name,
+                          color: t.color,
+                        }))}
+                        onCredentialsClick={() => {
+                          void handleResetStudentPassword(student);
+                        }}
+                        isResettingCredentials={resettingStudentId === student.student_id}
+                        onClick={() => handleOpenStudent(student.id)}
+                      />
+                    ))}
+                  </div>
+                  {renderPagination()}
+                </>
+              ))}
           </>
         )}
         </>

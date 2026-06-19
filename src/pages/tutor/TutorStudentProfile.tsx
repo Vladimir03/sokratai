@@ -35,8 +35,7 @@ import {
   setTutorStudentArchived,
   updateTutorStudentProfile,
   createTutorGroup,
-  upsertTutorGroupMembership,
-  deactivateTutorGroupMembership,
+  setStudentPrimaryGroup,
 } from '@/lib/tutors';
 import {
   formatRelativeTime,
@@ -51,7 +50,8 @@ import {
   invalidateTutorStudentDependentQueries,
   removeTutorStudentFromCache,
 } from '@/lib/tutorStudentCacheSync';
-import type { TutorGroupMembership } from '@/types/tutor';
+import type { TutorGroup, TutorGroupMembership } from '@/types/tutor';
+import { StudentTagsEditor } from '@/components/tutor/StudentTagsEditor';
 import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
 /**
@@ -175,14 +175,36 @@ function TutorStudentProfileContent() {
   const [editSelectedGroupId, setEditSelectedGroupId] = useState('');
   const [editNewGroupName, setEditNewGroupName] = useState('');
   const [isCreatingEditGroup, setIsCreatingEditGroup] = useState(false);
+  // Несколько групп на ученика (2026-06-18): основная группа (is_primary) — для
+  // селектора «мини-группа»; метки (is_primary=false) — отдельный редактор.
+  const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
+  const primaryGroups = useMemo(() => groups.filter((g) => g.is_primary), [groups]);
+  const tagGroups = useMemo(() => groups.filter((g) => !g.is_primary), [groups]);
+  const studentActiveMemberships = useMemo(
+    () =>
+      tutorStudentId
+        ? memberships.filter((m) => m.tutor_student_id === tutorStudentId && m.is_active)
+        : [],
+    [memberships, tutorStudentId],
+  );
+  // is_primary берём из groupById (getTutorGroups select('*')) — nested-select
+  // memberships его НЕ несёт (deploy-skew-proof, review P1).
   const activeMembership = useMemo<TutorGroupMembership | null>(() => {
-    if (!tutorStudentId) return null;
     return (
-      memberships.find(
-        (membership) => membership.tutor_student_id === tutorStudentId && membership.is_active
-      ) ?? null
+      studentActiveMemberships.find((m) => {
+        const g = groupById.get(m.tutor_group_id) ?? m.tutor_group;
+        return Boolean(g?.is_primary);
+      }) ?? null
     );
-  }, [memberships, tutorStudentId]);
+  }, [studentActiveMemberships, groupById]);
+  const studentTags = useMemo<TutorGroup[]>(() => {
+    return studentActiveMemberships
+      .map((m) => groupById.get(m.tutor_group_id) ?? m.tutor_group ?? null)
+      .filter((g): g is TutorGroup => Boolean(g) && !g.is_primary)
+      .sort((a, b) =>
+        (a.short_name?.trim() || a.name).localeCompare(b.short_name?.trim() || b.name, 'ru'),
+      );
+  }, [studentActiveMemberships, groupById]);
   const initialLoading = loading && !student && !error;
   const pageError = error || chatsError;
   const pageIsFetching = studentIsFetching || chatsIsFetching;
@@ -258,9 +280,10 @@ function TutorStudentProfileContent() {
     if (!tutorStudentId) return;
     setIsDeletingStudent(true);
     try {
-      const success = await removeStudentFromTutor(tutorStudentId);
-      if (!success) {
-        toast.error('Не удалось удалить ученика');
+      const result = await removeStudentFromTutor(tutorStudentId);
+      if (!result.ok) {
+        // Понятная фраза (rule 97), подсказывающая архив (запрос Елены 2026-06-18).
+        toast.error(result.error ?? 'Не удалось удалить ученика');
         return;
       }
       removeTutorStudentFromCache(queryClient, tutorStudentId);
@@ -275,6 +298,29 @@ function TutorStudentProfileContent() {
       setDeleteStudentOpen(false);
     }
   }, [navigate, queryClient, tutorStudentId]);
+
+  // «Заархивировать вместо удаления» из диалога удаления (запрос Елены 2026-06-18):
+  // безопасная альтернатива для реальных учеников — история сохраняется.
+  const handleArchiveInsteadOfDelete = useCallback(async () => {
+    if (!tutorStudentId) return;
+    setIsArchivingStudent(true);
+    try {
+      const ok = await setTutorStudentArchived(tutorStudentId, true);
+      if (!ok) {
+        toast.error('Не удалось архивировать');
+        return;
+      }
+      await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
+      toast.success('Ученик перемещён в архив');
+      navigate('/tutor/students');
+    } catch (error) {
+      console.error('Error archiving student:', error);
+      toast.error('Не удалось архивировать');
+    } finally {
+      setIsArchivingStudent(false);
+      setDeleteStudentOpen(false);
+    }
+  }, [tutorStudentId, queryClient, navigate]);
 
   // Архивирование (запрос Елены 2026-06-17). Обратимо, историю не трогает.
   const handleToggleArchive = useCallback(async () => {
@@ -308,7 +354,8 @@ function TutorStudentProfileContent() {
 
     setIsCreatingEditGroup(true);
     try {
-      const createdGroup = await createTutorGroup({ name: groupName });
+      // Из профиля создаётся учебная (основная) группа → is_primary: true.
+      const createdGroup = await createTutorGroup({ name: groupName, is_primary: true });
       if (!createdGroup) {
         toast.error('Не удалось создать мини-группу');
         return;
@@ -412,14 +459,15 @@ function TutorStudentProfileContent() {
       let membershipWarning: string | null = null;
       if (miniGroupsEnabled) {
         try {
+          // setStudentPrimaryGroup трогает только ОСНОВНУЮ группу — метки сохраняются.
           if (editIsInMiniGroup && editSelectedGroupId) {
-            const syncedMembership = await upsertTutorGroupMembership(tutorStudentId, editSelectedGroupId);
-            if (!syncedMembership) {
+            const ok = await setStudentPrimaryGroup(tutorStudentId, editSelectedGroupId);
+            if (!ok) {
               throw new Error('Не удалось назначить ученика в мини-группу');
             }
           } else if (!editIsInMiniGroup) {
-            const deactivatedMembership = await deactivateTutorGroupMembership(tutorStudentId);
-            if (!deactivatedMembership) {
+            const ok = await setStudentPrimaryGroup(tutorStudentId, null);
+            if (!ok) {
               throw new Error('Не удалось убрать ученика из мини-группы');
             }
           }
@@ -850,25 +898,38 @@ function TutorStudentProfileContent() {
             <DialogHeader>
               <DialogTitle>Удалить ученика?</DialogTitle>
               <DialogDescription>
-                Ученик будет удалён из вашего списка. Аккаунт ученика останется в системе.
+                Удаление <span className="font-semibold">безвозвратно</span> сотрёт ученика и его
+                историю (занятия, оплаты, баланс). Если хотите просто убрать из списка —
+                заархивируйте: ученик скроется, а история сохранится.
               </DialogDescription>
             </DialogHeader>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="ghost"
                 onClick={() => setDeleteStudentOpen(false)}
-                disabled={isDeletingStudent}
+                disabled={isDeletingStudent || isArchivingStudent}
               >
                 Отмена
               </Button>
+              {!student.archived_at && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleArchiveInsteadOfDelete}
+                  disabled={isDeletingStudent || isArchivingStudent}
+                >
+                  <Archive className="h-4 w-4 mr-2" />
+                  {isArchivingStudent ? 'Архивируем...' : 'Заархивировать'}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="destructive"
                 onClick={handleDeleteStudent}
-                disabled={isDeletingStudent}
+                disabled={isDeletingStudent || isArchivingStudent}
               >
-                {isDeletingStudent ? 'Удаление...' : 'Удалить'}
+                {isDeletingStudent ? 'Удаление...' : 'Удалить навсегда'}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -980,7 +1041,7 @@ function TutorStudentProfileContent() {
 
                       {editIsInMiniGroup && (
                         <div className="space-y-3">
-                          {groups.length > 0 && (
+                          {primaryGroups.length > 0 && (
                             <div className="space-y-2">
                               <Label>Мини-группа</Label>
                               <Select
@@ -991,7 +1052,7 @@ function TutorStudentProfileContent() {
                                   <SelectValue placeholder="Выберите мини-группу" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {groups.map((group) => (
+                                  {primaryGroups.map((group) => (
                                     <SelectItem key={group.id} value={group.id}>
                                       {group.short_name || group.name}
                                     </SelectItem>
@@ -1022,6 +1083,26 @@ function TutorStudentProfileContent() {
                           </div>
                         </div>
                       )}
+                    </div>
+                  )}
+
+                  {miniGroupsEnabled && tutorStudentId && (
+                    <div className="space-y-2 rounded-md border p-3 md:col-span-2">
+                      <div className="space-y-1">
+                        <Label className="text-sm font-medium">Метки</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Хештеги для фильтра и массовой выдачи (#интенсив, 11 класс…). Сохраняются сразу.
+                        </p>
+                      </div>
+                      <StudentTagsEditor
+                        tutorStudentId={tutorStudentId}
+                        tags={studentTags}
+                        allTags={tagGroups}
+                        onChanged={() => {
+                          refetchMemberships();
+                          refetchGroups();
+                        }}
+                      />
                     </div>
                   )}
                 </div>

@@ -3566,6 +3566,10 @@ function TutorScheduleContent() {
     error: membershipsError,
   } = useTutorGroupMemberships(miniGroupsEnabled);
 
+  // Гард (A6): групповое ЗАНЯТИЕ создаётся только в учебных (основных) группах —
+  // метки (#интенсив) сюда не попадают (иначе «занятие для #прогульщик»).
+  const primaryGroupsForLesson = useMemo(() => groups.filter((g) => g.is_primary), [groups]);
+
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
     const freshLesson = lessons.find(l => l.id === selectedLesson.id);
@@ -4697,7 +4701,7 @@ function TutorScheduleContent() {
           open={addLessonOpen}
           onOpenChange={setAddLessonOpen}
           miniGroupsEnabled={miniGroupsEnabled}
-          groups={groups}
+          groups={primaryGroupsForLesson}
           memberships={memberships}
           groupsLoading={groupsLoading}
           membershipsLoading={membershipsLoading}

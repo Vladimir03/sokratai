@@ -377,27 +377,38 @@ async function handleProgressOverview(
     });
   }
 
-  // Groups (active membership → group).
+  // Groups (active PRIMARY membership → group). Метки (is_primary=false) НЕ берём —
+  // иначе тег мог бы стать «группой» ученика при multi-membership (review P2, 2026-06-18).
   const { data: memberships } = await db
     .from("tutor_group_memberships")
     .select("tutor_student_id, tutor_group_id")
     .eq("tutor_id", tutorPkId)
-    .eq("is_active", true);
-  const groupIdByTs = new Map<string, string>();
-  const groupIds = new Set<string>();
-  for (const m of memberships ?? []) {
-    groupIdByTs.set(m.tutor_student_id as string, m.tutor_group_id as string);
-    groupIds.add(m.tutor_group_id as string);
-  }
-  const groupById = new Map<string, string>();
-  if (groupIds.size > 0) {
+    .eq("is_active", true)
+    .order("created_at", { ascending: true });
+  const allGroupIds = new Set<string>();
+  for (const m of memberships ?? []) allGroupIds.add(m.tutor_group_id as string);
+  const groupMetaById = new Map<string, { label: string; isPrimary: boolean }>();
+  if (allGroupIds.size > 0) {
     const { data: groups } = await db
       .from("tutor_groups")
-      .select("id, name, short_name")
-      .in("id", [...groupIds]);
+      .select("id, name, short_name, is_primary")
+      .in("id", [...allGroupIds]);
     for (const g of groups ?? []) {
-      groupById.set(g.id as string, ((g.short_name as string | null) || (g.name as string)) ?? "");
+      groupMetaById.set(g.id as string, {
+        label: ((g.short_name as string | null) || (g.name as string)) ?? "",
+        isPrimary: Boolean(g.is_primary),
+      });
     }
+  }
+  const groupIdByTs = new Map<string, string>();
+  const groupById = new Map<string, string>();
+  for (const m of memberships ?? []) {
+    const meta = groupMetaById.get(m.tutor_group_id as string);
+    if (!meta || !meta.isPrimary) continue; // только основная (учебная) группа
+    if (!groupIdByTs.has(m.tutor_student_id as string)) {
+      groupIdByTs.set(m.tutor_student_id as string, m.tutor_group_id as string);
+    }
+    groupById.set(m.tutor_group_id as string, meta.label);
   }
 
   // Homework (batched).

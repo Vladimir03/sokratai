@@ -21,6 +21,13 @@ export interface TutorGroup {
   short_name: string | null;
   color: string | null;
   is_active: boolean;
+  /**
+   * true = учебная (основная) группа: ≤1 активная на ученика (DB-триггер
+   * tutor_group_memberships_single_primary_guard), хостит групповые занятия,
+   * дефолтная группировка списка. false = метка (#интенсив/#прогульщик): ∞ на
+   * ученика, для фильтра/массовой выдачи. Миграция 20260618120000.
+   */
+  is_primary: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -40,6 +47,8 @@ export interface CreateTutorGroupInput {
   name: string;
   short_name?: string | null;
   color?: string | null;
+  /** true = учебная (основная) группа; false (default) = метка. */
+  is_primary?: boolean;
 }
 
 export interface TutorStudent {

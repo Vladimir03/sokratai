@@ -1,6 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { ArrowUpDown, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, RotateCcw, Search, Tag } from 'lucide-react';
 import type { TutorGroup } from '@/types/tutor';
 
 export type SortField = 'activity' | 'name' | 'progress';
@@ -13,17 +13,24 @@ export interface FilterValues {
   subject: string | null;
   groupMode: GroupFilterMode;
   groupId: string | null;
+  /** Фильтр по метке (доп. группа, is_primary=false). Запрос Елены 2026-06-18. */
+  tagId: string | null;
 }
 
 interface StudentsToolbarProps {
   sortBy: SortField;
   sortOrder: SortOrder;
+  search: string;
   filters: FilterValues;
   subjects: string[];
+  /** Только ОСНОВНЫЕ группы (is_primary) — для фильтра «Конкретная группа». */
   groups: TutorGroup[];
+  /** Метки (is_primary=false) — для фильтра по метке. */
+  tags: TutorGroup[];
   showGroupControls: boolean;
   totalCount: number;
   filteredCount: number;
+  onSearchChange: (value: string) => void;
   onSortChange: (field: SortField) => void;
   onSortOrderToggle: () => void;
   onFilterChange: (filters: FilterValues) => void;
@@ -33,21 +40,25 @@ interface StudentsToolbarProps {
 export function StudentsToolbar({
   sortBy,
   sortOrder,
+  search,
   filters,
   subjects,
   groups,
+  tags,
   showGroupControls,
   totalCount,
   filteredCount,
+  onSearchChange,
   onSortChange,
   onSortOrderToggle,
   onFilterChange,
   onReset,
 }: StudentsToolbarProps) {
-  const hasActiveFilters = filters.paymentStatus !== null || 
-                          filters.examType !== null || 
+  const hasActiveFilters = search.trim().length > 0 ||
+                          filters.paymentStatus !== null ||
+                          filters.examType !== null ||
                           filters.subject !== null ||
-                          (showGroupControls && (filters.groupMode !== 'all' || filters.groupId !== null));
+                          (showGroupControls && (filters.groupMode !== 'all' || filters.groupId !== null || filters.tagId !== null));
 
   const handlePaymentChange = (value: string) => {
     onFilterChange({
@@ -87,8 +98,32 @@ export function StudentsToolbar({
     });
   };
 
+  const handleTagChange = (value: string) => {
+    onFilterChange({
+      ...filters,
+      tagId: value === 'all' ? null : value,
+    });
+  };
+
   return (
     <div className="space-y-3">
+      {/* Поиск по имени (маркировка репетитора, а не данные ученика) */}
+      <div className="relative">
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+          aria-hidden="true"
+        />
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Поиск по имени или Telegram"
+          aria-label="Поиск учеников"
+          className="min-h-[44px] w-full rounded-md border border-socrat-border bg-white py-2 pl-9 pr-3 text-base text-slate-900 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+          style={{ touchAction: 'manipulation' }}
+        />
+      </div>
+
       {/* Sort and filters row */}
       <div className="flex flex-wrap gap-2 items-center">
         {/* Sort by */}
@@ -183,6 +218,24 @@ export function StudentsToolbar({
               {groups.map((group) => (
                 <SelectItem key={group.id} value={group.id}>
                   {group.short_name || group.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {/* Фильтр по метке (#интенсив и т.п.) */}
+        {showGroupControls && tags.length > 0 && (
+          <Select value={filters.tagId ?? 'all'} onValueChange={handleTagChange}>
+            <SelectTrigger className="w-[170px]">
+              <Tag className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+              <SelectValue placeholder="Метка" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Все метки</SelectItem>
+              {tags.map((tag) => (
+                <SelectItem key={tag.id} value={tag.id}>
+                  {tag.short_name || tag.name}
                 </SelectItem>
               ))}
             </SelectContent>

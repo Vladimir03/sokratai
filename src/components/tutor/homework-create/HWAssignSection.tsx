@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Copy, Search, Check, ExternalLink, Users, X } from 'lucide-react';
+import { Copy, Search, Check, ExternalLink, Users, X, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTutorStudents } from '@/hooks/useTutor';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
@@ -559,8 +559,10 @@ export function HWAssignSection({
                   </CardContent>
                 </Card>
               ) : (
-                <div className="grid gap-3">
-                  {groups.map((group) => {
+                (() => {
+                  // Основные (учебные) группы и метки разделены визуально. Выбор и
+                  // юнион (buildGroupUnionStudentIds) общие — selectedGroupIds спанит обе.
+                  const renderOption = (group: TutorGroupWithMembers) => {
                     const activeMemberCount = group.members.filter((member) => member.is_active).length;
                     const isSelected = selectedGroupIds.has(group.id);
                     return (
@@ -578,12 +580,15 @@ export function HWAssignSection({
                           <span
                             className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
                             style={{
-                              backgroundColor:
-                                group.color?.trim() || 'var(--accent)',
+                              backgroundColor: group.color?.trim() || 'var(--accent)',
                             }}
                             aria-hidden="true"
                           />
-                          <Users className="h-4 w-4 shrink-0 text-slate-500" />
+                          {group.is_primary ? (
+                            <Users className="h-4 w-4 shrink-0 text-slate-500" />
+                          ) : (
+                            <Tag className="h-4 w-4 shrink-0 text-slate-500" />
+                          )}
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium">
                               {group.short_name?.trim() || group.name}
@@ -600,8 +605,32 @@ export function HWAssignSection({
                         </div>
                       </button>
                     );
-                  })}
-                </div>
+                  };
+                  const primaryList = groups.filter((g) => g.is_primary);
+                  const tagList = groups.filter((g) => !g.is_primary);
+                  return (
+                    <div className="space-y-4">
+                      {primaryList.length > 0 && (
+                        <div className="space-y-2">
+                          {tagList.length > 0 && (
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                              Учебные группы
+                            </p>
+                          )}
+                          <div className="grid gap-3">{primaryList.map(renderOption)}</div>
+                        </div>
+                      )}
+                      {tagList.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                            <Tag className="h-3 w-3" aria-hidden="true" /> Метки
+                          </p>
+                          <div className="grid gap-3">{tagList.map(renderOption)}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               )}
 
               {selectedGroupCards.length > 0 && (

@@ -737,26 +737,44 @@ function TutorMockExamCreateContent() {
           </div>
         ) : (
           <div className="space-y-3">
-            {miniGroupsEnabled && groups.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Группы
-                </p>
-                {groups.map((group) => {
-                  const activeMembers = group.members.filter((m) => m.is_active);
-                  return (
-                    <RecipientRow
-                      key={group.id}
-                      id={group.id}
-                      primary={group.short_name?.trim() || group.name}
-                      secondary={`${activeMembers.length} ${pluralStudents(activeMembers.length)}`}
-                      isSelected={selectedGroupIds.has(group.id)}
-                      onToggle={handleGroupToggle}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            {miniGroupsEnabled && groups.length > 0 && (() => {
+              // Учебные группы и метки разделены (паритет с HWAssignSection, review P3).
+              const renderRow = (group: (typeof groups)[number]) => {
+                const activeMembers = group.members.filter((m) => m.is_active);
+                return (
+                  <RecipientRow
+                    key={group.id}
+                    id={group.id}
+                    primary={group.short_name?.trim() || group.name}
+                    secondary={`${activeMembers.length} ${pluralStudents(activeMembers.length)}`}
+                    isSelected={selectedGroupIds.has(group.id)}
+                    onToggle={handleGroupToggle}
+                  />
+                );
+              };
+              const primaryList = groups.filter((g) => g.is_primary);
+              const tagList = groups.filter((g) => !g.is_primary);
+              return (
+                <>
+                  {primaryList.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        {tagList.length > 0 ? 'Учебные группы' : 'Группы'}
+                      </p>
+                      {primaryList.map(renderRow)}
+                    </div>
+                  )}
+                  {tagList.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Метки
+                      </p>
+                      {tagList.map(renderRow)}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             <div className="space-y-1">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

@@ -336,6 +336,8 @@ export async function createTutorGroup(
       short_name: input.short_name ?? null,
       color: input.color ?? null,
       is_active: true,
+      // false (default) = метка; true = учебная (основная) группа.
+      is_primary: input.is_primary ?? false,
     })
     .select('*')
     .single();
@@ -396,7 +398,12 @@ export async function getTutorGroupMemberships(
 
 /**
  * Назначить (или обновить) активный membership ученика в группе.
- * В MVP допускается только один активный membership на ученика.
+ *
+ * Инвариант «≤1 активная ОСНОВНАЯ группа» теперь обеспечивает DB-триггер
+ * tutor_group_memberships_single_primary_guard (auto-replace основной группы),
+ * поэтому ручной deactivate-all УБРАН — иначе он снимал бы и метки (is_primary=false).
+ * Для основной группы предпочтительно `setStudentPrimaryGroup`; эта функция оставлена
+ * для legacy-callsite (AddStudentDialog), который выбирает только ОСНОВНЫЕ группы.
  */
 export async function upsertTutorGroupMembership(
   tutorStudentId: string,
@@ -405,19 +412,6 @@ export async function upsertTutorGroupMembership(
   const tutor = await getCurrentTutor();
   if (!tutor) {
     console.error('No tutor profile found');
-    return null;
-  }
-
-  const { error: deactivateOthersError } = await (supabase
-    .from('tutor_group_memberships') as any)
-    .update({ is_active: false })
-    .eq('tutor_id', tutor.id)
-    .eq('tutor_student_id', tutorStudentId)
-    .eq('is_active', true)
-    .neq('tutor_group_id', tutorGroupId);
-
-  if (deactivateOthersError) {
-    console.error('Error deactivating previous memberships:', deactivateOthersError);
     return null;
   }
 
@@ -452,7 +446,9 @@ export async function upsertTutorGroupMembership(
 }
 
 /**
- * Деактивировать активный membership ученика в группе
+ * Деактивировать ВСЕ активные membership ученика (и основную группу, и метки).
+ * Legacy «убрать из группы». Для снятия ТОЛЬКО основной группы (метки оставить)
+ * используй `setStudentPrimaryGroup(id, null)`.
  */
 export async function deactivateTutorGroupMembership(
   tutorStudentId: string
@@ -475,6 +471,120 @@ export async function deactivateTutorGroupMembership(
     return false;
   }
 
+  return true;
+}
+
+/**
+ * Установить ОСНОВНУЮ (учебную) группу ученика, либо снять её (groupId=null).
+ * Метки (is_primary=false) НЕ затрагиваются.
+ *  - groupId задан → upsert active; DB-триггер снимает прежнюю активную основную группу.
+ *  - groupId=null → деактивировать активную основную группу ученика (метки остаются).
+ */
+export async function setStudentPrimaryGroup(
+  tutorStudentId: string,
+  tutorGroupId: string | null
+): Promise<boolean> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return false;
+  }
+
+  if (tutorGroupId) {
+    const { error } = await (supabase.from('tutor_group_memberships') as any).upsert(
+      {
+        tutor_id: tutor.id,
+        tutor_student_id: tutorStudentId,
+        tutor_group_id: tutorGroupId,
+        is_active: true,
+      },
+      { onConflict: 'tutor_student_id,tutor_group_id' },
+    );
+    if (error) {
+      console.error('Error setting primary group:', error);
+      return false;
+    }
+    return true;
+  }
+
+  // null → снять основную группу. Находим активные membership ученика в ОСНОВНЫХ
+  // группах и деактивируем только их (метки оставляем).
+  const { data: active, error: selErr } = await (supabase
+    .from('tutor_group_memberships') as any)
+    .select('id, tutor_group:tutor_groups(is_primary)')
+    .eq('tutor_id', tutor.id)
+    .eq('tutor_student_id', tutorStudentId)
+    .eq('is_active', true);
+  if (selErr) {
+    console.error('Error loading memberships:', selErr);
+    return false;
+  }
+  const primaryIds = ((active ?? []) as { id: string; tutor_group?: { is_primary?: boolean } | null }[])
+    .filter((m) => m.tutor_group?.is_primary)
+    .map((m) => m.id);
+  if (primaryIds.length === 0) return true;
+
+  const { error } = await (supabase.from('tutor_group_memberships') as any)
+    .update({ is_active: false })
+    .in('id', primaryIds);
+  if (error) {
+    console.error('Error clearing primary group:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Навесить метку (доп. группу, is_primary=false) на ученика. Прочие membership не трогает.
+ * Триггер single-primary — no-op для меток.
+ */
+export async function addStudentTag(
+  tutorStudentId: string,
+  tagGroupId: string
+): Promise<boolean> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return false;
+  }
+  const { error } = await (supabase.from('tutor_group_memberships') as any).upsert(
+    {
+      tutor_id: tutor.id,
+      tutor_student_id: tutorStudentId,
+      tutor_group_id: tagGroupId,
+      is_active: true,
+    },
+    { onConflict: 'tutor_student_id,tutor_group_id' },
+  );
+  if (error) {
+    console.error('Error adding student tag:', error);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Снять конкретную метку (или группу) с ученика — деактивировать её membership.
+ */
+export async function removeStudentTag(
+  tutorStudentId: string,
+  tagGroupId: string
+): Promise<boolean> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return false;
+  }
+  const { error } = await (supabase.from('tutor_group_memberships') as any)
+    .update({ is_active: false })
+    .eq('tutor_id', tutor.id)
+    .eq('tutor_student_id', tutorStudentId)
+    .eq('tutor_group_id', tagGroupId)
+    .eq('is_active', true);
+  if (error) {
+    console.error('Error removing student tag:', error);
+    return false;
+  }
   return true;
 }
 
@@ -645,7 +755,9 @@ export async function updateTutorStudent(
 /**
  * Удалить связь с учеником
  */
-export async function removeStudentFromTutor(id: string): Promise<boolean> {
+export async function removeStudentFromTutor(
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
   const { error } = await supabase
     .from('tutor_students')
     .delete()
@@ -653,10 +765,19 @@ export async function removeStudentFromTutor(id: string): Promise<boolean> {
 
   if (error) {
     console.error('Error removing student:', error);
-    return false;
+    // 23503 = FK-violation: осталась блокирующая связь (rule 97 — рус. фраза,
+    // подсказываем архив как безопасную альтернативу).
+    if (error.code === '23503') {
+      return {
+        ok: false,
+        error:
+          'У ученика есть связанные записи, которые мешают удалению. Заархивируйте его вместо удаления — история сохранится.',
+      };
+    }
+    return { ok: false, error: 'Не удалось удалить ученика. Попробуйте заархивировать.' };
   }
 
-  return true;
+  return { ok: true };
 }
 
 /**

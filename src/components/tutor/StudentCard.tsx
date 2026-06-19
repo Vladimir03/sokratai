@@ -16,6 +16,7 @@ import {
   Mail,
   MessageCircle,
   ArchiveRestore,
+  Tag,
 } from 'lucide-react';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import {
@@ -33,6 +34,8 @@ interface StudentCardProps {
   onCredentialsClick: () => void;
   isResettingCredentials?: boolean;
   groupLabel?: string | null;
+  /** Метки ученика (доп. группы, is_primary=false) — чипы-хештеги (запрос Елены 2026-06-18). */
+  tags?: { id: string; name: string; color?: string | null }[];
   /** Если задан — карточка архивная: показать «Вернуть из архива» (запрос Елены 2026-06-17). */
   onUnarchive?: () => void;
   isUnarchiving?: boolean;
@@ -44,6 +47,7 @@ export const StudentCard = memo(function StudentCard({
   onCredentialsClick,
   isResettingCredentials = false,
   groupLabel,
+  tags,
   onUnarchive,
   isUnarchiving = false,
 }: StudentCardProps) {
@@ -173,6 +177,21 @@ export const StudentCard = memo(function StudentCard({
               )}
             </div>
           </div>
+
+          {/* Метки (доп. группы) — чипы-хештеги */}
+          {tags && tags.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {tags.map((t) => (
+                <span
+                  key={t.id}
+                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600"
+                >
+                  <Tag className="h-3 w-3 text-slate-400" aria-hidden="true" />
+                  {t.name}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Progress bar */}
           {student.target_score && (

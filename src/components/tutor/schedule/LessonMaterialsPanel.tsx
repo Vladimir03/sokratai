@@ -39,6 +39,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { getSubjectLabel } from '@/types/homework';
 import { listTutorHomeworkAssignments } from '@/lib/tutorHomeworkApi';
@@ -95,6 +96,20 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
+// PDF-конспекты лежат в bucket `lesson-materials` (rule 98). Репетитор имеет
+// `tutor read own` SELECT-политику (миграция 20260602140100) → может подписать
+// СВОИ PDF клиентом. URL уже RU-safe: client `supabase` хардкодит api.sokratai.ru
+// (rule 95) → rewriteToProxy не нужен (паттерн MockExamVariantPreviewSheet, rule 45).
+const LESSON_MATERIAL_BUCKET = 'lesson-materials';
+const PDF_SIGNED_URL_TTL_SEC = 3600;
+
+/** `storage://<bucket>/<objectPath>` → { bucket, objectPath } | null. */
+function parseStorageRef(ref: string): { bucket: string; objectPath: string } | null {
+  const m = /^storage:\/\/([^/]+)\/(.+)$/.exec(ref.trim());
+  if (!m) return null;
+  return { bucket: m[1], objectPath: m[2] };
+}
+
 // ─── Material row (memoized) ────────────────────────────────────────────────────
 
 interface MaterialRowProps {
@@ -102,9 +117,20 @@ interface MaterialRowProps {
   label: string;
   deleting: boolean;
   onRemove: () => void;
+  /** External href to open: recording → material.url; pdf → signed URL (may be null while resolving). */
+  openUrl?: string | null;
+  /** SPA navigation (homework_ref → /tutor/homework/:id). Mutually exclusive with openUrl in practice. */
+  onOpen?: () => void;
 }
 
-const MaterialRow = memo(function MaterialRow({ material, label, deleting, onRemove }: MaterialRowProps) {
+const MaterialRow = memo(function MaterialRow({
+  material,
+  label,
+  deleting,
+  onRemove,
+  openUrl,
+  onOpen,
+}: MaterialRowProps) {
   const kind = material.material_kind;
   const Icon = kind === 'recording' ? Video : kind === 'pdf' ? FileText : BookOpen;
   const iconColor =
@@ -113,6 +139,8 @@ const MaterialRow = memo(function MaterialRow({ material, label, deleting, onRem
       : kind === 'pdf'
         ? 'bg-socrat-primary-light text-socrat-primary'
         : 'bg-accent/10 text-accent';
+  // recording → material.url; pdf → resolved signed URL (openUrl).
+  const externalHref = kind === 'recording' ? material.url : kind === 'pdf' ? (openUrl ?? null) : null;
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-socrat-border bg-white px-3 py-2.5">
@@ -121,9 +149,9 @@ const MaterialRow = memo(function MaterialRow({ material, label, deleting, onRem
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-slate-900">{label}</p>
-        {kind === 'recording' && material.url && (
+        {externalHref && (
           <a
-            href={material.url}
+            href={externalHref}
             target="_blank"
             rel="noreferrer"
             className="mt-0.5 inline-flex items-center gap-1 text-xs text-accent hover:underline"
@@ -131,6 +159,16 @@ const MaterialRow = memo(function MaterialRow({ material, label, deleting, onRem
           >
             <ExternalLink className="h-3 w-3" /> Открыть
           </a>
+        )}
+        {kind === 'homework_ref' && onOpen && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="mt-0.5 inline-flex items-center gap-1 text-xs text-accent hover:underline"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <ExternalLink className="h-3 w-3" /> Открыть
+          </button>
         )}
       </div>
       <button
@@ -179,6 +217,52 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       () => new Set(homeworkRefs.map((m) => m.homework_assignment_id).filter(Boolean) as string[]),
       [homeworkRefs],
     );
+
+    // PDF-конспекты: подписываем storage-рефы клиентом, чтобы репетитор открывал
+    // СВОИ PDF так же, как ученик (скрин 3, паритет). Батч по всем PDF занятия.
+    const pdfObjectPaths = useMemo(() => {
+      const paths = new Set<string>();
+      for (const m of pdfs) {
+        const ref = parseAttachmentUrls(m.url)[0];
+        const parsed = ref ? parseStorageRef(ref) : null;
+        if (parsed && parsed.bucket === LESSON_MATERIAL_BUCKET) paths.add(parsed.objectPath);
+      }
+      return [...paths];
+    }, [pdfs]);
+
+    const pdfSignedQuery = useQuery({
+      queryKey: ['tutor', 'lesson-materials', 'pdf-signed', lessonId, pdfObjectPaths],
+      queryFn: async () => {
+        const map: Record<string, string> = {};
+        if (pdfObjectPaths.length === 0) return map;
+        const { data, error } = await supabase.storage
+          .from(LESSON_MATERIAL_BUCKET)
+          .createSignedUrls(pdfObjectPaths, PDF_SIGNED_URL_TTL_SEC);
+        if (error || !data) return map;
+        for (const item of data) {
+          if (item.signedUrl && item.path) map[item.path] = item.signedUrl;
+        }
+        return map;
+      },
+      enabled: active && pdfObjectPaths.length > 0,
+      staleTime: (PDF_SIGNED_URL_TTL_SEC - 300) * 1000, // refetch чуть раньше истечения TTL
+      // Drawer может быть открыт > 1ч → переподписываем до истечения, иначе «Открыть»
+      // даст просроченный URL (review P3).
+      refetchInterval:
+        active && pdfObjectPaths.length > 0 ? (PDF_SIGNED_URL_TTL_SEC - 600) * 1000 : false,
+      refetchOnWindowFocus: false,
+    });
+
+    const pdfUrlByMaterialId = useMemo(() => {
+      const signed = pdfSignedQuery.data ?? {};
+      const map = new Map<string, string>();
+      for (const m of pdfs) {
+        const ref = parseAttachmentUrls(m.url)[0];
+        const parsed = ref ? parseStorageRef(ref) : null;
+        if (parsed && signed[parsed.objectPath]) map.set(m.id, signed[parsed.objectPath]);
+      }
+      return map;
+    }, [pdfs, pdfSignedQuery.data]);
 
     // Recording form
     const [recordingUrl, setRecordingUrl] = useState('');
@@ -429,6 +513,16 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       navigate(`/tutor/homework/create?${params.toString()}`);
     }, [lesson, navigate, onRequestClose]);
 
+    // Открыть привязанное ДЗ на экране репетитора (скрин 3, паритет с учеником).
+    // Навигация ≠ «Готово» → raw close без notify (mirror handleCreateHomework).
+    const openHomework = useCallback(
+      (assignmentId: string) => {
+        onRequestClose();
+        navigate(`/tutor/homework/${assignmentId}`);
+      },
+      [navigate, onRequestClose],
+    );
+
     const recordingLimitReached = recordings.length >= MAX_LESSON_RECORDINGS;
 
     return (
@@ -560,6 +654,7 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
               label={m.title?.trim() || 'PDF-конспект'}
               deleting={deletingId === m.id}
               onRemove={() => handleDelete(m.id)}
+              openUrl={pdfUrlByMaterialId.get(m.id) ?? null}
             />
           ))}
         </section>
@@ -581,6 +676,11 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
               }
               deleting={deletingId === m.id}
               onRemove={() => handleDelete(m.id)}
+              onOpen={
+                m.homework_assignment_id
+                  ? () => openHomework(m.homework_assignment_id!)
+                  : undefined
+              }
             />
           ))}
 
