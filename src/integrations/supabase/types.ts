@@ -2948,6 +2948,7 @@ export type Database = {
           created_at: string
           id: string
           is_active: boolean
+          is_primary: boolean
           name: string
           short_name: string | null
           tutor_id: string
@@ -2958,6 +2959,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_primary?: boolean
           name: string
           short_name?: string | null
           tutor_id: string
@@ -2968,6 +2970,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_active?: boolean
+          is_primary?: boolean
           name?: string
           short_name?: string | null
           tutor_id?: string
