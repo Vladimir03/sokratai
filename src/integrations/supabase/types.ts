@@ -2793,6 +2793,63 @@ export type Database = {
           },
         ]
       }
+      tutor_calendar_events: {
+        Row: {
+          created_at: string
+          duration_min: number
+          id: string
+          is_recurring: boolean
+          notes: string | null
+          parent_event_id: string | null
+          recurrence_rule: string | null
+          start_at: string
+          title: string
+          tutor_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          duration_min?: number
+          id?: string
+          is_recurring?: boolean
+          notes?: string | null
+          parent_event_id?: string | null
+          recurrence_rule?: string | null
+          start_at: string
+          title: string
+          tutor_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          duration_min?: number
+          id?: string
+          is_recurring?: boolean
+          notes?: string | null
+          parent_event_id?: string | null
+          recurrence_rule?: string | null
+          start_at?: string
+          title?: string
+          tutor_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_calendar_events_parent_event_id_fkey"
+            columns: ["parent_event_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_calendar_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tutor_calendar_events_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_calendar_settings: {
         Row: {
           allow_student_cancel: boolean
@@ -4486,6 +4543,10 @@ export type Database = {
         Returns: Json
       }
       tutor_confirm_lessons: { Args: { p_lessons: Json }; Returns: Json }
+      tutor_delete_calendar_events: {
+        Args: { _event_id: string; _scope?: string }
+        Returns: Json
+      }
       tutor_delete_lessons: {
         Args: { _lesson_id: string; _scope?: string }
         Returns: Json
@@ -4536,6 +4597,19 @@ export type Database = {
         Returns: Json
       }
       tutor_sync_my_due_debits: { Args: never; Returns: Json }
+      update_calendar_event_series: {
+        Args: {
+          _apply_time_shift?: boolean
+          _duration_min?: number
+          _from_start_at: string
+          _notes?: string
+          _root_event_id: string
+          _selected_event_id: string
+          _shift_minutes?: number
+          _title?: string
+        }
+        Returns: number
+      }
       update_group_participant_payment_status: {
         Args: {
           _lesson_id: string
