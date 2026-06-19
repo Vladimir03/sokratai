@@ -590,5 +590,34 @@ if (frontMap[21] !== 59 || frontMap[45] !== 100 || frontMap[0] !== 0) {
 }
 ok("score-scales mirror in sync (46 entries, primary 21→59, 45→100)");
 
+// ─── 11. Trainer v1 formula LaTeX escaping (egorFormulas.ts) ──────────────────
+// Hand-written v1 trainer formulas keep LaTeX inside JS strings; a LONE backslash
+// before a letter is a JS-escape bug — `\t`→TAB (chip renders «extцс»),
+// `\c`/`\a`/`\s`→letter dropped (chip renders literal «cos(alpha)»). Correct LaTeX
+// doubles every backslash (`\\frac`, `\\text{цс}`, `\\cos(\\alpha)`). Collapse the
+// `\\` pairs, then any remaining `\`+letter is a regression. Catches the render
+// bugs Elena reported (2026-06-19) for current + future v1 formulas.
+console.log("");
+console.log("11. Trainer v1 formula LaTeX escaping (egorFormulas.ts)...");
+const egorFormulasPath = path.join(srcDir, "lib", "formulaEngine", "egorFormulas.ts");
+if (!fs.existsSync(egorFormulasPath)) {
+  fail("src/lib/formulaEngine/egorFormulas.ts missing — trainer v1 formula guard cannot run");
+}
+const egorLines = readText(egorFormulasPath).split(/\r?\n/);
+const loneBackslashHits = [];
+egorLines.forEach((line, idx) => {
+  const collapsed = line.replace(/\\\\/g, ""); // drop correctly-escaped \\ pairs
+  if (/\\[a-zA-Z]/.test(collapsed)) {
+    loneBackslashHits.push(`${idx + 1}: ${line.trim()}`);
+  }
+});
+if (loneBackslashHits.length > 0) {
+  fail(
+    "egorFormulas.ts has lone-backslash LaTeX (JS strings must double every backslash) — renders «extцс»/«cos(alpha)»:\n  " +
+      loneBackslashHits.slice(0, 12).join("\n  "),
+  );
+}
+ok(`trainer v1 formula LaTeX escaping clean (${egorLines.length} lines scanned)`);
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

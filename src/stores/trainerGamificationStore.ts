@@ -16,6 +16,8 @@ export type SectionKey =
   | 'conservation'
   | 'statics'
   | 'hydrostatics'
+  // v1 trainer — прямолинейное движение (равномерное + равноускоренное).
+  | 'egor-linear'
   // v1 trainer mode (формулы Егора, «Вращение по окружности»). Отдельная
   // корзина best-score, чтобы не смешивать с kinematics v2.
   | 'egor-v1'
@@ -32,9 +34,10 @@ export interface TrainerGamificationState {
   dailyRoundsCount: number;
   /** 'YYYY-MM-DD' attached to dailyRoundsCount — used to detect day rollover */
   dailyDate: string | null;
+  /** Лучший результат по разделу — «% правильных» (0–100), не XP (v2). */
   bestScoreBySection: Partial<Record<SectionKey, number>>;
   bestCombo: number;
-  version: 1;
+  version: 2;
 }
 
 export interface RoundOutcome {
@@ -77,7 +80,7 @@ const INITIAL_STATE: TrainerGamificationState = {
   dailyDate: null,
   bestScoreBySection: {},
   bestCombo: 0,
-  version: 1,
+  version: 2,
 };
 
 export const useTrainerGamificationStore = create<TrainerGamificationStore>()(
@@ -128,32 +131,25 @@ export const useTrainerGamificationStore = create<TrainerGamificationStore>()(
         }
         // else: 2nd+ round of same day → streak unchanged.
 
-        // ── 3. XP calculation with two-pass newBest detection ────────────────
-        // We need to know isNewBest before computing the final XP, but isNewBest
-        // depends on XP vs previous best. Resolve by comparing the pre-newBest
-        // subtotal against the current best — that's the "earned without bonus"
-        // figure the user actually beat.
-        const baseComputation = computeRoundXp({
+        // ── 3. Score = «% правильных» (0–100). Рекорд по разделу теперь по %, а
+        // не по XP. XP остаётся внутренним (totalXp/телеметрия), ученику больше не
+        // показывается. Двухпроходная newBest-логика не нужна — % известен до
+        // расчёта XP.
+        const roundPercentage =
+          outcome.totalCount > 0
+            ? Math.round((outcome.correctCount / outcome.totalCount) * 100)
+            : 0;
+
+        const currentBest = state.bestScoreBySection[outcome.section] ?? 0;
+        const isNewBest = !outcome.isRetryMode && roundPercentage > currentBest;
+
+        const finalComputation = computeRoundXp({
           correctCount: outcome.correctCount,
           totalCount: outcome.totalCount,
           bestComboInRound: outcome.bestComboInRound,
-          isNewBest: false,
+          isNewBest,
           isRetry: outcome.isRetryMode,
         });
-
-        const currentBest = state.bestScoreBySection[outcome.section] ?? 0;
-        const isNewBest =
-          !outcome.isRetryMode && baseComputation.total > currentBest;
-
-        const finalComputation = isNewBest
-          ? computeRoundXp({
-              correctCount: outcome.correctCount,
-              totalCount: outcome.totalCount,
-              bestComboInRound: outcome.bestComboInRound,
-              isNewBest: true,
-              isRetry: outcome.isRetryMode,
-            })
-          : baseComputation;
 
         const xpEarned = finalComputation.total;
 
@@ -166,7 +162,7 @@ export const useTrainerGamificationStore = create<TrainerGamificationStore>()(
 
         // ── 5. Commit new state ──────────────────────────────────────────────
         const nextBestScoreBySection = isNewBest
-          ? { ...state.bestScoreBySection, [outcome.section]: xpEarned }
+          ? { ...state.bestScoreBySection, [outcome.section]: roundPercentage }
           : state.bestScoreBySection;
 
         const nextBestCombo = Math.max(state.bestCombo, outcome.bestComboInRound);
@@ -199,7 +195,7 @@ export const useTrainerGamificationStore = create<TrainerGamificationStore>()(
     }),
     {
       name: 'sokrat-trainer-gamification-v1',
-      version: 1,
+      version: 2,
       // Persist the state slice only — actions are re-attached by create().
       partialize: (state) => ({
         totalXp: state.totalXp,
@@ -212,12 +208,17 @@ export const useTrainerGamificationStore = create<TrainerGamificationStore>()(
         bestCombo: state.bestCombo,
         version: state.version,
       }),
-      migrate: (persisted, version) => {
-        // Placeholder for future schema changes. On first rollout there is no
-        // v0 → v1 migration; return persisted state as-is when versions match,
-        // fall back to initial state for anything unexpected.
-        if (version === 1 && persisted && typeof persisted === 'object') {
-          return persisted as TrainerGamificationState;
+      migrate: (persisted) => {
+        // v1 → v2: bestScoreBySection сменил смысл (XP → «% правильных»). Старые
+        // XP-значения как проценты бессмысленны → сбрасываем (перезарабатывается
+        // за один раунд). Стрик, totalXp и даты сохраняем.
+        if (persisted && typeof persisted === 'object') {
+          return {
+            ...INITIAL_STATE,
+            ...(persisted as Partial<TrainerGamificationState>),
+            bestScoreBySection: {},
+            version: 2,
+          };
         }
         return { ...INITIAL_STATE };
       },

@@ -2,6 +2,8 @@ import { memo, useState, useMemo, useCallback } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
 import type { FormulaQuestion, BuildFormulaAnswer } from '@/lib/formulaEngine/types';
 import { joinTokensWithOperators } from '@/lib/formulaEngine/questionGenerator';
+import { getFormulaById } from '@/lib/formulaEngine/formulas';
+import { FormulaHintPanel } from './FormulaHintPanel';
 
 interface BuildFormulaCardProps {
   question: FormulaQuestion;
@@ -27,6 +29,7 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
   const [denominator, setDenominator] = useState<string[]>([]);
   const [selectedToken, setSelectedToken] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const formula = getFormulaById(question.formulaId);
 
   // Pool = options minus placed tokens
   const pool = useMemo(() => {
@@ -188,6 +191,14 @@ const BuildFormulaCard = memo(function BuildFormulaCard({
           </div>
         )}
       </div>
+
+      {/* Подсказки по желанию: величины + как рассуждать (req 5/7) */}
+      {formula && (formula.variables.length > 0 || formula.physicalMeaning) && (
+        <FormulaHintPanel
+          variables={formula.variables}
+          reasoning={formula.physicalMeaning}
+        />
+      )}
 
       {/* Assembly zones */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 space-y-3">

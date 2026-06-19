@@ -622,7 +622,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
       questionLatex,
       userAnswerLatex,
       reasoning: mutation?.hint ?? getMutationExplanation(question, formula),
-      trap: formula.dimensions,
+      trap: trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные из похожих формул'),
       isCorrect: false,
     };
   }
@@ -665,15 +665,11 @@ export function generateFeedback(question: FormulaQuestion, isCorrect: boolean):
 
   if (question.layer === 3) {
     if (question.correctAnswer === true) {
-      return joinLines([
-        `Эта запись верна: ${toReadableFormula(formula)}.`,
-        `Размерность согласуется: ${formula.dimensions}.`,
-      ]);
+      return `Эта запись верна: ${toReadableFormula(formula)}.`;
     }
 
     return joinLines([
       `Формула неверна. ${getMutationExplanation(question, formula)}`,
-      `Проверь размерность: ${formula.dimensions}.`,
       getProportionalityHint(formula),
     ]);
   }

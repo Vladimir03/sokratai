@@ -1123,12 +1123,20 @@ Standalone public trainer `/trainer` (пивот из homework-embedded preview)
 
 **Legacy cleanup:** `StudentFormulaRound.tsx`, `formulaRoundApi.ts`, `useFormulaRound.ts`, preview auth bypass, route `/homework/:id/round/:roundId` подлежат удалению (TASK-5). Новый код **не должен** их импортировать.
 
-**v1 ветка «Базовый курс · Вращение»:**
-- Каталог из 10 формул (`kin.13_e..kin.22_e`) в `src/lib/formulaEngine/egorFormulas.ts` (hand-craft, **вне** auto-generation). Экспортирует `egorFormulas`, `EGOR_BUILD_RECIPES`, `EGOR_SUPPORTED_BUILD_FORMULA_IDS`, `EGOR_MUTATION_LIBRARY`.
-- v1 НЕ в `mechanicsFormulas` (избегаем дубликатов), но в `formulasById` lookup. `relatedFormulas` v1 указывают **только** внутрь v1 (`_e` суффикс).
-- `RoundConfig.mode: 'v1' | 'v2'` (default `'v2'`); v1 → `selectV1Distribution` (только Layer 2 + Layer 3, без SituationCard). Детекция `isEgorFormulaId(id) → id.endsWith('_e')`.
-- Gamification `SectionKey = 'egor-v1'` (отдельный bucket). Store version не бампалась.
-- Расширение v1 — в `egorFormulas.ts`, не трогать `formulas.generated.ts`.
+**v1 ветки (кураторские, hand-craft в `egorFormulas.ts`, вне auto-generation):** три под-темы кинематики, все `mode:'v1'` (только Layer 2 + Layer 3, без SituationCard):
+- **Прямолинейное движение** (`egor-linear`, `kin.57-69_e`, 9 формул — равномерное+равноускоренное). **⚠️ DRAFT (2026-06-19): авторский контент — в листе Механика_v1 были только LaTeX+переменные, остальные поля (physicalMeaning/memoryHook/whenToUse/commonMistakes/мутации/recipe) написаны вручную. Егор/Елена выверяют формулировки/мутации.**
+- **Вращение по окружности** (`egor-v1`, `kin.13-22_e`, 10).
+- **Движение по параболе** (`egor-parabola`, `kin.23-35_e`, 13). В листе есть ещё 6 «помнить с выводом» (`kin.29,30,36,37,38,39`) — не загружены (кандидаты в TrueOrFalse-only).
+- Экспорт `egorFormulas`, `EGOR_BUILD_RECIPES`, `EGOR_SUPPORTED_BUILD_FORMULA_IDS` (= keys рецептов → buildable), `EGOR_MUTATION_LIBRARY`. v1 НЕ в `mechanicsFormulas` (дубли), но в `formulasById`. `relatedFormulas` v1 — **только** внутрь v1 (`_e`). `RoundConfig.mode` default `'v2'`; v1 → `selectV1Distribution`. `isEgorFormulaId(id)=id.endsWith('_e')`.
+- **Разделы (`TrainerPage`):** v2-авто-разделы (Вся механика/Кинематика/Динамика/Статика/Гидростатика) **убраны из UI** (формулы в `formulas.generated.ts` живут, но не в тренажёре). Остались 3 v1 с префиксом «Кинематика · Прямолинейное/Вращение/Парабола» (фильтр по `topic`: `прямолинейн`/`вращение`/`парабол`; default — `egor-linear`). `SectionKey` (store): `egor-linear`/`egor-v1`/`egor-parabola`. **Новый раздел/расширение v1 — синхронно:** `egorFormulas.ts` (+recipe+мутации) → `TrainerPage` (`SectionType`/`SECTION_POOLS`/фильтр) → store `SectionKey` → `BestScoreCard.SECTION_OPTIONS`; не трогать `formulas.generated.ts`.
+
+**Рендер-баги формул (2026-06-19, КРИТИЧНО) — одинарный `\` в JS-строке:** LaTeX в JS-строках `egorFormulas.ts` обязан **удваивать каждый бэкслеш** (`\\frac`, `\\text{цс}`, `\\cos(\\alpha)`). Одинарный → JS-escape бьёт: `\t`=TAB (чип рендерит «extцс»), `\c`/`\s`/`\a`→буква съедается (чип рендерит литерал «cos(alpha)»). Касается `variables[].symbol` **и** recipe-токенов. **Smoke-guard секция 11** (`scripts/smoke-check.mjs`): collapse `\\`-пар → любой оставшийся `\`+буква = фейл (ловит оба класса для всех текущих+будущих v1-формул). НЕ рантайм-ремаппер (Safari lookbehind запрещён, rule 80).
+
+**«Ловушка с размерностями» убрана (2026-06-19):** `questionGenerator.ts` — `trap` фидбэка = `commonMistakes[0]` (не `formula.dimensions`); из `generateFeedback` убраны «Размерность согласуется»/«Проверь размерность». Поле `Formula.dimensions` оставлено (нигде не показывается).
+
+**Подсказки по желанию (`FormulaHintPanel.tsx`, 2026-06-19):** свёрнутые «Что значат величины» (`variables`) + «Как рассуждать» (`physicalMeaning`). Button+useState+aria-expanded (НЕ `<details>`, iOS, rule 80). Монтаж: BuildFormula — оба блока; **TrueOrFalse — ТОЛЬКО величины** («как рассуждать» спойлит «Формула верна?»). Карточки резолвят `getFormulaById(question.formulaId)`; название формулы (`formula.name`) — eyebrow на карточках.
+
+**Шкала «% правильных» вместо абстрактных XP (2026-06-19):** `RoundResultScreen` герой = `percentage` («85% · 8 из 10»). `trainerGamificationStore`: `bestScoreBySection` хранит **%** (не XP), `isNewBest` по %, **version 1→2 + migrate сбрасывает `bestScoreBySection={}`** (старые XP как % бессмысленны; стрик/`totalXp`/даты сохранены). XP-движок (`xpCalculator`) внутренний (телеметрия `xpEarned`), ученику не показывается. `XpCard`→«Цель дня», `XpBreakdown`→серия+бейджи (без XP), `BestScoreCard`→«%». Смена шкалы хранения → бампать `version` + migrate.
 
 **DB таблицы:** `formula_rounds` (конфигурация), `formula_round_results` (результаты, `source`/`session_id`/`ip_hash` для trainer pivot). RLS: student видит свои; trainer — `trainer_results_no_anon_read`; tutor read для Phase 1b.
 

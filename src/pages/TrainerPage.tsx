@@ -5,12 +5,6 @@ import { useTrainerSession } from '@/hooks/useTrainerSession';
 import {
   generateRetryRound,
   generateRound,
-  kinematicsFormulas,
-  dynamicsFormulas,
-  conservationFormulas,
-  staticsFormulas,
-  hydrostaticsFormulas,
-  mechanicsFormulas,
   egorFormulas,
   type FormulaQuestion,
   type RoundConfig,
@@ -28,29 +22,18 @@ import {
 import { trackTrainerEvent } from '@/lib/trainerGamification/telemetry';
 
 type TrainerPageState = 'intro' | 'running' | 'result';
-type SectionType =
-  | 'mechanics'
-  | 'kinematics'
-  | 'dynamics'
-  | 'conservation'
-  | 'statics'
-  | 'hydrostatics'
-  | 'egor-v1'
-  | 'egor-parabola';
+// v2-авто-разделы (Вся механика/Кинематика/Динамика/Статика/…) убраны из
+// тренажёра — остаются только кураторские v1-разделы из листа Механика_v1.
+type SectionType = 'egor-linear' | 'egor-v1' | 'egor-parabola';
 
 const SECTION_TO_GAMIFICATION_KEY: Record<SectionType, SectionKey> = {
-  mechanics: 'all',
-  kinematics: 'kinematics',
-  dynamics: 'dynamics',
-  conservation: 'conservation',
-  statics: 'statics',
-  hydrostatics: 'hydrostatics',
+  'egor-linear': 'egor-linear',
   'egor-v1': 'egor-v1',
   'egor-parabola': 'egor-parabola',
 };
 
 type SectionPool = {
-  formulas: typeof kinematicsFormulas;
+  formulas: typeof egorFormulas;
   label: string;
   mode?: 'v1' | 'v2';
 };
@@ -59,6 +42,9 @@ type SectionPool = {
 // самый дешёвый способ, пока egorFormulas помещается в один файл. Если v1
 // вырастет и появятся разделы вне кинематики (Электродинамика, МКТ, ...),
 // имеет смысл вынести в отдельные именованные экспорты в egorFormulas.ts.
+const egorLinearFormulas = egorFormulas.filter((f) =>
+  f.topic.toLowerCase().includes('прямолинейн'),
+);
 const egorRotationFormulas = egorFormulas.filter((f) =>
   f.topic.toLowerCase().includes('вращение'),
 );
@@ -66,24 +52,22 @@ const egorParabolaFormulas = egorFormulas.filter((f) =>
   f.topic.toLowerCase().includes('парабол'),
 );
 
+// v1: упрощённые под-темы кинематики. Только Layer 2 + Layer 3, без SituationCard.
+// Каждая под-тема — отдельный pool, чтобы ученик тренировал один блок прицельно.
 const SECTION_POOLS: Record<SectionType, SectionPool> = {
-  mechanics: { formulas: mechanicsFormulas, label: 'Вся механика' },
-  kinematics: { formulas: kinematicsFormulas, label: 'Кинематика' },
-  dynamics: { formulas: dynamicsFormulas, label: 'Динамика' },
-  conservation: { formulas: conservationFormulas, label: 'Законы сохранения' },
-  statics: { formulas: staticsFormulas, label: 'Статика' },
-  hydrostatics: { formulas: hydrostaticsFormulas, label: 'Гидростатика' },
-  // v1: упрощённые под-темы для нулевого уровня. Только Layer 2 + Layer 3,
-  // без SituationCard. Каждая под-тема — отдельный pool, чтобы ученик мог
-  // тренировать прицельно один блок.
+  'egor-linear': {
+    formulas: egorLinearFormulas,
+    label: 'Кинематика · Прямолинейное',
+    mode: 'v1',
+  },
   'egor-v1': {
     formulas: egorRotationFormulas,
-    label: 'Базовый · Вращение',
+    label: 'Кинематика · Вращение',
     mode: 'v1',
   },
   'egor-parabola': {
     formulas: egorParabolaFormulas,
-    label: 'Базовый · Парабола',
+    label: 'Кинематика · Парабола',
     mode: 'v1',
   },
 };
@@ -121,7 +105,7 @@ function createRetryRound(result: RoundResult, section: SectionType): FormulaQue
 export default function TrainerPage() {
   const { sessionId, startedAt } = useTrainerSession();
   const [state, setState] = useState<TrainerPageState>('intro');
-  const [selectedSection, setSelectedSection] = useState<SectionType>('mechanics');
+  const [selectedSection, setSelectedSection] = useState<SectionType>('egor-linear');
   const [questions, setQuestions] = useState<FormulaQuestion[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [appliedOutcome, setAppliedOutcome] = useState<AppliedOutcome | null>(null);
@@ -129,7 +113,6 @@ export default function TrainerPage() {
   const [roundKey, setRoundKey] = useState(0);
   /** Snapshot of the last-started questions set — used by «Пройти ещё раз». */
   const lastQuestionsRef = useRef<FormulaQuestion[] | null>(null);
-  const totalXp = useTrainerGamificationStore((s) => s.totalXp);
   const currentStreak = useTrainerGamificationStore((s) => s.currentStreak);
   const lastPlayedDate = useTrainerGamificationStore((s) => s.lastPlayedDate);
   const dailyRoundsCount = useTrainerGamificationStore((s) => s.dailyRoundsCount);
@@ -292,7 +275,7 @@ export default function TrainerPage() {
                   currentStreak={currentStreak}
                   lastPlayedDate={lastPlayedDate}
                 />
-                <XpCard totalXp={totalXp} dailyRoundsCount={dailyRoundsCount} />
+                <XpCard dailyRoundsCount={dailyRoundsCount} />
                 <BestScoreCard
                   bestScoreBySection={bestScoreBySection}
                   initialSection={SECTION_TO_GAMIFICATION_KEY[selectedSection]}
@@ -303,7 +286,7 @@ export default function TrainerPage() {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">
-                  Выбери раздел механики
+                  Выбери раздел кинематики
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {(Object.entries(SECTION_POOLS) as Array<[SectionType, typeof SECTION_POOLS[SectionType]]>).map(

@@ -92,14 +92,14 @@ export const RoundResultScreen = memo(function RoundResultScreen({
             Раунд завершён!
           </h1>
 
-          {/* Score card */}
+          {/* Score card — герой = «% правильных» (0–100), балл «X из N» подзаголовком */}
           <div className="bg-white rounded-lg border border-slate-200 p-6">
             <div className="text-center">
-              <p className={`text-4xl font-bold tabular-nums ${scoreColor}`}>
-                {result.score}/{result.total}
+              <p className={`text-5xl font-bold tabular-nums ${scoreColor}`}>
+                {percentage}%
               </p>
               <p className="text-sm text-slate-500 mt-1">
-                {percentage}% правильных
+                {result.score} из {result.total} правильных
               </p>
             </div>
           </div>

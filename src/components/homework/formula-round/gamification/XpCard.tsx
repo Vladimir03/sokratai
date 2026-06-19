@@ -5,13 +5,18 @@ import { DAILY_GOAL_ROUNDS } from '@/lib/trainerGamification/xpCalculator';
 import { ZapIcon } from './icons/ZapIcon';
 
 export interface XpCardProps {
-  totalXp: number;
   dailyRoundsCount: number;
 }
 
-function XpCardComponent({ totalXp, dailyRoundsCount }: XpCardProps) {
+/**
+ * Карточка «Цель дня». Абстрактные XP убраны (req 9) — мотивация теперь через
+ * дневную цель (раунды сегодня) + стрик. Результат раунда показывается как
+ * «% правильных» (RoundResultScreen / BestScoreCard).
+ */
+function XpCardComponent({ dailyRoundsCount }: XpCardProps) {
   const clamped = Math.min(dailyRoundsCount, DAILY_GOAL_ROUNDS);
   const pct = Math.round((clamped / DAILY_GOAL_ROUNDS) * 100);
+  const done = clamped >= DAILY_GOAL_ROUNDS;
 
   return (
     <div className="min-w-[240px] snap-start bg-white border border-slate-200 rounded-lg p-4">
@@ -20,16 +25,13 @@ function XpCardComponent({ totalXp, dailyRoundsCount }: XpCardProps) {
       </div>
       <div className="mt-3 flex items-baseline gap-2">
         <span className="text-3xl font-bold tabular-nums text-slate-900">
-          {totalXp}
+          {clamped}/{DAILY_GOAL_ROUNDS}
         </span>
-        <span className="text-sm text-slate-600">XP</span>
+        <span className="text-sm text-slate-600">Цель дня</span>
       </div>
       <div className="mt-3 space-y-1.5">
         <div className="flex items-center justify-between text-xs text-slate-500">
-          <span>Цель дня</span>
-          <span className="tabular-nums">
-            {clamped}/{DAILY_GOAL_ROUNDS}
-          </span>
+          <span>{done ? 'Цель дня выполнена' : 'Раундов сегодня'}</span>
         </div>
         <div
           className="h-1.5 w-full overflow-hidden rounded-full bg-accent/20"

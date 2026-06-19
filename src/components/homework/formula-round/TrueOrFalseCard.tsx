@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
+import { getFormulaById } from '@/lib/formulaEngine/formulas';
 import type { FormulaQuestion } from '@/lib/formulaEngine/types';
+import { FormulaHintPanel } from './FormulaHintPanel';
 
 interface TrueOrFalseCardProps {
   question: FormulaQuestion;
@@ -23,9 +25,14 @@ export const TrueOrFalseCard = memo(function TrueOrFalseCard({
     onAnswer(selected);
   };
 
+  const formula = getFormulaById(question.formulaId);
+
   return (
-    <div className="w-full max-w-md space-y-6">
+    <div className="w-full max-w-md space-y-4">
       <div className="bg-white rounded-lg border border-slate-200 p-6 text-center space-y-4">
+        {formula?.name && (
+          <p className="text-xs font-medium text-slate-400">{formula.name}</p>
+        )}
         <MathText
           text={question.prompt}
           as="p"
@@ -38,6 +45,10 @@ export const TrueOrFalseCard = memo(function TrueOrFalseCard({
           />
         )}
       </div>
+      {/* Подсказка по желанию: только величины — «как рассуждать» спойлит ответ (req 7) */}
+      {formula && formula.variables.length > 0 && (
+        <FormulaHintPanel variables={formula.variables} />
+      )}
       <div className="flex gap-3">
         <button
           type="button"

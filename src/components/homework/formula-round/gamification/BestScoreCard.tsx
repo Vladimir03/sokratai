@@ -4,15 +4,12 @@ import type { SectionKey } from '@/stores/trainerGamificationStore';
 
 import { TrophyIcon } from './icons/TrophyIcon';
 
+// Только кураторские v1-разделы (v2-авто-разделы убраны из тренажёра).
+// Новый раздел кинематики добавляется сюда при загрузке из Механика_v1.
 const SECTION_OPTIONS: Array<{ value: SectionKey; label: string }> = [
-  { value: 'all', label: 'Вся механика' },
-  { value: 'kinematics', label: 'Кинематика' },
-  { value: 'dynamics', label: 'Динамика' },
-  { value: 'conservation', label: 'Законы сохранения' },
-  { value: 'statics', label: 'Статика' },
-  { value: 'hydrostatics', label: 'Гидростатика' },
-  { value: 'egor-v1', label: 'Базовый (Вращение)' },
-  { value: 'egor-parabola', label: 'Базовый (Парабола)' },
+  { value: 'egor-linear', label: 'Прямолинейное' },
+  { value: 'egor-v1', label: 'Вращение' },
+  { value: 'egor-parabola', label: 'Парабола' },
 ];
 
 export interface BestScoreCardProps {
@@ -22,7 +19,7 @@ export interface BestScoreCardProps {
 
 function BestScoreCardComponent({
   bestScoreBySection,
-  initialSection = 'all',
+  initialSection = 'egor-linear',
 }: BestScoreCardProps) {
   const [section, setSection] = useState<SectionKey>(initialSection);
 
@@ -62,12 +59,12 @@ function BestScoreCardComponent({
           ))}
         </select>
       </div>
-      <div className="mt-3 flex items-baseline gap-2">
+      <div className="mt-3 flex items-baseline gap-1.5">
         <span className="text-3xl font-bold tabular-nums text-slate-900">
-          {typeof best === 'number' ? best : '—'}
+          {typeof best === 'number' ? `${best}%` : '—'}
         </span>
         <span className="text-sm text-slate-600">
-          {typeof best === 'number' ? 'XP · лучший раунд' : 'нет записи'}
+          {typeof best === 'number' ? 'лучший результат' : 'нет записи'}
         </span>
       </div>
     </div>
