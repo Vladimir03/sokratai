@@ -268,6 +268,13 @@ export interface HWDraftTask {
    * Optional для backward-compat со старыми localStorage-черновиками (undefined → null).
    */
   kim_number?: number | null;
+  /**
+   * Балл за задачу (KB primary_score). HWDrawer (path B) пишет его в
+   * `homework_tutor_tasks.max_score` — иначе KB-задача с авто-баллом/сложностью
+   * (>1) молча падала в DB DEFAULT 1 (review fix P1, 2026-06-21).
+   * Optional для backward-compat со старыми черновиками (undefined → 1).
+   */
+  maxScoreSnapshot?: number | null;
 }
 
 /** Row from homework_kb_tasks table */

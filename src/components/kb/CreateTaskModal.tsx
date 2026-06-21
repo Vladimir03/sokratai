@@ -125,7 +125,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const canSave = hasContent && folderId !== '' && !olympiadNeedsDifficulty;
 
   const handleSave = async (keepOpen: boolean) => {
-    if (!canSave || !folderId) return;
+    if (!canSave || !folderId || isBusy) return;
 
     setUploading(true);
     const conditionRefs: string[] = [];
@@ -160,61 +160,53 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
         scoreNum = s ? parseInt(s, 10) : undefined;
       }
 
-      createTask.mutate(
-        {
-          folder_id: folderId,
-          text: taskText,
-          answer: answer.trim() || undefined,
-          solution: solution.trim() || undefined,
-          rubric_text: rubricText.trim() || undefined,
-          exam: exam || undefined,
-          answer_format: answerFormat || undefined,
-          attachment_url: attachmentUrl,
-          solution_attachment_url: solutionAttachmentUrl,
-          kim_number: kimNum && !isNaN(kimNum) ? kimNum : undefined,
-          primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : undefined,
-          difficulty: difficultyNum && !isNaN(difficultyNum) ? difficultyNum : undefined,
-          topic_id: topicId || undefined,
-          subtopic_id: subtopicId || undefined,
-          source_label: sourceLabel.trim() || undefined,
-        },
-        {
-          onSuccess: () => {
-            saveLastClassification({
-              taskType,
-              kimNumber,
-              difficulty,
-              topicId,
-              subtopicId,
-              sourceLabel,
-              answerFormat,
-              folderId,
-            });
-            if (keepOpen) {
-              // Серия: чистим только контент, классификацию + рубрику оставляем.
-              setText('');
-              setAnswer('');
-              setSolution('');
-              conditionImages.reset();
-              solutionImages.reset();
-              toast.success('Задача создана — добавляйте следующую');
-              requestAnimationFrame(() => textRef.current?.focus());
-            } else {
-              toast.success('Задача создана');
-              onClose();
-            }
-          },
-          onError: () => {
-            for (const ref of conditionRefs) void deleteKBTaskImage(ref);
-            for (const ref of solutionRefs) void deleteKBTaskImage(ref);
-            toast.error('Не удалось создать задачу');
-          },
-        },
-      );
+      // await — чтобы `uploading` (→ isBusy → кнопки disabled) держался до конца
+      // мутации; cleanup залитых refs — в catch (review fix P1 #2).
+      await createTask.mutateAsync({
+        folder_id: folderId,
+        text: taskText,
+        answer: answer.trim() || undefined,
+        solution: solution.trim() || undefined,
+        rubric_text: rubricText.trim() || undefined,
+        exam: exam || undefined,
+        answer_format: answerFormat || undefined,
+        attachment_url: attachmentUrl,
+        solution_attachment_url: solutionAttachmentUrl,
+        kim_number: kimNum && !isNaN(kimNum) ? kimNum : undefined,
+        primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : undefined,
+        difficulty: difficultyNum && !isNaN(difficultyNum) ? difficultyNum : undefined,
+        topic_id: topicId || undefined,
+        subtopic_id: subtopicId || undefined,
+        source_label: sourceLabel.trim() || undefined,
+      });
+
+      saveLastClassification({
+        taskType,
+        kimNumber,
+        difficulty,
+        topicId,
+        subtopicId,
+        sourceLabel,
+        answerFormat,
+        folderId,
+      });
+      if (keepOpen) {
+        // Серия: чистим только контент, классификацию + рубрику оставляем.
+        setText('');
+        setAnswer('');
+        setSolution('');
+        conditionImages.reset();
+        solutionImages.reset();
+        toast.success('Задача создана — добавляйте следующую');
+        requestAnimationFrame(() => textRef.current?.focus());
+      } else {
+        toast.success('Задача создана');
+        onClose();
+      }
     } catch {
       for (const ref of conditionRefs) void deleteKBTaskImage(ref);
       for (const ref of solutionRefs) void deleteKBTaskImage(ref);
-      toast.error('Не удалось загрузить изображение');
+      toast.error('Не удалось сохранить задачу');
     } finally {
       setUploading(false);
     }

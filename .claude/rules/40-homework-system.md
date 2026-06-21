@@ -70,7 +70,7 @@
 5. `handleUpdateAssignment` new-insert-no-submissions (~1489)
 6. `handleUpdateAssignment` update-no-submissions (~1577)
 
-**НЕ** возвращай ни одно к `isPositiveInt` — дробные 12.5 silently коллапсятся в 1 через `? t.max_score : 1` fallback (а validator пропустит запрос, т.к. валидируется ДРУГОЕ поле). Грепни `isPositive(Int|HalfStepNumber)\((t|task)\.max_score` — все совпадения должны быть `HalfStepNumber`. Двойной write-path применим: HWDrawer **не пишет** `max_score` явно — полагается на DB DEFAULT 1 (теперь numeric 1.0).
+**НЕ** возвращай ни одно к `isPositiveInt` — дробные 12.5 silently коллапсятся в 1 через `? t.max_score : 1` fallback (а validator пропустит запрос, т.к. валидируется ДРУГОЕ поле). Грепни `isPositive(Int|HalfStepNumber)\((t|task)\.max_score` — все совпадения должны быть `HalfStepNumber`. Двойной write-path применим: HWDrawer (path B) **пишет** `max_score` из `HWDraftTask.maxScoreSnapshot` (= KB `primary_score ?? 1`; fallback 1 для старых черновиков) — review fix 2026-06-21, иначе KB-задача с авто-баллом по КИМ / уровнем сложности олимпиады (>1) молча падала в DB DEFAULT 1. Раньше HWDrawer полагался на DEFAULT 1 (балл у физ-ЕГЭ KB-задач почти всегда был 1, но Phase 1 KB-loader сделал баллы значимыми).
 
 **0.1-шаг для `tutor_score_override`/`ai_score` — 5 точек в синхроне:**
 1. `homework-api/index.ts::handleSetTutorScoreOverride` validator.

@@ -129,7 +129,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const canSave = hasContent && !olympiadNeedsDifficulty;
 
   const handleSave = async () => {
-    if (!canSave) return;
+    if (!canSave || isBusy) return;
 
     setUploading(true);
     const conditionUploadedRefs: string[] = [];
@@ -198,30 +198,18 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         input.solution_attachment_url = serializeAttachmentUrls(allSolutionRefs);
       }
 
-      updateTask.mutate(
-        { taskId: task.id, input },
-        {
-          onSuccess: () => {
-            for (const ref of conditionImages.getRemovedRefs()) {
-              void deleteKBTaskImage(ref);
-            }
-            for (const ref of solutionImages.getRemovedRefs()) {
-              void deleteKBTaskImage(ref);
-            }
-            toast.success('Задача обновлена');
-            onClose();
-          },
-          onError: () => {
-            for (const ref of conditionUploadedRefs) void deleteKBTaskImage(ref);
-            for (const ref of solutionUploadedRefs) void deleteKBTaskImage(ref);
-            toast.error('Не удалось обновить задачу');
-          },
-        },
-      );
+      // await — uploading держится до конца мутации (review fix P1 #2).
+      await updateTask.mutateAsync({ taskId: task.id, input });
+
+      // Удаляем убранные refs только после успешного сохранения.
+      for (const ref of conditionImages.getRemovedRefs()) void deleteKBTaskImage(ref);
+      for (const ref of solutionImages.getRemovedRefs()) void deleteKBTaskImage(ref);
+      toast.success('Задача обновлена');
+      onClose();
     } catch {
       for (const ref of conditionUploadedRefs) void deleteKBTaskImage(ref);
       for (const ref of solutionUploadedRefs) void deleteKBTaskImage(ref);
-      toast.error('Не удалось загрузить изображение');
+      toast.error('Не удалось сохранить задачу');
     } finally {
       setUploading(false);
     }
@@ -355,7 +343,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-socrat-border bg-transparent px-4 py-2 text-[13px] text-muted-foreground"
+            className="rounded-lg border border-socrat-border bg-transparent px-4 py-2 text-[13px] text-muted-foreground [touch-action:manipulation]"
           >
             Отмена
           </button>
@@ -364,7 +352,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
             onClick={handleSave}
             disabled={!canSave || isBusy}
             className={cn(
-              'rounded-lg px-4 py-2 text-[13px] font-semibold text-white',
+              'rounded-lg px-4 py-2 text-[13px] font-semibold text-white [touch-action:manipulation]',
               canSave && !isBusy
                 ? 'bg-socrat-primary'
                 : 'cursor-default bg-socrat-border',
