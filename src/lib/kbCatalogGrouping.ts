@@ -71,8 +71,21 @@ export function groupTasksByKim(
 }
 
 /**
+ * Сортировка внутри олимпиадной группы: по возрастанию сложности (запрос Егора),
+ * затем стабильно по created_at / id. Задачи без сложности — в конце группы.
+ */
+function byDifficultyThenStable(a: KBTask, b: KBTask): number {
+  const da = a.difficulty ?? SORT_LAST;
+  const db = b.difficulty ?? SORT_LAST;
+  if (da !== db) return da - db;
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
  * Группирует задачи по ПОДТЕМЕ — для олимпиадных тем (без № КИМ).
  * Порядок групп: по `sort_order` подтемы; задачи без подтемы — в конце.
+ * Внутри группы задачи — по возрастанию уровня сложности (запрос Егора).
  * Если у темы нет подтем вовсе → одна группа «Все задачи».
  * Возвращает `KimGroup[]` (с заданными `key`/`label`) для переиспользования
  * `CatalogTaskGroups` без изменения его сигнатуры.
@@ -100,7 +113,7 @@ export function groupTasksBySubtopic(
 
   // Нет подтем → единая группа «Все задачи» (без шумного заголовка-разбивки).
   if (bySubtopic.size === 0) {
-    return [{ kim: null, key: 'all', label: 'Все задачи', tasks }];
+    return [{ kim: null, key: 'all', label: 'Все задачи', tasks: [...tasks].sort(byDifficultyThenStable) }];
   }
 
   const groups: KimGroup[] = Array.from(bySubtopic.entries())
@@ -109,11 +122,16 @@ export function groupTasksBySubtopic(
       kim: null,
       key: id,
       label: nameById.get(id) ?? 'Подтема',
-      tasks: list,
+      tasks: [...list].sort(byDifficultyThenStable),
     }));
 
   if (noSubtopic.length > 0) {
-    groups.push({ kim: null, key: NO_SUBTOPIC_FILTER, label: 'Без подтемы', tasks: noSubtopic });
+    groups.push({
+      kim: null,
+      key: NO_SUBTOPIC_FILTER,
+      label: 'Без подтемы',
+      tasks: [...noSubtopic].sort(byDifficultyThenStable),
+    });
   }
 
   return groups;

@@ -1,18 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useImageUpload } from '@/hooks/useImageUpload';
-import { useCreateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
+import { useCreateTask } from '@/hooks/useKnowledgeBase';
 import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   deleteKBTaskImage,
   serializeAttachmentUrls,
   uploadKBTaskImage,
 } from '@/lib/kbApi';
+import { getKimPrimaryScore } from '@/lib/kbKimScores';
+import {
+  loadLastClassification,
+  saveLastClassification,
+} from '@/lib/kbLastClassification';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
-import type { ExamType, KBFolderTreeNode } from '@/types/kb';
+import {
+  TaskClassificationFields,
+  type TaskClassType,
+} from '@/components/kb/TaskClassificationFields';
+import type { KBFolderTreeNode } from '@/types/kb';
 
 interface CreateTaskModalProps {
   /** Pre-selected folder id (e.g. current folder on FolderPage) */
@@ -35,53 +44,60 @@ function flattenTree(
   return result;
 }
 
-const ANSWER_FORMAT_OPTIONS = [
-  { value: '', label: 'Не указан' },
-  { value: 'number', label: 'Число' },
-  { value: 'text', label: 'Текст' },
-  { value: 'detailed', label: 'Развернутое решение' },
-  { value: 'matching', label: 'Соответствие' },
-  { value: 'choice', label: 'Выбор ответа' },
-];
-
 export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalProps) {
   const { tree, loading: treesLoading } = useFolderTree();
   const createTask = useCreateTask();
 
-  // Primary fields
-  const [folderId, setFolderId] = useState<string>(defaultFolderId ?? '');
-  const [text, setText] = useState('');
+  // Inherited classification from the last added task (запрос Егора — серия задач)
+  const [inherited] = useState(() => loadLastClassification());
 
-  // Additional fields
-  const [answerFormat, setAnswerFormat] = useState('');
+  // Primary fields
+  const [folderId, setFolderId] = useState<string>(defaultFolderId ?? inherited.folderId ?? '');
+  const [text, setText] = useState('');
+  const textRef = useRef<HTMLTextAreaElement>(null);
+
+  // Answer / solution (collapsible section)
   const [answer, setAnswer] = useState('');
   const [solution, setSolution] = useState('');
-  // Field-parity fix (2026-06-03): рубрика — first-class поле задачи в «Моей базе».
   const [rubricText, setRubricText] = useState('');
-  const [exam, setExam] = useState<ExamType | ''>('');
-  const [kimNumber, setKimNumber] = useState('');
-  const [primaryScore, setPrimaryScore] = useState('');
-  const [topicId, setTopicId] = useState('');
-  const [subtopicId, setSubtopicId] = useState('');
-  const [source, setSource] = useState('');
 
-  const [showExtra, setShowExtra] = useState(false);
+  // Classification (cascade) — prefilled from last task
+  const [taskType, setTaskType] = useState<TaskClassType>(
+    (inherited.taskType as TaskClassType) ?? '',
+  );
+  const [kimNumber, setKimNumber] = useState(inherited.kimNumber ?? '');
+  const [difficulty, setDifficulty] = useState(inherited.difficulty ?? '');
+  const [primaryScore, setPrimaryScore] = useState(''); // override; пусто = авто по КИМ
+  const [topicId, setTopicId] = useState(inherited.topicId ?? '');
+  const [subtopicId, setSubtopicId] = useState(inherited.subtopicId ?? '');
+  const [sourceLabel, setSourceLabel] = useState(inherited.sourceLabel ?? '');
+  const [answerFormat, setAnswerFormat] = useState(inherited.answerFormat ?? '');
+
+  const [showAnswerSection, setShowAnswerSection] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const isBusy = uploading || createTask.isPending;
 
-  // Image hooks
   const conditionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
   const solutionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
 
-  // Topics & subtopics for selectors
-  const { topics = [], loading: topicsLoading } = useTopics();
-  const { subtopics, loading: subtopicsLoading } = useSubtopics(topicId || undefined);
-
-  // Reset subtopic when topic changes
-  useEffect(() => {
+  // Type change → reset dependent fields (тема/подтема, балл, противоположное КИМ/сложность)
+  const handleTaskTypeChange = (v: TaskClassType) => {
+    setTaskType(v);
+    setTopicId('');
     setSubtopicId('');
-  }, [topicId]);
+    setPrimaryScore('');
+    if (v === 'olympiad') setKimNumber('');
+    else setDifficulty('');
+  };
+  const handleKimChange = (v: string) => {
+    setKimNumber(v);
+    setPrimaryScore(''); // снять ручной override → авто-балл по новому № КИМ
+  };
+  const handleTopicChange = (v: string) => {
+    setTopicId(v);
+    setSubtopicId('');
+  };
 
   // Auto-select defaultFolderId when tree loads
   useEffect(() => {
@@ -103,11 +119,12 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
     };
   }, [onClose]);
 
-  // Validation: folder + (text OR image)
+  // Validation: folder + (text OR image) + (для олимпиады обязателен уровень сложности)
   const hasContent = text.trim().length > 0 || conditionImages.totalImages > 0;
-  const canSave = hasContent && folderId !== '';
+  const olympiadNeedsDifficulty = taskType === 'olympiad' && !difficulty.trim();
+  const canSave = hasContent && folderId !== '' && !olympiadNeedsDifficulty;
 
-  const handleSave = async () => {
+  const handleSave = async (keepOpen: boolean) => {
     if (!canSave || !folderId) return;
 
     setUploading(true);
@@ -126,8 +143,22 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       const attachmentUrl = serializeAttachmentUrls(conditionRefs) ?? undefined;
       const solutionAttachmentUrl = serializeAttachmentUrls(solutionRefs) ?? undefined;
       const taskText = text.trim() || '[Задача на фото]';
-      const kimNum = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : undefined;
-      const scoreNum = primaryScore.trim() ? parseInt(primaryScore.trim(), 10) : undefined;
+
+      const exam = taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : undefined;
+      const kimNum =
+        taskType !== 'olympiad' && kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : undefined;
+
+      // Балл: олимпиада → сложность; ЕГЭ/ОГЭ → ручной override или авто по ФИПИ.
+      let difficultyNum: number | undefined;
+      let scoreNum: number | undefined;
+      if (taskType === 'olympiad') {
+        difficultyNum = difficulty.trim() ? parseInt(difficulty.trim(), 10) : undefined;
+        scoreNum = difficultyNum;
+      } else {
+        const autoScore = getKimPrimaryScore(exam ?? null, kimNum ?? null);
+        const s = primaryScore.trim() || (autoScore != null ? String(autoScore) : '');
+        scoreNum = s ? parseInt(s, 10) : undefined;
+      }
 
       createTask.mutate(
         {
@@ -142,14 +173,36 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
           solution_attachment_url: solutionAttachmentUrl,
           kim_number: kimNum && !isNaN(kimNum) ? kimNum : undefined,
           primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : undefined,
+          difficulty: difficultyNum && !isNaN(difficultyNum) ? difficultyNum : undefined,
           topic_id: topicId || undefined,
           subtopic_id: subtopicId || undefined,
-          source_label: source.trim() || 'my',
+          source_label: sourceLabel.trim() || undefined,
         },
         {
           onSuccess: () => {
-            toast.success('Задача создана');
-            onClose();
+            saveLastClassification({
+              taskType,
+              kimNumber,
+              difficulty,
+              topicId,
+              subtopicId,
+              sourceLabel,
+              answerFormat,
+              folderId,
+            });
+            if (keepOpen) {
+              // Серия: чистим только контент, классификацию + рубрику оставляем.
+              setText('');
+              setAnswer('');
+              setSolution('');
+              conditionImages.reset();
+              solutionImages.reset();
+              toast.success('Задача создана — добавляйте следующую');
+              requestAnimationFrame(() => textRef.current?.focus());
+            } else {
+              toast.success('Задача создана');
+              onClose();
+            }
           },
           onError: () => {
             for (const ref of conditionRefs) void deleteKBTaskImage(ref);
@@ -189,7 +242,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
         {/* Content */}
         <div className="relative flex-1 space-y-4 overflow-auto px-5 py-4">
-          {/* ── Primary fields ── */}
+          {/* ── Условие ── */}
 
           {/* Folder select */}
           <fieldset>
@@ -229,6 +282,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               Условие задачи {conditionImages.totalImages === 0 && <span className="text-red-500">*</span>}
             </legend>
             <textarea
+              ref={textRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onPaste={conditionImages.handlePaste}
@@ -252,36 +306,48 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
             </p>
           )}
 
-          {/* ── Collapsible additional fields ── */}
+          {/* ── Классификация (видна всегда) ── */}
+          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Классификация
+            </div>
+            <TaskClassificationFields
+              taskType={taskType}
+              kimNumber={kimNumber}
+              difficulty={difficulty}
+              primaryScore={primaryScore}
+              topicId={topicId}
+              subtopicId={subtopicId}
+              sourceLabel={sourceLabel}
+              answerFormat={answerFormat}
+              onTaskTypeChange={handleTaskTypeChange}
+              onKimNumberChange={handleKimChange}
+              onDifficultyChange={setDifficulty}
+              onPrimaryScoreChange={setPrimaryScore}
+              onTopicIdChange={handleTopicChange}
+              onSubtopicIdChange={setSubtopicId}
+              onSourceLabelChange={setSourceLabel}
+              onAnswerFormatChange={setAnswerFormat}
+              disabled={isBusy}
+            />
+          </div>
+
+          {/* ── Ответ и решение (сворачиваемо) ── */}
           <button
             type="button"
-            onClick={() => setShowExtra((v) => !v)}
+            onClick={() => setShowAnswerSection((v) => !v)}
             className="flex w-full items-center gap-1.5 rounded-lg py-1.5 text-[13px] font-medium text-socrat-primary hover:underline"
           >
-            {showExtra ? (
+            {showAnswerSection ? (
               <ChevronDown className="h-3.5 w-3.5" />
             ) : (
               <ChevronRight className="h-3.5 w-3.5" />
             )}
-            Дополнительные поля
+            Ответ и решение
           </button>
 
-          {showExtra && (
+          {showAnswerSection && (
             <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-              {/* Answer format */}
-              <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
-                <select
-                  value={answerFormat}
-                  onChange={(e) => setAnswerFormat(e.target.value)}
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                >
-                  {ANSWER_FORMAT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </fieldset>
-
               {/* Answer */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
@@ -321,113 +387,38 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
                   className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
                 />
               </fieldset>
-
-              {/* Exam + KIM number + primary score row */}
-              <div className="grid grid-cols-3 gap-3">
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
-                  <select
-                    value={exam}
-                    onChange={(e) => setExam(e.target.value as ExamType | '')}
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                  >
-                    <option value="">Не указан</option>
-                    <option value="ege">ЕГЭ</option>
-                    <option value="oge">ОГЭ</option>
-                  </select>
-                </fieldset>
-
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">№ задания</legend>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={kimNumber}
-                    onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1–30"
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                  />
-                </fieldset>
-
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Первичный балл</legend>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={primaryScore}
-                    onChange={(e) => setPrimaryScore(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1–4"
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                  />
-                </fieldset>
-              </div>
-
-              {/* Topic */}
-              <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Тема</legend>
-                <select
-                  value={topicId}
-                  onChange={(e) => setTopicId(e.target.value)}
-                  disabled={topicsLoading}
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                >
-                  <option value="">Не выбрана</option>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}{t.exam ? ` (${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </fieldset>
-
-              {/* Subtopic — only when topic is selected */}
-              {topicId && (
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Подтема</legend>
-                  <select
-                    value={subtopicId}
-                    onChange={(e) => setSubtopicId(e.target.value)}
-                    disabled={subtopicsLoading}
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                  >
-                    <option value="">Не выбрана</option>
-                    {subtopics.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </fieldset>
-              )}
-
-              {/* Source */}
-              <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Источник задачи</legend>
-                <input
-                  type="text"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                  placeholder="ФИПИ, Решу ЕГЭ, свой авторский, учебник…"
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                />
-              </fieldset>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-2 border-t border-socrat-border px-5 py-3.5">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-socrat-border px-5 py-3.5">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-socrat-border bg-transparent px-4 py-2 text-[13px] text-muted-foreground"
+            className="mr-auto rounded-lg border border-socrat-border bg-transparent px-4 py-2 text-[13px] text-muted-foreground [touch-action:manipulation]"
           >
             Отмена
           </button>
           <button
             type="button"
-            onClick={handleSave}
+            onClick={() => handleSave(true)}
             disabled={!canSave || isBusy}
             className={cn(
-              'rounded-lg px-4 py-2 text-[13px] font-semibold text-white',
+              'rounded-lg border px-4 py-2 text-[13px] font-semibold [touch-action:manipulation]',
+              canSave && !isBusy
+                ? 'border-socrat-primary/30 bg-socrat-primary-light text-socrat-primary'
+                : 'cursor-default border-socrat-border text-socrat-border',
+            )}
+          >
+            Сохранить и добавить ещё
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSave(false)}
+            disabled={!canSave || isBusy}
+            className={cn(
+              'rounded-lg px-4 py-2 text-[13px] font-semibold text-white [touch-action:manipulation]',
               canSave && !isBusy
                 ? 'bg-socrat-primary'
                 : 'cursor-default bg-socrat-border',

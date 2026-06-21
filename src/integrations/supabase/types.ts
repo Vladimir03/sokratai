@@ -1584,6 +1584,33 @@ export type Database = {
         }
         Relationships: []
       }
+      kb_sources: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          sort_order: number
+          subject: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          sort_order?: number
+          subject?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          sort_order?: number
+          subject?: string
+        }
+        Relationships: []
+      }
       kb_subtopics: {
         Row: {
           id: string
@@ -1626,6 +1653,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -1654,6 +1682,7 @@ export type Database = {
           answer_format?: string | null
           attachment_url?: string | null
           created_at?: string | null
+          difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
@@ -1682,6 +1711,7 @@ export type Database = {
           answer_format?: string | null
           attachment_url?: string | null
           created_at?: string | null
+          difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
@@ -4126,6 +4156,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -4163,6 +4194,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -4389,6 +4421,10 @@ export type Database = {
         }[]
       }
       kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
+      kb_mod_create_source: {
+        Args: { p_name: string; p_sort_order?: number; p_subject?: string }
+        Returns: string
+      }
       kb_mod_create_subtopic: {
         Args: { p_name: string; p_sort_order?: number; p_topic_id: string }
         Returns: string
@@ -4405,6 +4441,7 @@ export type Database = {
         }
         Returns: string
       }
+      kb_mod_delete_source: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_subtopic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_topic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_reassign: {
@@ -4413,6 +4450,10 @@ export type Database = {
       }
       kb_mod_unpublish: {
         Args: { p_published_task_id: string }
+        Returns: undefined
+      }
+      kb_mod_update_source: {
+        Args: { p_id: string; p_name?: string; p_sort_order?: number }
         Returns: undefined
       }
       kb_mod_update_subtopic: {

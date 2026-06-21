@@ -289,6 +289,7 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       exam: original.exam,
       kim_number: original.kim_number,
       primary_score: original.primary_score,
+      difficulty: original.difficulty,
       text: original.text,
       answer: original.answer,
       solution: original.solution,
@@ -296,6 +297,10 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       source_label: 'my',
       attachment_url: original.attachment_url,
       solution_attachment_url: original.solution_attachment_url,
+      // Lossless base→base копия (rule 40 field-parity): рубрика — first-class
+      // поле личной базы; в Каталог не утечёт (publish-триггеры её не копируют).
+      rubric_text: original.rubric_text,
+      rubric_image_urls: original.rubric_image_urls,
     })
     .select()
     .single();

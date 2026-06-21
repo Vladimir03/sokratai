@@ -234,6 +234,11 @@ export const TaskCard = memo(function TaskCard({
               <span className="text-[11px] font-medium text-slate-500">КИМ № {task.kim_number}</span>
             )
           ) : null}
+          {task.difficulty != null ? (
+            <span className="inline-flex items-center rounded-md bg-socrat-folder-bg px-1.5 py-0.5 text-[10px] font-semibold text-socrat-folder">
+              Сложность {task.difficulty}
+            </span>
+          ) : null}
           {isHiddenDuplicate ? (
             <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-600">
               дубль скрыт

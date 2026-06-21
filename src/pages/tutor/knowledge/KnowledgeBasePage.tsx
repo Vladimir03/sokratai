@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Folder, FolderPlus, LayoutGrid, Plus } from 'lucide-react';
+import { Folder, FolderPlus, LayoutGrid, Plus, Tags } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -10,6 +10,7 @@ import { KBSearchDropdown } from '@/components/kb/KBSearchDropdown';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
+import { SourcesManager } from '@/components/kb/SourcesManager';
 import { TopicCard } from '@/components/kb/TopicCard';
 import { TopicEditorModal } from '@/components/kb/TopicEditorModal';
 import { FilterChips } from '@/components/kb/ui/FilterChips';
@@ -96,6 +97,7 @@ function CatalogHome({
   const { isModerator } = useIsModerator();
   const [showDropdown, setShowDropdown] = useState(true);
   const [showCreateTopic, setShowCreateTopic] = useState(false);
+  const [showSources, setShowSources] = useState(false);
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
@@ -143,14 +145,24 @@ function CatalogHome({
           <p className="mt-2 text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
         </div>
         {isModerator ? (
-          <button
-            type="button"
-            onClick={() => setShowCreateTopic(true)}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5 text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35 [touch-action:manipulation]"
-          >
-            <Plus className="h-4 w-4" />
-            Тема
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowSources(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-socrat-border bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition-all duration-200 hover:border-socrat-primary/35 hover:text-socrat-primary [touch-action:manipulation]"
+            >
+              <Tags className="h-4 w-4" />
+              Источники
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreateTopic(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5 text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35 [touch-action:manipulation]"
+            >
+              <Plus className="h-4 w-4" />
+              Тема
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -237,6 +249,10 @@ function CatalogHome({
           kind={examFilter === 'olympiad' ? 'olympiad' : 'exam'}
           onClose={() => setShowCreateTopic(false)}
         />
+      ) : null}
+
+      {showSources ? (
+        <SourcesManager onClose={() => setShowSources(false)} />
       ) : null}
     </div>
   );

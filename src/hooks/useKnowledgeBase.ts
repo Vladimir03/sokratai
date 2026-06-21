@@ -16,6 +16,7 @@ import type {
   KBTask,
   KBMaterial,
   KBSubtopic,
+  KBSource,
   CreateKBTaskInput,
   UpdateKBTaskInput,
   CatalogFilter,
@@ -70,6 +71,16 @@ async function fetchSubtopics(topicId: string): Promise<KBSubtopic[]> {
     .order('sort_order');
   if (error) throw error;
   return (data ?? []) as KBSubtopic[];
+}
+
+async function fetchSources(): Promise<KBSource[]> {
+  const { data, error } = await supabase
+    .from('kb_sources')
+    .select('id, name, subject, sort_order')
+    .order('sort_order')
+    .order('name');
+  if (error) throw error;
+  return (data ?? []) as KBSource[];
 }
 
 async function fetchCatalogTasks(topicId: string): Promise<KBTask[]> {
@@ -251,6 +262,20 @@ export function useSubtopics(topicId: string | undefined) {
   });
 
   return { subtopics: result.data, ...result };
+}
+
+/** Managed source vocabulary (kb_sources) — for the source dropdown in task forms */
+export function useKbSources() {
+  const queryKey = useMemo(() => ['tutor', 'kb', 'sources'] as const, []);
+
+  const result = useKBQuery<KBSource[]>({
+    queryKey,
+    queryFn: fetchSources,
+    defaultValue: [],
+    errorMessage: 'Не удалось загрузить источники',
+  });
+
+  return { sources: result.data, ...result };
 }
 
 /** Catalog tasks (owner_id IS NULL) for a topic */

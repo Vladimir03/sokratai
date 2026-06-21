@@ -4,11 +4,14 @@
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  createCatalogSource,
   createCatalogSubtopic,
   createCatalogTopic,
+  deleteCatalogSource,
   deleteCatalogSubtopic,
   deleteCatalogTopic,
   publishFolderToCatalog,
+  updateCatalogSource,
   updateCatalogSubtopic,
   updateCatalogTopic,
   type CreateTopicInput,
@@ -67,6 +70,32 @@ export function useDeleteSubtopic() {
   const invalidate = useKBInvalidation();
   return useMutation({
     mutationFn: (id: string) => deleteCatalogSubtopic(id),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+export function useCreateSource() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (params: { name: string; sortOrder?: number }) =>
+      createCatalogSource(params.name, params.sortOrder),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+export function useUpdateSource() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (params: { id: string; name?: string; sortOrder?: number }) =>
+      updateCatalogSource(params.id, params.name, params.sortOrder),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+export function useDeleteSource() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (id: string) => deleteCatalogSource(id),
     onSuccess: () => { void invalidate(); },
   });
 }

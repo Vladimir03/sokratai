@@ -50,6 +50,9 @@ export interface UseImageUploadReturn {
   getNewFiles: () => File[];
   getExistingRefs: () => string[];
   getRemovedRefs: () => string[];
+
+  /** Clear all selected/existing images (e.g. «Сохранить и добавить ещё»). */
+  reset: () => void;
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
@@ -271,6 +274,18 @@ export function useImageUpload(options: UseImageUploadOptions = {}): UseImageUpl
   const getExistingRefs = useCallback(() => existingRefsRef.current, []);
   const getRemovedRefs = useCallback(() => removedRefsRef.current, []);
 
+  const reset = useCallback(() => {
+    for (const url of blobUrlsRef.current) URL.revokeObjectURL(url);
+    filesRef.current = [];
+    blobUrlsRef.current = [];
+    removedRefsRef.current = [];
+    existingRefsRef.current = [];
+    setFiles([]);
+    setPreviewUrls([]);
+    setExistingRefs([]);
+    setExistingSignedUrls({});
+  }, []);
+
   return {
     files,
     previewUrls,
@@ -291,5 +306,6 @@ export function useImageUpload(options: UseImageUploadOptions = {}): UseImageUpl
     getNewFiles,
     getExistingRefs,
     getRemovedRefs,
+    reset,
   };
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useImageUpload } from '@/hooks/useImageUpload';
-import { useUpdateTask, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
+import { useUpdateTask } from '@/hooks/useKnowledgeBase';
 import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   deleteKBTaskImage,
@@ -10,9 +10,14 @@ import {
   serializeAttachmentUrls,
   uploadKBTaskImage,
 } from '@/lib/kbApi';
+import { getKimPrimaryScore } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
-import type { ExamType, KBTask, UpdateKBTaskInput } from '@/types/kb';
+import {
+  TaskClassificationFields,
+  type TaskClassType,
+} from '@/components/kb/TaskClassificationFields';
+import type { KBTask, UpdateKBTaskInput } from '@/types/kb';
 
 interface EditTaskModalProps {
   task: KBTask;
@@ -32,14 +37,12 @@ function normalizeAnswerFormat(value: string | null): string {
   return map[value] ?? value;
 }
 
-const ANSWER_FORMAT_OPTIONS = [
-  { value: '', label: 'Не указан' },
-  { value: 'number', label: 'Число' },
-  { value: 'text', label: 'Текст' },
-  { value: 'detailed', label: 'Развернутое решение' },
-  { value: 'matching', label: 'Соответствие' },
-  { value: 'choice', label: 'Выбор ответа' },
-];
+/** Тип задания из существующей задачи: exam → ege/oge; difficulty → olympiad; иначе ''. */
+function deriveTaskType(task: KBTask): TaskClassType {
+  if (task.exam === 'ege' || task.exam === 'oge') return task.exam;
+  if (task.difficulty != null) return 'olympiad';
+  return '';
+}
 
 export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const updateTask = useUpdateTask();
@@ -49,14 +52,31 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [solution, setSolution] = useState(task.solution ?? '');
   // Field-parity fix (2026-06-03): рубрика — first-class поле задачи в «Моей базе».
   const [rubricText, setRubricText] = useState(task.rubric_text ?? '');
-  const [exam, setExam] = useState<ExamType | ''>(task.exam ?? '');
-  const [answerFormat, setAnswerFormat] = useState(normalizeAnswerFormat(task.answer_format));
+
+  // Classification (cascade)
+  const [taskType, setTaskType] = useState<TaskClassType>(() => deriveTaskType(task));
   const [kimNumber, setKimNumber] = useState(task.kim_number?.toString() ?? '');
-  const [primaryScore, setPrimaryScore] = useState(task.primary_score?.toString() ?? '');
+  const [difficulty, setDifficulty] = useState(task.difficulty?.toString() ?? '');
+  // primaryScore — ручной override (пусто = авто по КИМ). Если сохранённый балл
+  // совпадает с авто-баллом ФИПИ (или NULL) — оставляем пусто (покажется чип).
+  const [primaryScore, setPrimaryScore] = useState(() => {
+    const auto = getKimPrimaryScore(task.exam ?? null, task.kim_number ?? null);
+    return task.primary_score != null && task.primary_score !== auto
+      ? String(task.primary_score)
+      : '';
+  });
   const [topicId, setTopicId] = useState(task.topic_id ?? '');
   const [subtopicId, setSubtopicId] = useState(task.subtopic_id ?? '');
+  // 'my'/'socrat' — служебные sentinel'ы провенанса, не реальный источник.
+  const [sourceLabel, setSourceLabel] = useState(
+    task.source_label && task.source_label !== 'my' && task.source_label !== 'socrat'
+      ? task.source_label
+      : '',
+  );
+  const [answerFormat, setAnswerFormat] = useState(normalizeAnswerFormat(task.answer_format));
+
   const [uploading, setUploading] = useState(false);
-  const [showExtra, setShowExtra] = useState(false);
+  const [showAnswerSection, setShowAnswerSection] = useState(false);
 
   const isBusy = uploading || updateTask.isPending;
 
@@ -72,20 +92,23 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     initialRefs: parseAttachmentUrls(task.solution_attachment_url),
   });
 
-  // Topics & subtopics for selectors
-  const { topics = [], loading: topicsLoading } = useTopics();
-  const { subtopics, loading: subtopicsLoading } = useSubtopics(topicId || undefined);
-
-  // Reset subtopic when topic changes (only if user changes it, not on mount)
-  const [topicInitialized, setTopicInitialized] = useState(false);
-  useEffect(() => {
-    if (topicInitialized) {
-      setSubtopicId('');
-    } else {
-      setTopicInitialized(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [topicId]);
+  // Cascade resets (user-triggered only → safe on mount, no prefill clobber)
+  const handleTaskTypeChange = (v: TaskClassType) => {
+    setTaskType(v);
+    setTopicId('');
+    setSubtopicId('');
+    setPrimaryScore('');
+    if (v === 'olympiad') setKimNumber('');
+    else setDifficulty('');
+  };
+  const handleKimChange = (v: string) => {
+    setKimNumber(v);
+    setPrimaryScore('');
+  };
+  const handleTopicChange = (v: string) => {
+    setTopicId(v);
+    setSubtopicId('');
+  };
 
   // Esc to close + body scroll lock
   useEffect(() => {
@@ -100,11 +123,10 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     };
   }, [onClose]);
 
-  // ─── Save logic ───────────────────────────────────────────────────────────
-
   const hasImage = conditionImages.totalImages > 0;
   const hasContent = text.trim().length > 0 || hasImage;
-  const canSave = hasContent;
+  const olympiadNeedsDifficulty = taskType === 'olympiad' && !difficulty.trim();
+  const canSave = hasContent && !olympiadNeedsDifficulty;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -113,23 +135,18 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
     const conditionUploadedRefs: string[] = [];
     const solutionUploadedRefs: string[] = [];
     try {
-      // Upload new condition images
       for (const file of conditionImages.getNewFiles()) {
         const result = await uploadKBTaskImage(file);
         conditionUploadedRefs.push(result.storageRef);
       }
-
-      // Upload new solution images
       for (const file of solutionImages.getNewFiles()) {
         const result = await uploadKBTaskImage(file);
         solutionUploadedRefs.push(result.storageRef);
       }
 
-      // Combine existing + new refs for each field
       const allConditionRefs = [...conditionImages.getExistingRefs(), ...conditionUploadedRefs];
       const allSolutionRefs = [...solutionImages.getExistingRefs(), ...solutionUploadedRefs];
 
-      // Determine if attachment changed vs. original
       const originalConditionRefs = parseAttachmentUrls(task.attachment_url);
       const hasConditionChanges =
         allConditionRefs.length !== originalConditionRefs.length ||
@@ -143,23 +160,37 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         solutionImages.getRemovedRefs().length > 0;
 
       const taskText = text.trim() || '[Задача на фото]';
-      const kimNum = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
-      const scoreNum = primaryScore.trim() ? parseInt(primaryScore.trim(), 10) : null;
+
+      const exam = taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null;
+      const kimNum =
+        taskType !== 'olympiad' && kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
+
+      let difficultyNum: number | null = null;
+      let scoreNum: number | null = null;
+      if (taskType === 'olympiad') {
+        difficultyNum = difficulty.trim() ? parseInt(difficulty.trim(), 10) : null;
+        scoreNum = difficultyNum;
+      } else {
+        const autoScore = getKimPrimaryScore(exam, kimNum);
+        const s = primaryScore.trim() || (autoScore != null ? String(autoScore) : '');
+        scoreNum = s ? parseInt(s, 10) : null;
+      }
 
       const input: UpdateKBTaskInput = {
         text: taskText,
         answer: answer.trim() || null,
         solution: solution.trim() || null,
         rubric_text: rubricText.trim() || null,
-        exam: exam || null,
+        exam: exam,
         answer_format: answerFormat || null,
-        kim_number: kimNum && !isNaN(kimNum) ? kimNum : null,
-        primary_score: scoreNum && !isNaN(scoreNum) ? scoreNum : null,
+        kim_number: kimNum != null && !isNaN(kimNum) ? kimNum : null,
+        primary_score: scoreNum != null && !isNaN(scoreNum) ? scoreNum : null,
+        difficulty: difficultyNum != null && !isNaN(difficultyNum) ? difficultyNum : null,
         topic_id: topicId || null,
         subtopic_id: subtopicId || null,
+        source_label: sourceLabel.trim() || null,
       };
 
-      // Only include attachment fields if changed
       if (hasConditionChanges) {
         input.attachment_url = serializeAttachmentUrls(allConditionRefs);
       }
@@ -171,7 +202,6 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         { taskId: task.id, input },
         {
           onSuccess: () => {
-            // Delete removed refs only after successful save
             for (const ref of conditionImages.getRemovedRefs()) {
               void deleteKBTaskImage(ref);
             }
@@ -182,7 +212,6 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
             onClose();
           },
           onError: () => {
-            // Clean up orphan uploads — update failed
             for (const ref of conditionUploadedRefs) void deleteKBTaskImage(ref);
             for (const ref of solutionUploadedRefs) void deleteKBTaskImage(ref);
             toast.error('Не удалось обновить задачу');
@@ -190,7 +219,6 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         },
       );
     } catch {
-      // Clean up refs already uploaded before the failure
       for (const ref of conditionUploadedRefs) void deleteKBTaskImage(ref);
       for (const ref of solutionUploadedRefs) void deleteKBTaskImage(ref);
       toast.error('Не удалось загрузить изображение');
@@ -237,36 +265,48 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
           {/* Condition images */}
           <ImageUploadField label="Фото задачи" imageUpload={conditionImages} disabled={isBusy} />
 
-          {/* ── Collapsible additional fields ── */}
+          {/* ── Классификация (видна всегда) ── */}
+          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Классификация
+            </div>
+            <TaskClassificationFields
+              taskType={taskType}
+              kimNumber={kimNumber}
+              difficulty={difficulty}
+              primaryScore={primaryScore}
+              topicId={topicId}
+              subtopicId={subtopicId}
+              sourceLabel={sourceLabel}
+              answerFormat={answerFormat}
+              onTaskTypeChange={handleTaskTypeChange}
+              onKimNumberChange={handleKimChange}
+              onDifficultyChange={setDifficulty}
+              onPrimaryScoreChange={setPrimaryScore}
+              onTopicIdChange={handleTopicChange}
+              onSubtopicIdChange={setSubtopicId}
+              onSourceLabelChange={setSourceLabel}
+              onAnswerFormatChange={setAnswerFormat}
+              disabled={isBusy}
+            />
+          </div>
+
+          {/* ── Ответ и решение (сворачиваемо) ── */}
           <button
             type="button"
-            onClick={() => setShowExtra((v) => !v)}
+            onClick={() => setShowAnswerSection((v) => !v)}
             className="flex w-full items-center gap-1.5 rounded-lg py-1.5 text-[13px] font-medium text-socrat-primary hover:underline"
           >
-            {showExtra ? (
+            {showAnswerSection ? (
               <ChevronDown className="h-3.5 w-3.5" />
             ) : (
               <ChevronRight className="h-3.5 w-3.5" />
             )}
-            Дополнительные поля
+            Ответ и решение
           </button>
 
-          {showExtra && (
+          {showAnswerSection && (
             <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-              {/* Answer format */}
-              <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат ответа</legend>
-                <select
-                  value={answerFormat}
-                  onChange={(e) => setAnswerFormat(e.target.value)}
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                >
-                  {ANSWER_FORMAT_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </fieldset>
-
               {/* Answer */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
@@ -295,8 +335,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
               {/* Solution images */}
               <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
 
-              {/* Rubric / criteria (field-parity fix 2026-06-03) — критерии оценки,
-                  переносятся в ДЗ при добавлении задачи из базы. */}
+              {/* Rubric / criteria (field-parity fix 2026-06-03) */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Критерии оценки</legend>
                 <textarea
@@ -307,82 +346,6 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
                   className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] leading-relaxed transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
                 />
               </fieldset>
-
-              {/* Exam + KIM number + primary score row */}
-              <div className="grid grid-cols-3 gap-3">
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Экзамен</legend>
-                  <select
-                    value={exam}
-                    onChange={(e) => setExam(e.target.value as ExamType | '')}
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                  >
-                    <option value="">Не указан</option>
-                    <option value="ege">ЕГЭ</option>
-                    <option value="oge">ОГЭ</option>
-                  </select>
-                </fieldset>
-
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">№ задания</legend>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={kimNumber}
-                    onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1–30"
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                  />
-                </fieldset>
-
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Первичный балл</legend>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={primaryScore}
-                    onChange={(e) => setPrimaryScore(e.target.value.replace(/\D/g, ''))}
-                    placeholder="1–4"
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                  />
-                </fieldset>
-              </div>
-
-              {/* Topic */}
-              <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Тема</legend>
-                <select
-                  value={topicId}
-                  onChange={(e) => setTopicId(e.target.value)}
-                  disabled={topicsLoading}
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                >
-                  <option value="">Не выбрана</option>
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}{t.exam ? ` (${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </fieldset>
-
-              {/* Subtopic — only when topic is selected */}
-              {topicId && (
-                <fieldset>
-                  <legend className="mb-1.5 text-xs font-semibold text-slate-500">Подтема</legend>
-                  <select
-                    value={subtopicId}
-                    onChange={(e) => setSubtopicId(e.target.value)}
-                    disabled={subtopicsLoading}
-                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
-                  >
-                    <option value="">Не выбрана</option>
-                    {subtopics.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </fieldset>
-              )}
             </div>
           )}
         </div>

@@ -110,6 +110,38 @@ export async function deleteCatalogSubtopic(id: string): Promise<void> {
   if (error) throw rpcError(error, 'Не удалось удалить подтему');
 }
 
+// ─── Sources (управляемый справочник источников) ──────────────────────────────
+
+export async function createCatalogSource(
+  name: string,
+  sortOrder = 0,
+): Promise<string> {
+  const { data, error } = await supabase.rpc('kb_mod_create_source', {
+    p_name: name,
+    p_sort_order: sortOrder,
+  });
+  if (error) throw rpcError(error, 'Не удалось создать источник');
+  return data as string;
+}
+
+export async function updateCatalogSource(
+  id: string,
+  name?: string,
+  sortOrder?: number,
+): Promise<void> {
+  const { error } = await supabase.rpc('kb_mod_update_source', {
+    p_id: id,
+    p_name: name ?? undefined,
+    p_sort_order: sortOrder ?? undefined,
+  });
+  if (error) throw rpcError(error, 'Не удалось сохранить источник');
+}
+
+export async function deleteCatalogSource(id: string): Promise<void> {
+  const { error } = await supabase.rpc('kb_mod_delete_source', { p_id: id });
+  if (error) throw rpcError(error, 'Не удалось удалить источник');
+}
+
 // ─── Publish folder ─────────────────────────────────────────────────────────
 
 export interface PublishFolderResult {

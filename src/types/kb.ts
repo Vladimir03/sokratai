@@ -48,6 +48,18 @@ export interface KBSubtopic {
   sort_order: number;
 }
 
+/**
+ * Управляемый справочник источников задач (kb_sources). Модератор ведёт
+ * глобальный список; в форме задачи тутор выбирает из него (или вписывает
+ * «Другой»). Выбранное имя пишется в `kb_tasks.source_label`. Запрос Егора.
+ */
+export interface KBSource {
+  id: string;
+  name: string;
+  subject: string;
+  sort_order: number;
+}
+
 // =============================================
 // Личная база (папки)
 // =============================================
@@ -98,6 +110,11 @@ export interface KBTask {
   exam: ExamType | null;
   kim_number: number | null;
   primary_score: number | null;
+  /**
+   * Уровень сложности олимпиадной задачи 1–5 (= балл за задачу). NULL для
+   * ЕГЭ/ОГЭ (там балл известен по № КИМ). Запрос Егора (2026-06-21).
+   */
+  difficulty: number | null;
   text: string;
   answer: string | null;
   solution: string | null;
@@ -161,6 +178,8 @@ export interface CreateKBTaskInput {
   subtopic_id?: string;
   source_label?: string;
   primary_score?: number;
+  /** Уровень сложности 1–5 для олимпиадных задач (= балл). */
+  difficulty?: number | null;
 }
 
 export interface UpdateKBTaskInput {
@@ -168,6 +187,8 @@ export interface UpdateKBTaskInput {
   exam?: ExamType | null;
   kim_number?: number | null;
   primary_score?: number | null;
+  /** Уровень сложности 1–5 для олимпиадных задач (= балл). */
+  difficulty?: number | null;
   answer?: string | null;
   solution?: string | null;
   answer_format?: string | null;
@@ -179,6 +200,7 @@ export interface UpdateKBTaskInput {
   topic_id?: string | null;
   subtopic_id?: string | null;
   folder_id?: string | null;
+  source_label?: string | null;
 }
 
 // =============================================

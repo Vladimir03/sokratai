@@ -131,6 +131,25 @@
 
 **Путь рубрики (правь ВСЕ):** `KBTask`/`Create`/`UpdateKBTaskInput` типы → `kbTaskToDraftTask` (импорт в ДЗ, обрезка до `MAX_RUBRIC_IMAGES`=3) → `hwDraftStore.addTask`+`HWDrawer` (path B) → `handleSaveTasksToKB` (save-back из ДЗ) → `Create/EditTaskModal` («Критерии оценки», текст; update через `.update(input)` не зануляет невыбранные поля). Детали — rule 40 «Field-parity (2026-06-03)».
 
+## Форма задачи: каскад классификации + авто-балл + источники + серия (запрос Егора, 2026-06-21)
+
+Упрощение загрузки задач в «Мою базу» (`CreateTaskModal` / `EditTaskModal`). Аддитивно поверх self-serve каталога. Миграции `20260621120000` (difficulty) + `20260621120100` (kb_sources). НЕ задеплоено. Build-лог: memory `project_kb_task_loader_egor_2026_06_21.md`. План `~/.claude/plans/zesty-discovering-sphinx.md`.
+
+**Общий каскад — `src/components/kb/TaskClassificationFields.tsx` (НЕ дублировать в модалках):** Тип (`Не указан / ЕГЭ / ОГЭ / Олимпиада`) → фильтрует темы (`useTopics(filter)`) → Тема → Подтема. Оба модала рендерят этот компонент; каждый держит state + хендлеры сброса (смена типа → сброс темы/подтемы/балла + очистка противоположного КИМ↔сложность; смена КИМ → сброс ручного балла; смена темы → сброс подтемы). Сброс подтемы — **в хендлере, не в useEffect** (иначе клобберит prefill на mount — урок EditTaskModal).
+
+**`kb_tasks.difficulty SMALLINT 1–5` (олимпиада) — КЛАССИФИКАЦИЯ, не рубрика:**
+- Только при Тип=Олимпиада; `exam=NULL`, № КИМ скрыт. Уровень 1–5 ОДНОВРЕМЕННО пишется в `primary_score` (= балл за задачу) → переносится в ДЗ как `max_score` через существующий `kbTaskToDraftTask` (`primary_score ?? 1`), без правок homework write-path.
+- **Безопасно копируется в Каталог** (в отличие от рубрики): добавлена в column-lists `kb_publish_task`/`kb_resync_task` + в условие resync-триггера `trg_fn_kb_after_update_moderation` (миграция `20260621120000`, базировалась на последних версиях `20260330130615` + `20260611181252` — 3-арг fingerprint сохранён). При добавлении нового поля `kb_tasks` — решить tutor-only (как рубрика, НЕ в триггеры) vs catalog-safe (в INSERT/UPDATE-списки + resync-условие).
+- Путь типа (правь ВСЕ): `KBTask`/`Create`/`UpdateKBTaskInput` + `types.ts` (Row/Insert/Update **И** 2 RPC-return-шейпа `fetch_catalog_tasks_v2/_all`) + insert/update payload модалок + бейдж в `TaskCard`/`PickerTaskCard` + сортировка в `kbCatalogGrouping.groupTasksBySubtopic` (олимпиада — по `difficulty` asc внутри подтемы; ЕГЭ/ОГЭ уже по № КИМ asc).
+
+**Авто-балл по № КИМ — `src/lib/kbKimScores.ts` (frontend-only, НЕ грейдинг):** `getKimPrimaryScore(exam, kim)`. Физика ЕГЭ полная (Σ=45, сверено + совпадает с mock-part1-checker check_modes). **ОГЭ пуст → ручной ввод** (заполнить после подтверждения Егором). UX: чип «балл по ФИПИ · Изменить» (редактируемо). На submit: `primaryScore` (ручной override) ∥ авто. Значения валидирует Егор (физика); до того балл редактируем — риск низкий.
+
+**Справочник источников — `kb_sources` (глобальный, модераторский):** RLS SELECT для authenticated, запись только через RPC `kb_mod_create/update/delete_source` (зеркало `kb_mod_*_subtopic`). Выбранное имя пишется в **`kb_tasks.source_label`** (гибрид: список + «Другой»). Бейдж «Моя/Каталог» по-прежнему из `owner_id`, не из `source_label` (`'my'`/`'socrat'` — служебные sentinel). UI модератора — `SourcesManager` (gated `useIsModerator`, кнопка «Источники» на лендинге каталога). FK на задачи нет → удаление источника безопасно.
+
+**Серия задач (наследование + «Сохранить и добавить ещё»):** `src/lib/kbLastClassification.ts` (localStorage) — наследует классификацию (тип/КИМ/сложность/тема/подтема/источник/формат/папка) в новую задачу. Кнопка «Сохранить и добавить ещё» (`CreateTaskModal`) НЕ закрывает форму — чистит только контент (условие/ответ/решение/фото, `useImageUpload.reset()`), классификацию + рубрику оставляет. Балл/контент не наследуются (балл выводится из КИМ). Только Create; Edit — каскад без наследования.
+
+**При расширении:** новое поле задачи → реши catalog-safe vs tutor-only (триггеры); новый предмет авто-балла → добавь карту в `kbKimScores`; новый источник-write-путь → через RPC, имя в `source_label`; каскад — единый компонент, не дублировать.
+
 ## Snapshot-механика
 При добавлении задачи в ДЗ — текст фиксируется в homework_kb_tasks.task_text_snapshot.
 Ученик видит snapshot, не оригинал. Репетитор может редактировать snapshot в drawer.

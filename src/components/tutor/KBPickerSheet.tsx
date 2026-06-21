@@ -24,7 +24,7 @@ import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
 import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
-import { countTasksBySubtopic, groupTasksByKim, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
+import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
 import type { KBTask, KBTopicWithCounts, KBFolderWithCounts } from '@/types/kb';
 
@@ -110,6 +110,11 @@ function PickerTaskCard({
             КИМ №{task.kim_number}
           </span>
         )}
+        {task.difficulty != null && (
+          <span className="rounded bg-socrat-folder-bg px-1.5 py-0.5 text-[10px] font-semibold text-socrat-folder">
+            Сложность {task.difficulty}
+          </span>
+        )}
         <div className="flex-1" />
         <Button
           size="sm"
@@ -191,9 +196,18 @@ function CatalogBrowser({
     if (subtopicFilter === NO_SUBTOPIC_FILTER) return tasks.filter((t) => !t.subtopic_id);
     return tasks.filter((t) => t.subtopic_id === subtopicFilter);
   }, [tasks, subtopicFilter]);
+  // Олимпиадные темы группируются по подтеме + сортируются по сложности
+  // (как в CatalogTopicPage); экзаменационные — по № КИМ.
+  const isOlympiad = useMemo(
+    () => topics.find((t) => t.id === selectedTopicId)?.kind === 'olympiad',
+    [topics, selectedTopicId],
+  );
   const taskGroups = useMemo(
-    () => groupTasksByKim(visibleTasks, subtopicOrder),
-    [visibleTasks, subtopicOrder],
+    () =>
+      isOlympiad
+        ? groupTasksBySubtopic(visibleTasks, subtopics)
+        : groupTasksByKim(visibleTasks, subtopicOrder),
+    [isOlympiad, visibleTasks, subtopics, subtopicOrder],
   );
 
   // Сменить подтему/тему — сбросить batch-выбор (selection всегда в рамках текущего вида).
