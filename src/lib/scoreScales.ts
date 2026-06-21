@@ -36,17 +36,30 @@ export function egePrimaryToScaled(primary: number | null | undefined): number |
   return EGE_PHYS_2026.map[i];
 }
 
-/**
- * ОГЭ: первичный → оценка (2..5). Ratio-based ЗАГЛУШКА до загрузки официальных
- * per-subject порогов (04-score-scales §4). НЕ источник истины для ОГЭ-релиза.
- */
+// ОГЭ физика 2026 — первичный балл → оценка (официальные пороги ФИПИ, предоставил
+// Егор 2026-06-21). Max первичный 39. Пороги АБСОЛЮТНЫЕ (не ratio):
+// «2» 0–9 · «3» 10–19 · «4» 20–29 · «5» 30–39. v1 = физика; для других предметов ОГЭ
+// (иные пороги/max) — версионировать по subject.
+export const OGE_PHYS_2026 = {
+  scale_year: 2026,
+  max_primary: 39,
+  // min — нижняя граница первичного балла для оценки (проверяются сверху вниз).
+  bands: [
+    { min: 30, mark: 5 },
+    { min: 20, mark: 4 },
+    { min: 10, mark: 3 },
+    { min: 0, mark: 2 },
+  ],
+};
+
+/** ОГЭ-физика: первичный → оценка (2..5) по абсолютным порогам ФИПИ (Σ макс 39). */
 export function ogeMark(raw: number | null | undefined, max: number): number | null {
   if (raw == null || !Number.isFinite(raw) || max <= 0) return null;
-  const r = raw / max;
-  if (r < 0.4) return 2;
-  if (r < 0.55) return 3;
-  if (r < 0.75) return 4;
-  return 5;
+  const r = Math.max(0, Math.round(raw));
+  for (const b of OGE_PHYS_2026.bands) {
+    if (r >= b.min) return b.mark;
+  }
+  return 2;
 }
 
 /** Trim trailing zero, comma decimal for RU display: 2.5 → «2,5», 2.0 → «2». */
