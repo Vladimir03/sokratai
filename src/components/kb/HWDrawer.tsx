@@ -298,6 +298,10 @@ export function HWDrawer({
           order_num: index + 1,
           check_format: checkFormat,
           task_kind: deriveTaskKindFromCheckFormat(checkFormat),
+          // Phase 2 (2026-06-21): № КИМ → grading по критериям ФИПИ (path B).
+          kim_number: task.kim_number ?? null,
+          // Review fix P1 (2026-06-21): балл задачи из KB (иначе DB DEFAULT 1).
+          max_score: task.maxScoreSnapshot ?? 1,
         };
       });
 

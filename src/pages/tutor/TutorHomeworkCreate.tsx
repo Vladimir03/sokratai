@@ -92,6 +92,7 @@ function buildTaskSignature(tasks: Array<{
   check_format?: string | null;
   task_kind?: string | null;
   cefr_level?: string | null;
+  kim_number?: number | null;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -115,6 +116,8 @@ function buildTaskSignature(tasks: Array<{
       // CEFR-level fix (2026-05-29): explicit level в подписи → смена «Уровня»
       // помечает tasksDirty (иначе правка только уровня не сохранится на edit).
       cefr_level: task.cefr_level ?? null,
+      // Phase 2 (2026-06-21): № КИМ в подписи → re-импорт KB-задачи с другим № помечает dirty.
+      kim_number: task.kim_number ?? null,
     })),
   );
 }
@@ -258,6 +261,7 @@ function buildEditDiffState(params: {
       check_format: task.check_format,
       task_kind: task.task_kind,
       cefr_level: task.cefr_level,
+      kim_number: task.kim_number,
     })),
   ) !== snapshot.taskSignature;
 
@@ -404,6 +408,8 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
       check_format: t.check_format ?? 'short_answer',
       task_kind: t.task_kind ?? undefined,
       cefr_level: resolvedCefr,
+      // Phase 2 (2026-06-21): № КИМ из шаблона → ДЗ (grading по ФИПИ).
+      kim_number: t.kim_number ?? null,
     }),
   };
 }
@@ -664,6 +670,8 @@ function TutorHomeworkCreateContent() {
         task_kind: t.task_kind,
         // CEFR-level fix: preserve explicit «Уровень» on edit.
         cefr_level: t.cefr_level,
+        // Phase 2 (2026-06-21): preserve № КИМ on edit (grading по ФИПИ).
+        kim_number: t.kim_number ?? null,
         kb_task_id: t.kb_task_id ?? undefined,
         kb_snapshot_text: t.kb_snapshot_text ?? undefined,
         kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
@@ -1099,6 +1107,8 @@ function TutorHomeworkCreateContent() {
           cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
             ? (meta.cefr_level ?? null)
             : null,
+          // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
+          kim_number: t.kim_number ?? null,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -1253,6 +1263,7 @@ function TutorHomeworkCreateContent() {
               check_format: t.check_format,
               task_kind: t.task_kind ?? null,
               cefr_level: isLang ? (meta.cefr_level ?? null) : null,
+              kim_number: t.kim_number ?? null,
             })),
           });
           void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
@@ -1425,6 +1436,8 @@ function TutorHomeworkCreateContent() {
             cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
               ? (meta.cefr_level ?? null)
               : null,
+            // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
+            kim_number: t.kim_number ?? null,
           }));
         }
 

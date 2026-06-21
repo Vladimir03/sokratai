@@ -64,6 +64,20 @@ function normalizeCefrLevel(v: unknown): "A2" | "B1" | "B2" | "C1" | null {
     : null;
 }
 
+/**
+ * Normalize a client-supplied КИМ number for `homework_tutor_tasks.kim_number`
+ * (Phase 2, 2026-06-21). Переносится из KB-задачи, чтобы AI грейдил по критериям
+ * ФИПИ конкретного номера (`resolveSubjectRubric`). Integer 1..40 или null.
+ */
+function normalizeKimNumber(v: unknown): number | null {
+  const n = typeof v === "number"
+    ? v
+    : typeof v === "string" && /^\d+$/.test(v.trim())
+      ? parseInt(v.trim(), 10)
+      : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 40 ? n : null;
+}
+
 const VALID_FEEDBACK_LANGUAGES = ["auto", "russian", "target"] as const;
 
 // Phase 11 (2026-05-31): foreign-language subjects где письменные/устные задачи
@@ -790,6 +804,8 @@ async function handleCreateAssignment(
       task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
       // CEFR-level fix (2026-05-29): persist explicit «Уровень» (A2/B1/B2/C1) or null.
       cefr_level: normalizeCefrLevel(t.cefr_level),
+      // Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ этого номера.
+      kim_number: normalizeKimNumber(t.kim_number),
     };
   });
 
@@ -821,6 +837,7 @@ async function handleCreateAssignment(
       check_format: t.check_format,
       task_kind: t.task_kind,
       cefr_level: isLanguageTemplate ? t.cefr_level : null,
+      kim_number: t.kim_number,
     }));
     const { error: templateErr } = await db
       .from("homework_tutor_templates")
@@ -1159,7 +1176,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, cefr_level")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1680,6 +1697,10 @@ async function handleUpdateAssignment(
           // CEFR-level fix (2026-05-29): partial-update path persists explicit level.
           updateFields.cefr_level = normalizeCefrLevel(t.cefr_level);
         }
+        if (t.kim_number !== undefined) {
+          // Phase 2 (2026-06-21): № КИМ round-trips on edit (grading по ФИПИ).
+          updateFields.kim_number = normalizeKimNumber(t.kim_number);
+        }
 
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -1731,6 +1752,7 @@ async function handleUpdateAssignment(
               // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
               task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
               cefr_level: normalizeCefrLevel(t.cefr_level),
+              kim_number: normalizeKimNumber(t.kim_number),
             })
             .select("id")
             .single();
@@ -1821,6 +1843,7 @@ async function handleUpdateAssignment(
           // voice-speaking-mvp (2026-05-29): explicit 'speaking' wins over derive (§0).
           task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
           cefr_level: normalizeCefrLevel(t.cefr_level),
+          kim_number: normalizeKimNumber(t.kim_number),
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -4452,7 +4475,7 @@ async function handleCreateTemplateFromAssignment(
     .select(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
-        "check_format, task_kind, cefr_level",
+        "check_format, task_kind, kim_number, cefr_level",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -4484,6 +4507,7 @@ async function handleCreateTemplateFromAssignment(
     check_format: string | null;
     task_kind: string | null;
     cefr_level: string | null;
+    kim_number: number | null;
   }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
@@ -4504,6 +4528,8 @@ async function handleCreateTemplateFromAssignment(
       if (isNonEmptyString(t.task_kind)) base.task_kind = t.task_kind;
       // cefr_level — только для языковых задач.
       if (isLanguageTemplate && isNonEmptyString(t.cefr_level)) base.cefr_level = t.cefr_level;
+      // Phase 2 (2026-06-21): № КИМ → grading по ФИПИ при reuse шаблона.
+      if (typeof t.kim_number === "number") base.kim_number = t.kim_number;
     }
     return base;
   });

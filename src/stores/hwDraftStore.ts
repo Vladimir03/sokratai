@@ -54,6 +54,12 @@ export const useHWDraftStore = create<HWDraftStore>()(
           subtopic: subtopicName ?? '',
           topicName: topicName ?? '',
           sourceLabel: task.source_label ?? null,
+          // Phase 2 (2026-06-21): freeze № КИМ so HWDrawer persists it into
+          // homework_tutor_tasks.kim_number (path B) → grading по критериям ФИПИ.
+          kim_number: task.kim_number ?? null,
+          // Review fix P1 (2026-06-21): freeze балл задачи (primary_score) → HWDrawer
+          // пишет max_score, иначе KB-задача с авто-баллом/сложностью >1 падала в 1.
+          maxScoreSnapshot: task.primary_score ?? 1,
         };
 
         set((state) => ({ tasks: [...state.tasks, draftTask] }));
