@@ -100,6 +100,8 @@ export interface CreateAssignmentTask {
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** CEFR-level fix (2026-05-29): явный уровень для языковых задач; null → авто-детект. */
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ этого номера. */
+  kim_number?: number | null;
 }
 
 export interface CreateAssignmentPayload {
@@ -144,6 +146,8 @@ export interface HomeworkTemplateTask {
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
   /** CEFR-уровень — пишется только для языковых задач (french/english/spanish). */
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  /** Phase 2 (2026-06-21): № КИМ — round-trips через шаблон (grading по ФИПИ). */
+  kim_number?: number | null;
 }
 
 export interface HomeworkTemplateListItem {
@@ -623,6 +627,8 @@ export interface TutorHomeworkAssignmentDetails {
     task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
     /** CEFR-level fix: round-trips on edit so the «Уровень» selector preserves value. */
     cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+    /** Phase 2 (2026-06-21): № КИМ — round-trips on edit (grading по ФИПИ). */
+    kim_number?: number | null;
     kb_task_id?: string | null;
     kb_snapshot_text?: string | null;
     kb_snapshot_answer?: string | null;
@@ -1363,6 +1369,8 @@ export interface UpdateAssignmentTask {
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** CEFR-level fix: явный уровень для языковых задач; null → авто-детект. */
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ. */
+  kim_number?: number | null;
 }
 
 export async function updateTutorHomeworkAssignment(

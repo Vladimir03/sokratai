@@ -116,6 +116,12 @@ export interface DraftTask {
    * показывается только для foreign-language subjects.
    */
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  /**
+   * № КИМ из KB-задачи (Phase 2, 2026-06-21). Переносится в
+   * `homework_tutor_tasks.kim_number` → AI грейдит по критериям ФИПИ этого номера
+   * (`resolveSubjectRubric`). Только из KB-импорта; в UI конструктора не правится.
+   */
+  kim_number?: number | null;
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────

@@ -262,6 +262,12 @@ export interface HWDraftTask {
   subtopic: string;
   topicName: string;
   sourceLabel?: string | null;
+  /**
+   * № КИМ из KB-задачи (Phase 2, 2026-06-21). HWDrawer (path B) пишет его в
+   * `homework_tutor_tasks.kim_number` → AI грейдит по критериям ФИПИ этого номера.
+   * Optional для backward-compat со старыми localStorage-черновиками (undefined → null).
+   */
+  kim_number?: number | null;
 }
 
 /** Row from homework_kb_tasks table */

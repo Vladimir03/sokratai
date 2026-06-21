@@ -104,6 +104,8 @@ function kbTaskToDraftTask(
       max_score: task.primary_score ?? 1,
       uploading: false,
       check_format: checkFormat,
+      // Phase 2 (2026-06-21): переносим № КИМ в ДЗ → AI грейдит по критериям ФИПИ.
+      kim_number: task.kim_number ?? null,
       kb_task_id: task.id,
       kb_source: task.owner_id ? 'my' : 'socrat',
       kb_snapshot_text: task.text,

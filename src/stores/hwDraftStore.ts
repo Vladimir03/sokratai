@@ -54,6 +54,9 @@ export const useHWDraftStore = create<HWDraftStore>()(
           subtopic: subtopicName ?? '',
           topicName: topicName ?? '',
           sourceLabel: task.source_label ?? null,
+          // Phase 2 (2026-06-21): freeze № КИМ so HWDrawer persists it into
+          // homework_tutor_tasks.kim_number (path B) → grading по критериям ФИПИ.
+          kim_number: task.kim_number ?? null,
         };
 
         set((state) => ({ tasks: [...state.tasks, draftTask] }));
