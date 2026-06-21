@@ -4422,7 +4422,7 @@ export type Database = {
       }
       kb_is_in_socrat_tree: { Args: { p_folder_id: string }; Returns: boolean }
       kb_mod_create_source: {
-        Args: { _name: string; _sort_order?: number; _subject?: string }
+        Args: { p_name: string; p_sort_order?: number; p_subject?: string }
         Returns: string
       }
       kb_mod_create_subtopic: {
@@ -4441,7 +4441,7 @@ export type Database = {
         }
         Returns: string
       }
-      kb_mod_delete_source: { Args: { _id: string }; Returns: undefined }
+      kb_mod_delete_source: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_subtopic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_topic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_reassign: {
@@ -4453,7 +4453,7 @@ export type Database = {
         Returns: undefined
       }
       kb_mod_update_source: {
-        Args: { _id: string; _name: string; _sort_order?: number }
+        Args: { p_id: string; p_name?: string; p_sort_order?: number }
         Returns: undefined
       }
       kb_mod_update_subtopic: {
