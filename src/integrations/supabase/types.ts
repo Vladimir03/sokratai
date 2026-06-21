@@ -1626,6 +1626,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -1654,6 +1655,7 @@ export type Database = {
           answer_format?: string | null
           attachment_url?: string | null
           created_at?: string | null
+          difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
@@ -1682,6 +1684,7 @@ export type Database = {
           answer_format?: string | null
           attachment_url?: string | null
           created_at?: string | null
+          difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
@@ -4126,6 +4129,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -4163,6 +4167,7 @@ export type Database = {
           answer_format: string | null
           attachment_url: string | null
           created_at: string | null
+          difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
@@ -4452,9 +4457,18 @@ export type Database = {
           skipped_count: number
         }[]
       }
-      kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
+      kb_publish_task:
+        | {
+            Args: {
+              _source_task_id: string
+              _subtopic_id: string
+              _topic_id: string
+            }
+            Returns: string
+          }
+        | { Args: { p_source_task_id: string }; Returns: string }
       kb_require_moderator: { Args: never; Returns: string }
-      kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
+      kb_resync_task: { Args: { _source_task_id: string }; Returns: string }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
