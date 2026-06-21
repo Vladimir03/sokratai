@@ -1587,27 +1587,27 @@ export type Database = {
       kb_sources: {
         Row: {
           created_at: string
-          created_by: string | null
           id: string
           name: string
           sort_order: number
           subject: string
+          updated_at: string
         }
         Insert: {
           created_at?: string
-          created_by?: string | null
           id?: string
           name: string
           sort_order?: number
           subject?: string
+          updated_at?: string
         }
         Update: {
           created_at?: string
-          created_by?: string | null
           id?: string
           name?: string
           sort_order?: number
           subject?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -4493,9 +4493,18 @@ export type Database = {
           skipped_count: number
         }[]
       }
-      kb_publish_task: { Args: { p_source_task_id: string }; Returns: string }
+      kb_publish_task:
+        | {
+            Args: {
+              _source_task_id: string
+              _subtopic_id: string
+              _topic_id: string
+            }
+            Returns: string
+          }
+        | { Args: { p_source_task_id: string }; Returns: string }
       kb_require_moderator: { Args: never; Returns: string }
-      kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
+      kb_resync_task: { Args: { _source_task_id: string }; Returns: string }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
