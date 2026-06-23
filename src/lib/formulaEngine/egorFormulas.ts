@@ -918,7 +918,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.65_e', 'kin.67_e', 'kin.68_e'],
     difficulty: 2,
     exam: 'ЕГЭ+ОГЭ',
-    memoryHook: 's_x = v_0x·t + a_x·t²/2. Деление на 2 обязательно — без него перемещение вдвое больше.',
+    memoryHook: 's_x = v_0x·t + a_x·t²/2. Делить на 2 обязательно — иначе слагаемое с ускорением станет вдвое больше.',
     buildable: true,
   },
   {
@@ -1302,7 +1302,7 @@ export const EGOR_MUTATION_LIBRARY: Record<string, FormulaMutation[]> = {
     { type: 'wrong_power', latex: 'v_x = v_{0x} + a_x t^2', hint: 'Скорость растёт как a_x·t (первая степень времени); квадрат времени — у перемещения.' },
   ],
   'kin.66_e': [
-    { type: 'drop_coefficient', latex: 's_x = v_{0x} t + a_x t^2', hint: 'Слагаемое с ускорением делится на 2: a_x·t²/2, иначе перемещение вдвое больше.' },
+    { type: 'drop_coefficient', latex: 's_x = v_{0x} t + a_x t^2', hint: 'Слагаемое с ускорением делится на 2: a_x·t²/2, иначе оно станет вдвое больше.' },
     { type: 'wrong_power', latex: 's_x = v_{0x} t + \\frac{a_x t}{2}', hint: 'В члене с ускорением время входит в квадрате: a_x·t²/2.' },
   ],
   'kin.67_e': [

@@ -32,32 +32,49 @@ export function hasOperators(tokens: string[]): boolean {
   return tokens.some((t) => OPERATOR_TOKENS.has(t));
 }
 
-/** Разбивает массив токенов на сегменты, разделённые операторами. */
-function splitByOperators(tokens: string[]): Array<{ op: string | null; terms: string[] }> {
-  const segments: Array<{ op: string | null; terms: string[] }> = [{ op: null, terms: [] }];
-  for (const t of tokens) {
-    if (OPERATOR_TOKENS.has(t)) {
-      segments.push({ op: t, terms: [] });
+/**
+ * Разбивает токены на ЗНАКОВЫЕ слагаемые. Каждое слагаемое = знак (`+`/`−`) +
+ * мультимножество множителей (отсортированных, т.к. умножение коммутативно:
+ * `2\pi R` = `R 2\pi`). Ведущее слагаемое без оператора считается `+`. Пустой
+ * сегмент (ведущий унарный оператор, напр. `-gt`) пропускается. Возвращает
+ * массив строк-сигнатур слагаемых для multiset-сравнения.
+ */
+function toSignedTerms(tokens: string[]): string[] {
+  const terms: string[] = [];
+  let sign = '+';
+  let factors: string[] = [];
+  const flush = () => {
+    if (factors.length > 0) {
+      terms.push(`${sign}::${[...factors].sort().join('·')}`);
+    }
+  };
+  for (const token of tokens) {
+    if (OPERATOR_TOKENS.has(token)) {
+      flush();
+      sign = token;
+      factors = [];
     } else {
-      segments[segments.length - 1].terms.push(t);
+      factors.push(token);
     }
   }
-  return segments;
+  flush();
+  return terms;
 }
 
-/** Operator-aware equality: operators strict, terms between them — bag-compare. */
+/**
+ * Алгебраическое равенство собранной части формулы. Сложение/вычитание
+ * КОММУТАТИВНЫ: `x_0 + v_x t` = `v_x t + x_0`, `A + B - C` = `-C + B + A`. Но
+ * `A - B` ≠ `B - A` — знак каждого слагаемого сохраняется. Сравниваем
+ * мультимножество знаковых слагаемых (множители внутри слагаемого — тоже bag).
+ * Числитель и знаменатель сравниваются отдельно (FormulaRoundScreen), поэтому
+ * структура дроби не теряется.
+ */
 export function areTokenListsEquivalent(a: string[], b: string[]): boolean {
-  const segA = splitByOperators(a);
-  const segB = splitByOperators(b);
-  if (segA.length !== segB.length) return false;
-  for (let i = 0; i < segA.length; i++) {
-    if (segA[i].op !== segB[i].op) return false;
-    const ta = [...segA[i].terms].sort();
-    const tb = [...segB[i].terms].sort();
-    if (ta.length !== tb.length) return false;
-    for (let j = 0; j < ta.length; j++) {
-      if (ta[j] !== tb[j]) return false;
-    }
+  const ta = toSignedTerms(a).sort();
+  const tb = toSignedTerms(b).sort();
+  if (ta.length !== tb.length) return false;
+  for (let i = 0; i < ta.length; i++) {
+    if (ta[i] !== tb[i]) return false;
   }
   return true;
 }
