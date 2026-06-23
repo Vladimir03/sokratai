@@ -12,6 +12,8 @@ interface FeedbackOverlayProps {
   userAnswerLatex: string | null;
   reasoning: string;
   trap: string;
+  /** TrueOrFalse: верна ли ПОКАЗАННАЯ формула (для баннера). null/undefined → баннера нет. */
+  formulaShownIsCorrect?: boolean | null;
   onContinue: () => void;
 }
 
@@ -30,6 +32,7 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
   userAnswerLatex,
   reasoning,
   trap,
+  formulaShownIsCorrect,
   onContinue,
 }: FeedbackOverlayProps) {
   const bgColor = isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200';
@@ -42,10 +45,24 @@ export const FeedbackOverlay = memo(function FeedbackOverlay({
       className={`absolute inset-x-0 bottom-0 px-4 py-5 border-t animate-in slide-in-from-bottom-4 duration-200 ${bgColor}`}
     >
       <div className="max-w-md mx-auto space-y-3">
-        {/* Title */}
+        {/* Title — про ОТВЕТ ученика, не про формулу */}
         <h2 className={`text-base font-semibold ${titleColor}`}>
-          {isCorrect ? '✓ Верно!' : '✗ Неверно'}
+          {isCorrect ? '✓ Правильно!' : '✗ Ты ошибся'}
         </h2>
+
+        {/* TrueOrFalse: явный вердикт по САМОЙ формуле (зелёный/красный), чтобы
+            не путать «формула верна» с «ответ верный» (фидбэк Елены/Vladimir). */}
+        {formulaShownIsCorrect != null && (
+          <div
+            className={`rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
+              formulaShownIsCorrect
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                : 'border-red-200 bg-red-50 text-red-700'
+            }`}
+          >
+            {formulaShownIsCorrect ? 'Эта формула верна ✓' : 'Эта формула неверна ✗'}
+          </div>
+        )}
 
         {questionLatex && questionLatex !== canonicalLatex && (
           <div className={cardBg}>

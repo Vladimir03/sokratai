@@ -206,7 +206,7 @@ export const egorFormulas: Formula[] = [
     relatedFormulas: ['kin.17_e', 'kin.19_e', 'kin.20_e'],
     difficulty: 1,
     exam: 'ЕГЭ',
-    memoryHook: 'Угловая скорость — радианов в секунду. Угол поворота в числителе, время — в знаменателе.',
+    memoryHook: 'Угловая скорость измеряется в рад/с. Угол поворота в числителе, время — в знаменателе.',
     buildable: true,
   },
   {

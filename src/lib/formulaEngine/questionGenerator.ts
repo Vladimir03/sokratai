@@ -585,6 +585,13 @@ export interface FeedbackPayload {
   reasoning: string;
   trap: string;
   isCorrect: boolean;
+  /**
+   * Только для TrueOrFalse: была ли ПОКАЗАННАЯ формула верной (true) или это
+   * мутация (false). null/undefined для Build/Situation — баннер «Эта формула
+   * верна/неверна» не показывается. Разводит «верность формулы» и «верность
+   * ОТВЕТА ученика», чтобы «✗ Ты ошибся» не путали с «формула неверна».
+   */
+  formulaShownIsCorrect?: boolean | null;
 }
 
 export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: boolean, userAnswer?: string | boolean | { numerator: string[]; denominator: string[] }): FeedbackPayload {
@@ -603,6 +610,13 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
 
   const canonicalLatex = formula.formula;
   const questionLatex = unwrapMath(question.displayFormula);
+
+  // TrueOrFalse (layer 3): question.correctAnswer (boolean) = была ли показана
+  // ВЕРНАЯ запись формулы. Для Build/Situation — null (баннер не нужен).
+  const formulaShownIsCorrect =
+    question.layer === 3 && typeof question.correctAnswer === 'boolean'
+      ? question.correctAnswer
+      : null;
 
   // Build userAnswerLatex based on question type and answer (for BOTH correct and incorrect).
   // NB: `if (userAnswer)` was wrong — для TrueOrFalse карточек ответ `false` (неверно)
@@ -632,6 +646,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
       reasoning: formula.physicalMeaning,
       trap: getLayer1MemoryCue(formula),
       isCorrect: true,
+      formulaShownIsCorrect,
     };
   }
 
@@ -645,6 +660,7 @@ export function generateFeedbackPayload(question: FormulaQuestion, isCorrect: bo
       reasoning: mutation?.hint ?? getMutationExplanation(question, formula),
       trap: trimLine(formula.commonMistakes[0] ?? 'не подменяй переменные из похожих формул'),
       isCorrect: false,
+      formulaShownIsCorrect,
     };
   }
 

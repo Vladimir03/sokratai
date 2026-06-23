@@ -249,6 +249,7 @@ export function FormulaRoundScreen({
           userAnswerLatex={feedbackPayload.userAnswerLatex}
           reasoning={feedbackPayload.reasoning}
           trap={feedbackPayload.trap}
+          formulaShownIsCorrect={feedbackPayload.formulaShownIsCorrect}
           onContinue={handleNext}
         />
       )}
