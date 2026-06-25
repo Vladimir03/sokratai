@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Folder, FolderPlus, LayoutGrid, Plus, Tags } from 'lucide-react';
+import { Folder, FolderPlus, LayoutGrid, Plus, Sparkles, Tags } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -263,6 +263,7 @@ interface MyBaseHomeProps {
 }
 
 function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
+  const navigate = useNavigate();
   const { folders, loading, error, refetch, isFetching } = useRootFolders();
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
@@ -328,6 +329,15 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
       >
         <Plus className="h-4 w-4" />
         Добавить задачу
+      </button>
+
+      <button
+        type="button"
+        onClick={() => navigate('/tutor/knowledge/ai-loader')}
+        className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-[22px] border border-socrat-primary/20 bg-socrat-primary-light px-4 py-4 text-sm font-semibold text-socrat-primary transition-colors duration-200 hover:border-socrat-primary/35 [touch-action:manipulation]"
+      >
+        <Sparkles className="h-4 w-4" />
+        AI-загрузка задач
       </button>
 
       {!loading && folders.length === 0 ? (

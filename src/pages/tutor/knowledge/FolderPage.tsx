@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Trash2, UploadCloud, X } from 'lucide-react';
+import { ChevronRight, Folder, FolderPlus, Pencil, Plus, Sparkles, Trash2, UploadCloud, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
@@ -143,6 +143,14 @@ function FolderContent() {
                       В каталог
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/tutor/knowledge/ai-loader?folder=${folderId}`)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-socrat-primary/20 bg-socrat-primary-light px-4 py-2.5 text-sm font-semibold text-socrat-primary shadow-sm transition-all duration-200 hover:border-socrat-primary/35 [touch-action:manipulation]"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    AI-загрузка
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowCreateFolder(true)}

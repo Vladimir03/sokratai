@@ -199,6 +199,29 @@
 ### Русское склонение
 `src/lib/pluralizeRu(n, [one, few, many])` — канонический helper («1 задача / 2 задачи / 5 задач», корректный `% 100 / % 10`). Используй вместо inline `n < 5 ? …`. Применён в `CatalogTaskGroups`, `FolderCard`. Старые места (`TopicRow` / `FolderRow` / `TopicCard`) — кандидаты на миграцию.
 
+## AI-загрузка задач — `kb-ai-extract` (P0, 2026-06-25)
+
+Конвейер «материал (текст/фото) → AI извлекает черновики → карточки с правкой → запись в «Мою базу»». Снимает барьер наполнения базы (ручной ввод ~2–4 мин/задача → < 30 сек). Tutor-домен, аддитивно, **без миграций**. Вход — кнопка «AI-загрузка задач» (Lucide `Sparkles`) в «Моей базе» (`KnowledgeBasePage`) и тулбаре папки (`FolderPage`, текущая папка = назначение) → роут `/tutor/knowledge/ai-loader?folder=`. Spec: `docs/delivery/features/kb-ai-task-loader/{spec.md, prompts.md, kb-ai-task-loader-tasks.md}`. Build-лог: memory `project_kb_ai_task_loader.md`.
+
+**Единый write-path (КРИТИЧНО, rule 40):** edge `kb-ai-extract` **ТОЛЬКО извлекает** черновики (ноль записи в БД); запись — через существующий `insertTask`/`useCreateTask`. НЕ плодить новый `from('kb_tasks').insert` — грепни перед мержем.
+
+**Edge (`supabase/functions/kb-ai-extract/index.ts`, `verify_jwt=true`, service_role внутри):**
+- Ownership: `kb_folders.owner_id === userId` → иначе 403 `INVALID_FOLDER` (rule 97 flat `{error, code}`).
+- Картинки: клиент грузит скриншоты в `kb-attachments` → шлёт `storage://` refs; edge парсит (**own-namespace `{userId}/…` bind**, anti-SSRF) → `createSignedUrl` → `rewriteToDirect` → base64 (`_shared/ai-lovable.ts::inlineImageUrlToBase64`, SVG/size-guard). `storage://` **НИКОГДА** не уходит в AI текстом. Кап **≤10 изображений/вызов** (= единственная защита стоимости в P0; квота — P1, rule 99). Если все картинки отвалились и текста нет → 422 `IMAGES_UNREADABLE` (не звать AI вслепую).
+- Системный промпт — **verbatim `prompts.md §2` через `String.raw`** (LaTeX `\text`/`\frac`/`\sin` — литеральные бэкслеши; обычная строка превратила бы `\t`→TAB, `\f`→FF — класс бага rule 80) + схема/few-shot §3/§7 + опц. `exam_hint`/`topic_hint`.
+- `callLovableJson` (Gemini, temp 0.2) из **нового self-contained `_shared/ai-lovable.ts`** — `homework-api/ai_shared.ts` НЕ тронут (rule 10; repo-конвенция «mirror locally», `_shared` без cross-function deps). Validate `{tasks[]}` → **retry-once** → 502 `EXTRACT_FAILED`.
+- Нормализация: `answer=null` при `answer_confidence='low'` (anti-hallucination — неверный ответ отравляет авто-проверку ДЗ); `image_action='attach_original'` форсится (**P0 рисунки НЕ перерисовываются**); `kim_number` 1..30; enums.
+- Дедуп extract-time: `kb_normalize_fingerprint(p_text, p_answer, p_attachment_url)` (**3-арг**, attachment через `serializeAttachmentUrls` для parity с insert-триггером) → `kb_tasks` SELECT (mine+catalog) → `fingerprint_match` → карточка с баннером + снятой галочкой. Advisory (fail-open).
+- **Логи PII-free:** только counts/ids/status. AI-output-несущие пути (gateway error body, JSON-parse error, extraction-call) санитизированы (status/error_type, без preview ответа); `error.message` — только у DB/infra-ошибок (дедуп/unhandled), task text туда структурно не попадает.
+
+**Anti-leak:** рубрика/решение пишутся в личную папку (owner=tutor) — в Каталог не уходят (publish-триггеры рубрику не копируют; `solution` в Каталог уходит by design, spec §8 Q6). Edge возвращает только `{drafts, stats}`.
+
+**Клиент:** `src/lib/kbAiExtractApi.ts` (типы зеркалят edge-схему; `extractEdgeFunctionError` — никогда «non-2xx»). UI: `AiTaskLoaderPage` (роут, `React.lazy`) + `AiTaskLoader/{InputStage, DraftCard}`. `DraftCard` (`React.memo`): условие/ответ — сырой `$…$` (16px) + live `MathText`; `answer=null` → amber «впишите/поправьте»; рубрика «видно только вам»; рисунок «авторский — AI не меняет» + «Заменить вручную». Reuse `useImageUpload`/`ImageUploadField`/`uploadKBTaskImage`/`getKBImageSignedUrl`/`useFolderTree` (не изобретать). Commit — `insertTask` loop; `topic_suggestion → topic_id` **точным именем** (физ-таксономия `useTopics`, иначе null — темы НЕ создаём), subtopic bulk-fetch одним `kb_subtopics`-запросом; invalidate `['tutor','kb']`. Телеметрия `kbAiLoaderTelemetry.ts` (типизирована: `kb_ai_extract_run`/`kb_ai_tasks_saved`, PII-free counts/ids).
+
+**Deploy:** edge — Lovable (на синк main; `config.toml verify_jwt=true` + deploy workflow); фронт — `deploy-sokratai`.
+
+**При расширении (P1+, tasks.md TASK-10..15):** PDF-задачник/Excel/пакетный режим/правка-репликой/вход в конструктор ДЗ/квота; новый AI-путь с картинками → `inlineImageUrlToBase64` + bucket whitelist (`kb-attachments` уже в `HOMEWORK_AI_BUCKETS`); новый write — через `insertTask`, не новый site; AI-перерисовка рисунка (vector-first) — P2, отдельная spec.
+
 ## Спецификация
 - Tech spec: docs/delivery/features/kb/kb-tech-spec.md
 - Design ref: docs/discovery/product/kb/kb-design-ref.jsx

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Сократ — AI-загрузка задач (прототип)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --primary:#1E293B; --accent:#1B6B4A; --accent-d:#14543A; --accent-lt:#DCFCE7;
+    --warning:#B45309; --warning-bg:#FEF3C7; --warning-bd:#FCD34D;
+    --danger:#B91C1C; --danger-bg:#FEE2E2; --danger-bd:#FCA5A5;
+    --surface:#FFFFFF; --bg:#F1F5F9; --text1:#0F172A; --text2:#64748B; --text3:#94A3B8;
+    --border:#E2E8F0; --border-d:#CBD5E1; --folder:#5B5FC7; --folder-bg:#F3F2FB; --orange:#E8913A;
+    --radius:12px; --radius-sm:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family:'Golos Text',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg); color:var(--text1); line-height:1.5;
+    -webkit-font-smoothing:antialiased; padding-bottom:48px;
+  }
+  .ico{display:inline-block;vertical-align:-2px;}
+  .topbar{display:flex;align-items:center;gap:14px;height:56px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:30;}
+  .logo{display:flex;align-items:center;gap:8px;font-weight:600;font-size:18px;color:var(--primary);}
+  .logo .dot{width:10px;height:10px;border-radius:50%;background:var(--accent);}
+  .crumb{color:var(--text2);font-size:14px;display:flex;align-items:center;gap:8px;}
+  .crumb b{color:var(--text1);font-weight:500;}
+  .topbar .spacer{flex:1;}
+  .quota{font-size:13px;color:var(--text2);background:var(--bg);border:1px solid var(--border);padding:5px 10px;border-radius:999px;display:flex;align-items:center;gap:6px;}
+  .quota b{color:var(--accent);font-weight:600;}
+
+  .wrap{max-width:880px;margin:24px auto;padding:0 20px;}
+
+  /* ===== Home / Моя база ===== */
+  .home-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px;}
+  .home-head h1{margin:0;font-size:24px;font-weight:600;}
+  .home-head p{margin:5px 0 0;color:var(--text2);font-size:14px;}
+  .home-actions{display:flex;gap:10px;align-items:center;}
+  .entry-banner{display:flex;align-items:center;gap:13px;background:linear-gradient(0deg,var(--accent-lt),var(--accent-lt));border:1px solid #BBE9CF;border-radius:var(--radius);padding:14px 16px;margin-bottom:20px;}
+  .entry-banner .eb-ic{width:38px;height:38px;border-radius:10px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .entry-banner .eb-txt{flex:1;font-size:14px;color:var(--accent-d);}
+  .entry-banner .eb-txt b{font-weight:600;}
+  .entry-banner .eb-cta{background:var(--accent);color:#fff;border:none;font:inherit;font-size:13.5px;font-weight:600;padding:9px 14px;border-radius:var(--radius-sm);cursor:pointer;white-space:nowrap;display:inline-flex;align-items:center;gap:7px;}
+  .entry-banner .eb-cta:hover{background:var(--accent-d);}
+
+  .section-label{font-size:13px;color:var(--text2);font-weight:500;margin:0 0 10px;text-transform:none;}
+  .folder-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;margin-bottom:22px;}
+  .folder-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;transition:box-shadow .2s,border-color .2s;}
+  .folder-card:hover{box-shadow:0 4px 14px rgba(15,23,42,.07);border-color:var(--border-d);}
+  .folder-card .fic{width:38px;height:38px;border-radius:10px;background:var(--folder-bg);color:var(--folder);display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .folder-card .fname{font-weight:500;font-size:15px;}
+  .folder-card .fcount{font-size:12.5px;color:var(--text2);}
+  .folder-card.add{border-style:dashed;color:var(--text2);justify-content:center;}
+  .alt-entry{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text2);background:var(--surface);border:1px dashed var(--border-d);border-radius:var(--radius);padding:12px 14px;}
+  .alt-entry .mini-mock{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:12px;color:var(--text1);}
+  .alt-entry .ai-pill{display:inline-flex;align-items:center;gap:5px;background:var(--accent-lt);color:var(--accent-d);border:1px solid #BBE9CF;border-radius:6px;padding:3px 8px;font-size:12px;font-weight:500;}
+
+  .back{background:none;border:none;color:var(--text2);font:inherit;font-size:14px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:0;margin-bottom:14px;}
+  .back:hover{color:var(--accent);}
+
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+  .panel-head{padding:18px 22px;border-bottom:1px solid var(--border);}
+  .panel-head h1{margin:0;font-size:20px;font-weight:600;display:flex;align-items:center;gap:10px;}
+  .panel-head .ai-badge{color:var(--accent);}
+  .panel-head p{margin:6px 0 0;color:var(--text2);font-size:14px;}
+  .panel-body{padding:22px;}
+
+  .toolrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
+  .folder-chip{display:inline-flex;align-items:center;gap:8px;background:var(--folder-bg);color:var(--folder);border:1px solid #DDDcF5;border-radius:999px;padding:7px 12px;font-size:14px;font-weight:500;cursor:pointer;}
+  .folder-chip select{border:none;background:transparent;color:var(--folder);font:inherit;font-weight:500;cursor:pointer;outline:none;}
+  .tabs{display:inline-flex;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;gap:2px;}
+  .tab{display:inline-flex;align-items:center;gap:7px;border:none;background:transparent;color:var(--text2);font:inherit;font-size:14px;padding:7px 13px;border-radius:6px;cursor:pointer;}
+  .tab.active{background:var(--surface);color:var(--text1);font-weight:500;box-shadow:0 1px 2px rgba(15,23,42,.08);}
+
+  .dropzone{border:1.5px dashed var(--border-d);border-radius:var(--radius);background:#FBFCFE;padding:18px;}
+  textarea.material{width:100%;min-height:120px;border:none;background:transparent;resize:vertical;font:inherit;font-size:16px;color:var(--text1);outline:none;line-height:1.6;}
+  textarea.material::placeholder{color:var(--text3);}
+  .filechip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+  .filechip{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:5px 10px 5px 8px;font-size:13px;color:var(--text2);}
+  .filechip .thumb{width:22px;height:22px;border-radius:5px;background:#E7EEF9;color:#3F6CB0;display:flex;align-items:center;justify-content:center;}
+  .filechip .rm{cursor:pointer;color:var(--text3);display:flex;}
+  .photo-dz,.pdf-dz{display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:26px 16px;color:var(--text2);}
+  .photo-dz .big,.pdf-dz .big{width:48px;height:48px;border-radius:14px;background:var(--accent-lt);color:var(--accent-d);display:flex;align-items:center;justify-content:center;}
+  .pdf-dz .book-note{font-size:12.5px;color:var(--accent-d);background:var(--accent-lt);border-radius:999px;padding:4px 11px;}
+  .ghost-btn{background:var(--surface);border:1px solid var(--border-d);color:var(--text1);font:inherit;font-size:14px;padding:8px 14px;border-radius:var(--radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:7px;}
+  .ghost-btn:hover{background:var(--bg);}
+
+  .actions{display:flex;align-items:center;gap:12px;margin-top:16px;flex-wrap:wrap;}
+  .btn-primary{background:var(--accent);color:#fff;border:none;font:inherit;font-size:15px;font-weight:600;padding:11px 20px;border-radius:var(--radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:9px;}
+  .btn-primary:hover{background:var(--accent-d);}
+  .btn-primary:disabled{background:#A7B0BC;cursor:default;}
+  .link-btn{background:none;border:none;color:var(--accent);font:inherit;font-size:14px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px;}
+  .hint-text{color:var(--text3);font-size:13px;margin-left:auto;}
+
+  .proc{padding:8px 4px;}
+  .proc-step{display:flex;align-items:center;gap:12px;padding:10px 0;color:var(--text3);font-size:15px;transition:color .3s;}
+  .proc-step .mk{width:22px;height:22px;border-radius:50%;border:2px solid var(--border-d);display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .proc-step.run{color:var(--text1);}
+  .proc-step.run .mk{border-color:var(--accent);}
+  .proc-step.done{color:var(--text2);}
+  .proc-step.done .mk{background:var(--accent);border-color:var(--accent);color:#fff;}
+  .spinner{width:14px;height:14px;border:2px solid var(--accent);border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+  .summary .lead{font-size:15px;font-weight:600;}
+  .pill{font-size:12.5px;font-weight:500;padding:3px 10px;border-radius:999px;}
+  .pill.warn{background:var(--warning-bg);color:var(--warning);}
+  .pill.ok{background:var(--accent-lt);color:var(--accent-d);}
+  .pill.topic{background:var(--folder-bg);color:var(--folder);}
+  .legend{margin-left:auto;display:flex;gap:14px;font-size:12.5px;color:var(--text2);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .cdot{width:9px;height:9px;border-radius:50%;}
+  .cdot.hi{background:var(--accent);} .cdot.lo{background:var(--warning-bd);}
+
+  .card{border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-bottom:14px;background:var(--surface);transition:box-shadow .2s,border-color .2s,opacity .25s,transform .25s;}
+  .card.flash{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-lt);}
+  .card.dup{background:#FFFCFB;border-color:var(--warning-bd);}
+  .card.off{opacity:.5;}
+  .card.removing{opacity:0;transform:translateY(-6px);}
+  .card.saved{border-color:var(--accent);background:#FAFEFB;}
+  .card-top{display:flex;align-items:flex-start;gap:12px;}
+  .chk{appearance:none;-webkit-appearance:none;width:20px;height:20px;border:2px solid var(--border-d);border-radius:6px;cursor:pointer;flex:0 0 auto;margin-top:2px;position:relative;}
+  .chk:checked{background:var(--accent);border-color:var(--accent);}
+  .chk:checked::after{content:"";position:absolute;left:5px;top:1px;width:6px;height:11px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg);}
+  .card-main{flex:1;min-width:0;}
+  .chips{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:9px;}
+  .chip{font-size:12px;font-weight:500;padding:3px 9px;border-radius:6px;background:var(--bg);color:var(--text2);border:1px solid var(--border);display:inline-flex;align-items:center;gap:5px;}
+  .chip.exam{background:#EEF4FF;color:#3A5BB0;border-color:#DCE6FB;}
+  .chip.topic{background:var(--folder-bg);color:var(--folder);border-color:#E2E0F6;}
+  .chip.detailed{background:#F3F2FB;color:var(--folder);border-color:#E2E0F6;}
+  .chip.num{color:var(--text1);}
+  .conf{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500;}
+  .conf.hi{color:var(--accent-d);} .conf.lo{color:var(--warning);}
+
+  .qtext{font-size:15.5px;color:var(--text1);line-height:1.55;}
+  .qtext b{font-weight:600;}
+  .cond-row{display:flex;align-items:flex-start;gap:10px;}
+  .cond-row .qtext{flex:1;}
+  .cond-pencil{margin-left:0;flex:0 0 auto;}
+  .math{white-space:nowrap;font-weight:500;}
+  .cond-editor{border:1px solid var(--accent);border-radius:var(--radius-sm);padding:11px;background:#FBFEFC;}
+  .cond-src{width:100%;min-height:66px;border:1px solid var(--border-d);border-radius:7px;padding:8px 10px;font-size:15px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;outline:none;line-height:1.5;}
+  .cond-src:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-lt);}
+  .cond-hint{font-size:12px;color:var(--text2);margin:7px 0;display:flex;align-items:center;gap:6px;}
+  .cond-preview{font-size:15.5px;color:var(--text1);background:var(--surface);border:1px dashed var(--border-d);border-radius:7px;padding:8px 11px;}
+  .cond-preview .pl{font-size:11px;color:var(--text3);display:block;margin-bottom:3px;}
+  .cond-actions{display:flex;gap:8px;margin-top:9px;}
+  .cond-actions button{font:inherit;font-size:13px;border-radius:7px;padding:7px 13px;cursor:pointer;border:1px solid var(--border-d);background:#fff;color:var(--text1);}
+  .mini-save{background:var(--accent)!important;color:#fff!important;border-color:var(--accent)!important;}
+  .figure-row{display:flex;gap:12px;align-items:center;margin-top:11px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 11px;}
+  .figure-thumb{width:66px;height:48px;border-radius:6px;background:#E7EEF9;color:#3F6CB0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:9px;flex:0 0 auto;text-align:center;}
+  .figure-meta{display:flex;flex-direction:column;gap:6px;min-width:0;}
+  .figure-badge{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--accent-d);font-weight:500;}
+  .figure-replace{align-self:flex-start;background:none;border:1px solid var(--border-d);border-radius:6px;color:var(--text2);font:inherit;font-size:12px;padding:4px 9px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;}
+  .figure-replace:hover{background:#fff;color:var(--text1);}
+  .formula{margin-top:10px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 12px;font-size:16px;color:var(--primary);display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .formula .fx i{font-style:italic;}
+  .latex-toggle{background:none;border:1px solid var(--border-d);border-radius:6px;color:var(--text2);font-size:11px;padding:3px 7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-family:ui-monospace,Menlo,Consolas,monospace;flex:0 0 auto;}
+  .latex-src{display:none;margin-top:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;background:#0F172A;color:#CBD5E1;border-radius:var(--radius-sm);padding:8px 11px;overflow-x:auto;}
+
+  .ansrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;}
+  .ans-label{font-size:13px;color:var(--text2);font-weight:500;}
+  .ans-field{min-width:90px;border:1px solid var(--border-d);border-radius:7px;padding:6px 11px;font-size:15px;font-weight:600;color:var(--text1);background:var(--surface);outline:none;}
+  .ans-field:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-lt);}
+  .ans-field.empty{min-width:140px;}
+  .ans-flag{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;padding:4px 9px;border-radius:7px;}
+  .ans-flag.lo{background:var(--warning-bg);color:var(--warning);}
+  .ans-flag.hi{background:var(--accent-lt);color:var(--accent-d);}
+  .edit-pencil{margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;}
+  .edit-pencil:hover{color:var(--accent);}
+
+  .rubric{margin-top:11px;background:#F8F8FD;border:1px dashed #D9D7F0;border-radius:var(--radius-sm);padding:9px 12px;font-size:13px;color:#4B4886;display:flex;gap:9px;align-items:flex-start;}
+  .rubric .lk{color:var(--folder);flex:0 0 auto;margin-top:1px;}
+  .rubric .only{font-weight:600;}
+
+  .dup-banner{margin-top:12px;background:var(--warning-bg);border:1px solid var(--warning-bd);border-radius:var(--radius-sm);padding:10px 12px;display:flex;align-items:center;gap:10px;font-size:13.5px;color:var(--warning);flex-wrap:wrap;}
+  .dup-banner b{font-weight:600;}
+  .dup-actions{margin-left:auto;display:flex;gap:8px;}
+  .mini-btn{font:inherit;font-size:12.5px;border-radius:6px;padding:5px 10px;cursor:pointer;border:1px solid var(--warning-bd);background:#fff;color:var(--warning);}
+  .mini-btn.solid{background:var(--warning);color:#fff;border-color:var(--warning);}
+
+  .chatbar{margin-top:18px;border-top:1px solid var(--border);padding-top:16px;}
+  .chat-hint{font-size:13px;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
+  .chat-hint .ai{color:var(--accent);}
+  .sugg{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;}
+  .sugg button{font:inherit;font-size:13px;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:999px;padding:7px 13px;cursor:pointer;}
+  .sugg button:hover{background:#E9EEF4;border-color:var(--border-d);}
+  .chat-input{display:flex;gap:10px;align-items:center;}
+  .chat-input input{flex:1;border:1px solid var(--border-d);border-radius:var(--radius-sm);padding:11px 14px;font:inherit;font-size:16px;outline:none;}
+  .chat-input input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-lt);}
+  .send-btn{background:var(--primary);color:#fff;border:none;border-radius:var(--radius-sm);width:44px;height:44px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+
+  .savebar{position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--border);margin:18px -22px -22px;padding:16px 22px;display:flex;align-items:center;gap:14px;}
+  .savebar .count{font-size:14px;color:var(--text2);}
+  .savebar .count b{color:var(--text1);font-weight:600;}
+  .savebar .spacer{flex:1;}
+
+  .toast-wrap{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;display:flex;flex-direction:column;gap:10px;align-items:center;}
+  .toast{background:var(--primary);color:#fff;border-radius:var(--radius);padding:13px 18px;font-size:14px;display:flex;align-items:center;gap:11px;box-shadow:0 10px 30px rgba(15,23,42,.25);opacity:0;transform:translateY(10px);transition:.3s;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast .ic{color:#86EFAC;display:flex;}
+
+  .saved-state{text-align:center;padding:36px 20px;}
+  .saved-state .big{width:64px;height:64px;border-radius:50%;background:var(--accent-lt);color:var(--accent-d);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;}
+  .saved-state h2{margin:0 0 6px;font-size:19px;font-weight:600;}
+  .saved-state p{margin:0 0 20px;color:var(--text2);font-size:14.5px;}
+  .saved-state .row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;}
+
+  .footnote{max-width:880px;margin:14px auto 0;padding:0 20px;color:var(--text3);font-size:12.5px;text-align:center;}
+  @media(max-width:640px){
+    .legend{display:none;} .hint-text{display:none;}
+    .wrap{margin:14px auto;} .panel-body{padding:16px;}
+    .savebar{margin:16px -16px -16px;padding:14px 16px;}
+    .home-actions{width:100%;} .home-actions .btn-primary{flex:1;justify-content:center;}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo"><span class="dot"></span>Сократ</div>
+  <div class="crumb" id="crumb"></div>
+  <div class="spacer"></div>
+  <div class="quota" title="Концепт квоты — открытый вопрос в спецификации">AI-загрузок сегодня: <b>3</b>&nbsp;/&nbsp;20</div>
+</div>
+
+<div class="wrap" id="app"></div>
+<div class="footnote">Интерактивный прототип · данные демонстрационные · бренд и флоу — SokratAI</div>
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+const SVG=(p,s=18,w=2)=>`<svg class="ico" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const I={
+  spark:'<path d="M12 3l1.7 4.8L18.5 9 13.7 10.7 12 15l-1.7-4.3L5.5 9l4.8-1.2z"/><path d="M19 14l.7 2 .8.6-.8.6L19 20l-.7-1.8-.8-.6.8-.6z"/>',
+  check:'<polyline points="20 6 9 17 4 12"/>',
+  x:'<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  alert:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.6-3.6a2 2 0 0 0-2.8 0L6 21"/>',
+  file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+  text:'<line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/>',
+  lock:'<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  pencil:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  send:'<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+  refresh:'<polyline points="23 4 23 10 17 10"/><path d="M20.5 15a9 9 0 1 1-2.1-9.4L23 10"/>',
+  folder:'<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  tag:'<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  back:'<polyline points="15 18 9 12 15 6"/>',
+  plus:'<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'
+};
+
+const app=document.getElementById('app');
+const crumb=document.getElementById('crumb');
+let stage=null;            // current #stage (loader)
+const FOLDERS=['Механика','Кинематика','Динамика','+ Новая папка…'];
+const HOME_FOLDERS=[['Механика',32],['Кинематика',18],['Динамика',24],['Электричество',28],['Оптика',12],['Термодинамика',10]];
+let folder='Механика';
+let inputTab='text';
+let tasks=[];
+
+function toast(msg){
+  const t=document.createElement('div');t.className='toast';
+  t.innerHTML=`<span class="ic">${SVG(I.check,18)}</span><span>${msg}</span>`;
+  document.getElementById('toasts').appendChild(t);
+  requestAnimationFrame(()=>t.classList.add('show'));
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),320);},4200);
+}
+function plural(n,one,few,many){const m10=n%10,m100=n%100;if(m10===1&&m100!==11)return one;if(m10>=2&&m10<=4&&(m100<10||m100>=20))return few;return many;}
+
+/* ===================== HOME (Моя база) ===================== */
+function renderHome(){
+  crumb.innerHTML='<b>Моя база</b>';
+  app.innerHTML=`
+    <div class="home-head">
+      <div><h1>Моя база</h1><p>124 задачи в 6 папках</p></div>
+      <div class="home-actions">
+        <button class="ghost-btn">${SVG(I.plus,16)}Создать задачу</button>
+        <button class="btn-primary" data-open>${SVG(I.spark,18)}AI-загрузка задач</button>
+      </div>
+    </div>
+
+    <div class="entry-banner">
+      <div class="eb-ic">${SVG(I.spark,20)}</div>
+      <div class="eb-txt"><b>Новое.</b> Загрузите PDF-задачник целиком — Сократ разрежет его на задачи, распознает условия и ответы и сам разложит по темам. Вы только проверяете.</div>
+      <button class="eb-cta" data-open>${SVG(I.upload,15)}Загрузить задачник</button>
+    </div>
+
+    <p class="section-label">Папки</p>
+    <div class="folder-grid">
+      ${HOME_FOLDERS.map(([n,c])=>`<div class="folder-card" data-folder="${n}">
+        <div class="fic">${SVG(I.folder,20)}</div>
+        <div><div class="fname">${n}</div><div class="fcount">${c} ${plural(c,'задача','задачи','задач')}</div></div>
+      </div>`).join('')}
+      <div class="folder-card add" data-open>${SVG(I.plus,18)}&nbsp;Папка через AI-загрузку</div>
+    </div>
+
+    <div class="alt-entry">
+      ${SVG(I.text,16)}
+      <span>Вторая точка входа — в <b>конструкторе ДЗ</b>: рядом с кнопкой</span>
+      <span class="mini-mock">${SVG(I.plus,12)} из базы</span>
+      <span>появится</span>
+      <span class="ai-pill">${SVG(I.spark,12)} AI-загрузка</span>
+    </div>`;
+
+  app.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>openLoader());
+  app.querySelectorAll('[data-folder]').forEach(b=>b.onclick=()=>{folder=b.dataset.folder;openLoader();});
+}
+
+/* ===================== LOADER shell ===================== */
+function openLoader(){
+  tasks=[];inputTab='text';
+  crumb.innerHTML='Моя база <span style="color:var(--text3)">/</span> <b>AI-загрузка задач</b>';
+  app.innerHTML=`
+    <button class="back" id="back">${SVG(I.back,16)}Моя база</button>
+    <div class="panel">
+      <div class="panel-head">
+        <h1><span class="ai-badge">${SVG(I.spark,22)}</span>AI-загрузка задач</h1>
+        <p>Бросьте сюда материал — текст, фото страницы, PDF-задачник или таблицу от коллеги. Я распознаю условия и ответы, разложу по темам и подготовлю готовые задачи. Вы только проверяете.</p>
+      </div>
+      <div class="panel-body" id="stage"></div>
+    </div>`;
+  document.getElementById('back').onclick=renderHome;
+  stage=document.getElementById('stage');
+  renderInput();
+}
+
+function folderOptions(){return FOLDERS.map(f=>`<option ${f===folder?'selected':''}>${f}</option>`).join('');}
+
+function renderInput(){
+  stage.innerHTML=`
+    <div class="toolrow">
+      <span class="folder-chip">${SVG(I.folder,16)}<select id="fsel" aria-label="Папка назначения">${folderOptions()}</select></span>
+      <div class="tabs" role="tablist">
+        <button class="tab ${inputTab==='text'?'active':''}" data-tab="text">${SVG(I.text,16)}Текст</button>
+        <button class="tab ${inputTab==='photo'?'active':''}" data-tab="photo">${SVG(I.image,16)}Фото</button>
+        <button class="tab ${inputTab==='pdf'?'active':''}" data-tab="pdf">${SVG(I.file,16)}PDF-задачник</button>
+      </div>
+    </div>
+    <div class="dropzone">
+      <textarea class="material" id="material" placeholder="Вставьте условия задач, ответы, критерии… Можно вперемешку — я разберу.&#10;Например: «ЕГЭ-2026, вариант 3, задачи 1, 2 и 24. Ответы в конце страницы.»" style="display:${inputTab==='text'?'block':'none'}"></textarea>
+      <div class="photo-dz" style="display:${inputTab==='photo'?'flex':'none'}">
+        <div class="big">${SVG(I.image,24)}</div>
+        <div>Перетащите фото или <b>вставьте скриншоты из буфера — Ctrl+V</b><br><span style="color:var(--text3)">до 10 снимков за раз · условие, ответы, критерии</span></div>
+        <button class="ghost-btn" id="addphoto">${SVG(I.upload,16)}Выбрать фото</button>
+      </div>
+      <div class="pdf-dz" style="display:${inputTab==='pdf'?'flex':'none'}">
+        <div class="big">${SVG(I.file,24)}</div>
+        <div>Перетащите <b>PDF-задачник целиком</b><br><span style="color:var(--text3)">разрежу на задачи и разложу по темам — постранично</span></div>
+        <span class="book-note">${SVG(I.spark,13)} как просил Александр: задачник → задачи → темы</span>
+        <button class="ghost-btn" id="addpdf">${SVG(I.upload,16)}Выбрать PDF-задачник</button>
+      </div>
+      <div class="filechip-row" id="filechips"></div>
+    </div>
+    <div class="actions">
+      <button class="btn-primary" id="recognize" disabled>${SVG(I.spark,18)}Распознать задачи</button>
+      <button class="link-btn" id="loadex">${SVG(I.upload,15)}Загрузить пример</button>
+      <span class="hint-text">Ничего не запишется в базу без вашего подтверждения</span>
+    </div>`;
+
+  document.getElementById('fsel').onchange=e=>{folder=e.target.value;};
+  stage.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{inputTab=b.dataset.tab;renderInput();});
+  const mat=document.getElementById('material');
+  const rec=document.getElementById('recognize');
+  let files=[];
+  function refresh(){
+    const has=(inputTab==='text'&&mat&&mat.value.trim().length>0)||files.length>0;
+    rec.disabled=!has;
+    const fc=document.getElementById('filechips');
+    fc.innerHTML=files.map((f,i)=>`<span class="filechip"><span class="thumb">${SVG(f.t==='pdf'?I.file:I.image,13)}</span>${f.n}<span class="rm" data-i="${i}">${SVG(I.x,13)}</span></span>`).join('');
+    fc.querySelectorAll('.rm').forEach(r=>r.onclick=()=>{files.splice(+r.dataset.i,1);refresh();});
+  }
+  if(mat)mat.oninput=refresh;
+  const ap=document.getElementById('addphoto');if(ap)ap.onclick=()=>{files.push({t:'img',n:'IMG_'+(4821+files.length)+'.jpg'});refresh();};
+  const apd=document.getElementById('addpdf');if(apd)apd.onclick=()=>{files.push({t:'pdf',n:'Демидова_ЕГЭ_2026.pdf'});refresh();toast('Задачник прикреплён — нажмите «Распознать задачи»');};
+  document.getElementById('loadex').onclick=()=>{
+    inputTab='text';renderInput();
+    const m=document.getElementById('material');
+    m.value='Сборник Демидовой, стр. 42 (ЕГЭ-2026, вариант 3):\n1. Тело движется равноускоренно из состояния со скоростью v0 = 2 м/с с ускорением a = 0,5 м/с². Какова скорость через t = 6 с?\n2. Камень свободно падает с высоты h = 20 м. Найдите время падения. g = 10 м/с².\n24. Брусок скользит по наклонной плоскости (угол α, коэффициент трения μ). Получите выражение для ускорения.';
+    m.dispatchEvent(new Event('input'));m.focus();
+  };
+  rec.onclick=renderProcessing;
+}
+
+function renderProcessing(){
+  const steps=['Распознаю условия и формулы (LaTeX)…','Извлекаю ответы и критерии…','Раскладываю по темам и проверяю дубликаты…'];
+  stage.innerHTML=`<div class="proc" id="proc">${steps.map((s,i)=>`
+    <div class="proc-step" id="ps${i}"><span class="mk" id="mk${i}"></span><span>${s}</span></div>`).join('')}</div>`;
+  let i=0;
+  const run=()=>{
+    if(i>0){const p=document.getElementById('ps'+(i-1));p.className='proc-step done';document.getElementById('mk'+(i-1)).innerHTML=SVG(I.check,13);}
+    if(i<steps.length){
+      const c=document.getElementById('ps'+i);c.className='proc-step run';
+      document.getElementById('mk'+i).innerHTML='<span class="spinner"></span>';
+      i++;setTimeout(run,820);
+    } else { tasks=seedTasks(); setTimeout(renderResults,250); }
+  };
+  setTimeout(run,400);
+}
+
+function seedTasks(){
+  return [
+    {id:1,kim:'1',exam:'ЕГЭ',topic:'Кинематика',format:'Краткий ответ',kind:'short',selected:true,dup:false,
+     src:'Тело движется равноускоренно из состояния со скоростью $v_0 = 2\\ \\text{м/с}$ с ускорением $a = 0{,}5\\ \\text{м/с}^2$. Какова скорость тела через $t = 6\\ \\text{с}$?',
+     formula:'v = v₀ + a·t = 2 + 0,5·6 = <i>5</i>', latex:'v = v_0 + a\\,t = 2 + 0{,}5\\cdot 6 = 5', answer:'5 м/с',answerConf:'hi'},
+    {id:2,kim:'1',exam:'ЕГЭ',topic:'Кинематика',format:'Краткий ответ',kind:'short',selected:true,dup:false,
+     src:'Камень свободно падает с высоты $h = 20\\ \\text{м}$. Найдите время падения. ($g = 10\\ \\text{м/с}^2$)',
+     formula:'t = √(2h / g) = √(2·20 / 10) = √4', latex:'t = \\sqrt{2h/g} = \\sqrt{4}', answer:'',answerConf:'lo'},
+    {id:3,kim:'24',exam:'ЕГЭ',topic:'Динамика',format:'Развёрнутое решение',kind:'detailed',selected:true,dup:false,figure:true,
+     src:'Брусок скользит по наклонной плоскости с углом наклона $\\alpha$ и коэффициентом трения $\\mu$. Получите выражение для ускорения бруска.',
+     formula:'a = g·(sin α − μ·cos α)', latex:'a = g(\\sin\\alpha - \\mu\\cos\\alpha)', answer:'a = g(sin α − μ·cos α)',answerConf:'hi',
+     rubric:'1 балл — II закон Ньютона в проекциях; 1 балл — учтена сила трения; 1 балл — верный итог.'},
+    {id:4,kim:'1',exam:'ЕГЭ',topic:'Кинематика',format:'Краткий ответ',kind:'short',selected:false,dup:true,dupFolder:'Кинематика',
+     src:'Автомобиль из состояния покоя за $t = 10\\ \\text{с}$ прошёл путь $S = 100\\ \\text{м}$. Найдите ускорение.',
+     formula:'a = 2S / t² = 2·100 / 100 = <i>2</i>', latex:'a = 2S/t^2 = 2', answer:'2 м/с²',answerConf:'hi'}
+  ];
+}
+
+function confBadge(c){return c==='hi'
+  ?`<span class="conf hi">${SVG(I.check,14)}уверенно</span>`
+  :`<span class="conf lo">${SVG(I.alert,14)}проверьте</span>`;}
+
+function tex2uni(e){return e
+  .replace(/\\text\{([^}]*)\}/g,'$1')
+  .replace(/\\sqrt\{([^}]*)\}/g,'√($1)').replace(/\\sqrt/g,'√')
+  .replace(/\\sin/g,'sin').replace(/\\cos/g,'cos').replace(/\\tan/g,'tan')
+  .replace(/\\cdot/g,'·').replace(/\\times/g,'×')
+  .replace(/\\alpha/g,'α').replace(/\\beta/g,'β').replace(/\\mu/g,'μ').replace(/\\pi/g,'π').replace(/\\Delta/g,'Δ')
+  .replace(/\\,/g,' ').replace(/\\ /g,' ')
+  .replace(/\{,\}/g,',')
+  .replace(/\^2/g,'²').replace(/\^3/g,'³')
+  .replace(/_0/g,'₀').replace(/_x/g,'ₓ').replace(/_y/g,'ᵧ').replace(/_1/g,'₁').replace(/_2/g,'₂').replace(/_n/g,'ₙ')
+  .replace(/[{}]/g,'');}
+function prettyLatex(s){return (s||'').replace(/\$([^$]*)\$/g,(m,e)=>`<span class="math">${tex2uni(e)}</span>`);}
+
+function taskCard(t){
+  const ansBlock = t.answer
+    ? `<input class="ans-field" value="${t.answer.replace(/"/g,'&quot;')}" data-id="${t.id}" aria-label="Ответ"/>
+       <span class="ans-flag ${t.answerConf}">${t.answerConf==='hi'?SVG(I.check,13)+'распознан':SVG(I.alert,13)+'проверьте'}</span>`
+    : `<input class="ans-field empty" placeholder="ответ не распознан" data-id="${t.id}" aria-label="Ответ"/>
+       <span class="ans-flag lo">${SVG(I.alert,13)}впишите или поправьте репликой ниже</span>`;
+  return `<div class="card ${t.dup?'dup':''} ${t.selected?'':'off'}" id="card-${t.id}">
+    <div class="card-top">
+      <input type="checkbox" class="chk" ${t.selected?'checked':''} data-sel="${t.id}" aria-label="Добавить задачу ${t.id}"/>
+      <div class="card-main">
+        <div class="chips">
+          <span class="chip num">Задача ${t.id}</span>
+          <span class="chip exam">${t.exam} · №${t.kim}</span>
+          <span class="chip topic">${SVG(I.tag,12)}${t.topic}</span>
+          <span class="chip ${t.kind==='detailed'?'detailed':''}">${t.format}</span>
+          ${confBadge(t.answerConf)}
+        </div>
+        ${t.editingCond ? `
+        <div class="cond-editor">
+          <textarea class="cond-src" id="cs-${t.id}" data-prev="${t.id}" aria-label="LaTeX-исходник условия">${t.src}</textarea>
+          <div class="cond-hint">${SVG(I.spark,13)}Правьте условие прямо в LaTeX — формулы в $…$. Превью обновляется на лету.</div>
+          <div class="cond-preview" id="cp-${t.id}"><span class="pl">Превью:</span>${prettyLatex(t.src)}</div>
+          <div class="cond-actions"><button class="mini-save" data-condsave="${t.id}">Готово</button><button data-condcancel="${t.id}">Отмена</button></div>
+        </div>` : `
+        <div class="cond-row">
+          <div class="qtext" id="q-${t.id}">${prettyLatex(t.src)}</div>
+          <button class="edit-pencil cond-pencil" data-condedit="${t.id}">${SVG(I.pencil,14)}изменить</button>
+        </div>`}
+        <div class="formula">
+          <span class="fx">${tex2uni(t.latex)}</span>
+          <button class="latex-toggle" data-latex="${t.id}">fx LaTeX</button>
+        </div>
+        <div class="latex-src" id="latex-${t.id}">$${t.latex}$</div>
+        ${t.figure?`<div class="figure-row">
+          <div class="figure-thumb">${SVG(I.image,20)}<span>рисунок</span></div>
+          <div class="figure-meta">
+            <span class="figure-badge">${SVG(I.shield,13)}Авторский рисунок — AI не меняет, добавлен как есть</span>
+            <button class="figure-replace" data-replace="${t.id}">${SVG(I.image,13)}Заменить вручную</button>
+          </div>
+        </div>`:''}
+        <div class="ansrow">
+          <span class="ans-label">Ответ:</span>${ansBlock}
+          <button class="edit-pencil" data-focus="${t.id}">${SVG(I.pencil,14)}изменить</button>
+        </div>
+        ${t.rubric?`<div class="rubric"><span class="lk">${SVG(I.lock,15)}</span><span><span class="only">Критерии — видно только вам:</span> ${t.rubric} <span style="color:var(--text3)">(в Каталог не уходит)</span></span></div>`:''}
+        ${t.dup?`<div class="dup-banner">${SVG(I.alert,16)}<span><b>Похоже, уже есть</b> в папке «${t.dupFolder}». По умолчанию пропустим.</span>
+          <span class="dup-actions"><button class="mini-btn" data-skip="${t.id}">Пропустить</button><button class="mini-btn solid" data-keep="${t.id}">Добавить всё равно</button></span></div>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderResults(){
+  const found=tasks.length, dups=tasks.filter(t=>t.dup).length;
+  const topics=[...new Set(tasks.map(t=>t.topic))];
+  stage.innerHTML=`
+    <div class="summary">
+      <span class="lead">Найдено ${found} ${plural(found,'задача','задачи','задач')}</span>
+      <span class="pill topic">${SVG(I.tag,12)} разложено по темам: ${topics.join(', ')}</span>
+      ${dups?`<span class="pill warn">${dups} возможный дубликат</span>`:''}
+      <span class="pill ok">формулы в LaTeX</span>
+      <span class="legend"><span><span class="cdot hi"></span>уверенно</span><span><span class="cdot lo"></span>проверьте</span></span>
+    </div>
+    <div id="cards">${tasks.map(taskCard).join('')}</div>
+    <div class="chatbar">
+      <div class="chat-hint"><span class="ai">${SVG(I.spark,15)}</span>Поправьте репликой — как написали бы коллеге. Я применю к карточкам.</div>
+      <div class="chat-hint" style="margin-top:-4px;color:var(--accent-d);">${SVG(I.shield,14)}Рисунки из ваших материалов остаются авторскими — AI их не перерисовывает. Заменить можно вручную.</div>
+      <div class="sugg">
+        <button data-msg="ответ к №2 — 2 с">ответ к №2 — 2 с</button>
+        <button data-msg="убрать дубликат">убрать дубликат</button>
+        <button data-msg="тему №3 поменяй на Статика">тему №3 — Статика</button>
+        <button data-msg="источник ФИПИ всем">источник «ФИПИ» всем</button>
+      </div>
+      <div class="chat-input">
+        <input id="chatmsg" placeholder="Напишите правку…" aria-label="Правка"/>
+        <button class="send-btn" id="chatsend" aria-label="Отправить">${SVG(I.send,18)}</button>
+      </div>
+    </div>
+    <div class="savebar">
+      <span class="count">К сохранению: <b id="savecount">0</b> · папка «${folder}»</span>
+      <span class="spacer"></span>
+      <button class="link-btn" id="reset">${SVG(I.refresh,15)}Начать заново</button>
+      <button class="btn-primary" id="save">${SVG(I.check,18)}Сохранить в «Мою базу»</button>
+    </div>`;
+  wireResults();updateCount();
+}
+
+function wireResults(){
+  stage.querySelectorAll('[data-sel]').forEach(c=>c.onchange=()=>{
+    const t=tasks.find(x=>x.id==c.dataset.sel);t.selected=c.checked;
+    document.getElementById('card-'+t.id).classList.toggle('off',!t.selected);updateCount();
+  });
+  stage.querySelectorAll('.ans-field').forEach(f=>f.onchange=()=>{const t=tasks.find(x=>x.id==f.dataset.id);t.answer=f.value;});
+  stage.querySelectorAll('[data-latex]').forEach(b=>b.onclick=()=>{const el=document.getElementById('latex-'+b.dataset.latex);el.style.display=el.style.display==='block'?'none':'block';});
+  stage.querySelectorAll('[data-focus]').forEach(b=>b.onclick=()=>{const f=stage.querySelector('.ans-field[data-id="'+b.dataset.focus+'"]');f.focus();f.select&&f.select();});
+  stage.querySelectorAll('[data-skip]').forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id==b.dataset.skip);t.selected=false;syncCard(t);});
+  stage.querySelectorAll('[data-keep]').forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id==b.dataset.keep);t.selected=true;t.dup=false;renderResults();});
+  stage.querySelectorAll('.sugg button').forEach(b=>b.onclick=()=>applyCorrection(b.dataset.msg));
+  stage.querySelectorAll('[data-condedit]').forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id==b.dataset.condedit);t.editingCond=true;renderResults();const ta=document.getElementById('cs-'+t.id);if(ta){ta.focus();}});
+  stage.querySelectorAll('[data-condcancel]').forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id==b.dataset.condcancel);t.editingCond=false;renderResults();});
+  stage.querySelectorAll('[data-condsave]').forEach(b=>b.onclick=()=>{const t=tasks.find(x=>x.id==b.dataset.condsave);const ta=document.getElementById('cs-'+t.id);if(ta)t.src=ta.value;t.editingCond=false;renderResults();toast('Условие задачи №'+t.id+' обновлено');});
+  stage.querySelectorAll('.cond-src').forEach(ta=>ta.oninput=()=>{const p=document.getElementById('cp-'+ta.dataset.prev);if(p)p.innerHTML='<span class="pl">Превью:</span>'+prettyLatex(ta.value);});
+  stage.querySelectorAll('[data-replace]').forEach(b=>b.onclick=()=>toast('Прикрепите своё фото — заменю распознанный рисунок. Авторский оригинал я не редактирую.'));
+  document.getElementById('chatsend').onclick=sendChat;
+  document.getElementById('chatmsg').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+  document.getElementById('save').onclick=doSave;
+  document.getElementById('reset').onclick=renderInput;
+}
+function syncCard(t){const c=document.getElementById('card-'+t.id);if(c){c.classList.toggle('off',!t.selected);const chk=c.querySelector('.chk');if(chk)chk.checked=t.selected;}updateCount();}
+function sendChat(){const i=document.getElementById('chatmsg');if(i.value.trim()){applyCorrection(i.value.trim());i.value='';}}
+
+function applyCorrection(msg){
+  const m=msg.toLowerCase();
+  if(m.includes('дубликат')||m.includes('убери')||m.includes('убрать')){
+    const t=tasks.find(x=>x.dup);
+    if(t){const c=document.getElementById('card-'+t.id);c.classList.add('removing');
+      setTimeout(()=>{tasks=tasks.filter(x=>x.id!==t.id);renderResults();toast('Дубликат убран из набора');},260);}
+    return;
+  }
+  const tm=m.match(/тем[уы]\s*№?\s*(\d+).*?(?:—|-|:|на)\s*([a-zа-яё ]+)$/i);
+  if(tm){const id=+tm[1],val=tm[2].trim().replace(/^на\s+/,'');const t=tasks.find(x=>x.id===id);
+    if(t){t.topic=val.charAt(0).toUpperCase()+val.slice(1);renderResults();
+      const c=document.getElementById('card-'+id);if(c){c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),1200);}
+      toast('Тема задачи №'+id+' изменена: '+t.topic);return;}}
+  if(m.includes('источник')||m.includes('фипи')){tasks.forEach(t=>t.source='ФИПИ');toast('Источник «ФИПИ» проставлен всем задачам');flashAll();return;}
+  const mm=m.match(/№?\s*(\d+).*?(?:—|-|:)\s*(.+)$/);
+  if(mm){const id=+mm[1];let val=mm[2].trim().replace(/\.$/,'');const t=tasks.find(x=>x.id===id);
+    if(t){t.answer=val;t.answerConf='hi';renderResults();
+      const c=document.getElementById('card-'+id);if(c){c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),1200);}
+      toast('Ответ к №'+id+' обновлён: '+val);return;}}
+  toast('Готово — применил правку');
+}
+function flashAll(){stage.querySelectorAll('.card').forEach(c=>{c.classList.add('flash');setTimeout(()=>c.classList.remove('flash'),900);});}
+
+function updateCount(){const n=tasks.filter(t=>t.selected).length;const el=document.getElementById('savecount');if(el)el.textContent=n;
+  const s=document.getElementById('save');if(s){s.disabled=n===0;s.innerHTML=SVG(I.check,18)+'Сохранить '+n+' '+plural(n,'задачу','задачи','задач');}}
+
+function doSave(){
+  const sel=tasks.filter(t=>t.selected),skipped=tasks.filter(t=>t.dup&&!t.selected).length;
+  const topics=[...new Set(sel.map(t=>t.topic))];
+  stage.querySelectorAll('.card').forEach(c=>c.classList.add('saved'));
+  setTimeout(()=>{
+    stage.innerHTML=`<div class="saved-state">
+      <div class="big">${SVG(I.check,30)}</div>
+      <h2>Добавлено ${sel.length} ${plural(sel.length,'задача','задачи','задач')} в «${folder}»</h2>
+      <p>${skipped?skipped+' пропущена как дубликат. ':''}Разложены по темам: ${topics.join(', ')}. Готовы для конструктора ДЗ и пробников.</p>
+      <div class="row">
+        <button class="ghost-btn" id="tohome">${SVG(I.folder,16)}В «Мою базу»</button>
+        <button class="btn-primary" id="again">${SVG(I.spark,18)}Загрузить ещё</button>
+      </div>
+    </div>`;
+    document.getElementById('again').onclick=openLoader;
+    document.getElementById('tohome').onclick=renderHome;
+    toast('Добавлено '+sel.length+' в «'+folder+'»'+(skipped?' · '+skipped+' дубликат пропущен':''));
+  },420);
+}
+
+renderHome();
+</script>
+</body>
+</html>

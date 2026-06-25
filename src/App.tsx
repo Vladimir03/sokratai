@@ -92,6 +92,7 @@ const RedirectTutorAssistant = lazy(() => import("./pages/RedirectTutorAssistant
 const KnowledgeBasePage = lazy(() => import("./pages/tutor/knowledge/KnowledgeBasePage"));
 const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopicPage"));
 const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
+const AiTaskLoaderPage = lazy(() => import("./pages/tutor/knowledge/AiTaskLoaderPage"));
 const InvitePage = lazy(() => import("./pages/InvitePage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 const InstallApp = lazy(() => import("./pages/InstallApp"));
@@ -430,6 +431,7 @@ const App = () => (
               <Route path="mock-exams" element={<TutorMockExams />} />
               <Route path="assistant" element={<RedirectTutorAssistant />} />
               <Route path="knowledge/topic/:topicId" element={<CatalogTopicPage />} />
+              <Route path="knowledge/ai-loader" element={<AiTaskLoaderPage />} />
               <Route path="knowledge/folder/:folderId" element={<FolderPage />} />
               <Route path="knowledge" element={<KnowledgeBasePage />} />
             </Route>

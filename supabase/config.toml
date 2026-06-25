@@ -27,6 +27,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.invite-preview]
     verify_jwt = false
+  [functions.kb-ai-extract]
+    verify_jwt = true
   [functions.lesson-auto-debit]
     verify_jwt = false
   [functions.lesson-materials-api]
