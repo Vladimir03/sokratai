@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ImagePlus, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, ImagePlus, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MathText } from '@/components/kb/ui/MathText';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
@@ -80,7 +80,7 @@ function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, 
     try {
       const res = await uploadKBTaskImage(file);
       onChange(index, { attachment_ref: res.storageRef });
-      toast.success('Рисунок заменён');
+      toast.success('Рисунок прикреплён');
     } catch {
       toast.error('Не удалось загрузить рисунок');
     } finally {
@@ -196,9 +196,9 @@ function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, 
         </div>
       ) : null}
 
-      {/* Рисунок — оригинал, AI не меняет */}
-      {draft.attachment_ref ? (
-        <div className="mt-3">
+      {/* Рисунок — тутор управляет независимо от AI: добавить / заменить / убрать */}
+      <div className="mt-3">
+        {draft.attachment_ref ? (
           <div className="flex items-center gap-3">
             {signedUrl ? (
               <img
@@ -216,30 +216,62 @@ function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, 
               <span className="text-[11px] font-medium text-slate-500">
                 Авторский рисунок — AI не меняет
               </span>
-              <button
-                type="button"
-                disabled={disabled || replacing}
-                onClick={() => fileInputRef.current?.click()}
-                className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-socrat-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-socrat-primary/40 hover:text-socrat-primary disabled:opacity-50 [touch-action:manipulation]"
-              >
-                {replacing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                Заменить вручную
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={disabled || replacing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-socrat-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-socrat-primary/40 hover:text-socrat-primary disabled:opacity-50 [touch-action:manipulation]"
+                >
+                  {replacing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  Заменить
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled || replacing}
+                  onClick={() => onChange(index, { attachment_ref: null })}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 [touch-action:manipulation]"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  Убрать
+                </button>
+              </div>
             </div>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleReplaceImage}
-            className="hidden"
-          />
-        </div>
-      ) : null}
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {draft.needs_review_fields.includes('image') ? (
+              <span className="text-[11px] text-amber-700">
+                AI не уверен, нужен ли рисунок — добавьте, если в задаче есть график или схема.
+              </span>
+            ) : null}
+            <button
+              type="button"
+              disabled={disabled || replacing}
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex w-fit items-center gap-1.5 rounded-lg border border-dashed border-socrat-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-socrat-primary/40 hover:text-socrat-primary disabled:opacity-50 [touch-action:manipulation]"
+            >
+              {replacing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Добавить рисунок
+            </button>
+          </div>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleReplaceImage}
+          className="hidden"
+        />
+      </div>
 
       {/* notes */}
       {draft.notes ? (

@@ -69,6 +69,9 @@ const KB_EXTRACT_SYSTEM_PROMPT = String.raw`Ты — ассистент репе
    Пиши ЧИСТЫЙ LaTeX: индексы $S_x$ (не «Sx»), степени $t^2$, $\sqrt{}$, $\frac{}{}$,
    $\cdot$, $\alpha$, $\mu$, $\pi$. Единицы — внутри $…$ через \text{} или как обычный
    текст после формулы. Не оставляй битых конструкций вроде «$1$S» или «3t²($S$».
+   Таблицы с данными оформляй LaTeX-таблицей прямо в тексте (окружение array для
+   KaTeX, например $$\begin{array}{cc} t,\ \text{с} & v,\ \text{м/с} \\ 0 & 0 \\ 2 & 4 \end{array}$$),
+   а не прикрепляй таблицу картинкой.
 3. Ответ (поле answer): впиши ТОЛЬКО если он явно есть в материале или однозначно
    следует из условия и ты уверен. Если ответа нет или есть сомнение —
    answer = null, answer_confidence = "low". НИКОГДА не выдумывай число.
@@ -80,10 +83,16 @@ const KB_EXTRACT_SYSTEM_PROMPT = String.raw`Ты — ассистент репе
    primary_score (если указан), answer_format, и предложи тему/подтему
    (topic_suggestion/subtopic_suggestion) по содержанию. Это подсказки — репетитор
    подтвердит.
-7. Рисунки: если к задаче относится приложенное изображение, укажи его номер в
-   image_index (0-based по порядку приложенных файлов). НЕ описывай рисунок текстом
-   вместо самого рисунка и НЕ предлагай его перерисовать. image_action = "attach_original".
-   Если рисунок есть, но нечитаем — image_index укажи, в notes пометь «рисунок нечитаем».
+7. Рисунки: укажи image_index (0-based по порядку приложенных файлов) ТОЛЬКО если
+   выполнены ОБА условия: (а) это изображение содержит РОВНО ОДНУ задачу, и (б) в
+   задаче есть существенный рисунок (график, схема, чертёж, электрическая цепь,
+   иллюстрация), без которого её не решить. Если изображение содержит НЕСКОЛЬКО
+   задач — НЕ прикрепляй его ни к одной (image_index = null, только распознанный текст).
+   Если в задаче нет рисунка (чисто текстовая задача) — image_index = null. Если
+   сомневаешься, нужен ли рисунок — image_index = null и добавь "image" в
+   needs_review_fields. НЕ описывай рисунок текстом вместо самого рисунка и НЕ
+   перерисовывай его; image_action = "attach_original". НИКОГДА не считай рисунком
+   бланк ответов, номер задания, рамку или служебные пометки.
 8. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
 9. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
 
@@ -588,6 +597,23 @@ async function handleExtract(
   for (const raw of rawTasks) {
     const norm = normalizeTask(raw, orderedRefs);
     if (norm) drafts.push(norm);
+  }
+
+  // Backstop (owner rule): if an input image maps to MORE than one task, it
+  // contains multiple tasks → don't attach it to any (multi-task screenshot =
+  // text only). The prompt already instructs this; this enforces it if the AI
+  // over-attached. P0 can't crop a single figure out of a multi-task image.
+  const imageIndexUsage = new Map<number, number>();
+  for (const d of drafts) {
+    if (d.image_index !== null) {
+      imageIndexUsage.set(d.image_index, (imageIndexUsage.get(d.image_index) ?? 0) + 1);
+    }
+  }
+  for (const d of drafts) {
+    if (d.image_index !== null && (imageIndexUsage.get(d.image_index) ?? 0) > 1) {
+      d.image_index = null;
+      d.attachment_ref = null;
+    }
   }
 
   // Dedup markers (advisory).
