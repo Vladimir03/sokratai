@@ -32,6 +32,8 @@ export interface UseImageUploadReturn {
   // Derived
   totalImages: number;
   canAddMore: boolean;
+  /** Max images this instance allows (for display, e.g. "1/10"). */
+  maxImages: number;
 
   // Event handlers
   handleFileInput: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -294,6 +296,7 @@ export function useImageUpload(options: UseImageUploadOptions = {}): UseImageUpl
     isDragging,
     totalImages,
     canAddMore,
+    maxImages,
     handleFileInput,
     handlePaste,
     handleDragEnter,

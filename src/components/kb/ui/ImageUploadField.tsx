@@ -30,7 +30,7 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
     fileInputRef,
   } = imageUpload;
 
-  const maxImages = MAX_TASK_IMAGES;
+  const maxImages = imageUpload.maxImages ?? MAX_TASK_IMAGES;
 
   return (
     <fieldset>

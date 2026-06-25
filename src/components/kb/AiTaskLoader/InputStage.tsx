@@ -139,7 +139,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
 
       {/* Photo upload (drag / click / paste), up to 10 */}
       <ImageUploadField
-        label={`Скриншоты задач (до ${MAX_LOADER_IMAGES})`}
+        label="Скриншоты задач"
         imageUpload={imageUpload}
         disabled={isExtracting}
       />
@@ -166,6 +166,13 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           </>
         )}
       </button>
+      {!canExtract && !isExtracting ? (
+        <p className="text-center text-xs text-slate-400">
+          {folderId === ''
+            ? 'Выберите папку для сохранения, чтобы продолжить'
+            : 'Добавьте текст задач или хотя бы одно фото'}
+        </p>
+      ) : null}
     </div>
   );
 }
