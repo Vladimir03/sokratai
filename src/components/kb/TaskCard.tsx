@@ -276,21 +276,32 @@ export const TaskCard = memo(function TaskCard({
         onClick={handleContentClick}
         className="cursor-pointer select-text px-4 pb-2 pt-2 md:px-5"
       >
-        {/* Hero image / image strip — at the top of content zone */}
-        {attachmentRefs.length > 0 ? (
+        {/* Hero image / image strip — at the top of content zone.
+            Single image: hero shown in BOTH states (clickable, opens full-size).
+            Multi-image: hero+strip in collapsed; the expanded gallery below
+            renders all images once. Avoids showing the same photo twice on expand. */}
+        {attachmentRefs.length > 0 && (attachmentRefs.length === 1 || !isExpanded) ? (
           <div className={cn(!isExpanded && 'mb-3')}>
             {collapsedLoading ? (
               <div className="h-48 w-full animate-pulse rounded-xl bg-socrat-surface md:h-64" />
             ) : collapsedUrls.length > 0 ? (
               attachmentRefs.length === 1 ? (
-                // Single attachment — hero image, full width.
-                <img
-                  src={collapsedUrls[0]}
-                  alt="Фото условия"
-                  loading="lazy"
-                  decoding="async"
-                  className="max-h-48 w-full rounded-xl border border-socrat-border object-contain md:max-h-64"
-                />
+                // Single attachment — hero image, full width, click to open full-size.
+                <a
+                  href={collapsedUrls[0]}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="block"
+                >
+                  <img
+                    src={collapsedUrls[0]}
+                    alt="Фото условия"
+                    loading="lazy"
+                    decoding="async"
+                    className="max-h-48 w-full rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-90 md:max-h-64"
+                  />
+                </a>
               ) : (
                 // Multiple attachments — first one as hero, rest as strip below.
                 <div className="flex flex-col gap-2">
@@ -353,8 +364,9 @@ export const TaskCard = memo(function TaskCard({
           />
         ) : null}
 
-        {/* Expanded: full image gallery */}
-        {isExpanded && attachmentRefs.length > 0 ? (
+        {/* Expanded: full image gallery — only for multi-image tasks (single
+            image is already shown once as the clickable hero above). */}
+        {isExpanded && attachmentRefs.length > 1 ? (
           <div className="mt-3">
             {imageLoading ? (
               <div className="flex flex-wrap gap-2">
