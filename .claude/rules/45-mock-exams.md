@@ -2,6 +2,12 @@
 
 Mock-exams pilot (ЕГЭ physics, variant 1). Invariants distilled from the build-out (Phases 1–6 + pilot polish AC-P3..P11 + TASK-16/17). Round-by-round history + full specs: `docs/delivery/features/mock-exams-v1*/` and `~/.claude/plans/1-functional-meteor.md`.
 
+## Feature flag `tutors.feature_mock_exams_enabled` — пилот завершён, открыто всем (2026-06-26)
+
+Видимость «Пробников» гейтится per-tutor флагом `tutors.feature_mock_exams_enabled` в **двух** местах: `SideNav.tsx` (через `useTutorMockExamsFeatureFlag`) прячет вкладку, а `mock-exam-tutor-api::ensureMockExamsEnabled` отдаёт **404** (не 403, AC-8 — не утечь существование фичи) при `false`. Флаг был staggered-pilot с `DEFAULT false` (миграция `20260508120000`), включался точечно (`20260521165921` — один user_id).
+
+**С 2026-06-26 (решение владельца, репорт «у репетитора нет вкладки Пробники»): `DEFAULT true` + backfill всех в `true`** (миграция `20260626120000_enable_mock_exams_for_all_tutors.sql`). Все туторы видят «Пробники»; точечно выключить — `UPDATE … SET feature_mock_exams_enabled = false`. **Это НЕ был баг рендера/Safari** — просто флаг был выключен у аккаунта; в любом браузере вкладки бы не было. Симптом «нет вкладки Пробники» → первым делом проверять этот флаг, не фронт. Зеркальный флаг голосовых — `feature_voice_speaking_enabled` (rule 40, остаётся per-tutor пилотом).
+
 ## Anti-leak — STATE-AWARE (do NOT copy homework's tutor-only model)
 
 Mock-exam reveal depends on `attempt.status` — it is **not** "never show the student":
