@@ -64,6 +64,24 @@ export interface TutorHomeworkAssignmentListItem {
   folder_id?: string | null;
 }
 
+/**
+ * Структурный критерий покритериальной AI-проверки (criteria-grading, 2026-06).
+ * Mirror backend `SubjectCriterionTemplate` (subject-rubrics/types.ts). Любой
+ * предмет: репетитор задаёт критерии (название + макс. балл [+ описание /
+ * зависимость / kind]) → AI раскладывает балл по ним → `ai_criteria_json` →
+ * таблица ученику. Видит AI (prompt context), не ученик.
+ */
+export interface GradingCriterion {
+  label: string;
+  max: number;
+  /** Опц. band-описание «как начислять балл» — для AI, не показывается ученику. */
+  description?: string;
+  /** 'tutor_only' = вне AI-суммы («оценивает репетитор»). По умолчанию 'ai'. */
+  kind?: 'ai' | 'tutor_only';
+  /** Cascade: если ЛЮБОЙ из этих критериев = 0, этот форсится в 0 (ссылка по label). */
+  depends_on_zero?: string[];
+}
+
 export interface CreateAssignmentTask {
   order_num?: number;
   task_text: string;
@@ -102,6 +120,11 @@ export interface CreateAssignmentTask {
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ этого номера. */
   kim_number?: number | null;
+  /**
+   * Criteria-grading feature (2026-06): структурные критерии (любой предмет) →
+   * покритериальная AI-оценка. null/undefined → нет покритериального разбора.
+   */
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 export interface CreateAssignmentPayload {
@@ -148,6 +171,8 @@ export interface HomeworkTemplateTask {
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ — round-trips через шаблон (grading по ФИПИ). */
   kim_number?: number | null;
+  /** Criteria-grading feature (2026-06): структурные критерии round-trip через шаблон. */
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 export interface HomeworkTemplateListItem {
@@ -629,6 +654,8 @@ export interface TutorHomeworkAssignmentDetails {
     cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
     /** Phase 2 (2026-06-21): № КИМ — round-trips on edit (grading по ФИПИ). */
     kim_number?: number | null;
+    /** Criteria-grading feature (2026-06): структурные критерии — round-trip on edit. */
+    grading_criteria_json?: GradingCriterion[] | null;
     kb_task_id?: string | null;
     kb_snapshot_text?: string | null;
     kb_snapshot_answer?: string | null;
@@ -1371,6 +1398,8 @@ export interface UpdateAssignmentTask {
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ. */
   kim_number?: number | null;
+  /** Criteria-grading feature (2026-06): структурные критерии (любой предмет). */
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 export async function updateTutorHomeworkAssignment(

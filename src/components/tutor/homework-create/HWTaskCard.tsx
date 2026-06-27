@@ -34,7 +34,8 @@ import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { cn } from '@/lib/utils';
 
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
-import { type DraftTask, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
+import { type DraftTask, type GradingCriterion, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
+import { GRADING_CRITERIA_PRESETS, sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 
 // ─── Shared kbd hint for empty galleries ─────────────────────────────────────
 
@@ -344,6 +345,9 @@ interface RubricFieldProps {
   onAddRubricFiles: (files: File[]) => void;
   onRemoveRubricPhoto: (index: number) => void;
   onOpenRubricZoom: (index: number) => void;
+  /** When the structured criteria editor is active above, this free-text field
+   *  becomes supplementary notes (relabel to avoid two «Критерии оценки»). */
+  supplementary?: boolean;
 }
 
 function RubricField({
@@ -356,6 +360,7 @@ function RubricField({
   onAddRubricFiles,
   onRemoveRubricPhoto,
   onOpenRubricZoom,
+  supplementary = false,
 }: RubricFieldProps) {
   const [open, setOpen] = useState(Boolean(value) || rubricRefs.length > 0);
 
@@ -367,12 +372,14 @@ function RubricField({
         className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
       >
         {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-        Критерии оценки (опционально)
+        {supplementary ? 'Дополнительные заметки для AI (опционально)' : 'Критерии оценки (опционально)'}
       </button>
       {open && (
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground">
-            Как начислять баллы. Используется AI при проверке ответа.
+            {supplementary
+              ? 'Свободный текст / фото в помощь AI (помимо структурных критериев выше).'
+              : 'Как начислять баллы. Используется AI при проверке ответа.'}
           </p>
           <textarea
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[60px] resize-y"
@@ -393,6 +400,282 @@ function RubricField({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Structured grading criteria editor (criteria-grading feature, 2026-06) ───
+
+interface CriterionRowProps {
+  criterion: GradingCriterion;
+  index: number;
+  onUpdate: (patch: Partial<GradingCriterion>) => void;
+  onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+}
+
+/** One editable criterion row. Local max-string state mirrors the task max_score
+ *  pattern (lets the tutor type «12.» before «5» without losing keystrokes). */
+const CriterionRow = memo(function CriterionRow({
+  criterion,
+  index,
+  onUpdate,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
+}: CriterionRowProps) {
+  const [maxText, setMaxText] = useState<string>(() => String(criterion.max));
+  useEffect(() => {
+    setMaxText(String(criterion.max));
+  }, [criterion.max]);
+  const handleMaxBlur = useCallback(() => {
+    const raw = maxText.replace(',', '.').trim();
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v) || v < 0.5) {
+      onUpdate({ max: 1 });
+      setMaxText('1');
+      return;
+    }
+    const snapped = Math.round(v * 2) / 2;
+    onUpdate({ max: snapped });
+    setMaxText(String(snapped));
+  }, [maxText, onUpdate]);
+
+  const [descOpen, setDescOpen] = useState<boolean>(Boolean(criterion.description));
+  const isTutorOnly = criterion.kind === 'tutor_only';
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50/60 p-2 space-y-1.5">
+      <div className="flex items-start gap-1.5">
+        <div className="flex flex-col">
+          <button
+            type="button"
+            aria-label="Выше"
+            disabled={isFirst}
+            onClick={onMoveUp}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <ChevronUp className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Ниже"
+            disabled={isLast}
+            onClick={onMoveDown}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            style={{ touchAction: 'manipulation' }}
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <Input
+          aria-label={`Критерий ${index + 1}`}
+          value={criterion.label}
+          onChange={(e) => onUpdate({ label: e.target.value })}
+          placeholder="Название критерия (напр. К1: Позиция автора)"
+          className="flex-1 text-base"
+          style={{ fontSize: '16px' }}
+        />
+        <Input
+          aria-label="Макс. балл критерия"
+          inputMode="decimal"
+          value={maxText}
+          onChange={(e) => setMaxText(e.target.value)}
+          onBlur={handleMaxBlur}
+          className="w-16 text-base text-center"
+          style={{ fontSize: '16px', touchAction: 'manipulation' }}
+        />
+        <button
+          type="button"
+          aria-label="Удалить критерий"
+          onClick={onRemove}
+          className="mt-2 text-muted-foreground hover:text-red-600"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pl-6">
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground" style={{ touchAction: 'manipulation' }}>
+          <input
+            type="checkbox"
+            checked={isTutorOnly}
+            onChange={(e) => onUpdate({ kind: e.target.checked ? 'tutor_only' : 'ai' })}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          оценивает репетитор
+          {isTutorOnly ? <span className="text-[10px] text-muted-foreground">(вне AI-суммы)</span> : null}
+        </label>
+        <button
+          type="button"
+          onClick={() => setDescOpen((v) => !v)}
+          className="text-xs text-muted-foreground hover:text-foreground"
+          style={{ touchAction: 'manipulation' }}
+        >
+          {descOpen ? '− описание баллов' : '+ описание баллов'}
+        </button>
+      </div>
+      {descOpen ? (
+        <textarea
+          aria-label="Описание баллов критерия"
+          value={criterion.description ?? ''}
+          onChange={(e) => onUpdate({ description: e.target.value })}
+          placeholder="Как начислять балл (напр. 3 — 2 примера с пояснением + смысловая связь)…"
+          className="ml-6 flex w-[calc(100%-1.5rem)] rounded-md border border-input bg-background px-2 py-1.5 text-base resize-y min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ fontSize: '16px' }}
+        />
+      ) : null}
+    </div>
+  );
+});
+
+interface CriteriaEditorProps {
+  criteria: GradingCriterion[];
+  taskMaxScore: number;
+  /** Reconciles grading_criteria_json + max_score on the parent task. */
+  onChange: (next: GradingCriterion[]) => void;
+}
+
+/**
+ * Структурный редактор критериев (любой предмет). Кнопка пресета + список строк +
+ * живой Σ-бейдж. Свободный текст рубрики остаётся ниже как доп. заметки.
+ * Гейтится non-numeric задачами (criteriaEditorEnabled в HWTaskCard).
+ */
+function CriteriaEditor({ criteria, taskMaxScore, onChange }: CriteriaEditorProps) {
+  const [open, setOpen] = useState<boolean>(criteria.length > 0);
+  // Σ = AI-gradable max (excl. tutor_only) — это и есть шкала, на которой AI
+  // ставит балл (= taskMaxScore после авто-reconcile). tutor_only-критерии
+  // показываются строками, но в Σ/max_score не входят (их ставит репетитор).
+  const sumMax = useMemo(() => sumAiGradableCriteriaMax(criteria), [criteria]);
+  const hasTutorOnly = useMemo(() => criteria.some((c) => c.kind === 'tutor_only'), [criteria]);
+  const hasCriteria = criteria.length > 0;
+  const mismatch = hasCriteria && Math.abs(sumMax - taskMaxScore) > 1e-9;
+
+  const updateAt = useCallback(
+    (idx: number, patch: Partial<GradingCriterion>) => {
+      onChange(criteria.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+    },
+    [criteria, onChange],
+  );
+  const removeAt = useCallback(
+    (idx: number) => onChange(criteria.filter((_, i) => i !== idx)),
+    [criteria, onChange],
+  );
+  const moveAt = useCallback(
+    (idx: number, dir: -1 | 1) => {
+      const j = idx + dir;
+      if (j < 0 || j >= criteria.length) return;
+      const next = [...criteria];
+      [next[idx], next[j]] = [next[j], next[idx]];
+      onChange(next);
+    },
+    [criteria, onChange],
+  );
+  const addCriterion = useCallback(
+    () => onChange([...criteria, { label: '', max: 1 }]),
+    [criteria, onChange],
+  );
+  const loadPreset = useCallback(
+    (presetId: string) => {
+      const preset = GRADING_CRITERIA_PRESETS.find((p) => p.id === presetId);
+      if (!preset) return;
+      onChange(preset.criteria.map((c) => ({ ...c })));
+      setOpen(true);
+      toast.success(`Критерии загружены: ${preset.label}`);
+    },
+    [onChange],
+  );
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-xs font-medium text-foreground hover:text-accent transition-colors"
+      >
+        {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        Критерии оценки (покритериальная проверка AI)
+        {hasCriteria ? (
+          <span
+            className={cn(
+              'ml-1 rounded-full px-2 py-0.5 text-[11px] tabular-nums',
+              mismatch ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900',
+            )}
+          >
+            Σ {sumMax} / {taskMaxScore}
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            AI разложит балл по этим критериям и покажет ученику разбор. Можно загрузить готовый набор
+            или задать свои (название + макс. балл).
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Загрузить готовые критерии"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) loadPreset(e.target.value);
+                e.currentTarget.selectedIndex = 0;
+              }}
+              className="rounded-md border border-input bg-background px-2 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              style={{ fontSize: '16px', touchAction: 'manipulation' }}
+            >
+              <option value="">Загрузить готовые критерии…</option>
+              {GRADING_CRITERIA_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {hasCriteria ? (
+            <div className="space-y-2">
+              {criteria.map((c, i) => (
+                <CriterionRow
+                  key={i}
+                  criterion={c}
+                  index={i}
+                  onUpdate={(patch) => updateAt(i, patch)}
+                  onRemove={() => removeAt(i)}
+                  onMoveUp={() => moveAt(i, -1)}
+                  onMoveDown={() => moveAt(i, 1)}
+                  isFirst={i === 0}
+                  isLast={i === criteria.length - 1}
+                />
+              ))}
+            </div>
+          ) : null}
+
+          <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={addCriterion}>
+            <Plus className="h-3.5 w-3.5" />
+            Добавить критерий
+          </Button>
+
+          {hasTutorOnly ? (
+            <p className="text-xs text-muted-foreground">
+              Критерии «оценивает репетитор» не входят в балл AI ({sumMax}) — вы выставите их вручную при
+              проверке. Макс. балл задачи равен сумме AI-критериев.
+            </p>
+          ) : null}
+
+          {mismatch ? (
+            <p className="text-xs text-amber-700">
+              Сумма AI-критериев (Σ {sumMax}) не совпадает с макс. баллом задачи ({taskMaxScore}).
+              Обычно макс. балл = сумме AI-критериев.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -430,6 +713,12 @@ export interface HWTaskCardProps {
    * «Уровень (CEFR)» selector. Off → selector hidden (non-language subjects).
    */
   cefrLevelEnabled?: boolean;
+  /**
+   * Criteria-grading feature (2026-06): when true (non-numeric / развёрнутая
+   * задача), show the structured criteria editor + preset button. Off → hidden
+   * (numeric tasks grade by exact-answer match, no per-criterion breakdown).
+   */
+  criteriaEditorEnabled?: boolean;
 }
 
 export function HWTaskCard({
@@ -446,6 +735,7 @@ export function HWTaskCard({
   onRequestSaveToKB,
   voiceSpeakingEnabled = false,
   cefrLevelEnabled = false,
+  criteriaEditorEnabled = false,
 }: HWTaskCardProps) {
   const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
   const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
@@ -475,6 +765,28 @@ export function HWTaskCard({
     onUpdate({ ...task, max_score: snapped });
     setScoreText(String(snapped));
   }, [scoreText, task, onUpdate]);
+
+  // Criteria-grading feature (2026-06): when the structured criteria change,
+  // persist grading_criteria_json AND auto-reconcile max_score = Σ criteria max
+  // (engine needs max_score == Σ AI-gradable max; warn only on manual divergence).
+  const criteriaList = useMemo<GradingCriterion[]>(
+    () => (Array.isArray(task.grading_criteria_json) ? task.grading_criteria_json : []),
+    [task.grading_criteria_json],
+  );
+  const handleCriteriaChange = useCallback(
+    (next: GradingCriterion[]) => {
+      if (next.length === 0) {
+        onUpdate({ ...task, grading_criteria_json: null });
+        return;
+      }
+      // max_score = Σ AI-gradable max (excl. tutor_only) — движок требует
+      // max_score == aiGradableMax (иначе ремап искажает баллы). Review fix P1.
+      const total = sumAiGradableCriteriaMax(next);
+      const snapped = total > 0 ? Math.round(total * 2) / 2 : task.max_score;
+      onUpdate({ ...task, grading_criteria_json: next, max_score: snapped });
+    },
+    [task, onUpdate],
+  );
   // Ref mirrors created blob URLs so unmount cleanup sees the latest set (closure over [] would be stale).
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const { urls: resolvedTaskUrls } = useKBImagesSignedUrls(taskRefs, { enabled: taskRefs.length > 0 });
@@ -1163,6 +1475,16 @@ export function HWTaskCard({
           />
         </div>
 
+        {/* CRITERIA EDITOR — структурные критерии покритериальной AI-проверки.
+            Гейтится non-numeric задачами. Свободная рубрика ниже = доп. заметки. */}
+        {criteriaEditorEnabled ? (
+          <CriteriaEditor
+            criteria={criteriaList}
+            taskMaxScore={task.max_score}
+            onChange={handleCriteriaChange}
+          />
+        ) : null}
+
         {/* RUBRIC SECTION — paste via lastFocusedSection, drag-drop per-wrapper. */}
         <div
           className={cn(
@@ -1185,6 +1507,7 @@ export function HWTaskCard({
             onAddRubricFiles={addRubricPhotos}
             onRemoveRubricPhoto={removeRubricPhoto}
             onOpenRubricZoom={openRubricZoom}
+            supplementary={criteriaEditorEnabled}
           />
         </div>
 

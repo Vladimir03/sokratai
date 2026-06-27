@@ -260,6 +260,14 @@ export interface EvaluateStudentAnswerParams {
    * Только для языковых subjects влияет на response_language_instruction.
    */
   feedbackLanguage?: "auto" | "russian" | "target" | null;
+  /**
+   * Tutor-authored structured criteria from `homework_tutor_tasks.grading_criteria_json`
+   * (criteria-grading feature, 2026-06). When non-empty, drives per-criterion AI
+   * grading (`criteria_breakdown`) for ANY subject — overrides built-in presets.
+   * Passed straight to `resolveSubjectRubric.grading_criteria`. Loaded from the
+   * task row in `runStudentAnswerGrading`.
+   */
+  gradingCriteria?: SubjectCriterionTemplate[] | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -912,6 +920,75 @@ function sanitizeCriteriaBreakdown(
   return normalizeAiGradableScores(items, target);
 }
 
+/**
+ * Criteria-grading feature (2026-06): apply a DETERMINISTIC dependency cascade
+ * to a sanitized breakdown (e.g. ЕГЭ-русский К1=0 ⇒ К2, К3 = 0 — per ФИПИ
+ * «Указания к оцениванию»). The cascade is encoded on the template via
+ * `depends_on_zero` (labels). NEVER trusted to the model — applied here in code.
+ *
+ * Because zeroing a dependent criterion changes Σ, the cascade OVERRIDES the
+ * AI's top-level `ai_score`: the returned `aiScoreTaskScale` is recomputed from
+ * the cascaded AI-gradable sum (mapped back to the task scale). Returns `null`
+ * when the template has no cascade rules (caller keeps the AI's ai_score).
+ * Pure — does not mutate the input items.
+ */
+function applyCriteriaCascade(
+  items: GuidedCriteriaItem[] | null | undefined,
+  template: SubjectCriterionTemplate[] | null | undefined,
+  maxScore: number,
+): { items: GuidedCriteriaItem[]; aiScoreTaskScale: number } | null {
+  if (!items || items.length === 0 || !template || template.length === 0) return null;
+
+  // label(lower) → depends_on_zero labels(lower).
+  const depMap = new Map<string, string[]>();
+  for (const t of template) {
+    if (Array.isArray(t.depends_on_zero) && t.depends_on_zero.length > 0) {
+      depMap.set(
+        t.label.toLowerCase(),
+        t.depends_on_zero.map((l) => String(l).toLowerCase()),
+      );
+    }
+  }
+  if (depMap.size === 0) return null;
+
+  const out = items.map((it) => ({ ...it }));
+
+  // Iterate to a fixpoint (a zeroed criterion can cascade onto another).
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < 10) {
+    changed = false;
+    guard += 1;
+    const scoreByLabel = new Map<string, number>();
+    for (const it of out) scoreByLabel.set(it.label.toLowerCase(), it.score);
+    for (const it of out) {
+      if (it.score === 0) continue;
+      const deps = depMap.get(it.label.toLowerCase());
+      if (!deps) continue;
+      // Missing referenced label → treat as non-zero (safe: no spurious cascade).
+      const anyZero = deps.some((d) => (scoreByLabel.get(d) ?? 1) === 0);
+      if (anyZero) {
+        it.score = 0;
+        changed = true;
+      }
+    }
+  }
+
+  // Recompute ai_score (task scale) from cascaded AI-gradable scores.
+  const aiGradableMax = sumAiGradableMax(out);
+  const aiGradableSum = out
+    .filter((c) => c.kind !== "tutor_only")
+    .reduce((sum, c) => sum + (Number.isFinite(c.score) ? c.score : 0), 0);
+  let aiScoreTaskScale = aiGradableSum;
+  if (aiGradableMax > 0 && maxScore > 0) {
+    aiScoreTaskScale = (aiGradableSum / aiGradableMax) * maxScore;
+  }
+  return {
+    items: out,
+    aiScoreTaskScale: roundToTenth(Math.max(0, Math.min(maxScore, aiScoreTaskScale))),
+  };
+}
+
 function buildFallbackAiScoreComment(
   verdict: Exclude<GuidedVerdict, "CHECK_FAILED">,
   aiScore: number,
@@ -1295,7 +1372,17 @@ function sanitizeCheckResult(
   const error_type = sanitizeErrorType(parsed.error_type, verdict);
   const maxScore = Math.max(0, scoring.maxScore);
 
-  if (scoring.checkFormat !== "detailed_solution") {
+  // Criteria-grading feature (2026-06): a criteria task must use the
+  // per-criterion scoring path (AI ai_score + sanitize + cascade) REGARDLESS of
+  // check_format. Without this guard, a criteria task that ended up on
+  // check_format='short_answer' (e.g. tutor flipped format back after authoring,
+  // or a template/edit round-trip) would take the binary 0/max branch below —
+  // discarding the AI's per-criterion score and SKIPPING the К1=0⇒К2,К3=0
+  // cascade. Mirrors the fast-path guard (`!hasCriteriaTemplate`) below.
+  const hasCriteriaTemplate =
+    Array.isArray(scoring.criteriaTemplate) && scoring.criteriaTemplate.length > 0;
+
+  if (scoring.checkFormat !== "detailed_solution" && !hasCriteriaTemplate) {
     const aiScoreShort = verdict === "CORRECT" ? maxScore : 0;
     return {
       verdict,
@@ -1325,19 +1412,35 @@ function sanitizeCheckResult(
       buildFallbackAiScoreComment(verdict, ai_score)
     : null;
 
+  let criteria_breakdown = sanitizeCriteriaBreakdown(
+    parsed.criteria_breakdown,
+    scoring.criteriaTemplate,
+    ai_score,
+    maxScore,
+  );
+
+  // Criteria-grading feature (2026-06): deterministic dependency cascade
+  // (e.g. ЕГЭ-русский К1=0 ⇒ К2,К3=0). When a cascade fires it OVERRIDES the
+  // AI's ai_score with the cascaded AI-gradable sum (keeps Σ == ai_score).
+  let finalAiScore = ai_score;
+  let finalAiScoreComment = ai_score_comment;
+  const cascade = applyCriteriaCascade(criteria_breakdown, scoring.criteriaTemplate, maxScore);
+  if (cascade) {
+    criteria_breakdown = cascade.items;
+    finalAiScore = cascade.aiScoreTaskScale;
+    finalAiScoreComment = finalAiScore < maxScore
+      ? (ai_score_comment ?? buildFallbackAiScoreComment(verdict, finalAiScore))
+      : null;
+  }
+
   return {
     verdict,
     feedback,
     confidence,
     error_type,
-    ai_score,
-    ai_score_comment,
-    criteria_breakdown: sanitizeCriteriaBreakdown(
-      parsed.criteria_breakdown,
-      scoring.criteriaTemplate,
-      ai_score,
-      maxScore,
-    ),
+    ai_score: finalAiScore,
+    ai_score_comment: finalAiScoreComment,
+    criteria_breakdown,
   };
 }
 
@@ -1561,6 +1664,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     feedback_language: params.feedbackLanguage ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
+    grading_criteria: params.gradingCriteria ?? null,
   });
 
   // Voice-Speaking MVP TASK-3 (2026-05-27): per-criterion breakdown for
@@ -1577,8 +1681,8 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
         "Помимо ai_score разложи балл по перечисленным критериям. Используй ТОЧНО эти label'ы и max-значения:",
         ...criteriaTemplate!.map((c) =>
           c.kind === "tutor_only"
-            ? `- "${c.label}" — max ${c.max} (ОЦЕНИВАЕТ РЕПЕТИТОР НА СЛУХ; для тебя score = max, comment = "Оценивает репетитор на слух").`
-            : `- "${c.label}" — max ${c.max}.`,
+            ? `- "${c.label}" — max ${c.max} (ОЦЕНИВАЕТ РЕПЕТИТОР; для тебя score = max, comment = "Оценивает репетитор").`
+            : `- "${c.label}" — max ${c.max}.${c.description ? ` ${c.description}` : ""}`,
         ),
         "Правила:",
         "- Включи ВСЕ перечисленные критерии (даже если score = 0).",
@@ -2003,6 +2107,7 @@ export async function evaluateStudentAnswer(
     feedback_language: params.feedbackLanguage ?? null,
     task_text: params.taskText,
     tutor_rubric: params.rubricText,
+    grading_criteria: params.gradingCriteria ?? null,
   });
   const criteriaTemplate: SubjectCriterionTemplate[] | null =
     checkRubric.criteria_breakdown_template ?? null;
@@ -2014,7 +2119,11 @@ export async function evaluateStudentAnswer(
   // Языковые numeric-задачи редки → стоимость лишнего AI-вызова приемлема ради
   // консистентного языка ответа.
   const isLanguageSubject = ["french", "english", "spanish"].includes(params.subject);
-  if (params.checkFormat !== "detailed_solution" && !isLanguageSubject) {
+  // Criteria-grading feature (2026-06): if a per-criterion template is active
+  // (tutor criteria OR built-in preset), always run the AI so the breakdown is
+  // produced — never short-circuit a criteria task on a deterministic match.
+  const hasCriteriaTemplate = Array.isArray(criteriaTemplate) && criteriaTemplate.length > 0;
+  if (params.checkFormat !== "detailed_solution" && !isLanguageSubject && !hasCriteriaTemplate) {
     const deterministicMatch = tryDeterministicShortAnswerMatch(
       params.studentAnswer,
       params.correctAnswer,

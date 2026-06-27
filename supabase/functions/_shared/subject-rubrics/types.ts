@@ -63,6 +63,15 @@ export interface SubjectRubricInput {
    * `null`/undefined → 'auto'. Non-language subjects ignore it (instruction = null).
    */
   feedback_language?: "auto" | "russian" | "target" | null;
+  /**
+   * Tutor-authored structured criteria from `homework_tutor_tasks.grading_criteria_json`
+   * (criteria-grading feature, 2026-06). When present (non-empty) it is returned
+   * AS the `criteria_breakdown_template` for ANY subject, OVERRIDING any built-in
+   * preset (russian-ege / languages-ege). This is the generic engine: a tutor of
+   * any subject can drive per-criterion AI grading. The resolver stays pure —
+   * the caller loads the array from the task row and passes it in.
+   */
+  grading_criteria?: SubjectCriterionTemplate[] | null;
 }
 
 /**
@@ -90,9 +99,24 @@ export interface SubjectCriterionTemplate {
   /**
    * Defaults to 'ai'. 'tutor_only' = phonétique / произношение / другие
    * аспекты, которые AI не оценивает (например, audio cannot reach AI for
-   * pronunciation comparison). UI помечает их как «оценивает репетитор».
+   * pronunciation comparison; орфография / пунктуация в сочинении — подсчёт
+   * ошибок ненадёжен для LLM). UI помечает их как «оценивает репетитор».
    */
   kind?: "ai" | "tutor_only";
+  /**
+   * Optional band / scoring description shown to the AI as grading guidance
+   * for this criterion (e.g. «3 балла — 2 примера с пояснением + смысловая
+   * связь»). Tutor-authored criteria carry it; built-in presets may too.
+   * Never rendered to the student (prompt-only context).
+   */
+  description?: string;
+  /**
+   * Optional cascade dependency: labels of OTHER criteria — if ANY of them
+   * resolves to score 0, this criterion is FORCED to 0 (e.g. ЕГЭ-русский К1=0
+   * ⇒ К2, К3 = 0). Applied DETERMINISTICALLY in code after the AI grades,
+   * never trusted to the model. References by label (the stable match key).
+   */
+  depends_on_zero?: string[];
 }
 
 /**

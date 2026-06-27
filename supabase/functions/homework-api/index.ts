@@ -18,6 +18,7 @@ import {
   parseAttachmentUrls,
 } from "../_shared/attachment-refs.ts";
 import { rewriteToDirect, rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import type { SubjectCriterionTemplate } from "../_shared/subject-rubrics/index.ts";
 import { computeFinalScore } from "../_shared/score-compute.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
 import {
@@ -76,6 +77,71 @@ function normalizeKimNumber(v: unknown): number | null {
       ? parseInt(v.trim(), 10)
       : NaN;
   return Number.isInteger(n) && n >= 1 && n <= 40 ? n : null;
+}
+
+/** Max criteria per task (defensive cap; ЕГЭ-русский = 10). */
+const MAX_GRADING_CRITERIA = 30;
+
+/**
+ * Normalize client-supplied structured grading criteria for
+ * `homework_tutor_tasks.grading_criteria_json` (criteria-grading feature, 2026-06).
+ * Returns a clean `SubjectCriterionTemplate[]` (ANY subject) or null. Drops
+ * malformed entries; clamps `max` to a positive half-step (mirror max_score
+ * 0.5-step invariant, rule 40); whitelists `kind`; caps array + string lengths.
+ * A bad payload never reaches grading. Written by all task write-paths.
+ */
+function normalizeGradingCriteria(v: unknown): SubjectCriterionTemplate[] | null {
+  if (!Array.isArray(v) || v.length === 0) return null;
+  const out: SubjectCriterionTemplate[] = [];
+  const seenLabels = new Set<string>();
+  for (const raw of v.slice(0, MAX_GRADING_CRITERIA)) {
+    if (!raw || typeof raw !== "object") continue;
+    const o = raw as Record<string, unknown>;
+    const label = typeof o.label === "string" ? o.label.trim().slice(0, 200) : "";
+    if (!label) continue;
+    // Dedupe by label — the cascade keys depends_on_zero / scoreByLabel on label
+    // (guided_ai.ts::applyCriteriaCascade), so duplicate labels would collapse to
+    // one Map entry and silently misroute a dependency. First label wins.
+    const labelKey = label.toLowerCase();
+    if (seenLabels.has(labelKey)) continue;
+    const maxNum = typeof o.max === "number"
+      ? o.max
+      : typeof o.max === "string" && o.max.trim() !== ""
+        ? Number(o.max)
+        : NaN;
+    if (!Number.isFinite(maxNum) || maxNum <= 0) continue;
+    const max = Math.round(maxNum * 2) / 2; // snap to 0.5 step
+    if (max <= 0) continue;
+    seenLabels.add(labelKey);
+    const entry: SubjectCriterionTemplate = { label, max };
+    if (o.kind === "tutor_only") entry.kind = "tutor_only";
+    if (typeof o.description === "string" && o.description.trim()) {
+      entry.description = o.description.trim().slice(0, 1000);
+    }
+    if (Array.isArray(o.depends_on_zero)) {
+      const deps = o.depends_on_zero
+        .filter((d): d is string => typeof d === "string" && d.trim().length > 0)
+        .map((d) => d.trim().slice(0, 200))
+        .slice(0, MAX_GRADING_CRITERIA);
+      if (deps.length > 0) entry.depends_on_zero = deps;
+    }
+    out.push(entry);
+  }
+  if (out.length === 0) return null;
+  // Second pass: drop depends_on_zero refs that don't resolve to a real label in
+  // THIS set (stale ref after a label rename → cascade would no-op anyway; this
+  // keeps the data clean and the cascade deterministic). Self-refs dropped too.
+  const validLabels = new Set(out.map((e) => e.label.toLowerCase()));
+  for (const e of out) {
+    if (!e.depends_on_zero) continue;
+    const selfKey = e.label.toLowerCase();
+    const resolved = e.depends_on_zero.filter(
+      (d) => validLabels.has(d.toLowerCase()) && d.toLowerCase() !== selfKey,
+    );
+    if (resolved.length > 0) e.depends_on_zero = resolved;
+    else delete e.depends_on_zero;
+  }
+  return out;
 }
 
 const VALID_FEEDBACK_LANGUAGES = ["auto", "russian", "target"] as const;
@@ -806,6 +872,9 @@ async function handleCreateAssignment(
       cefr_level: normalizeCefrLevel(t.cefr_level),
       // Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ этого номера.
       kim_number: normalizeKimNumber(t.kim_number),
+      // Criteria-grading feature (2026-06): структурные критерии репетитора (любой
+      // предмет) → покритериальная AI-оценка. Normalize защищает от битого payload.
+      grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
     };
   });
 
@@ -838,6 +907,7 @@ async function handleCreateAssignment(
       task_kind: t.task_kind,
       cefr_level: isLanguageTemplate ? t.cefr_level : null,
       kim_number: t.kim_number,
+      grading_criteria_json: t.grading_criteria_json,
     }));
     const { error: templateErr } = await db
       .from("homework_tutor_templates")
@@ -1176,7 +1246,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1701,6 +1771,10 @@ async function handleUpdateAssignment(
           // Phase 2 (2026-06-21): № КИМ round-trips on edit (grading по ФИПИ).
           updateFields.kim_number = normalizeKimNumber(t.kim_number);
         }
+        if (t.grading_criteria_json !== undefined) {
+          // Criteria-grading feature (2026-06): структурные критерии round-trip on edit.
+          updateFields.grading_criteria_json = normalizeGradingCriteria(t.grading_criteria_json);
+        }
 
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -1753,6 +1827,7 @@ async function handleUpdateAssignment(
               task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
               cefr_level: normalizeCefrLevel(t.cefr_level),
               kim_number: normalizeKimNumber(t.kim_number),
+              grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
             })
             .select("id")
             .single();
@@ -1844,6 +1919,7 @@ async function handleUpdateAssignment(
           task_kind: resolveWriteTaskKind(t.task_kind, normalizedCheckFormat),
           cefr_level: normalizeCefrLevel(t.cefr_level),
           kim_number: normalizeKimNumber(t.kim_number),
+          grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
         };
         const { error } = await db
           .from("homework_tutor_tasks")
@@ -4303,6 +4379,8 @@ async function handleCreateTemplate(
       check_format: checkFormat,
       task_kind: resolveWriteTaskKind(t.task_kind, checkFormat),
       cefr_level: isLanguageTemplate ? normalizeCefrLevel(t.cefr_level) : null,
+      // Criteria-grading feature (2026-06): структурные критерии round-trip через шаблон.
+      grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
     };
   });
   const { data, error } = await db
@@ -4475,7 +4553,7 @@ async function handleCreateTemplateFromAssignment(
     .select(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
-        "check_format, task_kind, kim_number, cefr_level",
+        "check_format, task_kind, kim_number, cefr_level, grading_criteria_json",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -4508,6 +4586,7 @@ async function handleCreateTemplateFromAssignment(
     task_kind: string | null;
     cefr_level: string | null;
     kim_number: number | null;
+    grading_criteria_json: unknown;
   }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
@@ -4530,6 +4609,9 @@ async function handleCreateTemplateFromAssignment(
       if (isLanguageTemplate && isNonEmptyString(t.cefr_level)) base.cefr_level = t.cefr_level;
       // Phase 2 (2026-06-21): № КИМ → grading по ФИПИ при reuse шаблона.
       if (typeof t.kim_number === "number") base.kim_number = t.kim_number;
+      // Criteria-grading feature (2026-06): структурные критерии — часть AI-настроек.
+      const gc = normalizeGradingCriteria(t.grading_criteria_json);
+      if (gc) base.grading_criteria_json = gc;
     }
     return base;
   });
@@ -7789,6 +7871,8 @@ async function runStudentAnswerGrading(args: {
     task_kind?: string | null;
     /** CEFR-level fix (2026-05-29): explicit tutor level → forces language rubric level. */
     cefr_level?: string | null;
+    /** Criteria-grading feature (2026-06): tutor structured criteria (any subject). */
+    grading_criteria_json?: unknown;
   };
   assignment: {
     subject: string | null;
@@ -7879,6 +7963,9 @@ async function runStudentAnswerGrading(args: {
       : null,
     // Phase 11 (2026-05-31): assignment-level feedback language → response_language_instruction.
     feedbackLanguage: normalizeFeedbackLanguage(assignment.feedback_language) ?? "auto",
+    // Criteria-grading feature (2026-06): tutor structured criteria drive the
+    // per-criterion breakdown for ANY subject (overrides built-in presets).
+    gradingCriteria: normalizeGradingCriteria(task.grading_criteria_json),
     conversationHistory: (recentMessages ?? []).map((m) => ({
       role: typeof m.role === "string" ? m.role : "",
       content: typeof m.content === "string" ? m.content : "",
@@ -7956,8 +8043,16 @@ async function runStudentAnswerGrading(args: {
   const nextAttemptCount = ((currentState.attempts as number) ?? 0) + 1;
 
   if (effectiveVerdict === "CORRECT") {
-    // Set earned_score, mark completed, advance
-    const earnedScore = currentAvailableScore;
+    // Set earned_score, mark completed, advance.
+    // Criteria-grading feature (2026-06): when a per-criterion breakdown is
+    // present, cap earned_score by the (possibly cascade-reduced) ai_score so the
+    // recorded grade matches the per-criterion table the student sees. Without
+    // this, a CORRECT verdict with К1=0 (cascade zeroes К2,К3 → ai_score 14/22)
+    // would still award full 22/22 — contradicting the visible criteria table.
+    // Penalty model preserved: hint/wrong degradation can still lower it further.
+    const earnedScore = criteriaBreakdown && effectiveAiScore != null
+      ? Math.min(currentAvailableScore, effectiveAiScore)
+      : currentAvailableScore;
 
     await db.from("homework_tutor_task_states").update({
       attempts: nextAttemptCount,
@@ -8156,7 +8251,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
     .eq("id", currentState.task_id)
     .single();
 
@@ -8376,7 +8471,7 @@ async function handleStudentSubmission(
   // 5. Load target task (full SELECT — grading needs solution/rubric).
   const { data: task, error: taskError } = await db
     .from("homework_tutor_tasks")
-    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, cefr_level")
+    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
     .eq("id", taskId)
     .maybeSingle();
   if (taskError) {

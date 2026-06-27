@@ -33,7 +33,8 @@ import { buildChemistryEgeRubric } from "./chemistry-ege.ts";
 import { buildLanguagesRubric, buildResponseLanguageInstruction } from "./languages-ege.ts";
 import { buildMathEgeRubric } from "./math-ege.ts";
 import { buildPhysicsEgeRubric } from "./physics-ege.ts";
-import type { SubjectRubric, SubjectRubricInput } from "./types.ts";
+import { buildRussianEgeRubric } from "./russian-ege.ts";
+import type { SubjectCriterionTemplate, SubjectRubric, SubjectRubricInput } from "./types.ts";
 
 // ─── Subject labels (mirror src/types/homework.ts SUBJECTS) ──────────────
 // Keep in sync — Deno cannot import TS from src/. See .claude/rules/40-homework-system.md.
@@ -291,6 +292,8 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     core = { ...buildMathEgeRubric(kimNumber), cefr_level: null };
   } else if (subjectId === "chemistry") {
     core = { ...buildChemistryEgeRubric(kimNumber), cefr_level: null };
+  } else if (subjectId === "russian" || subjectId === "rus") {
+    core = { ...buildRussianEgeRubric(kimNumber), cefr_level: null };
   } else if (LANGUAGE_SUBJECTS.has(subjectId)) {
     core = buildLanguagesRubric(subjectId, input.task_text, input.task_kind === "speaking", input.cefr_level ?? null);
   } else {
@@ -309,12 +312,24 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     };
   }
 
-  // Voice-Speaking MVP TASK-2 (2026-05-27): numeric (краткий ответ) для
-  // language задач тоже не получает per-criterion breakdown — нечего
-  // декомпозировать. Breakdown применяется только к развёрнутым языковым
-  // заданиям (письмо / эссе / монолог).
-  const criteriaTemplate =
-    isNumeric ? null : (core.criteria_breakdown_template ?? null);
+  // Criteria-grading feature (2026-06): per-criterion breakdown template
+  // precedence (highest wins):
+  //   1. tutor-defined grading_criteria (любой предмет) — ВСЕГДА побеждают
+  //   2. встроенный пресет (russian-ege К1–К10 / languages-ege)
+  //   3. null (physics / maths / numeric — нечего декомпозировать)
+  // Tutor criteria — это generic engine: репетитор любого предмета задаёт свои
+  // критерии в конструкторе → они приходят сюда и управляют покритериальной
+  // оценкой (даже на numeric-задаче, если репетитор их явно задал).
+  //
+  // Voice-Speaking MVP TASK-2 (2026-05-27): numeric (краткий ответ) БЕЗ tutor
+  // criteria не получает breakdown — нечего декомпозировать. Встроенный
+  // breakdown применяется только к развёрнутым заданиям.
+  const tutorCriteria: SubjectCriterionTemplate[] | null =
+    Array.isArray(input.grading_criteria) && input.grading_criteria.length > 0
+      ? input.grading_criteria
+      : null;
+  const presetCriteria = core.criteria_breakdown_template ?? null;
+  const criteriaTemplate = tutorCriteria ?? (isNumeric ? null : presetCriteria);
 
   // Merge tutor_rubric (priority) with default methodology.
   let methodology = core.methodology;

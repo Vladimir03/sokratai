@@ -227,6 +227,29 @@ Spec: `~/.claude/plans/1-functional-meteor.md` Phase 2.
 
 Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 
+### Покритериальная проверка ДЗ — критерии репетитора (любой предмет) + ЕГЭ-русский пресет (2026-06-27)
+
+Расширение `criteria_breakdown` (выше) на **любой предмет**: репетитор задаёт **структурные критерии** в конструкторе → AI раскладывает балл по ним → `ai_criteria_json` → та же `CriteriaBreakdownTable`. Закрывает запрос репетитора-филолога (проверка сочинения ЕГЭ по К1–К10 ФИПИ). Root cause бага «22/22 + общая похвала»: движок гейтился `LANGUAGE_SUBJECTS` → русский шёл в generic → `criteria_breakdown_template=null`. Реализован single-call путь (Ф0-Ф2); multi-agent критик/async/фото-OCR — отложены. Миграция `20260627120000`. Build-лог: memory `project_criteria_grading_2026_06_27.md`, план `~/.claude/plans/zany-rolling-lynx.md`.
+
+**Хранение:** `homework_tutor_tasks.grading_criteria_json JSONB NULL` — критерии репетитора `[{label, max, description?, kind?: 'ai'|'tutor_only', depends_on_zero?: string[]}]`. **Tutor-only prompt context — НИКОГДА не возвращается ученику** (только tutor edit-GET + service-role grading SELECTs читают; `ai_criteria_json` РЕЗУЛЬТАТ — student-visible by design). Table-level GRANT покрывает (HWDrawer пишет напрямую).
+
+**Precedence в `resolveSubjectRubric` (`SubjectRubricInput.grading_criteria`):** `tutorCriteria ?? (isNumeric ? null : presetCriteria)` — критерии репетитора **ВСЕГДА** побеждают встроенный пресет, любой предмет. `SubjectCriterionTemplate` расширен `description?` (band-гайд в промпт) + `depends_on_zero?` (cascade). Резолвер чист — caller грузит из task-row.
+
+**Пресет `russian-ege.ts`** — К1–К10 сочинения ЕГЭ (реформа 2024+, Σ=22). **К7–К10 = `ai` (НЕ `tutor_only`), max_score=22** — иначе `max_score ≠ aiGradableMax` ломает движок/override (К7–К10 = AI-черновик грамотности, тутор подтверждает). Авто-фаерится только при `kim_number===27`; основной путь — кнопка пресета (через `grading_criteria`). Frontend-зеркало `src/lib/gradingCriteriaPresets.ts::RUSSIAN_EGE_27_PRESET` — labels/max/depends_on_zero **byte-for-byte** = backend (иначе cascade ломается).
+
+**Cascade (КРИТИЧНО, детерминированно в коде):** `depends_on_zero` (К2,К3 → К1) → `applyCriteriaCascade` в `sanitizeCheckResult` зануляет зависимый критерий при score=0 референса (fixpoint) и **OVERRIDE'ит ai_score** = Σ cascaded. Модели НЕ доверяется. Матчинг по **label** (items[].label = template label из `sanitizeCriteriaBreakdown`); `normalizeGradingCriteria` дедупит labels + резолвит `depends_on_zero` к реальным labels (иначе misroute).
+
+**Инварианты (review fixes 2026-06-27 — НЕ откатывать):**
+- **`max_score` = Σ AI-gradable (excl `tutor_only`)** — frontend авто-`max_score` через `sumAiGradableCriteriaMax` (НЕ `sumCriteriaMax`), Σ-бейдж тоже. Иначе `mapAiScoreToTemplateScale` ремапит и искажает баллы.
+- **criteria-задача → per-criterion путь независимо от `check_format`** — `sanitizeCheckResult` guard `if (checkFormat !== 'detailed_solution' && !hasCriteriaTemplate)` (зеркало fast-path). Иначе short_answer-ветка теряет балл + cascade.
+- **CORRECT не перебивает cascade** — `earnedScore = criteriaBreakdown && effectiveAiScore != null ? Math.min(available, effectiveAiScore) : available` (иначе 22/22 заголовок vs 14/22 таблица).
+- **Write-гейт `isCriteriaEligibleTask`** (`homework-create/types.ts`, single source) — редактор (HWTasksSection) И 3 body-write (create/update/template) в `TutorHomeworkCreate`. Критерии на переключённой-в-numeric задаче НЕ пишутся.
+- **Dual-write (rule 40):** `grading_criteria_json` через `normalizeGradingCriteria` во ВСЕХ write-path: create + 3 update-ветки + create-template + save-as-template; HWDrawer path B пишет NULL. Грейдинг SELECTs (submission + check, оба с `kim_number`) + edit-GET round-trip. Frontend plumbing: DraftTask/Create/Update/HomeworkTemplateTask/GetAssignment-тип + `buildTaskSignature`/`tasksDirty` (правка только критериев → dirty) + prefill + resolveTemplateLoad.
+
+**Tutor review:** AI = черновик; существующий флоу `tutor_reviewed_at` + `EditScoreDialog` + «галочка проверено» — гейт перед финалом ученику. Per-criterion правка тутором (`CriteriaReviewPanel`) = Ф4 (отложено).
+
+**При расширении:** новый пресет → backend `*-ege.ts` + frontend `gradingCriteriaPresets.ts` (byte-identical labels) + `GRADING_CRITERIA_PRESETS`; новый предмет с criteria — резолвер сам подхватит через `grading_criteria`; cascade — только в коде (label-матчинг); `max_score` = aiGradableMax (tutor_only вне суммы); новый write-path → `grading_criteria_json` + `isCriteriaEligibleTask`-гейт.
+
 ### Уровень CEFR языковых ДЗ — `cefr_level` (явный, форсит рубрику)
 
 Баг (репортер — Эмилия, FR/DELF, 2026-05-29): письменные работы ВСЕХ уровней проверялись по критериям **B1**. Причина: уровень определялся ТОЛЬКО эвристикой `cefr-detector.ts::detectCefrLevel` из `task_text` с **дефолтом B1**, поле «Критерии» не читалось, а во французской ветке вообще **не было A2-рубрики** (A2 проваливался в B1). Тот же класс, что speaking→oral: heuristic вместо explicit signal.

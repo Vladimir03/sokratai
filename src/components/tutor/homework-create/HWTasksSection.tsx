@@ -14,7 +14,7 @@ import {
 } from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
-import { type DraftTask, createEmptyTask, generateUUID, revokeObjectUrl } from './types';
+import { type DraftTask, createEmptyTask, generateUUID, isCriteriaEligibleTask, revokeObjectUrl } from './types';
 
 // Lazy-load the Save-to-KB dialog — it's only needed when the tutor actually
 // clicks BookmarkPlus on a task card in edit-mode. Bundle stays slim for the
@@ -305,6 +305,7 @@ export function HWTasksSection({
           onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
           voiceSpeakingEnabled={voiceSpeakingEnabled}
           cefrLevelEnabled={cefrLevelEnabled}
+          criteriaEditorEnabled={isCriteriaEligibleTask(task)}
         />
       ))}
       {disableTaskAdd && (

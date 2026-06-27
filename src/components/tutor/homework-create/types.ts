@@ -1,9 +1,13 @@
 import type {
+  GradingCriterion,
   HomeworkSubject,
   ModernHomeworkSubject,
   MaterialType,
 } from '@/lib/tutorHomeworkApi';
 import { SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
+
+// Re-export so constructor components can import the criterion type from here.
+export type { GradingCriterion };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -122,6 +126,14 @@ export interface DraftTask {
    * (`resolveSubjectRubric`). Только из KB-импорта; в UI конструктора не правится.
    */
   kim_number?: number | null;
+  /**
+   * Структурные критерии покритериальной AI-проверки (criteria-grading, 2026-06).
+   * Любой предмет: репетитор задаёт критерии → AI раскладывает балл по ним →
+   * `ai_criteria_json` → таблица «критерий → балл/макс → комментарий» ученику.
+   * undefined/null → нет покритериального разбора (встроенный пресет или общий
+   * грейдинг). Редактор показывается только для развёрнутых задач (non-numeric).
+   */
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────
@@ -188,6 +200,26 @@ export function createEmptyTask(): DraftTask {
     uploading: false,
     check_format: 'short_answer',
   };
+}
+
+/**
+ * Criteria-grading (2026-06): per-criterion editor + write are gated to
+ * развёрнутые (non-numeric) tasks. SINGLE SOURCE OF TRUTH — used by both
+ * HWTasksSection (editor visibility) AND TutorHomeworkCreate (write gating),
+ * so criteria authored on an extended task and then format-flipped-back to
+ * «Краткий ответ» are never written/graded (review fix P2). Mirrors the gate
+ * exactly so the two sides can't drift.
+ */
+export function isCriteriaEligibleTask(t: {
+  check_format?: string | null;
+  task_kind?: string | null;
+}): boolean {
+  return (
+    t.check_format === 'detailed_solution' ||
+    t.task_kind === 'extended' ||
+    t.task_kind === 'proof' ||
+    t.task_kind === 'speaking'
+  );
 }
 
 export function createEmptyMaterial(): DraftMaterial {

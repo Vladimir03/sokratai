@@ -54,6 +54,7 @@ import {
   SUBJECTS,
   createEmptyTask,
   generateUUID,
+  isCriteriaEligibleTask,
   revokeObjectUrl,
 } from '@/components/tutor/homework-create/types';
 import { HWTemplatePicker } from '@/components/tutor/homework-create/HWTemplatePicker';
@@ -93,6 +94,7 @@ function buildTaskSignature(tasks: Array<{
   task_kind?: string | null;
   cefr_level?: string | null;
   kim_number?: number | null;
+  grading_criteria_json?: unknown;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -118,6 +120,9 @@ function buildTaskSignature(tasks: Array<{
       cefr_level: task.cefr_level ?? null,
       // Phase 2 (2026-06-21): № КИМ в подписи → re-импорт KB-задачи с другим № помечает dirty.
       kim_number: task.kim_number ?? null,
+      // Criteria-grading feature (2026-06): структурные критерии в подписи → правка
+      // ТОЛЬКО критериев (без других полей) помечает tasksDirty (иначе не сохранится).
+      grading_criteria_json: task.grading_criteria_json ?? null,
     })),
   );
 }
@@ -262,6 +267,7 @@ function buildEditDiffState(params: {
       task_kind: task.task_kind,
       cefr_level: task.cefr_level,
       kim_number: task.kim_number,
+      grading_criteria_json: task.grading_criteria_json ?? null,
     })),
   ) !== snapshot.taskSignature;
 
@@ -410,6 +416,8 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
       cefr_level: resolvedCefr,
       // Phase 2 (2026-06-21): № КИМ из шаблона → ДЗ (grading по ФИПИ).
       kim_number: t.kim_number ?? null,
+      // Criteria-grading feature (2026-06): структурные критерии из шаблона → ДЗ.
+      grading_criteria_json: t.grading_criteria_json ?? null,
     }),
   };
 }
@@ -672,6 +680,8 @@ function TutorHomeworkCreateContent() {
         cefr_level: t.cefr_level,
         // Phase 2 (2026-06-21): preserve № КИМ on edit (grading по ФИПИ).
         kim_number: t.kim_number ?? null,
+        // Criteria-grading feature (2026-06): preserve structured criteria on edit.
+        grading_criteria_json: t.grading_criteria_json ?? null,
         kb_task_id: t.kb_task_id ?? undefined,
         kb_snapshot_text: t.kb_snapshot_text ?? undefined,
         kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
@@ -1109,6 +1119,10 @@ function TutorHomeworkCreateContent() {
             : null,
           // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
           kim_number: t.kim_number ?? null,
+          // Criteria-grading feature (2026-06): структурные критерии (любой предмет).
+          // Gated на eligible-задачи (review fix P2) — критерии, заданные на
+          // развёрнутой задаче и затем переключённой в «Краткий ответ», НЕ пишутся.
+          grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -1264,6 +1278,7 @@ function TutorHomeworkCreateContent() {
               task_kind: t.task_kind ?? null,
               cefr_level: isLang ? (meta.cefr_level ?? null) : null,
               kim_number: t.kim_number ?? null,
+              grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
             })),
           });
           void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
@@ -1438,6 +1453,9 @@ function TutorHomeworkCreateContent() {
               : null,
             // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
             kim_number: t.kim_number ?? null,
+            // Criteria-grading feature (2026-06): структурные критерии (any subject).
+            // Gated на eligible-задачи (review fix P2) — см. create body.
+            grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
           }));
         }
 
