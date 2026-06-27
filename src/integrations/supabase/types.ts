@@ -1192,6 +1192,7 @@ export type Database = {
           cefr_level: string | null
           check_format: string
           correct_answer: string | null
+          grading_criteria_json: Json | null
           id: string
           kim_number: number | null
           max_score: number
@@ -1211,6 +1212,7 @@ export type Database = {
           cefr_level?: string | null
           check_format?: string
           correct_answer?: string | null
+          grading_criteria_json?: Json | null
           id?: string
           kim_number?: number | null
           max_score?: number
@@ -1230,6 +1232,7 @@ export type Database = {
           cefr_level?: string | null
           check_format?: string
           correct_answer?: string | null
+          grading_criteria_json?: Json | null
           id?: string
           kim_number?: number | null
           max_score?: number
