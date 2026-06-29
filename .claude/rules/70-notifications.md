@@ -3,9 +3,10 @@
 ## Preview parity (КРИТИЧНО)
 
 ### Service Worker
-- SW регистрируется **ТОЛЬКО** на продакшен-домене (`sokratai.lovable.app`)
-- На preview/dev/localhost — принудительный `unregister()` + очистка `CacheStorage`
+- SW регистрируется на **всех** хостах из `PROD_HOSTS` (`src/registerServiceWorker.ts`): `sokratai.ru`, `www.sokratai.ru`, `sokratai.lovable.app`, `preview--sokratai.lovable.app`. ⚠️ **НЕ только `sokratai.lovable.app`** — после переезда прода на VPS (Phase B, rule 95) SW работает и на `sokratai.ru`. (Историческая заметка «только lovable» была устаревшей и однажды увела диагностику не туда.)
+- На preview/dev/localhost (хост вне `PROD_HOSTS`) — принудительный `unregister()` + очистка `CacheStorage`. **Поэтому SW нельзя проверить на локальном dev-сервере** — только на prod/preview-хосте.
 - Не менять логику allow-list в `src/registerServiceWorker.ts` без веской причины
+- **fetch-handler багует под РФ-DPI** — если фича/чанк молча не грузится при корректных данных и коде, подозревай SW. Полный диагностический рецепт + инварианты: **rule 95 «Service Worker — битая загрузка модулей (octet-stream) под РФ-DPI»**.
 - **Push handlers**: `push`, `notificationclick`, `pushsubscriptionchange` — в `public/service-worker.js`
 - `notificationclick`: same-origin URL validation + exact-URL tab reuse
 - `pushsubscriptionchange`: re-subscribe + `postMessage` → `listenForSubscriptionChanges()` → authenticated API call

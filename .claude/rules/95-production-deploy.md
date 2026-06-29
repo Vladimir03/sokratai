@@ -128,6 +128,33 @@ systemctl reload nginx
 
 **При новом tutor-surface / новом запросе:** используй `TutorDataStatus` (не свой баннер); реши явно critical vs degraded (по умолчанию degraded — баннер только когда «кабинет реально пуст»); на многозапросной странице — split, не OR. История/spec: memory `project_tutor_connectivity_banner.md`.
 
+## Service Worker — битая загрузка модулей (octet-stream) под РФ-DPI (2026-06-29)
+
+**Класс бага, который легко уводит диагностику на часы.** Симптом: фича/таблица/блок **не рендерится у пользователя**, ХОТЯ данные корректны (подтверждены в БД И в сыром ответе сети) И код корректен (подтверждён в **задеплоенном** бандле). На guided-homework это всплыло как «таблица „Разбор по критериям“ (`ai_criteria_json`) не появляется ни у ученика, ни у репетитора», но причина — общая для всего приложения.
+
+**Сигнатура в консоли (ищи ИМЕННО это):**
+- `Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "application/octet-stream".`
+- `Uncaught (in promise) TypeError: Failed to convert value to 'Response'.` ← источник `service-worker.js`
+- `The FetchEvent for "…" resulted in a network error response: the promise was rejected.`
+- рядом — `Service Worker: Registered successfully https://sokratai.ru/`.
+
+**Быстрая диагностика (2 шага, без деплоя):**
+1. **Сервер чист?** `curl -I https://sokratai.ru/assets/<chunk>-<hash>.js | grep -i content-type`. Если `application/javascript` → nginx ни при чём, `octet-stream` целиком от SW. (Если вдруг `application/octet-stream` от nginx — тогда серверный MIME, чини nginx, не SW.)
+2. **Воспроизводится в инкогнито?** Если в **свежем** инкогнито баг есть → это **логика** SW, а не устаревший кеш (SW регистрируется заново и сразу `claim()`-ит страницу). Если в инкогнито всё ок → застрявший кеш у юзера (разовый сброс ниже).
+
+**Корень (что именно ломается):** под РФ-DPI обрывается `fetch` чанка → в `fetch`-обработчике `public/service-worker.js` `catch(() => caches.match(req))` при пустом кеше возвращает **`undefined`** → `event.respondWith(undefined)` → модуль-скрипт «приходит» пустым → браузер трактует как `application/octet-stream` → strict-MIME-проверка ES-модулей не проходит → чанк не исполняется → фича, которую он рисует, молча исчезает. (Фикс — commit `18094d9`.)
+
+**Инварианты SW fetch-handler (НЕ нарушать):**
+- **НИКОГДА `respondWith(undefined)`.** Любая ветка `respondWith` обязана вернуть валидный `Response`: кешированный, сетевой, либо `Response.error()` (настоящая сетевая ошибка — восстановима reload'ом, в отличие от пустышки→octet-stream).
+- **`isHashedAsset()` обязан матчить хеши Vite** — `name-<hash>.js|css`, base62 **смешанного регистра** (`4cjyIRNK`, `CqLFP3xM`). Старый `/[a-f0-9]{8,}/` (только нижний hex) не матчил НИ ОДИН реальный чанк → все шли по хрупкому network-first. Регэксп: `/-[A-Za-z0-9_-]{8,}\.(?:js|css)(?:\?.*)?$/`.
+- **Хешированные чанки → cache-first** (контент-адресуемы, иммунны к обрывам на повторных загрузках).
+- **+1 ретрай сетевого fetch** для GET-чанков (гасит «1 из N» DPI-обрывов; rule про tiered tutor-errors — про тот же DPI).
+- **Менял логику кеширования SW → бампни `CACHE_NAME`** (`v3→v4…`) — `activate`-хендлер чистит старый (возможно отравленный) кеш.
+
+**Помни:** `sokratai.ru` ∈ `PROD_HOSTS` → SW тут работает (rule 70 поправлена). На **локальном dev SW принудительно unregister'ится** → этот баг локально НЕ воспроизвести, только на prod/preview-хосте. Эмердженси для юзера: `?sw=off` (kill-switch, `src/lib/swKillSwitch.ts`) на один чистый заход, либо DevTools → Application → Service Workers → Unregister + Clear site data.
+
+**Forward-guard (рекомендация):** добавить smoke-check, который грепает `public/service-worker.js` на `respondWith(undefined)`-паттерны и проверяет, что `isHashedAsset` матчит образец Vite-хеша — чтобы регрессия не уехала тихо. Файлы: `public/service-worker.js`, `src/registerServiceWorker.ts`, `src/lib/swKillSwitch.ts`. Build-лог: memory `project_sw_octet_stream_fix_2026_06_29.md`.
+
 ## Anti-patterns для AI агентов
 
 ❌ **НЕ делать:**
