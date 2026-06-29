@@ -163,4 +163,13 @@ export interface SubjectRubric {
    * `SubjectCriterionTemplate` for shape.
    */
   criteria_breakdown_template?: SubjectCriterionTemplate[] | null;
+  /**
+   * Strict-grading discipline clause (strict-criteria-grading, 2026-06-29).
+   * Non-null ТОЛЬКО для откалиброванных предметов (итерация 1: русское сочинение
+   * № 27). Инжектится ТОЛЬКО в грейдинг-промпты (buildCheckPrompt + mock-exam
+   * Часть 2), НИКОГДА в hint/chat (tone-split: строго в баллах, поддерживающе в
+   * обсуждении). Опционально — per-subject builders могут не задавать; резолвер
+   * коалесцит `core.grading_discipline ?? null` и занулят на numeric.
+   */
+  grading_discipline?: string | null;
 }

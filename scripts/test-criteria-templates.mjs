@@ -15,6 +15,7 @@
 // Run: node scripts/test-criteria-templates.mjs
 
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
@@ -141,4 +142,66 @@ test("cefr_level forces the rubric level over text heuristic", () => {
   assert.match(methodologyFor("B2"), /B2/, "cefr_level=B2 → B2 methodology");
   // null → авто-детект: нейтральный текст падает в дефолт B1 (прежнее поведение).
   assert.match(methodologyFor(null), /B1/, "cefr_level=null → auto-detect (B1 default)");
+});
+
+// strict-criteria-grading (2026-06-29): `grading_discipline` клауза строгости.
+// Итерация 1 — ТОЛЬКО русское сочинение № 27 (extended). Numeric, не-эссе русский
+// и не-откалиброванные предметы → null. Ловит регрессию «строгость уехала в
+// физику / в numeric» и случайное удаление клаузы.
+const gradingDiscipline = (subject, kim, taskKind = "extended") =>
+  resolveSubjectRubric({
+    subject,
+    exam_type: "ege",
+    kim_number: kim,
+    task_kind: taskKind,
+    task_text: null,
+    tutor_rubric: null,
+  }).grading_discipline ?? null;
+
+test("grading_discipline: russian essay № 27 (extended) → non-empty clause", () => {
+  const clause = gradingDiscipline("russian", 27, "extended");
+  assert.ok(typeof clause === "string" && clause.length > 0, "essay 27 must carry strict clause");
+  assert.match(clause, /СТРОГ/i, "clause mentions строгость");
+});
+test("grading_discipline: russian essay № 27 numeric → null (numeric gate)", () => {
+  assert.equal(gradingDiscipline("russian", 27, "numeric"), null);
+});
+test("grading_discipline: russian non-essay № 8 → null (not calibrated)", () => {
+  assert.equal(gradingDiscipline("russian", 8, "extended"), null);
+});
+for (const subject of ["physics", "maths", "chemistry", "french", "english"]) {
+  test(`grading_discipline: ${subject} → null (not calibrated yet)`, () => {
+    assert.equal(gradingDiscipline(subject, subject === "physics" ? 21 : null, "extended"), null);
+  });
+}
+
+// strict-criteria-grading review fix #4 (2026-06-29): кнопка пресета пишет
+// grading_criteria в БД, и они ПЕРЕКРЫВАЮТ backend-пресет в resolver → band-описания
+// критериев обязаны жить и во frontend-зеркале RUSSIAN_EGE_27_PRESET, иначе AI грейдит
+// по label+max. Guard: каждое backend-описание непусто И присутствует во frontend
+// byte-for-byte (ловит и удаление backend-описаний, и рассинхрон зеркала).
+test("russian preset descriptions mirror frontend (review fix #4)", () => {
+  const backend = resolveSubjectRubric({
+    subject: "russian",
+    exam_type: "ege",
+    kim_number: 27,
+    task_kind: "extended",
+    task_text: null,
+    tutor_rubric: null,
+  }).criteria_breakdown_template;
+  assert.ok(Array.isArray(backend) && backend.length === 10, "backend has 10 К-criteria");
+
+  const frontendPath = fileURLToPath(new URL("../src/lib/gradingCriteriaPresets.ts", import.meta.url));
+  const frontendText = readFileSync(frontendPath, "utf8");
+
+  for (const c of backend) {
+    assert.ok(
+      typeof c.description === "string" && c.description.trim().length > 0,
+      `backend criterion «${c.label}» must carry a non-empty description`,
+    );
+    assert.ok(
+      frontendText.includes(c.description),
+      `frontend RUSSIAN_EGE_27_PRESET must mirror «${c.label}» description byte-for-byte`,
+    );
+  }
 });

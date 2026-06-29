@@ -365,6 +365,10 @@ export function resolveSubjectRubric(input: SubjectRubricInput): SubjectRubric {
     tutor_rubric_active: hasTutorRubric,
     criteria_breakdown_template: criteriaTemplate,
     response_language_instruction: responseLanguageInstruction,
+    // Strict-criteria-grading (2026-06-29): инжектится только в грейдинг-промпты.
+    // Numeric (краткий ответ) никогда не получает клаузу — строгость лишь для
+    // развёрнутых работ. Не-откалиброванные предметы → builder не задаёт → null.
+    grading_discipline: isNumeric ? null : (core.grading_discipline ?? null),
   };
 }
 

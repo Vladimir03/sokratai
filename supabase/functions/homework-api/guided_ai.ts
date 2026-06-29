@@ -690,25 +690,51 @@ function roundToTenth(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+/**
+ * Leading criterion code «К1»/«K10» (lowercased, digits preserved) or null.
+ * Disambiguates К-criteria in matchTemplateEntry — иначе loose substring
+ * «к1» ⊂ «к10» присвоил бы балл не тому критерию (review fix #3, 2026-06-29).
+ * Без \b и без lookbehind (Deno-safe, rule 80): \d+ greedy ловит все цифры.
+ */
+function criterionCode(label: string): string | null {
+  const m = label.toLowerCase().match(/^\s*[кk]\s*(\d+)/);
+  return m ? `к${m[1]}` : null;
+}
+
 function matchTemplateEntry(
   template: SubjectCriterionTemplate[],
   rawLabel: string,
   usedIndices: Set<number>,
 ): { index: number; entry: SubjectCriterionTemplate } | null {
   const normalized = rawLabel.toLowerCase();
+  const rawCode = criterionCode(rawLabel);
+  // Pass 1: exact label.
   for (let i = 0; i < template.length; i += 1) {
     if (usedIndices.has(i)) continue;
     if (template[i].label.toLowerCase() === normalized) {
       return { index: i, entry: template[i] };
     }
   }
+  // Pass 2: exact criterion-code match («К1» → «К1: …»). Детерминированно для К1–К10.
+  if (rawCode) {
+    for (let i = 0; i < template.length; i += 1) {
+      if (usedIndices.has(i)) continue;
+      if (criterionCode(template[i].label) === rawCode) {
+        return { index: i, entry: template[i] };
+      }
+    }
+  }
+  // Pass 3: loose substring — но НИКОГДА между РАЗНЫМИ кодами критериев («к1» ⊄ «к10»).
   for (let i = 0; i < template.length; i += 1) {
     if (usedIndices.has(i)) continue;
+    const tmplCode = criterionCode(template[i].label);
+    if (rawCode && tmplCode && rawCode !== tmplCode) continue;
     const templateLower = template[i].label.toLowerCase();
     if (templateLower.includes(normalized) || normalized.includes(templateLower)) {
       return { index: i, entry: template[i] };
     }
   }
+  // Pass 4: ordinal fallback — не роняем mislabeled критерий.
   for (let i = 0; i < template.length; i += 1) {
     if (!usedIndices.has(i)) return { index: i, entry: template[i] };
   }
@@ -1750,6 +1776,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       ? "ВЫШЕ — критерии от репетитора имеют ПРИОРИТЕТ. Если они конфликтуют со стандартной методологией, следуй tutor."
       : "",
     ...criteriaPromptBlock,
+    // Strict-criteria-grading (2026-06-29): клауза строгости перед правилами
+    // выставления балла. null для не-откалиброванных предметов → .filter(Boolean) drop.
+    rubric.grading_discipline ?? "",
     "",
     "ПРАВИЛА ОЦЕНКИ:",
     "",

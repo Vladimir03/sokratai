@@ -235,7 +235,7 @@ Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 
 **Precedence в `resolveSubjectRubric` (`SubjectRubricInput.grading_criteria`):** `tutorCriteria ?? (isNumeric ? null : presetCriteria)` — критерии репетитора **ВСЕГДА** побеждают встроенный пресет, любой предмет. `SubjectCriterionTemplate` расширен `description?` (band-гайд в промпт) + `depends_on_zero?` (cascade). Резолвер чист — caller грузит из task-row.
 
-**Пресет `russian-ege.ts`** — К1–К10 сочинения ЕГЭ (реформа 2024+, Σ=22). **К7–К10 = `ai` (НЕ `tutor_only`), max_score=22** — иначе `max_score ≠ aiGradableMax` ломает движок/override (К7–К10 = AI-черновик грамотности, тутор подтверждает). Авто-фаерится только при `kim_number===27`; основной путь — кнопка пресета (через `grading_criteria`). Frontend-зеркало `src/lib/gradingCriteriaPresets.ts::RUSSIAN_EGE_27_PRESET` — labels/max/depends_on_zero **byte-for-byte** = backend (иначе cascade ломается).
+**Пресет `russian-ege.ts`** — К1–К10 сочинения ЕГЭ (реформа 2024+, Σ=22). **К7–К10 = `ai` (НЕ `tutor_only`), max_score=22** — иначе `max_score ≠ aiGradableMax` ломает движок/override (К7–К10 = AI-черновик грамотности, тутор подтверждает). Авто-фаерится только при `kim_number===27`; основной путь — кнопка пресета (через `grading_criteria`). Frontend-зеркало `src/lib/gradingCriteriaPresets.ts::RUSSIAN_EGE_27_PRESET` — labels/max/depends_on_zero **+ `description`** **byte-for-byte** = backend `RUSSIAN_EGE_27_CRITERIA` (иначе cascade ломается + AI грейдит по label+max без band-гайда — review fix #4 2026-06-29). Кнопка пресета пишет `grading_criteria_json` → перекрывает backend-пресет в resolver, поэтому `description` ОБЯЗАН ехать во фронт-зеркале. Smoke-guard: `scripts/test-criteria-templates.mjs` сверяет каждое backend-описание с текстом фронт-файла.
 
 **Cascade (КРИТИЧНО, детерминированно в коде):** `depends_on_zero` (К2,К3 → К1) → `applyCriteriaCascade` в `sanitizeCheckResult` зануляет зависимый критерий при score=0 референса (fixpoint) и **OVERRIDE'ит ai_score** = Σ cascaded. Модели НЕ доверяется. Матчинг по **label** (items[].label = template label из `sanitizeCriteriaBreakdown`); `normalizeGradingCriteria` дедупит labels + резолвит `depends_on_zero` к реальным labels (иначе misroute).
 
@@ -248,7 +248,19 @@ Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 
 **Tutor review:** AI = черновик; существующий флоу `tutor_reviewed_at` + `EditScoreDialog` + «галочка проверено» — гейт перед финалом ученику. Per-criterion правка тутором (`CriteriaReviewPanel`) = Ф4 (отложено).
 
-**При расширении:** новый пресет → backend `*-ege.ts` + frontend `gradingCriteriaPresets.ts` (byte-identical labels) + `GRADING_CRITERIA_PRESETS`; новый предмет с criteria — резолвер сам подхватит через `grading_criteria`; cascade — только в коде (label-матчинг); `max_score` = aiGradableMax (tutor_only вне суммы); новый write-path → `grading_criteria_json` + `isCriteriaEligibleTask`-гейт.
+**При расширении:** новый пресет → backend `*-ege.ts` + frontend `gradingCriteriaPresets.ts` (byte-identical labels **+ `description`**) + `GRADING_CRITERIA_PRESETS`; новый предмет с criteria — резолвер сам подхватит через `grading_criteria`; cascade — только в коде (label-матчинг); `max_score` = aiGradableMax (tutor_only вне суммы); новый write-path → `grading_criteria_json` + `isCriteriaEligibleTask`-гейт.
+
+### Строгость AI-оценки — `grading_discipline` + tone-split (2026-06-29)
+
+Рычаг строгости в rubric-слое: модель по умолчанию завышает балл «из вежливости» (баг филолога: 22/22 за неидеальное сочинение). Критерии (`description`) до промпта доходят — не хватало инструкции «оцени строго». Spec: `docs/delivery/features/strict-criteria-grading/`.
+
+- **Поле `SubjectRubric.grading_discipline?: string | null`** (зеркало `response_language_instruction`). Резолвер коалесцит `core.grading_discipline ?? null` + **занулят на numeric** (`isNumeric ? null : …`).
+- **Tone-split (КРИТИЧНО — НЕ нарушать):** инжектится ТОЛЬКО в грейдинг-промпты — `guided_ai.ts::buildCheckPrompt` (перед «ПРАВИЛА ОЦЕНКИ») + `mock-exam-prompts.ts::buildMockExamPart2Prompt`. **НИКОГДА** в `buildHintPrompt` / `chat/index.ts` subjectBlock (подсказки/обсуждение остаются сократическими). Все 4 пути резолвят rubric, но добрые два поле НЕ читают.
+- **Per-subject rollout:** контент задаёт builder. Итерация 1 — только русское сочинение (`russian-ege.ts::STRICT_GRADING_DISCIPLINE`, gate `isEssay27`). Физика/языки/математика → `null` (no-op; провод mock уже стоит → активируется добавлением клаузы в `physics-ege.ts`). **Текст строгости КАЛИБРУЕТ ФИЛОЛОГ** — single-point правка в `russian-ege.ts`.
+- **Клауза GENERIC** (review #2): без номеров К — «оцени по КАЖДОМУ заданному критерию строго по его band-описанию». Когерентна и с пресетом К1–К10, и с кастомными критериями тутора (пресет приходит как `tutorCriteria` → гейтить на `!tutorCriteria` НЕЛЬЗЯ). Грамотность-исключение условное («если такие критерии заданы») — строгость на содержании, лояльность к подсчёту ошибок.
+- **`matchTemplateEntry` code-pass** (review #3, `guided_ai.ts`): `criterionCode` извлекает «К1»/«К10» → exact-code-match ПЕРЕД loose-substring; substring запрещён между РАЗНЫМИ кодами (иначе «к1» ⊂ «к10» → балл не тому критерию). Ordinal-fallback сохранён.
+- **Известный follow-up (#1, НЕ сделан):** `sanitizeCriteriaBreakdown` нормализует критерии ПОД холистический `ai_score` модели (не наоборот). Для строгой покритериальной — `ai_score` должен выводиться из Σ критериев. Трогает общую нормализацию (языки + `renormalizeCriteriaToScore` downgrade) → отдельная задача со своей валидацией.
+- **При расширении строгости на предмет:** добавь `grading_discipline` в его `*-ege.ts` (generic-клауза переиспользуема); НЕ инжектируй в hint/chat; numeric остаётся null.
 
 ### Уровень CEFR языковых ДЗ — `cefr_level` (явный, форсит рубрику)
 

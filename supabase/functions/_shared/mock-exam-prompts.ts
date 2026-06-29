@@ -256,6 +256,9 @@ export function buildMockExamPart2Prompt(
     // Для № 26: Критерий 1 (обоснование, 1 балл) + Критерий 2 (расчёт как № 24-25, 3 балла).
     "ПОЛНАЯ МЕТОДОЛОГИЯ ОЦЕНКИ (используй для распределения баллов по элементам):",
     rubric.methodology,
+    // Strict-criteria-grading (2026-06-29): провод строгости. No-op пока физику
+    // (subject hardcode='physics') не валидируем — там grading_discipline=null.
+    rubric.grading_discipline ?? "",
     "",
     // Backward-compat slot: legacy buildCriteriaBlock summary всё ещё инжектируется
     // как краткая шпаргалка (для № 21 — спец-правило, для № 22-26 — компакт I-IV).
