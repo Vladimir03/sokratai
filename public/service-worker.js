@@ -1,4 +1,4 @@
-const CACHE_NAME = 'math-tutor-cache-v3';
+const CACHE_NAME = 'math-tutor-cache-v4';
 
 // Only cache files that definitely exist and are stable
 const STATIC_ASSETS = [
@@ -45,9 +45,27 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Check if asset should be cached long-term (has hash in filename)
+// Check if asset should be cached long-term. Vite emits `name-[hash].js|css`
+// where the hash is base62/base64url and MIXED case — e.g. `index-CqLFP3xM.js`,
+// `HomeworkProblem-4cjyIRNK.js`. The old `/[a-f0-9]{8,}/` test only matched a
+// run of 8+ lowercase-hex chars and so matched NONE of Vite's real chunks,
+// routing every JS/CSS chunk through the fragile network-first path below.
+// Match the real `-<hash>.ext` shape instead.
 function isHashedAsset(url) {
-  return /\.(js|css)$/.test(url) && /[a-f0-9]{8,}/.test(url);
+  return /-[A-Za-z0-9_-]{8,}\.(?:js|css)(?:\?.*)?$/.test(url);
+}
+
+// Fetch with one retry. RU DPI intermittently drops ~1 of N TLS connections
+// (see .claude/rules/95-production-deploy.md), turning a transient drop into a
+// hard module-load failure. A single retry recovers most drops. GET-only (the
+// fetch handler returns early for non-GET), so retrying is idempotent-safe.
+async function fetchWithRetry(request, retries) {
+  try {
+    return await fetch(request);
+  } catch (err) {
+    if (retries > 0) return fetchWithRetry(request, retries - 1);
+    throw err;
+  }
 }
 
 // Check if request is for a document/HTML page
@@ -99,37 +117,49 @@ self.addEventListener('fetch', (event) => {
           // Return fresh response, don't cache it
           return fetchResponse;
         })
-        .catch(() => {
-          // Offline fallback: return cached index.html
+        .catch(async () => {
+          // Offline fallback: cached index.html if present. NEVER return
+          // undefined — `respondWith(undefined)` throws "Failed to convert
+          // value to 'Response'" and breaks the navigation. Fall back to a real
+          // network-error Response so the browser surfaces a normal failure.
           console.log('Service Worker: Network failed for document, using cached index.html');
-          return caches.match('/index.html');
+          const cached = await caches.match('/index.html');
+          return cached || Response.error();
         })
     );
     return;
   }
 
-  // HASHED ASSETS (JS/CSS with hash): Cache-first (immutable)
+  // HASHED ASSETS (JS/CSS with content hash): Cache-first (immutable).
+  // Content-addressed → a given URL always has the same bytes, so once cached
+  // it is safe forever AND immune to RU DPI drops on every repeat load.
   if (isHashedAsset(event.request.url)) {
     event.respondWith(
-      caches.match(event.request).then((cachedResponse) => {
+      caches.match(event.request).then(async (cachedResponse) => {
         if (cachedResponse) {
           return cachedResponse;
         }
-        
-        return fetch(event.request).then((fetchResponse) => {
+
+        try {
+          const fetchResponse = await fetchWithRetry(event.request, 1);
           // Only cache successful responses
-          if (fetchResponse.status === 200) {
+          if (fetchResponse && fetchResponse.status === 200) {
             const responseToCache = fetchResponse.clone();
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, responseToCache);
             });
           }
           return fetchResponse;
-        }).catch((error) => {
+        } catch (error) {
           console.error('Service Worker: Failed to fetch hashed asset:', event.request.url, error);
-          // Don't return stale cache for assets - let it fail so ErrorBoundary catches it
-          throw error;
-        });
+          // Nothing cached and network failed after the retry. Return a real
+          // network-error Response — NEVER undefined. `respondWith(undefined)`
+          // throws "Failed to convert value to 'Response'", which makes module
+          // scripts arrive empty → browser treats them as application/octet-stream
+          // → MIME check fails → chunk never executes. A proper error Response
+          // lets the browser surface a normal, recoverable load failure instead.
+          return Response.error();
+        }
       })
     );
     return;
@@ -137,10 +167,10 @@ self.addEventListener('fetch', (event) => {
 
   // Network-first strategy for other requests
   event.respondWith(
-    fetch(event.request)
+    fetchWithRetry(event.request, 1)
       .then((fetchResponse) => {
         // Cache successful responses for offline use
-        if (fetchResponse.status === 200) {
+        if (fetchResponse && fetchResponse.status === 200) {
           const responseToCache = fetchResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, responseToCache);
@@ -148,9 +178,12 @@ self.addEventListener('fetch', (event) => {
         }
         return fetchResponse;
       })
-      .catch(() => {
-        // Fallback to cache
-        return caches.match(event.request);
+      .catch(async () => {
+        // Fallback to cache; NEVER return undefined (respondWith(undefined)
+        // throws "Failed to convert value to 'Response'"). Real network-error
+        // Response when there is no cached copy.
+        const cached = await caches.match(event.request);
+        return cached || Response.error();
       })
   );
 });
