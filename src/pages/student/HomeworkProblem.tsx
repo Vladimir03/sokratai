@@ -302,6 +302,9 @@ export default function HomeworkProblem() {
 
   // Auto-scroll to bottom on new messages or streaming.
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  // Ref on the criteria-breakdown wrapper so a completed task can scroll the
+  // разбор into view (it mounts on task_state data, not on a chat message).
+  const criteriaRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = chatScrollRef.current;
     if (!el) return;
@@ -395,6 +398,30 @@ export default function HomeworkProblem() {
     }
     return data.task.max_score;
   }, [data, isCurrentCompleted, currentTaskState]);
+
+  // Завершённая задача с покритериальным разбором: таблица «Разбор по
+  // критериям» монтируется по данным task_state (не по сообщению), поэтому
+  // message-based авто-скролл выше до неё не доезжает — ученик её не видит
+  // под лентой. Скроллим к ней ОДИН раз на задачу (ref-guard, чтобы не
+  // дёргать при рефетчах и не мешать ручному скроллу). Двойной rAF ждёт
+  // лейаут высокой таблицы.
+  const criteriaScrolledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isCurrentCompleted) return;
+    const hasCriteria =
+      Array.isArray(currentTaskState?.ai_criteria_json) &&
+      currentTaskState.ai_criteria_json.length > 0;
+    if (!hasCriteria) return;
+    const key = data?.task.id ?? '';
+    if (criteriaScrolledRef.current === key) return;
+    criteriaScrolledRef.current = key;
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        criteriaRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isCurrentCompleted, currentTaskState, data?.task.id]);
 
   // ─── Tutor identity for chat bubbles (preview-QA #7, 2026-05-10) ──────────
   // Сообщения от репетитора в чате должны показывать имя + аватар (или
@@ -1652,12 +1679,17 @@ export default function HomeworkProblem() {
             </div>
           </div>
         ) : null}
-        {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion breakdown. */}
+        {/* Voice-Speaking MVP TASK-4 (2026-05-27): per-criterion breakdown.
+            Wrapped in a ref'd div so the completed-task effect can scroll the
+            разбор into view. The table keeps full height via its own `shrink-0`
+            (flex-compression fix, 2026-06-29). */}
         {Array.isArray(currentTaskState?.ai_criteria_json) &&
         currentTaskState!.ai_criteria_json!.length > 0 ? (
-          <CriteriaBreakdownTable
-            criteria={currentTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
-          />
+          <div ref={criteriaRef}>
+            <CriteriaBreakdownTable
+              criteria={currentTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
+            />
+          </div>
         ) : null}
       </div>
 

@@ -72,7 +72,13 @@ function CriteriaBreakdownTableImpl({
   const displayMax = aiGraded.reduce((sum, c) => sum + (Number(c.max) || 0), 0);
 
   const wrapperClass = [
-    "rounded-md border border-slate-200 bg-white overflow-hidden",
+    // `shrink-0` REQUIRED: this section sets `overflow-hidden`, which per the
+    // flexbox spec makes its `min-height: auto` resolve to 0. As a direct child
+    // of a `flex flex-col` scroll container (student HomeworkProblem chat, tutor
+    // GuidedThreadViewer), flex-shrink then compresses it to ~2px and its own
+    // overflow-hidden clips the full-height content → invisible AND unreachable
+    // by scroll. Do NOT remove. (Bug found 2026-06-29: table rendered but 2px tall.)
+    "rounded-md border border-slate-200 bg-white overflow-hidden shrink-0",
     className ?? "",
   ]
     .filter(Boolean)
