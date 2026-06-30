@@ -1,0 +1,115 @@
+# Пример выгрузки по проверке ДЗ + ответ про телеметрию (для Кати-Дубай)
+
+> ⚠ **Это синтетический образец, не реальные данные.** Реальных строк здесь нет (ученики
+> несовершеннолетние, NDA, и у Claude Code нет доступа к БД). **Структура, имена полей и типы —
+> точные, как в проде.** Реальная выгрузка — это один SQL-запрос внутри периметра
+> (`export-hw-check-anonymized.sql`). Загружаемая версия этих же строк — `sample-hw-check-export.json`.
+
+**Грейн строки:** одна строка = **(ученик × задача)** в рамках одного ДЗ (таблица
+`homework_tutor_task_states`). 8 строк подобраны так, чтобы покрыть случаи, которые встретятся в
+скоркарте.
+
+---
+
+## 1. Словарь данных
+
+| Поле | Источник | Тип | Null? | Что значит |
+|---|---|---|---|---|
+| `task_state_id` | task_states | uuid | нет | PK строки проверки (в примере синтетический). Безопасный ключ |
+| `student_anon` | хеш `auth.users.id` | text | нет | обезличенный ученик. В реальной выгрузке = хеш, **не** сырой id |
+| `task_id` | homework_tutor_tasks | uuid | нет | задача (каноническая идентичность). Безопасный ключ |
+| `subject` | homework_tutor_assignments | text | нет | предмет (joined). Для стратификации |
+| `check_format` | homework_tutor_tasks | text | нет | `short_answer` / `detailed_solution` |
+| `task_kind` | homework_tutor_tasks | text | нет | `numeric` / `extended` / `proof` / `speaking` |
+| `max_score` | homework_tutor_tasks | numeric(6,1) | нет | макс балл задачи (joined) — **без него `ai_score` не интерпретировать** |
+| `status` | task_states | text | нет | `locked` / `active` / `completed` / `skipped` |
+| `attempts` | task_states | int | нет | число попыток сдачи |
+| `wrong_answer_count` | task_states | int | нет | неверные попытки (влияют на деградацию балла) |
+| `hint_count` | task_states | int | нет | взятые подсказки (влияют на деградацию балла) |
+| **`ai_score`** | task_states | numeric(5,2) | **да** | балл Gemini (шаг 0.5). `null` = не оценивал (сбой / force-complete / в процессе) |
+| **`ai_score_comment`** | task_states | text | да | обоснование AI. **Tutor-only** (ученику не показывается) |
+| **`ai_criteria_json`** | task_states | jsonb | да | покритериально `[{label,score,max,comment,kind?}]`. **Только языки** (DELF/ЕГЭ EN/IELTS); физика = `null`. Σ AI-баллов = `ai_score` |
+| `earned_score` | task_states | numeric(8,2) | да | балл ученика после деградации за подсказки/ошибки |
+| `available_score` | task_states | numeric(8,2) | да | доступный максимум после деградации |
+| **`tutor_score_override`** | task_states | numeric(5,2) | да | ручной балл репетитора. **≠ `ai_score` = репетитор переоценил → ключевой сигнал ошибки AI** |
+| `tutor_score_override_comment` | task_states | text | да | комментарий репетитора (виден ученику) |
+| **`tutor_reviewed_at`** | task_states | timestamptz | да | момент подтверждения («проверено»). `null` = ещё не подтверждено |
+| **`tutor_force_completed_at`** | task_states | timestamptz | да | момент ручного закрытия без AI-вердикта. `null` = закрыто по AI / не закрыто |
+| `created_at` / `updated_at` | task_states | timestamptz | нет | служебные |
+
+**Итоговый балл** (как считает продукт): `final = tutor_score_override ?? earned_score ?? ai_score ??
+(status='completed' ? max_score : 0)`.
+
+---
+
+## 2. Сами строки (что в `.json`)
+
+| Строка | Предмет | Формат | max | ai_score | override | reviewed | force | criteria | Случай |
+|---|---|---|---|---|---|---|---|---|---|
+| ts_0001 | physics | short | 1 | 1 | — | да | — | — | Чистый авто-зачёт (AI=макс, репетитор подтвердил) |
+| ts_0002 | physics | detailed | 3 | 3 | **1.5** | да | — | — | **F1 ложно-«верно»** (Δ −1.5): AI зачёл неполное решение |
+| ts_0003 | physics | detailed | 2 | 0 | **2** | да | — | — | **F2 ложно-«ошибка»** (Δ +2) + намёк F5: «AI не распознал рукопись» |
+| ts_0004 | physics | detailed | 3 | 2 | — | да | — | — | Корректная частичная (ON_TRACK), с подсказками |
+| ts_0005 | physics | proof | 3 | **—** | 2.5 | — | **да** | — | Force-complete: AI не оценивал, репетитор закрыл вручную |
+| ts_0006 | french | detailed | 13 | 9.5 | — | — | — | **есть** | Язык: `ai_criteria_json` заполнен, Σ=9.5=ai_score; ещё не подтверждён |
+| ts_0007 | physics | short | 1 | 1 | — | **—** | — | — | Авто-зачёт, ещё НЕ подтверждён (в auto-accept, но не reviewed) |
+| ts_0008 | physics | detailed | 3 | **—** | — | — | — | — | AI не смог проверить (status=active; класс CHECK_FAILED) |
+
+---
+
+## 3. Что покрывают эти строки (для скоркарты)
+
+- **F1 / F2** (ложно-«верно» / ложно-«ошибка») — строки ts_0002 / ts_0003. Детект через
+  `override_delta = tutor_score_override − ai_score` (оба не null): `Δ < 0` → F1, `Δ > 0` → F2.
+- **F5** (сбой распознавания рукописи) — ts_0003, виден только через комментарий репетитора
+  (авто-сигнала нет, OCR не хранится).
+- **Force-complete vs reviewed** — ts_0005 (force, но не reviewed) vs ts_0001/ts_0002 (reviewed).
+  Это разные действия, не путать.
+- **Покритериальный грейдинг языков** — ts_0006 (`ai_criteria_json`); для физики поле всегда `null`.
+- **Auto-accept, но не подтверждён** — ts_0007 (важно для метрики auto-accept-rate vs review-coverage).
+- **AI не дал балл** — ts_0005 (force) и ts_0008 (сбой): `ai_score IS NULL` с разными причинами.
+
+### Ключевые метрики прямо из этих полей
+
+| Метрика | Формула |
+|---|---|
+| `override_delta` | `tutor_score_override − ai_score` (оба не null) → знак = F1/F2 |
+| `auto_accept_rate` | доля reviewed-строк, где `tutor_score_override IS NULL` |
+| `review_coverage` | доля строк с `tutor_reviewed_at IS NOT NULL` (= потолок «лейблов правды») |
+| `has_ai_grade` | доля строк с `ai_score IS NOT NULL` |
+| `degradation` | `available_score / max_score` (влияние подсказок/ошибок) |
+
+---
+
+## 4. Чего в этой выгрузке НЕТ (важно для дизайна скоркарты)
+
+- ❌ `verdict` (CORRECT / ON_TRACK / INCORRECT / CHECK_FAILED), `confidence`, `error_type`,
+  `failure_reason` — их **нет в таблице task_states**. С 2026-06-30 они пишутся ВПЕРЁД в отдельную
+  таблицу телеметрии `hw_ai_check_events` (см. `telemetry-hw-ai-check-events.md`).
+- ❌ OCR/распознанный текст рукописи — нигде не хранится (фото → Gemini в реальном времени).
+- Грейн = (ученик × задача), а не «вся работа целиком».
+
+---
+
+## 5. Ответ на вопрос про телеметрию
+
+**Вопрос:** «правильно понимаю, что пока нет ретроспективных данных, но можно будет включить
+логирование на какой-то период для аналитики?»
+
+**Почти так — с одним уточнением. Разделим на два слоя:**
+
+**Слой A — баллы и правки (есть ретроспективно уже сейчас).** `ai_score`, `ai_score_comment`,
+`ai_criteria_json`, `tutor_score_override(+comment/+at)`, `tutor_reviewed_at`,
+`tutor_force_completed_at`, `hint_count`, `wrong_answer_count`, `attempts`, `earned`/`available_score`
+— всё это **персистентные колонки в БД** с самого начала. Их можно анализировать **за весь прошлый
+период без всякого включения логирования** (это и есть `export-hw-check-anonymized.sql`) — и именно
+тут лежит главный «лейбл правды» (правки репетитора).
+
+**Слой B — вердикт/уверенность/тип ошибки (тут да, ты права).** `verdict`, `confidence`,
+`error_type`, `failure_reason` исторически уходили только в логи edge-функций. **С 2026-06-30
+включено структурированное логирование** в таблицу `hw_ai_check_events` (два события: `check_completed`
+на каждой проверке + `tutor_correction` на правке репетитора). Ретроспективы по нему нет — копит
+вперёд; данные накопятся к нужному окну (2–4 недели).
+
+**Итог:** по Слою A стартуй ретроспективно прямо сейчас; по Слою B — логирование уже включается,
+собираем вперёд.

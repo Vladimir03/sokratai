@@ -4118,6 +4118,23 @@ async function handleSetTutorScoreOverride(
       task_id: taskId,
       action: "force_complete",
     });
+    // Analytics telemetry (2026-06-30): force-complete is a tutor correction
+    // (closed without an AI verdict). Best-effort, never blocks the response.
+    await recordHwCheckEvent(db, {
+      event_type: "tutor_correction",
+      tutor_id: tutorUserId,
+      assignment_id: assignmentId,
+      student_id: studentId,
+      task_id: taskId,
+      task_state_id: (result.task_state_id as string) ?? (existing.id as string),
+      max_score: maxScore,
+      correction_kind: "force_complete",
+      tutor_score_override: overrideValue,
+      ai_score_at_correction: existing.ai_score == null ? null : Number(existing.ai_score),
+      override_delta: (overrideValue != null && existing.ai_score != null)
+        ? overrideValue - Number(existing.ai_score)
+        : null,
+    });
     return jsonOk(cors, {
       ok: true,
       task_state: {
@@ -4175,6 +4192,25 @@ async function handleSetTutorScoreOverride(
     console.error("homework_api_request_error", { route: "PATCH score-override", error: updErr?.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to update task state");
   }
+
+  // Analytics telemetry (2026-06-30): tutor correction of the AI grade.
+  // override_delta = override − ai_score is the core false-accept/false-reject
+  // signal for the AI-quality project. Best-effort, never blocks the response.
+  await recordHwCheckEvent(db, {
+    event_type: "tutor_correction",
+    tutor_id: tutorUserId,
+    assignment_id: assignmentId,
+    student_id: studentId,
+    task_id: taskId,
+    task_state_id: existing.id as string,
+    max_score: maxScore,
+    correction_kind: forceComplete === "active" ? "reopen" : (overrideValue === null ? "reset" : "override"),
+    tutor_score_override: overrideValue,
+    ai_score_at_correction: existing.ai_score == null ? null : Number(existing.ai_score),
+    override_delta: (overrideValue != null && existing.ai_score != null)
+      ? overrideValue - Number(existing.ai_score)
+      : null,
+  });
 
   let finalStatus = updated.status as string;
   let finalForceCompletedAt: string | null = (updated as Record<string, unknown>).tutor_force_completed_at as string | null;
@@ -7846,6 +7882,37 @@ async function loadAdvanceContext(
 //
 // Does NOT touch the user message row, thread timestamps, or the final
 // thread refetch — those vary per caller and stay in the caller.
+/**
+ * Append-only AI-check telemetry (analytics layer, 2026-06-30).
+ *
+ * Records the per-check "verdict layer" (verdict / confidence / error_type /
+ * failure_reason) that is NOT persisted on `homework_tutor_task_states`, plus
+ * tutor corrections (override / reopen / force_complete) — for the
+ * "Качество AI-проверки ДЗ" analytics project. Writes to
+ * `public.hw_ai_check_events` (migration 20260630120000), service-role only.
+ *
+ * Invariants:
+ *  - Best-effort + non-throwing: a telemetry failure MUST NEVER break grading.
+ *  - PII-free: never store feedback text / comments — only categorical outcome,
+ *    scores, flags and ids (ids anonymized at export time, not here).
+ */
+async function recordHwCheckEvent(
+  db: SupabaseClient,
+  event: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const { error } = await db.from("hw_ai_check_events").insert(event);
+    if (error) {
+      console.warn(JSON.stringify({ event: "hw_ai_check_event_insert_failed", reason: error.message }));
+    }
+  } catch (e) {
+    console.warn(JSON.stringify({
+      event: "hw_ai_check_event_insert_threw",
+      reason: e instanceof Error ? e.message : "unknown",
+    }));
+  }
+}
+
 async function runStudentAnswerGrading(args: {
   db: SupabaseClient;
   threadId: string;
@@ -8192,6 +8259,36 @@ async function runStudentAnswerGrading(args: {
       total_tasks: totalTasks,
     };
   }
+
+  // Analytics telemetry (2026-06-30): persist the per-check verdict layer
+  // (verdict/confidence/error_type/failure_reason) that is NOT stored on
+  // task_states — needed for the AI-quality analytics project. Best-effort:
+  // never blocks grading, PII-free (no feedback text).
+  await recordHwCheckEvent(db, {
+    event_type: "check_completed",
+    student_id: studentAssignment.student_id,
+    assignment_id: studentAssignment.assignment_id,
+    task_id: task.id,
+    task_state_id: currentState.id as string,
+    subject: assignment.subject ?? null,
+    check_format: task.check_format ?? null,
+    task_kind: task.task_kind ?? null,
+    kim_number: typeof task.kim_number === "number" ? task.kim_number : null,
+    max_score: task.max_score ?? null,
+    verdict: effectiveVerdict,
+    confidence: typeof result.confidence === "number" ? result.confidence : null,
+    error_type: typeof (result as Record<string, unknown>).error_type === "string"
+      ? (result as Record<string, unknown>).error_type
+      : null,
+    failure_reason: typeof (result as Record<string, unknown>).failure_reason === "string"
+      ? (result as Record<string, unknown>).failure_reason
+      : null,
+    ai_score: typeof effectiveAiScore === "number" ? effectiveAiScore : null,
+    meta: {
+      feedback_kind: feedbackKind,
+      raw_verdict: result.verdict !== effectiveVerdict ? result.verdict : undefined,
+    },
+  });
 
   return responseData;
 }
