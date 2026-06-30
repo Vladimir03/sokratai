@@ -1434,6 +1434,99 @@ export type Database = {
         }
         Relationships: []
       }
+      hw_ai_check_events: {
+        Row: {
+          ai_score: number | null
+          ai_score_at_correction: number | null
+          assignment_id: string | null
+          check_format: string | null
+          confidence: number | null
+          correction_kind: string | null
+          error_type: string | null
+          event_type: string
+          failure_reason: string | null
+          fast_path: boolean | null
+          id: string
+          image_missing: boolean | null
+          kim_number: number | null
+          latency_ms: number | null
+          leak_retry: boolean | null
+          leak_scrubbed: boolean | null
+          max_score: number | null
+          meta: Json | null
+          occurred_at: string
+          override_delta: number | null
+          student_id: string | null
+          subject: string | null
+          task_id: string | null
+          task_kind: string | null
+          task_state_id: string | null
+          tutor_id: string | null
+          tutor_score_override: number | null
+          verdict: string | null
+        }
+        Insert: {
+          ai_score?: number | null
+          ai_score_at_correction?: number | null
+          assignment_id?: string | null
+          check_format?: string | null
+          confidence?: number | null
+          correction_kind?: string | null
+          error_type?: string | null
+          event_type: string
+          failure_reason?: string | null
+          fast_path?: boolean | null
+          id?: string
+          image_missing?: boolean | null
+          kim_number?: number | null
+          latency_ms?: number | null
+          leak_retry?: boolean | null
+          leak_scrubbed?: boolean | null
+          max_score?: number | null
+          meta?: Json | null
+          occurred_at?: string
+          override_delta?: number | null
+          student_id?: string | null
+          subject?: string | null
+          task_id?: string | null
+          task_kind?: string | null
+          task_state_id?: string | null
+          tutor_id?: string | null
+          tutor_score_override?: number | null
+          verdict?: string | null
+        }
+        Update: {
+          ai_score?: number | null
+          ai_score_at_correction?: number | null
+          assignment_id?: string | null
+          check_format?: string | null
+          confidence?: number | null
+          correction_kind?: string | null
+          error_type?: string | null
+          event_type?: string
+          failure_reason?: string | null
+          fast_path?: boolean | null
+          id?: string
+          image_missing?: boolean | null
+          kim_number?: number | null
+          latency_ms?: number | null
+          leak_retry?: boolean | null
+          leak_scrubbed?: boolean | null
+          max_score?: number | null
+          meta?: Json | null
+          occurred_at?: string
+          override_delta?: number | null
+          student_id?: string | null
+          subject?: string | null
+          task_id?: string | null
+          task_kind?: string | null
+          task_state_id?: string | null
+          tutor_id?: string | null
+          tutor_score_override?: number | null
+          verdict?: string | null
+        }
+        Relationships: []
+      }
       kb_folders: {
         Row: {
           catalog_subtopic_id: string | null
