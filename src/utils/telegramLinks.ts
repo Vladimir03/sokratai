@@ -69,13 +69,18 @@ export const getTutorInvitePreviewLink = (inviteCode: string): string => {
 /**
  * Онбординг-активация v2 — share-ссылка per-student claim (гейт «Подключить»).
  *
- * Ведёт на edge `student-claim` (GET): отдаёт invite-OG для Telegram/WhatsApp
- * scrape + meta-refresh редиректит браузер на SPA `/c/{token}`, который минтит
- * беспарольную сессию. Hardcoded `https://api.sokratai.ru` (RU bypass, AGENTS.md).
- * Подходит для копирования в любой чат (Telegram/WhatsApp) и для QR.
+ * Ведёт на **SPA-роут** `sokratai.ru/c/{token}` (НЕ на edge напрямую) — зеркало
+ * решения `getTutorInviteWebLink`. Причина: прямой GET на edge
+ * `api.sokratai.ru/functions/v1/student-claim` из браузера/скрейпера идёт без
+ * auth-заголовка → Supabase-gateway отдаёт 401 `UNAUTHORIZED_NO_AUTH_HEADER`
+ * (функция задеплоена verify_jwt=true, rule 96 #11a). SPA-роут же обслуживается
+ * nginx (VPS), грузит `StudentClaimPage`, который зовёт `student-claim` POST
+ * через `supabase.functions.invoke` (шлёт anon-ключ → проходит gateway).
+ * OG в Telegram — generic global (как у tutor-invite, reliability > custom OG).
+ * Подходит для копирования в любой чат и для QR.
  */
 export const getStudentClaimShareLink = (token: string): string => {
-  return `https://api.sokratai.ru/functions/v1/student-claim?t=${encodeURIComponent(token)}`;
+  return `${PRODUCTION_URL}/c/${encodeURIComponent(token)}`;
 };
 
 export const telegramLinks = {
