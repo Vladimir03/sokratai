@@ -74,6 +74,45 @@ export type Database = {
         }
         Relationships: []
       }
+      analytics_events: {
+        Row: {
+          actor_user_id: string | null
+          assignment_id: string | null
+          event_name: string
+          id: string
+          meta: Json | null
+          occurred_at: string
+          source: string | null
+          student_id: string | null
+          tutor_id: string | null
+          tutor_student_id: string | null
+        }
+        Insert: {
+          actor_user_id?: string | null
+          assignment_id?: string | null
+          event_name: string
+          id?: string
+          meta?: Json | null
+          occurred_at?: string
+          source?: string | null
+          student_id?: string | null
+          tutor_id?: string | null
+          tutor_student_id?: string | null
+        }
+        Update: {
+          actor_user_id?: string | null
+          assignment_id?: string | null
+          event_name?: string
+          id?: string
+          meta?: Json | null
+          occurred_at?: string
+          source?: string | null
+          student_id?: string | null
+          tutor_id?: string | null
+          tutor_student_id?: string | null
+        }
+        Relationships: []
+      }
       answer_attempts: {
         Row: {
           attempt_time: string
@@ -124,6 +163,24 @@ export type Database = {
         Update: {
           request_count?: number
           user_id?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      auth_otp_throttle: {
+        Row: {
+          attempts: number
+          throttle_key: string
+          window_start: string
+        }
+        Insert: {
+          attempts?: number
+          throttle_key: string
+          window_start?: string
+        }
+        Update: {
+          attempts?: number
+          throttle_key?: string
           window_start?: string
         }
         Relationships: []
@@ -3771,6 +3828,10 @@ export type Database = {
         Row: {
           archived_at: string | null
           balance: number
+          claim_channel: string | null
+          claim_token: string | null
+          claim_token_created_at: string | null
+          claimed_at: string | null
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -3794,6 +3855,10 @@ export type Database = {
         Insert: {
           archived_at?: string | null
           balance?: number
+          claim_channel?: string | null
+          claim_token?: string | null
+          claim_token_created_at?: string | null
+          claimed_at?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -3817,6 +3882,10 @@ export type Database = {
         Update: {
           archived_at?: string | null
           balance?: number
+          claim_channel?: string | null
+          claim_token?: string | null
+          claim_token_created_at?: string | null
+          claimed_at?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -4705,6 +4774,10 @@ export type Database = {
           _note?: string
           _occurred_on?: string
         }
+        Returns: string
+      }
+      tutor_ensure_student_claim_token: {
+        Args: { p_tutor_student_id: string }
         Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }
