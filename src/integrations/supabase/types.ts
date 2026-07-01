@@ -74,6 +74,45 @@ export type Database = {
         }
         Relationships: []
       }
+      analytics_events: {
+        Row: {
+          actor_user_id: string | null
+          assignment_id: string | null
+          event_name: string
+          id: string
+          meta: Json | null
+          occurred_at: string
+          source: string | null
+          student_id: string | null
+          tutor_id: string | null
+          tutor_student_id: string | null
+        }
+        Insert: {
+          actor_user_id?: string | null
+          assignment_id?: string | null
+          event_name: string
+          id?: string
+          meta?: Json | null
+          occurred_at?: string
+          source?: string | null
+          student_id?: string | null
+          tutor_id?: string | null
+          tutor_student_id?: string | null
+        }
+        Update: {
+          actor_user_id?: string | null
+          assignment_id?: string | null
+          event_name?: string
+          id?: string
+          meta?: Json | null
+          occurred_at?: string
+          source?: string | null
+          student_id?: string | null
+          tutor_id?: string | null
+          tutor_student_id?: string | null
+        }
+        Relationships: []
+      }
       answer_attempts: {
         Row: {
           attempt_time: string
@@ -124,6 +163,24 @@ export type Database = {
         Update: {
           request_count?: number
           user_id?: string
+          window_start?: string
+        }
+        Relationships: []
+      }
+      auth_otp_throttle: {
+        Row: {
+          attempts: number
+          throttle_key: string
+          window_start: string
+        }
+        Insert: {
+          attempts?: number
+          throttle_key: string
+          window_start?: string
+        }
+        Update: {
+          attempts?: number
+          throttle_key?: string
           window_start?: string
         }
         Relationships: []
@@ -4253,6 +4310,7 @@ export type Database = {
         Args: { message_id: number; queue_name: string }
         Returns: boolean
       }
+      email_queue_dispatch: { Args: never; Returns: undefined }
       enqueue_email: {
         Args: { payload: Json; queue_name: string }
         Returns: number
