@@ -33,6 +33,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
+import { ConnectStudentSheet, type ConnectStudentTarget } from '@/components/tutor/ConnectStudentSheet';
 import { useTutor, useTutorGroups } from '@/hooks/useTutor';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import {
@@ -110,6 +111,9 @@ export function AddStudentsToHomeworkDialog({
   const [notify, setNotify] = useState(true);
   // HWAssignSection demands these but we hide via hideNotify.
   const [notifyTemplate, setNotifyTemplate] = useState('');
+  // Онбординг v2 (T3) — гейт «Подключить» после добавления учеников без канала.
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectTargets, setConnectTargets] = useState<ConnectStudentTarget[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -165,6 +169,19 @@ export function AddStudentsToHomeworkDialog({
         queryKey: ['tutor', 'homework', 'assignments'],
       });
 
+      // Онбординг v2 (T3): если среди добавленных есть ученики без канала и не
+      // подключённые — открываем гейт «Подключить» (QR/ссылка/email).
+      const withoutChannel = data.students_without_channel ?? [];
+      if (withoutChannel.length > 0) {
+        const names = data.students_without_channel_names ?? [];
+        setConnectTargets(
+          withoutChannel.map((sid, i) => ({ student_id: sid, name: names[i] ?? 'Ученик' })),
+        );
+        onOpenChange(false);
+        setConnectOpen(true);
+        return;
+      }
+
       onOpenChange(false);
     },
     onError: (err) => {
@@ -181,6 +198,7 @@ export function AddStudentsToHomeworkDialog({
   }, [newStudentIds.length, mutation]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
@@ -269,5 +287,13 @@ export function AddStudentsToHomeworkDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <ConnectStudentSheet
+      open={connectOpen}
+      onOpenChange={setConnectOpen}
+      assignmentId={assignmentId}
+      students={connectTargets}
+    />
+    </>
   );
 }

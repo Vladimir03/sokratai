@@ -94,6 +94,7 @@ const CatalogTopicPage = lazy(() => import("./pages/tutor/knowledge/CatalogTopic
 const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
 const AiTaskLoaderPage = lazy(() => import("./pages/tutor/knowledge/AiTaskLoaderPage"));
 const InvitePage = lazy(() => import("./pages/InvitePage"));
+const StudentClaimPage = lazy(() => import("./pages/StudentClaimPage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 const InstallApp = lazy(() => import("./pages/InstallApp"));
 
@@ -448,6 +449,14 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <InvitePage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/c/:token"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentClaimPage />
                 </Suspense>
               }
             />

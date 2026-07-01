@@ -66,6 +66,7 @@ import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMateria
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
 import { HWSubmitSuccess } from '@/components/tutor/homework-create/HWSubmitSuccess';
+import { ConnectStudentSheet, type ConnectStudentTarget } from '@/components/tutor/ConnectStudentSheet';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -497,6 +498,20 @@ function TutorHomeworkCreateContent() {
   const createdAssignmentIdRef = useRef<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [successResult, setSuccessResult] = useState<SubmitSuccessResult | null>(null);
+  // Онбординг v2 (T3) — гейт «Подключить» после первой выдачи ДЗ ученикам без канала.
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [connectTargets, setConnectTargets] = useState<ConnectStudentTarget[]>([]);
+  const [connectAssignmentId, setConnectAssignmentId] = useState<string>('');
+  // Edit-flow: навигация откладывается до закрытия sheet (review P1 #4).
+  const [connectPendingNav, setConnectPendingNav] = useState<string | null>(null);
+  const handleConnectOpenChange = useCallback((next: boolean) => {
+    setConnectOpen(next);
+    if (!next && connectPendingNav) {
+      const url = connectPendingNav;
+      setConnectPendingNav(null);
+      navigate(url);
+    }
+  }, [connectPendingNav, navigate]);
   const assignTabInitializedRef = useRef(false);
   const editGroupPrefilledRef = useRef(false);
 
@@ -1336,6 +1351,17 @@ function TutorHomeworkCreateContent() {
         inviteWebLink,
         studentLoginLink,
       });
+
+      // Онбординг v2 (T3): первая выдача ДЗ ученикам без канала → гейт «Подключить».
+      const withoutChannel = assignResult.students_without_channel ?? [];
+      if (withoutChannel.length > 0) {
+        const names = assignResult.students_without_channel_names ?? [];
+        setConnectTargets(
+          withoutChannel.map((sid, i) => ({ student_id: sid, name: names[i] ?? 'Ученик' })),
+        );
+        setConnectAssignmentId(assignmentId);
+        setConnectOpen(true);
+      }
     } catch (err) {
       setSubmitPhase('idle');
 
@@ -1514,9 +1540,13 @@ function TutorHomeworkCreateContent() {
         }
       }
 
+      let editWithoutChannel: string[] = [];
+      let editWithoutChannelNames: string[] = [];
       if (editDiffState.newStudentsDirty) {
         setSubmitPhase('assigning');
-        await assignTutorHomeworkStudents(editId, editDiffState.newStudentIds);
+        const editAssignResult = await assignTutorHomeworkStudents(editId, editDiffState.newStudentIds);
+        editWithoutChannel = editAssignResult.students_without_channel ?? [];
+        editWithoutChannelNames = editAssignResult.students_without_channel_names ?? [];
 
         setSubmitPhase('notifying');
         try {
@@ -1553,6 +1583,20 @@ function TutorHomeworkCreateContent() {
       } else if ((notifyResult?.failed ?? 0) > 0) {
         toast.warning('Новых учеников добавили, но уведомления отправились не всем.');
       }
+
+      // Онбординг v2 (T3, review P1 #4): добавили ученика без канала в edit-flow →
+      // открываем гейт «Подключить»; навигация — при закрытии sheet.
+      if (editWithoutChannel.length > 0) {
+        const names = editWithoutChannelNames;
+        setConnectTargets(
+          editWithoutChannel.map((sid, i) => ({ student_id: sid, name: names[i] ?? 'Ученик' })),
+        );
+        setConnectAssignmentId(editId);
+        setConnectPendingNav(`/tutor/homework/${editId}`);
+        setConnectOpen(true);
+        return;
+      }
+
       navigate(`/tutor/homework/${editId}`);
     } catch (err) {
       setSubmitPhase('idle');
@@ -1650,10 +1694,18 @@ function TutorHomeworkCreateContent() {
   // ── Inline success state (Phase 4) — create mode only ──
   if (successResult && !isEditMode) {
     return (
+      <>
         <HWSubmitSuccess
           result={successResult}
           onCreateAnother={handleCreateAnother}
         />
+        <ConnectStudentSheet
+          open={connectOpen}
+          onOpenChange={handleConnectOpenChange}
+          assignmentId={connectAssignmentId}
+          students={connectTargets}
+        />
+      </>
     );
   }
 
@@ -2009,6 +2061,14 @@ function TutorHomeworkCreateContent() {
           saveAsTemplate={saveAsTemplate}
           onSaveAsTemplateChange={setSaveAsTemplate}
           isEditMode={isEditMode}
+        />
+
+        {/* Онбординг v2 (T3, review P1 #4): гейт «Подключить» в edit-flow. */}
+        <ConnectStudentSheet
+          open={connectOpen}
+          onOpenChange={handleConnectOpenChange}
+          assignmentId={connectAssignmentId}
+          students={connectTargets}
         />
       </div>
   );

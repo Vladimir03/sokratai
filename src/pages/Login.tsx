@@ -11,6 +11,7 @@ import TelegramLoginButton from "@/components/TelegramLoginButton";
 import GoogleAuthButton from "@/components/GoogleAuthButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { applyPendingConsent } from "@/lib/consent";
+import { requestStudentOtp } from "@/lib/studentClaimApi";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -26,6 +27,11 @@ const Login = () => {
   const [showTelegramHint, setShowTelegramHint] = useState(false);
   const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const redirectErrorShown = useRef(false);
+  // Онбординг v2 (T7) — «войти по коду» (RU-safe magic-link на email).
+  const [otpOpen, setOtpOpen] = useState(false);
+  const [otpEmail, setOtpEmail] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
 
   // Cleanup telegram timeout on unmount
   useEffect(() => {
@@ -131,6 +137,25 @@ const Login = () => {
     }
   };
 
+  const handleOtpRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = otpEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      toast.error("Введите корректный email");
+      return;
+    }
+    setOtpLoading(true);
+    try {
+      await requestStudentOtp(value);
+      setOtpSent(true);
+      toast.success("Если аккаунт есть — мы прислали ссылку для входа на почту");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось отправить ссылку");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-hero p-4">
       <Card className="w-full max-w-md shadow-elegant">
@@ -188,6 +213,48 @@ const Login = () => {
               </Link>
             </p>
           </form>
+
+          {/* Онбординг v2 (T7) — вход по коду (magic-link на почту) */}
+          <div className="rounded-lg border border-border p-3">
+            {!otpOpen ? (
+              <button
+                type="button"
+                className="w-full text-sm font-medium text-primary"
+                onClick={() => {
+                  setOtpOpen(true);
+                  setOtpSent(false);
+                  if (!otpEmail && email) setOtpEmail(email);
+                }}
+                style={{ touchAction: "manipulation" }}
+              >
+                Войти по коду на почту
+              </button>
+            ) : otpSent ? (
+              <p className="text-sm text-muted-foreground text-center">
+                Проверь почту — мы прислали ссылку для входа. Перейди по ней с этого устройства.
+              </p>
+            ) : (
+              <form onSubmit={handleOtpRequest} className="space-y-2">
+                <p className="text-sm text-muted-foreground">Пришлём ссылку для входа на почту — без пароля.</p>
+                <Input
+                  type="email"
+                  inputMode="email"
+                  placeholder="Email"
+                  value={otpEmail}
+                  onChange={(e) => setOtpEmail(e.target.value)}
+                  className="text-base"
+                  disabled={otpLoading}
+                  required
+                />
+                <Button type="submit" variant="outline" className="w-full" disabled={otpLoading}>
+                  {otpLoading ? "Отправляем…" : "Прислать ссылку"}
+                </Button>
+              </form>
+            )}
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Нет пароля и почты? Попроси у репетитора новую ссылку для входа.
+            </p>
+          </div>
 
           {/* Divider */}
           <div className="relative">

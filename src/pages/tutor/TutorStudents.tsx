@@ -13,6 +13,7 @@ import {
 import { UserPlus, Archive, ArrowLeft, Users } from 'lucide-react';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
+import { ConnectStudentSheet, type ConnectStudentTarget } from '@/components/tutor/ConnectStudentSheet';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import { 
@@ -29,11 +30,8 @@ import {
 } from '@/components/tutor/StudentsStates';
 import { useTutorStudents, useArchivedTutorStudents, useTutor, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
 import {
-  createTutorGroup,
-  deactivateTutorGroupMembership,
   resetStudentPassword,
   setTutorStudentArchived,
-  upsertTutorGroupMembership,
 } from '@/lib/tutors';
 import { invalidateTutorStudentDependentQueries } from '@/lib/tutorStudentCacheSync';
 import { calculateProgress, getPaymentStatus } from '@/lib/formatters';
@@ -126,6 +124,14 @@ function TutorStudentsContent() {
   const [page, setPage] = useState(1);
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
+  // Онбординг v2 (T8) — гейт «Подключить» с карточки ученика (QR/ссылка, без ДЗ).
+  const [connectTargets, setConnectTargets] = useState<ConnectStudentTarget[]>([]);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const handleOpenConnect = (student: { student_id: string; display_name?: string | null; profiles?: { username?: string | null } | null }) => {
+    const name = student.display_name?.trim() || student.profiles?.username?.trim() || 'Ученик';
+    setConnectTargets([{ student_id: student.student_id, name }]);
+    setConnectOpen(true);
+  };
   const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
 
   // Архив учеников (запрос Елены 2026-06-17). Фетчим архив только когда открыт режим.
@@ -378,37 +384,6 @@ function TutorStudentsContent() {
     setFilters(newFilters);
   }, []);
 
-  const handleCreateGroup = useCallback(async (name: string) => {
-    // Создаётся из AddStudentDialog = учебная (основная) группа → is_primary: true.
-    const createdGroup = await createTutorGroup({ name, is_primary: true });
-    if (!createdGroup) {
-      return null;
-    }
-
-    refetchGroups();
-    return createdGroup;
-  }, [refetchGroups]);
-
-  const handleSyncStudentMembership = useCallback(async (tutorStudentId: string, tutorGroupId: string | null) => {
-    if (!miniGroupsEnabled) {
-      return;
-    }
-
-    if (tutorGroupId) {
-      const synced = await upsertTutorGroupMembership(tutorStudentId, tutorGroupId);
-      if (!synced) {
-        throw new Error('Не удалось назначить мини-группу');
-      }
-    } else {
-      const deactivated = await deactivateTutorGroupMembership(tutorStudentId);
-      if (!deactivated) {
-        throw new Error('Не удалось обновить membership мини-группы');
-      }
-    }
-
-    refetchMemberships();
-  }, [miniGroupsEnabled, refetchMemberships]);
-
   const handleReset = useCallback(() => {
     setSearch('');
     setFilters({
@@ -558,10 +533,6 @@ function TutorStudentsContent() {
           inviteCode={inviteCode}
           inviteWebLink={inviteWebLink}
           inviteTelegramLink={inviteTelegramLink}
-          miniGroupsEnabled={miniGroupsEnabled}
-          groups={primaryGroups}
-          onCreateGroup={handleCreateGroup}
-          onSyncStudentMembership={handleSyncStudentMembership}
           onManualAdded={(tutorStudentId) => {
             refetch();
             if (miniGroupsEnabled) {
@@ -701,6 +672,7 @@ function TutorStudentsContent() {
                             }}
                             isResettingCredentials={resettingStudentId === student.student_id}
                             onClick={() => handleOpenStudent(student.id)}
+                            onConnect={() => handleOpenConnect(student)}
                           />
                         ))}
                       </div>
@@ -729,6 +701,7 @@ function TutorStudentsContent() {
                         }}
                         isResettingCredentials={resettingStudentId === student.student_id}
                         onClick={() => handleOpenStudent(student.id)}
+                        onConnect={() => handleOpenConnect(student)}
                       />
                     ))}
                   </div>
@@ -752,6 +725,12 @@ function TutorStudentsContent() {
           plainPassword={credentialsData.plainPassword}
         />
       )}
+
+      <ConnectStudentSheet
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        students={connectTargets}
+      />
     </>
   );
 }

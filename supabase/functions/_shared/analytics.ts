@@ -1,0 +1,121 @@
+/**
+ * Серверная воронка активации (онбординг v2) — единый writer для analytics_events.
+ *
+ * Таблица append-only, service_role-only (миграция 20260701120100). PII-free:
+ * НИКОГДА не передавай сюда имена/email/тексты — только id, категории, счётчики.
+ *
+ * Fire-and-forget: ошибка записи телеметрии НЕ должна ломать основной flow —
+ * все функции глотают ошибку (лог без PII) и возвращают void.
+ */
+import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+
+export type AnalyticsEventName =
+  // репетитор
+  | "tutor_first_student_added"
+  | "invite_generated"
+  | "tutor_first_homework_created"
+  | "homework_sent_to_student"
+  | "student_received_and_opened" // cross-side «ага»
+  // ученик
+  | "invite_claimed"
+  | "student_first_login"
+  | "student_registered"
+  | "student_first_homework_opened"
+  | "student_first_submission";
+
+export interface AnalyticsEventInput {
+  event_name: AnalyticsEventName;
+  actor_user_id?: string | null;
+  tutor_id?: string | null;
+  student_id?: string | null;
+  tutor_student_id?: string | null;
+  assignment_id?: string | null;
+  source?: string | null;
+  /** Только счётчики/флаги/категории — без свободного текста (PII-free). */
+  meta?: Record<string, unknown> | null;
+}
+
+/** Записать событие воронки. Fire-and-forget — никогда не бросает. */
+export async function logAnalyticsEvent(
+  db: SupabaseClient,
+  input: AnalyticsEventInput,
+): Promise<void> {
+  try {
+    const { error } = await db.from("analytics_events").insert({
+      event_name: input.event_name,
+      actor_user_id: input.actor_user_id ?? null,
+      tutor_id: input.tutor_id ?? null,
+      student_id: input.student_id ?? null,
+      tutor_student_id: input.tutor_student_id ?? null,
+      assignment_id: input.assignment_id ?? null,
+      source: input.source ?? null,
+      meta: input.meta ?? null,
+    });
+    if (error) {
+      // PII-free: только имя события + код ошибки.
+      console.warn(
+        JSON.stringify({
+          event: "analytics_event_insert_failed",
+          event_name: input.event_name,
+          error: error.message,
+        }),
+      );
+    }
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "analytics_event_insert_threw",
+        event_name: input.event_name,
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
+  }
+}
+
+/**
+ * Записать событие ТОЛЬКО если для него ещё нет строки с тем же event_name и
+ * указанным scope-фильтром (для `*_first_*` событий). Best-effort, не атомарно
+ * (дубль при гонке приемлем для аналитики). Fire-and-forget.
+ *
+ * @param scope — колонки-ключ дедупа, напр. `{ tutor_id }` или `{ student_id }`.
+ */
+export async function logAnalyticsEventOnce(
+  db: SupabaseClient,
+  input: AnalyticsEventInput,
+  scope: Partial<
+    Pick<AnalyticsEventInput, "tutor_id" | "student_id" | "tutor_student_id" | "assignment_id">
+  >,
+): Promise<void> {
+  try {
+    let query = db
+      .from("analytics_events")
+      .select("id", { count: "exact", head: true })
+      .eq("event_name", input.event_name);
+
+    for (const [key, value] of Object.entries(scope)) {
+      if (value == null) {
+        // Без валидного scope «once» не имеет смысла — пишем обычным путём.
+        await logAnalyticsEvent(db, input);
+        return;
+      }
+      query = query.eq(key, value as string);
+    }
+
+    const { count, error } = await query;
+    if (error) {
+      // При сбое проверки — лучше записать (может задвоить), чем потерять сигнал.
+      await logAnalyticsEvent(db, input);
+      return;
+    }
+    if ((count ?? 0) > 0) return; // уже было — пропускаем
+    await logAnalyticsEvent(db, input);
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "analytics_event_once_threw",
+        event_name: input.event_name,
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
+  }
+}

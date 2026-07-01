@@ -319,6 +319,26 @@ deploy-sokratai
 
 ---
 
+## Онбординг-активация v2 — беспарольный claim + регистрация + OTP (2026-07-01)
+
+Хэндофф репетитор→ученик (create-then-claim). Спека: `docs/delivery/features/onboarding-activation-v2/`. Build-лог: memory `project_onboarding_activation_v2.md`. План `~/.claude/plans/v2-dapper-lamport.md`.
+
+**Per-student claim-токен (`tutor_students.claim_token`, миграция `20260701120000`):**
+- **Одноразовый** — `student-claim` POST обнуляет `claim_token` при первом успешном минте (`claimed_at := now()`). Persistent session проносит ученика через регистрацию. **НЕ вечный bearer-login**. **Короткоживущий** — TTL 30 дней от `claim_token_created_at` (edge enforce).
+- Запись токена ТОЛЬКО через SECURITY DEFINER RPC `tutor_ensure_student_claim_token(p_tutor_student_id)` (ownership `auth.uid → tutors.id`, генерит-если-NULL атомарно, паттерн `tutor_get_invite_code`) ИЛИ внутри `homework-api` под service_role. Формат — `encode(gen_random_bytes(16),'hex')` (32 hex).
+
+**Новые edge-функции (минт сессии — паттерн `email-verify`/`oauth-google-callback`):**
+- **`student-claim`** (`verify_jwt=false`): `GET ?t=` → OG-превью + redirect на SPA `/c/{token}` (mirror `invite-preview`, escapeHtml + no-store, **НЕ consume** — скрейперы безопасны); `POST {token}` → `admin.generateLink({type:'magiclink'})` → `verifyOtp({type:'magiclink'})` → session JSON + `tutor_name` + `preview` (anti-leak: только title/subject/N задач). Клиент `supabase.auth.setSession(...)`.
+- **`student-register`** (`verify_jwt=true`): доустановка email+пароля поверх claim-сессии через `admin.updateUserById(uid, {password, email, email_confirm:true})` — смена email **БЕЗ верификации** (client `updateUser({email})` форсил бы письмо). Collision → 409 `EMAIL_TAKEN`. **Не новый signUp** (пользователь создан плейсхолдером).
+- **`student-otp-request`** (`verify_jwt=false`): «войти по коду» — `admin.generateLink({type:'magiclink'})` → письмо через наш RU-safe email-пайплайн (`_shared/email-sender.ts::sendStudentLoginLinkEmail`) со ссылкой на `api.sokratai.ru/functions/v1/email-verify?type=magiclink` (НЕ `*.supabase.co`). Anti-enumeration: нейтральный ответ.
+- **`email-verify`** расширен: `ALLOWED_TYPES += "magiclink"`. Tutor-role finalization для magiclink-входа ученика → skipped (signup_source не tutor). Redirect allow-list не трогать.
+
+**Инварианты:** claim/register/otp вызываются клиентом через `supabase.functions.invoke` (anon-key в apikey+Authorization, rule 96 #11a — проходит и при verify_jwt true/false). Токены/PII не логируются. `/c/:token` — SPA вне AuthGuard (сам минтит). Persistent session уже сконфигурирована в `supabaseClient` (`persistSession`/`autoRefreshToken`). Контакт ученика опционален при добавлении (rule 60 ослаблено); канал/claim нужен до первой отправки ДЗ (гейт «Подключить» — `students_without_channel` в обоих assign-эндпоинтах `homework-api`, `ConnectStudentSheet`). Серверная воронка — `analytics_events` (service_role-only, PII-free, `_shared/analytics.ts`).
+
+**Канонические файлы (доп.):** `supabase/functions/{student-claim,student-register,student-otp-request}/index.ts`, `_shared/analytics.ts`, `src/pages/StudentClaimPage.tsx` (`/c/:token`), `src/lib/studentClaimApi.ts`, `src/components/tutor/ConnectStudentSheet.tsx`, `src/utils/telegramLinks.ts::getStudentClaimShareLink`, `supabase/functions/homework-api/index.ts::{computeStudentsWithoutChannel,handleConnectStudentByEmail}`.
+
+---
+
 ## История
 
 | Дата | Event | Spec/PR |

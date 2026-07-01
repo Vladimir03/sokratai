@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</helmet>
+
+<!-- ░░░░ TITLE ░░░░ -->
+<div style="position:absolute;left:64px;top:40px;font:800 27px 'Golos Text',sans-serif;color:#0F172A;letter-spacing:-.01em">Дискавери · онбординг нового репетитора</div>
+<div style="position:absolute;left:64px;top:80px;font:500 14px 'Golos Text',sans-serif;color:#64748B">Репетитор впервые зашёл в пустой кабинет и не знает, что делать. Как Сократ AI ведёт его к первой ценности — и чем именно.</div>
+
+<!-- ░░░░ DISCOVERY DOC ░░░░ -->
+<div style="position:absolute;left:64px;top:152px;width:1180px">
+  <div data-drags-parent="1" style="position:absolute;top:-28px;left:2px;font:700 13px 'Golos Text',sans-serif;color:#334155">Дискавери</div>
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px 26px;display:flex;flex-direction:column;gap:18px">
+
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:6px">Проблема</div>
+      <div style="font:400 14px/1.6 'Golos Text',sans-serif;color:#334155">Новый репетитор открывает пустой кабинет и не понимает, что Сократ — AI-помощник репетитора — умеет и с чего начать. Риск — уйти <b style="color:#0F172A">до первой ценности</b>: отправил первое ДЗ и увидел, что ученик сам его прошёл. Это и есть момент, когда продукт доказывает себя.</div>
+    </div>
+
+    <div style="height:1px;background:#EEF2F7"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:26px">
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:6px">Кто и контекст</div>
+        <div style="font:400 13.5px/1.6 'Golos Text',sans-serif;color:#334155">Платящий оператор; занят, часто между уроками; нередко скептичен к «AI для списывания». Пришёл из пилота в Telegram. Первая сессия — соло-осмотр, иногда во время онбординг-звонка. Десктоп.</div>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:6px">Момент активации · «ага»</div>
+        <div style="font:400 13.5px/1.6 'Golos Text',sans-serif;color:#334155">Первое ДЗ отправлено → ученик сам его прошёл; репетитор видит Сократову проверку и AI-вердикт. Вторично — заполняется ростер, первая оплата.</div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:#EEF2F7"></div>
+
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:8px">Jobs-to-be-done</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;gap:10px;align-items:flex-start;background:#F8FAFC;border-radius:10px;padding:11px 13px"><span style="color:#1B6B4A;font-weight:800;font-size:15px;line-height:1.4">“</span><span style="font:500 13.5px/1.55 'Golos Text',sans-serif;color:#334155">Когда я впервые открываю кабинет, хочу быстро понять, что это, и завести реального ученика, чтобы попробовать на настоящем ДЗ — не тратя время на доки.</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start;background:#F8FAFC;border-radius:10px;padding:11px 13px"><span style="color:#1B6B4A;font-weight:800;font-size:15px;line-height:1.4">“</span><span style="font:500 13.5px/1.55 'Golos Text',sans-serif;color:#334155">Когда настраиваю, хочу, чтобы система показала кратчайший путь к ценности, а не список возможностей.</span></div>
+      </div>
+    </div>
+
+    <div style="height:1px;background:#EEF2F7"></div>
+
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:8px">Кратчайший путь к ценности</div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:7px;font:600 13px 'Golos Text',sans-serif">
+        <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:6px 12px">Добавить ученика · по имени</span>
+        <span style="color:#94A3B8">→</span>
+        <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:6px 12px">Собрать первое ДЗ</span>
+        <span style="color:#94A3B8">→</span>
+        <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:6px 12px">Подключить · ссылка/QR</span>
+        <span style="color:#94A3B8">→</span>
+        <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:6px 12px">Ученик решает</span>
+        <span style="color:#94A3B8">→</span>
+        <span style="background:#0F172A;color:#fff;border-radius:999px;padding:6px 12px">Репетитор видит результат</span>
+      </div>
+      <div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#64748B;margin-top:10px">Онбординг должен вести к одной цели — «отправь первое ДЗ». Всё остальное вторично.</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ░░░░ APPROACHES COMPARISON ░░░░ -->
+<div style="position:absolute;left:1304px;top:152px;width:900px">
+  <div data-drags-parent="1" style="position:absolute;top:-28px;left:2px;font:700 13px 'Golos Text',sans-serif;color:#334155">4 подхода — что взвесили</div>
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:22px 24px;display:flex;flex-direction:column;gap:13px">
+
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span style="flex:none;width:24px;height:24px;border-radius:7px;background:#E8F5EE;color:#145236;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">A</span>
+      <div><div style="font:700 13.5px 'Golos Text',sans-serif;color:#0F172A">Пустые состояния ведут</div><div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#64748B"><b style="color:#0F7A4A">+</b> ноль трения, контекстно, учит делом · <b style="color:#B15A12">−</b> легко потерять общий путь, нет прогресса</div></div>
+    </div>
+    <div style="height:1px;background:#EEF2F7"></div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span style="flex:none;width:24px;height:24px;border-radius:7px;background:#E8F5EE;color:#145236;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">B</span>
+      <div><div style="font:700 13.5px 'Golos Text',sans-serif;color:#0F172A">Чеклист активации</div><div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#64748B"><b style="color:#0F7A4A">+</b> ясный путь, прогресс, измеримая активация · <b style="color:#B15A12">−</b> риск «обязаловки», нужна логика скрытия</div></div>
+    </div>
+    <div style="height:1px;background:#EEF2F7"></div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span style="flex:none;width:24px;height:24px;border-radius:7px;background:#FEF3E6;color:#B15A12;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">C</span>
+      <div><div style="font:700 13.5px 'Golos Text',sans-serif;color:#0F172A">Спотлайт-тур</div><div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#64748B"><b style="color:#0F7A4A">+</b> быстро объясняет интерфейс · <b style="color:#B15A12">−</b> прерывает, пропускают, не создаёт ценности, хрупок</div></div>
+    </div>
+    <div style="height:1px;background:#EEF2F7"></div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <span style="flex:none;width:24px;height:24px;border-radius:7px;background:#E8F5EE;color:#145236;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">D</span>
+      <div><div style="font:700 13.5px 'Golos Text',sans-serif;color:#0F172A">Приветствие + подсказки</div><div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#64748B"><b style="color:#0F7A4A">+</b> тёплый вход, задаёт ожидания · <b style="color:#B15A12">−</b> модалку закрывают без действия; подсказки надоедают</div></div>
+    </div>
+
+    <div style="margin-top:6px;background:#0F4432;border-radius:12px;padding:16px 18px">
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#9ad3b8;margin-bottom:6px">Рекомендация</div>
+      <div style="font:400 13px/1.55 'Golos Text',sans-serif;color:#E2E8F0"><b style="color:#fff">D → B.</b> Тёплое, но пропускаемое приветствие (1 модалка: что такое Сократ + одно действие) → сразу дашборд с чеклистом «С чего начать»: его шаг 1 несёт единственный видимый primary-CTA «Добавить ученика», прогресс и cross-side «ага» на шаге 4. Отдельный экран A не нужен — A и B оформляют один и тот же пустой дашборд, и две primary-кнопки конкурировали бы между собой. Поэтому A — это не шаг, а принцип: второстепенные панели главной (Сегодня, Требует проверки) — тихие плейсхолдеры, а пустые состояния разделов, куда репетитор зайдёт позже (Расписание, База задач), ведут контекстно. Тяжёлый тур (C) убираем.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ░░░░ APPROACH FRAMES ░░░░ -->
+<div style="position:absolute;left:64px;top:872px;font:700 18px 'Golos Text',sans-serif;color:#334155">4 подхода · на пустом дашборде нового репетитора</div>
+
+<div style="position:absolute;left:64px;top:958px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Подход A · Пустые состояния ведут <span style="color:#B15A12;font-weight:600">· принцип, не отдельный шаг онбординга</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="empty-guided" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<div style="position:absolute;left:1404px;top:958px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Подход B · Чеклист «С чего начать» <span style="color:#0F7A4A;font-weight:600">· рекомендация — единственный старт онбординга</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="empty-checklist" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<div style="position:absolute;left:64px;top:1814px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Подход C · Спотлайт-тур <span style="color:#B15A12;font-weight:600">· убрать или свести к 1–2 подсказкам</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="spotlight" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<div style="position:absolute;left:1404px;top:1814px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Подход D · Приветственное окно <span style="color:#0F7A4A;font-weight:600">· точка входа в рекомендации</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="welcome" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<!-- ░░░░ RECOMMENDED COMBINED FLOW ░░░░ -->
+<div style="position:absolute;left:64px;top:2730px;width:2580px">
+  <div style="background:#145236;border-radius:16px;padding:24px 28px;display:flex;align-items:center;gap:28px">
+    <div style="flex:none;max-width:540px">
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#9ad3b8;margin-bottom:8px">Рекомендованный онбординг</div>
+      <div style="font:700 20px/1.3 'Golos Text',sans-serif;color:#fff">Приветствие → сразу дашборд с чеклистом «С чего начать»</div>
+      <div style="font:400 13.5px/1.55 'Golos Text',sans-serif;color:rgba(255,255,255,.82);margin-top:10px">Без промежуточного шага: CTA «Добавить ученика» (шаг 1 чеклиста) виден сразу. Один primary-CTA — текущий шаг чеклиста. Чеклист скрывается после первой сдачи ДЗ.</div>
+    </div>
+    <div style="flex:1;display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+      <div style="background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:12px 14px;color:#fff;min-width:150px">
+        <div style="font:700 12px 'Golos Text';color:#9ad3b8">D · Вход</div>
+        <div style="font:600 14px 'Golos Text';margin-top:2px">Приветственное окно</div>
+        <div style="font:400 12px/1.4 'Golos Text';color:rgba(255,255,255,.75);margin-top:3px">что такое Сократ + 1 действие, пропускается</div>
+      </div>
+      <span style="color:rgba(255,255,255,.6);font-size:18px">→</span>
+      <div style="background:rgba(255,255,255,.2);border:1px solid rgba(154,211,184,.5);border-radius:12px;padding:12px 14px;color:#fff;min-width:176px">
+        <div style="font:700 12px 'Golos Text';color:#9ad3b8">B · Старт</div>
+        <div style="font:600 14px 'Golos Text';margin-top:2px">Дашборд с чеклистом</div>
+        <div style="font:400 12px/1.4 'Golos Text';color:rgba(255,255,255,.75);margin-top:3px">CTA «Добавить ученика» виден сразу · «ага» на шаге 4</div>
+      </div>
+      <span style="color:rgba(255,255,255,.45);font-size:18px">·</span>
+      <div style="background:rgba(255,255,255,.07);border:1px dashed rgba(255,255,255,.28);border-radius:12px;padding:12px 14px;color:#fff;min-width:150px">
+        <div style="font:700 12px 'Golos Text';color:#9ad3b8">A · Принцип</div>
+        <div style="font:600 14px 'Golos Text';margin-top:2px">Не отдельный шаг</div>
+        <div style="font:400 12px/1.4 'Golos Text';color:rgba(255,255,255,.75);margin-top:3px">тихие плейсхолдеры на главной; гид на других разделах</div>
+      </div>
+      <span style="color:rgba(255,255,255,.45);font-size:18px">·</span>
+      <div style="background:rgba(177,90,18,.22);border:1px solid rgba(246,195,138,.4);border-radius:12px;padding:12px 14px;color:#fff;min-width:130px">
+        <div style="font:700 12px 'Golos Text';color:#f6c38a">C · Тур</div>
+        <div style="font:600 14px 'Golos Text';margin-top:2px">Убрать</div>
+        <div style="font:400 12px/1.4 'Golos Text';color:rgba(255,255,255,.75);margin-top:3px">или 1–2 контекстных подсказки</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ░░░░ POST-IT ░░░░ -->
+<div style="position:absolute;left:2700px;top:2730px;width:300px;background:#fef4a8;padding:14px 16px;border-radius:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);transform:rotate(-1.4deg)">
+  <div style="font:700 12px 'Golos Text',sans-serif;color:#7a5b00;margin-bottom:5px">Дальше · аналитика</div>
+  <div style="font:400 12.5px/1.5 'Golos Text',sans-serif;color:#5c4500">Разметить события активации: <b>added_student</b>, <b>sent_first_hw</b>, <b>student_solved</b> — чтобы чеклист и «ага» считались по реальным данным, а не вручную.</div>
+</div>
+
+</x-dc>
+</body>
+</html>

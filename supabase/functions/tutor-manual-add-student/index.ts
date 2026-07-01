@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { logAnalyticsEventOnce } from "../_shared/analytics.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -20,6 +21,54 @@ function generatePassword(): string {
 
 function tooLong(value: unknown, max: number): boolean {
   return typeof value === "string" && value.length > max;
+}
+
+/**
+ * Онбординг v2 — создать плейсхолдер-ученика ТОЛЬКО по имени (контакт NULL).
+ * Auth-user с temp-email (как single-add Step 3), profile, привязка tutor_students.
+ * Используется bulk-экшеном; бросает Error при сбое (вызывающий ловит per-name).
+ */
+async function createPlaceholderByName(
+  admin: ReturnType<typeof createClient>,
+  tutorId: string,
+  name: string,
+): Promise<{ tutor_student_id: string; student_id: string }> {
+  const userEmail = `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+  const { data: authData, error: authError } = await admin.auth.admin.createUser({
+    email: userEmail,
+    email_confirm: true,
+    password: generatePassword(),
+    user_metadata: { username: name },
+  });
+  if (authError || !authData?.user) {
+    throw new Error(authError?.message ?? "Не удалось создать аккаунт ученика.");
+  }
+  const studentId = authData.user.id;
+
+  // Профиль: создаём, если триггер ещё не успел (orphan recovery, как single-add).
+  const { data: existingProfile } = await admin
+    .from("profiles")
+    .select("id")
+    .eq("id", studentId)
+    .maybeSingle();
+  if (!existingProfile) {
+    await admin.from("profiles").insert({
+      id: studentId,
+      username: name,
+      registration_source: "manual",
+      trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+  }
+
+  const { data: ts, error: insErr } = await admin
+    .from("tutor_students")
+    .insert({ tutor_id: tutorId, student_id: studentId, status: "active" })
+    .select("id")
+    .single();
+  if (insErr || !ts) {
+    throw new Error(insErr?.message ?? "Не удалось привязать ученика к кабинету.");
+  }
+  return { tutor_student_id: ts.id, student_id: studentId };
 }
 
 function validateBodyLengths(body: Record<string, unknown>): string | null {
@@ -171,6 +220,61 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Онбординг v2 — массовое добавление плейсхолдеров по списку имён (контакт NULL).
+    if (action === "bulk-add-students") {
+      const namesRaw = Array.isArray(body.names) ? body.names : [];
+      const names = namesRaw
+        .map((n: unknown) => (typeof n === "string" ? n.trim() : ""))
+        .filter((n: string) => n.length > 0);
+      if (names.length === 0) {
+        return new Response(
+          JSON.stringify({ code: "VALIDATION", error: "Добавьте хотя бы одно имя." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (names.length > 50) {
+        return new Response(
+          JSON.stringify({ code: "VALIDATION", error: "За раз можно добавить не больше 50 имён." }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      const created: Array<{ tutor_student_id: string; student_id: string; name: string }> = [];
+      const errors: Array<{ name: string; error: string }> = [];
+      for (const nm of names) {
+        // Слишком длинное имя — в errors, а не молча дропаем (review P2).
+        if (nm.length > 200) {
+          errors.push({ name: nm.slice(0, 60), error: "Имя слишком длинное (максимум 200 символов)." });
+          continue;
+        }
+        try {
+          const r = await createPlaceholderByName(supabaseAdmin, tutor.id, nm);
+          created.push({ ...r, name: nm });
+        } catch (e) {
+          errors.push({ name: nm, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+
+      if (created.length > 0) {
+        await logAnalyticsEventOnce(
+          supabaseAdmin,
+          {
+            event_name: "tutor_first_student_added",
+            tutor_id: tutor.id,
+            actor_user_id: user.id,
+            source: "bulk",
+            meta: { count: created.length },
+          },
+          { tutor_id: tutor.id },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ created, errors }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     if (!name) {
       return new Response(
         JSON.stringify({ code: "VALIDATION", error: "Укажите имя ученика." }),
@@ -178,12 +282,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    if (!telegramUsernameRaw.trim() && !emailRaw) {
-      return new Response(
-        JSON.stringify({ code: "VALIDATION", error: "Укажите хотя бы один контакт — email или Telegram." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    // Онбординг v2 (rule 60): контакт БОЛЬШЕ НЕ обязателен — плейсхолдер по имени.
+    // Канал требуется только до первой отправки ДЗ (share-gate). Если email задан —
+    // проверяем формат; пустой email+telegram → temp-email плейсхолдер (Step 3).
 
     if (emailRaw && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
       return new Response(
@@ -526,6 +627,19 @@ Deno.serve(async (req) => {
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
+
+    await logAnalyticsEventOnce(
+      supabaseAdmin,
+      {
+        event_name: "tutor_first_student_added",
+        tutor_id: tutor.id,
+        actor_user_id: user.id,
+        student_id: studentId,
+        tutor_student_id: tutorStudent.id,
+        source: "single",
+      },
+      { tutor_id: tutor.id },
+    );
 
     const successResponse: Record<string, unknown> = {
       tutor_student_id: tutorStudent.id,

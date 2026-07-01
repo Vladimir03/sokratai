@@ -3771,6 +3771,10 @@ export type Database = {
         Row: {
           archived_at: string | null
           balance: number
+          claim_channel: string | null
+          claim_token: string | null
+          claim_token_created_at: string | null
+          claimed_at: string | null
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -3794,6 +3798,10 @@ export type Database = {
         Insert: {
           archived_at?: string | null
           balance?: number
+          claim_channel?: string | null
+          claim_token?: string | null
+          claim_token_created_at?: string | null
+          claimed_at?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -3817,6 +3825,10 @@ export type Database = {
         Update: {
           archived_at?: string | null
           balance?: number
+          claim_channel?: string | null
+          claim_token?: string | null
+          claim_token_created_at?: string | null
+          claimed_at?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -4704,6 +4716,10 @@ export type Database = {
           _note?: string
           _occurred_on?: string
         }
+        Returns: string
+      }
+      tutor_ensure_student_claim_token: {
+        Args: { p_tutor_student_id: string }
         Returns: string
       }
       tutor_get_invite_code: { Args: never; Returns: string }

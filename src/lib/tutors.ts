@@ -10,6 +10,7 @@ import type {
   CreateTutorStudentInput,
   ManualAddTutorStudentInput,
   ManualAddTutorStudentResponse,
+  BulkAddTutorStudentsResponse,
   ResetStudentPasswordInput,
   ResetStudentPasswordResponse,
   UpdateTutorStudentProfileInput,
@@ -44,8 +45,18 @@ type StudentContactInfoRow = {
   has_real_email: boolean;
 };
 
+// Явный whitelist колонок tutor_students (НЕ `*`): claim_token — bearer-секрет
+// (онбординг v2), не должен ехать в обычный список учеников. Токен отдаётся
+// только on-demand через RPC tutor_ensure_student_claim_token в ConnectStudentSheet
+// (review P1 #3). claimed_at (не секрет) оставляем — статус подключения.
+const TUTOR_STUDENT_COLUMNS =
+  'archived_at, balance, claimed_at, created_at, current_score, display_name, ' +
+  'exam_type, gender, hourly_rate_cents, id, last_activity_at, last_lesson_at, ' +
+  'notes, paid_until, parent_contact, start_score, status, student_id, subject, ' +
+  'target_score, tutor_id, updated_at';
+
 const STUDENT_PROFILE_SELECT = `
-  *,
+  ${TUTOR_STUDENT_COLUMNS},
   profiles (
     id,
     username,
@@ -58,7 +69,7 @@ const STUDENT_PROFILE_SELECT = `
 `;
 
 const STUDENT_PROFILE_DETAIL_SELECT = `
-  *,
+  ${TUTOR_STUDENT_COLUMNS},
   profiles (
     id,
     username,
@@ -611,6 +622,32 @@ export async function manualAddTutorStudent(
   }
 
   return data as ManualAddTutorStudentResponse;
+}
+
+/**
+ * Онбординг v2 — массовое добавление плейсхолдеров по списку имён (контакт NULL).
+ * Возвращает per-name {created[], errors[]} (частичный успех допустим).
+ */
+export async function bulkAddTutorStudents(
+  names: string[],
+): Promise<BulkAddTutorStudentsResponse> {
+  const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
+    body: { action: "bulk-add-students", names },
+  });
+
+  if (error) {
+    console.error("Error bulk-adding students:", error, "data:", data);
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      "Не удалось добавить учеников",
+    );
+    const err = new Error(message);
+    if (code) (err as Error & { code?: string }).code = code;
+    throw err;
+  }
+
+  return data as BulkAddTutorStudentsResponse;
 }
 
 /**

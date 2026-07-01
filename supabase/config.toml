@@ -59,7 +59,13 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.student-account]
     verify_jwt = true
+  [functions.student-claim]
+    verify_jwt = false
   [functions.student-lessons-api]
+    verify_jwt = true
+  [functions.student-otp-request]
+    verify_jwt = false
+  [functions.student-register]
     verify_jwt = true
   [functions.telegram-auth]
     verify_jwt = false

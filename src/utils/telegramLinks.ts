@@ -66,6 +66,18 @@ export const getTutorInvitePreviewLink = (inviteCode: string): string => {
   return `https://api.sokratai.ru/functions/v1/invite-preview?c=${encodeURIComponent(inviteCode)}`;
 };
 
+/**
+ * Онбординг-активация v2 — share-ссылка per-student claim (гейт «Подключить»).
+ *
+ * Ведёт на edge `student-claim` (GET): отдаёт invite-OG для Telegram/WhatsApp
+ * scrape + meta-refresh редиректит браузер на SPA `/c/{token}`, который минтит
+ * беспарольную сессию. Hardcoded `https://api.sokratai.ru` (RU bypass, AGENTS.md).
+ * Подходит для копирования в любой чат (Telegram/WhatsApp) и для QR.
+ */
+export const getStudentClaimShareLink = (token: string): string => {
+  return `https://api.sokratai.ru/functions/v1/student-claim?t=${encodeURIComponent(token)}`;
+};
+
 export const telegramLinks = {
   headerTry: getTelegramLink('header_try'),
   planFree: getTelegramLink('plan_free'),

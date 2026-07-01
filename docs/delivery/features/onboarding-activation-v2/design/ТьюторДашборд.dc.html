@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet">
+<style>
+  .tdash *::-webkit-scrollbar{width:10px;height:10px}
+  .tdash *::-webkit-scrollbar-thumb{background:#E2E8F0;border-radius:6px;border:3px solid #fff}
+  .tdash *::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+<div class="tdash" style="height:100%;width:100%;display:grid;grid-template-columns:240px 1fr;grid-template-rows:56px 1fr;background:#F8FAFC;color:#0F172A;font-family:'Golos Text',system-ui,sans-serif;font-size:14px;font-variant-numeric:tabular-nums lining-nums;position:relative;overflow:hidden;border-radius:inherit;-webkit-font-smoothing:antialiased">
+
+  <!-- ░░ RAIL ░░ -->
+  <aside style="grid-row: 1 / span 2; background: #fff; border-right: 1px solid #EEF2F7; padding: 16px 12px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; position: relative">
+    <div style="display:flex;align-items:center;gap:10px;padding:8px 10px 16px">
+      <div style="width:28px;height:28px;border-radius:8px;background:#1B6B4A;display:grid;place-items:center;color:#fff;font-weight:700;font-size:14px;flex:none">С</div>
+      <div style="font-weight:600;font-size:15px;color:#0F172A">Сократ · Тьютор</div>
+    </div>
+
+    <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px 4px">Работа</div>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;background:#E8F5EE;color:#145236;font-weight:600;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg>
+      <span>Главная</span>
+    </a>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M3 10h18M8 2v4M16 2v4"></path></svg>
+      <span>Расписание</span>
+    </a>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M9 12h6M9 16h4"></path></svg>
+      <span>Домашние задания</span>
+      <span style="margin-left:auto;font-size:12px;font-weight:500;color:#64748B">{{ countHw }}</span>
+    </a>
+
+    <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px 4px">Ученики</div>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      <span>Все ученики</span>
+      <span style="margin-left:auto;font-size:12px;font-weight:500;color:#64748B">{{ countStudents }}</span>
+    </a>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2z"></path></svg>
+      <span>Группы</span>
+      <span style="margin-left:auto;font-size:12px;font-weight:500;color:#64748B">{{ countGroups }}</span>
+    </a>
+
+    <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px 4px">Материалы</div>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path></svg>
+      <span>База задач</span>
+    </a>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"></path></svg>
+      <span>Мои задачи</span>
+    </a>
+
+    <div style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;padding:12px 10px 4px">Финансы</div>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><rect x="2" y="5" width="20" height="14" rx="2"></rect><path d="M2 10h20"></path></svg>
+      <span>Платежи</span>
+    </a>
+    <a style="display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;color:#334155;font-weight:500;text-decoration:none;cursor:pointer">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path><circle cx="7.5" cy="7.5" r="1.5"></circle></svg>
+      <span>Тарифы</span>
+    </a>
+  <div style="position: absolute; left: 7px; top: 244px; width: 216px; height: 36px; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(15,23,42,.62); outline: 2px solid #2a8a63; outline-offset: 1px; z-index: 45; pointer-events: none"></div></aside>
+
+  <!-- ░░ TOPBAR ░░ -->
+  <header style="grid-column:2;background:#fff;border-bottom:1px solid #EEF2F7;display:flex;align-items:center;gap:16px;padding:0 20px">
+    <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:#334155">
+      <span>Сократ</span><span style="color:#94A3B8">/</span><span style="color:#0F172A;font-weight:500">Главная</span>
+    </div>
+    <div style="flex:1;max-width:520px;margin:0 auto;position:relative">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:12px;top:50%;transform:translateY(-50%)"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+      <div style="width:100%;height:36px;padding:0 40px 0 36px;background:#F8FAFC;border:1px solid transparent;border-radius:10px;display:flex;align-items:center;font-size:13px;color:#64748B">Поиск учеников, ДЗ, задач</div>
+      <div style="position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:'SF Mono',monospace;font-size:11px;font-weight:500;color:#64748B;background:#fff;border:1px solid #E2E8F0;border-radius:4px;padding:1px 6px">/</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
+      <div style="width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:#64748B;font-size:15px">⌘</div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px">ВГ</div>
+    </div>
+  </header>
+
+  <!-- ░░ MAIN ░░ -->
+  <main style="grid-column:2;overflow-y:auto;padding:20px 24px 48px">
+
+    <!-- ── NORMAL (populated) BODY ── -->
+    <sc-if value="{{ showNormalBody }}" hint-placeholder-val="{{ true }}">
+    <div>
+      <div style="display:flex;align-items:flex-start;gap:16px;padding:4px 0 20px">
+        <div style="flex:1;min-width:0">
+          <h1 style="font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.005em;color:#0F172A;margin:0">Главная</h1>
+          <div style="font-size:13px;color:#64748B;margin-top:4px">Вторник, 12 марта · 4 урока сегодня · 4 работы на проверке</div>
+        </div>
+        <button onClick="{{ newHw }}" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-weight:600;font-size:13px;cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"></path></svg>
+          Новое ДЗ
+        </button>
+      </div>
+
+      <!-- stat strip -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 2px rgba(15,23,42,.05)">
+        <div style="padding:14px 16px">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:6px">Активных учеников</div>
+          <div style="font-size:22px;font-weight:600;line-height:1.2">28</div>
+          <div style="font-size:12px;color:#64748B;margin-top:2px">+2 за неделю</div>
+        </div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:6px">На проверке</div>
+          <div style="font-size:22px;font-weight:600;line-height:1.2">4</div>
+          <div style="font-size:12px;color:#64748B;margin-top:2px">требует внимания</div>
+        </div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:6px">Ср. балл за неделю</div>
+          <div style="font-size:22px;font-weight:600;line-height:1.2">4,6</div>
+          <div style="font-size:12px;color:#64748B;margin-top:2px">+0,2 к прошлой</div>
+        </div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7">
+          <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:6px">Поступления за месяц</div>
+          <div style="font-size:22px;font-weight:600;line-height:1.2">148 000 ₽</div>
+          <div style="font-size:12px;color:#64748B;margin-top:2px">11 платежей</div>
+        </div>
+      </div>
+
+      <!-- two columns -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <!-- Сегодня -->
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px">
+            <h2 style="font-size:15px;font-weight:600;margin:0">Сегодня</h2>
+            <span style="font-size:12px;color:#64748B">4 занятия</span>
+            <span style="margin-left:auto;font-size:13px;color:#1B6B4A;font-weight:600;cursor:pointer">Открыть расписание</span>
+          </div>
+          <div style="display:flex;gap:10px;padding:4px 16px 16px;overflow-x:auto">
+            <div style="flex:none;width:140px;display:flex;flex-direction:column;gap:3px;padding:10px;border-radius:10px;background:#E8F5EE;border-left:2px solid #1B6B4A">
+              <div style="font-size:11px;font-weight:600;color:#145236">10:00</div>
+              <div style="font-size:13px;font-weight:600;color:#0F172A">Маша К.</div>
+              <div style="font-size:12px;color:#64748B">Кинематика · разбор ДЗ</div>
+            </div>
+            <div style="flex:none;width:140px;display:flex;flex-direction:column;gap:3px;padding:10px;border-radius:10px;background:#EEF2F7;border-left:2px solid #4F46E5">
+              <div style="font-size:11px;font-weight:600;color:#4F46E5">13:00</div>
+              <div style="font-size:13px;font-weight:600;color:#0F172A">Лена И.</div>
+              <div style="font-size:12px;color:#64748B">Квадратные уравнения</div>
+            </div>
+            <div style="flex:none;width:140px;display:flex;flex-direction:column;gap:3px;padding:10px;border-radius:10px;background:#E8F5EE;border-left:2px solid #1B6B4A">
+              <div style="font-size:11px;font-weight:600;color:#145236">16:00</div>
+              <div style="font-size:13px;font-weight:600;color:#0F172A">Саша П.</div>
+              <div style="font-size:12px;color:#64748B">Производная · тренажёр</div>
+            </div>
+            <div style="flex:none;width:140px;display:flex;flex-direction:column;gap:3px;padding:10px;border-radius:10px;background:#E8F5EE;border-left:2px solid #1B6B4A">
+              <div style="font-size:11px;font-weight:600;color:#145236">19:00</div>
+              <div style="font-size:13px;font-weight:600;color:#0F172A">Группа 11А</div>
+              <div style="font-size:12px;color:#64748B">Динамика · пробник</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Требует проверки -->
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px">
+            <h2 style="font-size:15px;font-weight:600;margin:0">Требует проверки</h2>
+            <span style="font-size:12px;color:#64748B">4 работы</span>
+            <span style="margin-left:auto;font-size:13px;color:#1B6B4A;font-weight:600;cursor:pointer">Открыть все</span>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;border-top:1px solid #EEF2F7">
+              <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px;flex:none">МК</div>
+              <div style="min-width:0"><div style="font-weight:600;font-size:13px">Маша Коротаева</div><div style="font-size:12px;color:#64748B">Сдано 11.03 21:14</div></div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;font-weight:500">8/8</span>
+                <span style="display:inline-flex;align-items:center;gap:3px;font-family:'SF Mono',monospace;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;background:#E8F5EE;color:#0F7A4A">AI ✓</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;border-top:1px solid #EEF2F7">
+              <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px;flex:none">СП</div>
+              <div style="min-width:0"><div style="font-weight:600;font-size:13px">Саша Петров</div><div style="font-size:12px;color:#64748B">Сдано 12.03 09:02</div></div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;font-weight:500">5/8</span>
+                <span style="display:inline-flex;align-items:center;gap:3px;font-family:'SF Mono',monospace;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;background:#FEF3E6;color:#B15A12">AI ⚠ 2</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;border-top:1px solid #EEF2F7">
+              <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px;flex:none">КМ</div>
+              <div style="min-width:0"><div style="font-weight:600;font-size:13px">Катя Морозова</div><div style="font-size:12px;color:#64748B">Сдано 11.03 22:40</div></div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;font-weight:500">7/8</span>
+                <span style="display:inline-flex;align-items:center;gap:3px;font-family:'SF Mono',monospace;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;background:#E8F5EE;color:#0F7A4A">AI ✓</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;border-top:1px solid #EEF2F7">
+              <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px;flex:none">ДК</div>
+              <div style="min-width:0"><div style="font-weight:600;font-size:13px">Данил Киселёв</div><div style="font-size:12px;color:#64748B">Сдано 12.03 11:18</div></div>
+              <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span style="font-size:13px;font-weight:500">6/8</span>
+                <span style="display:inline-flex;align-items:center;gap:3px;font-family:'SF Mono',monospace;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;background:#FEF3E6;color:#B15A12">AI ⚠ 1</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- roster -->
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;margin-top:16px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px">
+          <h2 style="font-size:15px;font-weight:600;margin:0">Активность учеников</h2>
+          <span style="font-size:12px;color:#64748B">Топ-8</span>
+          <span style="margin-left:auto;font-size:13px;color:#1B6B4A;font-weight:600;cursor:pointer">Все ученики</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:10px 16px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Ученик</th>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:10px 12px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Поток</th>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:10px 12px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Предметы</th>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:right;padding:10px 12px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Прогресс</th>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:10px 12px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Посл. занятие</th>
+            <th style="font-size:11px;font-weight:600;color:#64748B;text-transform:uppercase;letter-spacing:.06em;text-align:left;padding:10px 16px;border-top:1px solid #EEF2F7;border-bottom:1px solid #E2E8F0">Статус</th>
+          </tr></thead>
+          <tbody>
+            <tr><td style="padding:8px 16px;height:32px;border-bottom:1px solid #EEF2F7;font-weight:600;font-size:13px">Маша Коротаева</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#E8F5EE;color:#145236">ЕГЭ</span></td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">физика, математика</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:right;font-size:13px;font-weight:500">78%</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">11.03 18:00</td><td style="padding:8px 16px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><span style="width:6px;height:6px;border-radius:50%;background:#0F7A4A"></span>активна</span></td></tr>
+            <tr><td style="padding:8px 16px;height:32px;border-bottom:1px solid #EEF2F7;font-weight:600;font-size:13px">Саша Петров</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#E8F5EE;color:#145236">ЕГЭ</span></td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">математика</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:right;font-size:13px;font-weight:500">54%</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">10.03 17:00</td><td style="padding:8px 16px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><span style="width:6px;height:6px;border-radius:50%;background:#B15A12"></span>долг по ДЗ</span></td></tr>
+            <tr><td style="padding:8px 16px;height:32px;border-bottom:1px solid #EEF2F7;font-weight:600;font-size:13px">Лена Иванова</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#EEF2F7;color:#4F46E5">ОГЭ</span></td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">математика</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:right;font-size:13px;font-weight:500">64%</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">12.03 15:30</td><td style="padding:8px 16px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><span style="width:6px;height:6px;border-radius:50%;background:#0F7A4A"></span>активна</span></td></tr>
+            <tr><td style="padding:8px 16px;height:32px;border-bottom:1px solid #EEF2F7;font-weight:600;font-size:13px">Артём Белов</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#E8F5EE;color:#145236">ЕГЭ</span></td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">физика</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;text-align:right;font-size:13px;font-weight:500">41%</td><td style="padding:8px 12px;border-bottom:1px solid #EEF2F7;font-size:13px;color:#334155">05.03 19:00</td><td style="padding:8px 16px;border-bottom:1px solid #EEF2F7"><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><span style="width:6px;height:6px;border-radius:50%;background:#94A3B8"></span>пауза</span></td></tr>
+            <tr><td style="padding:8px 16px;height:32px;font-weight:600;font-size:13px">Катя Морозова</td><td style="padding:8px 12px"><span style="display:inline-flex;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:#E8F5EE;color:#145236">ЕГЭ</span></td><td style="padding:8px 12px;font-size:13px;color:#334155">физика, математика</td><td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:500">92%</td><td style="padding:8px 12px;font-size:13px;color:#334155">12.03 17:00</td><td style="padding:8px 16px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:13px"><span style="width:6px;height:6px;border-radius:50%;background:#0F7A4A"></span>активна</span></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+    </sc-if>
+
+    <!-- ── EMPTY-GUIDED BODY (empty states lead) ── -->
+    <sc-if value="{{ showEmptyBody }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="display:flex;align-items:flex-start;gap:16px;padding:4px 0 20px">
+        <div style="flex:1;min-width:0">
+          <h1 style="font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.005em;color:#0F172A;margin:0">Главная</h1>
+          <div style="font-size:13px;color:#64748B;margin-top:4px">Добро пожаловать в Сократ! Соберём кабинет за пару минут.</div>
+        </div>
+        <button onClick="{{ addStudent }}" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-weight:600;font-size:13px;cursor:pointer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"></path></svg>
+          Добавить ученика
+        </button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 2px rgba(15,23,42,.05)">
+        <div style="padding:14px 16px"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94A3B8;margin-bottom:6px">Активных учеников</div><div style="font-size:22px;font-weight:600;line-height:1.2;color:#94A3B8">0</div><div style="font-size:12px;color:#94A3B8;margin-top:2px">ещё никого</div></div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94A3B8;margin-bottom:6px">На проверке</div><div style="font-size:22px;font-weight:600;line-height:1.2;color:#94A3B8">0</div><div style="font-size:12px;color:#94A3B8;margin-top:2px">нет работ</div></div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94A3B8;margin-bottom:6px">Ср. балл за неделю</div><div style="font-size:22px;font-weight:600;line-height:1.2;color:#94A3B8">—</div><div style="font-size:12px;color:#94A3B8;margin-top:2px">нет данных</div></div>
+        <div style="padding:14px 16px;border-left:1px solid #EEF2F7"><div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94A3B8;margin-bottom:6px">Поступления за месяц</div><div style="font-size:22px;font-weight:600;line-height:1.2;color:#94A3B8">0 ₽</div><div style="font-size:12px;color:#94A3B8;margin-top:2px">нет платежей</div></div>
+      </div>
+
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;margin-top:16px;padding:40px 24px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px">
+        <div style="width:56px;height:56px;border-radius:50%;background:#E8F5EE;display:grid;place-items:center;color:#1B6B4A">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        </div>
+        <div style="font-size:16px;font-weight:600;color:#0F172A">Здесь появятся ваши ученики</div>
+        <div style="font-size:13px;color:#64748B;max-width:380px;line-height:1.55">Добавьте первого ученика — достаточно имени. Контакты можно добавить позже, перед отправкой первого ДЗ.</div>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button onClick="{{ addStudent }}" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-weight:600;font-size:13px;cursor:pointer">Добавить ученика</button>
+          <button style="display:inline-flex;align-items:center;justify-content:center;height:40px;padding:0 16px;border-radius:10px;border:1px solid #E2E8F0;background:#fff;color:#334155;font:inherit;font-weight:600;font-size:13px;cursor:pointer">Добавить списком</button>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Сегодня</h2><span style="font-size:12px;color:#94A3B8">0 занятий</span></div>
+          <div style="padding:24px 16px 28px;text-align:center;font-size:13px;color:#94A3B8;border-top:1px solid #EEF2F7">Появится после первого назначенного занятия</div>
+        </section>
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Требует проверки</h2><span style="font-size:12px;color:#94A3B8">0 работ</span></div>
+          <div style="padding:24px 16px 28px;text-align:center;font-size:13px;color:#94A3B8;border-top:1px solid #EEF2F7">Работы появятся здесь после первой сдачи ДЗ</div>
+        </section>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ── CHECKLIST BODY (activation guide) ── -->
+    <sc-if value="{{ showChecklistBody }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="padding:4px 0 20px">
+        <h1 style="font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.005em;color:#0F172A;margin:0">Главная</h1>
+        <div style="font-size:13px;color:#64748B;margin-top:4px">Добро пожаловать! Пройдите 4 шага, чтобы отправить первое ДЗ.</div>
+      </div>
+
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;overflow:hidden;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+          <h2 style="font-size:15px;font-weight:600;margin:0">С чего начать</h2>
+          <span style="margin-left:auto;font-size:12px;color:#64748B">0 из 4 выполнено</span>
+          <span style="font-size:13px;color:#64748B;cursor:pointer;margin-left:12px">Скрыть</span>
+        </div>
+        <div style="height:4px;background:#EEF2F7"><div style="height:100%;width:6%;background:#1B6B4A"></div></div>
+
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:#f3f9f5;border-left:2px solid #1B6B4A">
+          <div style="width:26px;height:26px;border-radius:50%;background:#1B6B4A;color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">1</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#0F172A">Добавьте первого ученика</div><div style="font-size:12px;color:#64748B;margin-top:1px">Достаточно имени — контакты можно добавить позже.</div></div>
+          <button onClick="{{ addStudent }}" style="display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;flex:none">Добавить</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid #E2E8F0;color:#94A3B8;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">2</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#334155">Соберите первое ДЗ</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Выберите задачи из базы или добавьте свои.</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid #E2E8F0;color:#94A3B8;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">3</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#334155">Подключите ученика</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Покажите QR или отправьте ссылку — один раз.</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid #E2E8F0;color:#94A3B8;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">4</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#334155">Дождитесь первой сдачи</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Сократ проверит ответы и покажет результат вам.</div></div>
+        </div>
+      </section>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Сегодня</h2><span style="font-size:12px;color:#94A3B8">0 занятий</span></div>
+          <div style="padding:22px 16px 26px;text-align:center;font-size:13px;color:#94A3B8;border-top:1px solid #EEF2F7">Появится после первого занятия</div>
+        </section>
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Требует проверки</h2><span style="font-size:12px;color:#94A3B8">0 работ</span></div>
+          <div style="padding:22px 16px 26px;text-align:center;font-size:13px;color:#94A3B8;border-top:1px solid #EEF2F7">Появятся после первой сдачи ДЗ</div>
+        </section>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ── CHECKLIST-2 BODY (step 1 done, step 2 active) ── -->
+    <sc-if value="{{ showChecklist2Body }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="padding:4px 0 20px">
+        <h1 style="font-size:24px;line-height:1.25;font-weight:600;letter-spacing:-.005em;color:#0F172A;margin:0">Главная</h1>
+        <div style="font-size:13px;color:#64748B;margin-top:4px">Отлично — ученик добавлен. Осталось собрать ДЗ и подключить.</div>
+      </div>
+
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;overflow:hidden;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+          <h2 style="font-size:15px;font-weight:600;margin:0">С чего начать</h2>
+          <span style="margin-left:auto;font-size:12px;color:#64748B">1 из 4 выполнено</span>
+          <span style="font-size:13px;color:#64748B;cursor:pointer;margin-left:12px">Скрыть</span>
+        </div>
+        <div style="height:4px;background:#EEF2F7"><div style="height:100%;width:28%;background:#1B6B4A"></div></div>
+
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-left:2px solid transparent">
+          <div style="width:26px;height:26px;border-radius:50%;background:#E8F5EE;color:#0F7A4A;display:grid;place-items:center;flex:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#94A3B8;text-decoration:line-through">Добавьте первого ученика</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Иван Петров добавлен</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:#f3f9f5;border-left:2px solid #1B6B4A;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;background:#1B6B4A;color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">2</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#0F172A">Соберите первое ДЗ</div><div style="font-size:12px;color:#64748B;margin-top:1px">Выберите задачи из базы или добавьте свои.</div></div>
+          <button onClick="{{ newHw }}" style="display:inline-flex;align-items:center;justify-content:center;height:36px;padding:0 14px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;flex:none">Собрать ДЗ</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid #E2E8F0;color:#94A3B8;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">3</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#334155">Подключите ученика</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Покажите QR или отправьте ссылку — один раз.</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:26px;height:26px;border-radius:50%;border:1.5px solid #E2E8F0;color:#94A3B8;font-size:13px;font-weight:700;display:grid;place-items:center;flex:none">4</div>
+          <div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:600;color:#334155">Дождитесь первой сдачи</div><div style="font-size:12px;color:#94A3B8;margin-top:1px">Сократ проверит ответы и покажет результат вам.</div></div>
+        </div>
+      </section>
+
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Ваши ученики</h2><span style="font-size:12px;color:#64748B">1</span></div>
+        <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid #EEF2F7">
+          <div style="width:32px;height:32px;border-radius:50%;background:#EEF2F7;color:#334155;display:grid;place-items:center;font-weight:600;font-size:11px;flex:none">ИП</div>
+          <div style="min-width:0"><div style="font-weight:600;font-size:13px">Иван Петров</div><div style="font-size:12px;color:#64748B">Добавлен только что · контактов нет</div></div>
+          <span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#FEF3E6;color:#B15A12"><span style="width:6px;height:6px;border-radius:50%;background:#B15A12"></span>не подключился</span>
+        </div>
+      </section>
+    </div>
+    </sc-if>
+
+    <!-- ── NUDGE BODY (student profile · not connected) ── -->
+    <sc-if value="{{ showNudgeBody }}" hint-placeholder-val="{{ false }}">
+    <div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:#64748B;margin-bottom:14px;cursor:pointer">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg>
+        Все ученики
+      </div>
+
+      <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;padding:18px;display:flex;align-items:center;gap:16px">
+        <div style="width:56px;height:56px;border-radius:50%;background:#EEF2F7;color:#64748B;display:grid;place-items:center;font-weight:700;font-size:18px;flex:none;box-shadow:0 0 0 2px #fff, 0 0 0 3.5px #CBD5E1">ИП</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:20px;font-weight:600;color:#0F172A">{{ studentName }}</div>
+          <div style="font-size:13px;color:#64748B;margin-top:2px">Добавлен сегодня · класс не указан · поток не выбран</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+          <span style="display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;background:#FEF3E6;color:#B15A12"><span style="width:6px;height:6px;border-radius:50%;background:#B15A12"></span>не подключился</span>
+          <button onClick="{{ connectStudent }}" style="display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;padding:0 16px;border-radius:10px;border:0;background:#1B6B4A;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"></path></svg>
+            Подключить
+          </button>
+        </div>
+      </section>
+
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-top:14px;background:#FEF3E6;border:1px solid #F8D9A8;border-radius:12px;padding:13px 14px">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#B15A12" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:#92400E;line-height:1.5">Добавьте email или Telegram, чтобы Иван мог входить с любого устройства и получать уведомления о новых заданиях.</div>
+          <button style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 14px;border-radius:10px;border:1px solid rgba(177,90,18,.35);background:#fff;color:#B15A12;font:inherit;font-size:13px;font-weight:600;cursor:pointer">Добавить email или Telegram</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Последние работы</h2></div>
+          <div style="padding:20px 16px 24px;text-align:center;border-top:1px solid #EEF2F7"><div style="font-size:13px;color:#94A3B8">Первое задание ещё не отправлено</div><div style="font-size:13px;color:#1B6B4A;font-weight:600;margin-top:6px;cursor:pointer">Собрать ДЗ</div></div>
+        </section>
+        <section style="background:#fff;border:1px solid #EEF2F7;border-radius:14px">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px"><h2 style="font-size:15px;font-weight:600;margin:0">Контакты</h2></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #EEF2F7;font-size:13px"><span style="color:#64748B;width:78px">Email</span><span style="color:#94A3B8">не добавлен</span><span style="margin-left:auto;color:#1B6B4A;font-weight:600;cursor:pointer">Добавить</span></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #EEF2F7;font-size:13px"><span style="color:#64748B;width:78px">Telegram</span><span style="color:#94A3B8">не добавлен</span><span style="margin-left:auto;color:#1B6B4A;font-weight:600;cursor:pointer">Добавить</span></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-top:1px solid #EEF2F7;font-size:13px"><span style="color:#64748B;width:78px">Класс · цель</span><span style="color:#94A3B8">не указаны</span></div>
+        </section>
+      </div>
+    </div>
+    </sc-if>
+
+  </main>
+
+  <!-- ░░ OVERLAY: ADD STUDENT ░░ -->
+  <sc-if value="{{ overlayAdd }}" hint-placeholder-val="{{ false }}">
+  <div style="position:absolute;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);z-index:40;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:444px;max-width:100%;background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #EEF2F7">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6M22 11h-6"></path></svg>
+        <div style="font-size:15px;font-weight:600;flex:1">Добавить ученика</div>
+        <button onClick="{{ closeOverlay }}" style="width:32px;height:32px;border:0;background:transparent;border-radius:8px;display:grid;place-items:center;color:#64748B;cursor:pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+      </div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:inline-flex;background:#EEF2F7;border-radius:10px;padding:3px;align-self:flex-start">
+          <button style="height:28px;padding:0 14px;border:0;border-radius:8px;background:#fff;color:#0F172A;font:inherit;font-size:12px;font-weight:600;box-shadow:0 1px 2px rgba(15,23,42,.05);cursor:pointer">Вручную</button>
+          <button style="height:28px;padding:0 14px;border:0;border-radius:8px;background:transparent;color:#64748B;font:inherit;font-size:12px;font-weight:500;cursor:pointer">По ссылке</button>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <label style="font-size:12px;font-weight:500;color:#64748B">Имя ученика <span style="color:#B91C1C">*</span></label>
+          <div style="display:flex;align-items:center;height:40px;padding:0 12px;background:#fff;border:1px solid #1B6B4A;border-radius:10px;box-shadow:0 0 0 3px rgba(27,107,74,.22)">
+            <span style="font-size:14px;color:#0F172A;font-weight:500">{{ studentName }}</span>
+          </div>
+          <div style="font-size:12px;color:#64748B;line-height:1.5">Контакт можно добавить позже — он понадобится только перед отправкой первой домашки.</div>
+        </div>
+
+        <button style="display:flex;align-items:center;gap:8px;padding:11px 12px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;cursor:pointer;text-align:left">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+          <span style="font-size:13px;color:#334155;font-weight:500">Дополнительно</span>
+          <span style="font-size:12px;color:#94A3B8;margin-left:auto">email · Telegram · класс · цель</span>
+        </button>
+
+        <button style="display:flex;align-items:center;justify-content:center;gap:8px;height:40px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;cursor:pointer;color:#334155;font:inherit;font-size:13px;font-weight:600">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"></path></svg>
+          Добавить списком имён
+        </button>
+
+        <span style="display:inline-flex;align-items:center;gap:6px;align-self:flex-start;padding:5px 11px;border-radius:999px;font-size:12px;font-weight:600;background:#E8F5EE;color:#0F7A4A">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+          Без контакта — это нормально
+        </span>
+
+        <button onClick="{{ submitAdd }}" style="display:flex;align-items:center;justify-content:center;height:44px;background:#1B6B4A;border:0;border-radius:10px;cursor:pointer;color:#fff;font:inherit;font-size:14px;font-weight:600">Добавить ученика</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ░░ OVERLAY: CONNECT STUDENT (link-first) ░░ -->
+  <sc-if value="{{ overlayConnect }}" hint-placeholder-val="{{ false }}">
+  <div style="position:absolute;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);z-index:40;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:452px;max-width:100%;background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #EEF2F7">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2M15 7h2a5 5 0 0 1 0 10h-2M8 12h8"></path></svg>
+        <div style="font-size:15px;font-weight:600;flex:1">Подключить · {{ connectFirstName }}</div>
+        <button onClick="{{ closeOverlay }}" style="width:32px;height:32px;border:0;background:transparent;border-radius:8px;display:grid;place-items:center;color:#64748B;cursor:pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg></button>
+      </div>
+      <div style="padding:18px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:13px;color:#64748B;line-height:1.5">Дальше задания приходят ученику сами — этот экран нужен только для первого подключения.</div>
+
+        <!-- LINK HERO -->
+        <div style="border:1px solid #E2E8F0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px;font-weight:600;color:#0F172A">Личная ссылка для входа</span>
+            <span style="font-size:11px;font-weight:600;color:#0F7A4A;background:#E8F5EE;border-radius:999px;padding:2px 8px;margin-left:auto">рекомендуем</span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;min-width:0;display:flex;align-items:center;height:40px;padding:0 12px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;font-size:13px;color:#334155;font-family:'SF Mono',monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ joinLink }}</div>
+            <button onClick="{{ copyLink }}" style="display:inline-flex;align-items:center;gap:6px;height:40px;padding:0 16px;background:#1B6B4A;border:0;border-radius:10px;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;flex:none">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              Скопировать
+            </button>
+          </div>
+          <div style="font-size:12px;color:#64748B">Отправьте в любой чат ученику — он откроет, зарегистрируется и примется за задание.</div>
+        </div>
+
+        <!-- QR secondary -->
+        <button style="display:flex;align-items:center;gap:12px;padding:12px 14px;background:#fff;border:1px solid #E2E8F0;border-radius:12px;cursor:pointer;text-align:left">
+          <div style="width:52px;height:52px;border-radius:8px;background:#fff;border:1px solid #EEF2F7;padding:5px;flex:none">{{ qrSvg }}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:600;color:#0F172A">Показать QR</div>
+            <div style="font-size:12px;color:#64748B;line-height:1.4">Ученик сканирует камерой — в одной комнате или на видеозвонке</div>
+          </div>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="m9 18 6-6-6-6"></path></svg>
+        </button>
+
+        <!-- email / telegram tertiary -->
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:center;padding-top:2px">
+          <div style="display:flex;align-items:center;gap:10px;width:100%;color:#94A3B8;font-size:12px">
+            <span style="flex:1;height:1px;background:#EEF2F7"></span>или<span style="flex:1;height:1px;background:#EEF2F7"></span>
+          </div>
+          <div style="display:flex;gap:8px;width:100%">
+            <button style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;color:#334155;font:inherit;font-size:13px;font-weight:600;cursor:pointer">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6 10-6"></path></svg>
+              Отправить на email
+            </button>
+            <button style="flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;background:#fff;border:1px solid #E2E8F0;border-radius:10px;color:#334155;font:inherit;font-size:13px;font-weight:600;cursor:pointer">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0088cc" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"></path></svg>
+              В Telegram
+            </button>
+          </div>
+          <div style="font-size:12px;color:#94A3B8;text-align:center;line-height:1.4">При выборе email или Telegram Сократ сам пришлёт приглашение и первое задание туда.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ░░ OVERLAY: WELCOME ░░ -->
+  <sc-if value="{{ overlayWelcome }}" hint-placeholder-val="{{ false }}">
+  <div style="position:absolute;inset:0;background:rgba(15,23,42,.45);backdrop-filter:blur(2px);z-index:40;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="width:476px;max-width:100%;background:#fff;border-radius:16px;box-shadow:0 20px 50px rgba(15,23,42,.18);overflow:hidden">
+      <div style="padding:26px 26px 22px;display:flex;flex-direction:column;gap:16px">
+        <div style="width:56px;height:56px;border-radius:50%;background:#E8F5EE;display:grid;place-items:center;color:#1B6B4A;align-self:center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10 12 5 2 10l10 5 10-5z"></path><path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5"></path></svg>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:20px;font-weight:700;color:#0F172A">Добро пожаловать в Сократ</div>
+          <div style="font-size:14px;color:#334155;line-height:1.55;margin-top:8px">Сократ — это AI-помощник репетитора: он не выдаёт ученику готовые ответы, а ведёт его наводящими вопросами и берёт на себя проверку. Вы добавляете учеников и собираете ДЗ — остальное на Сократе.</div>
+        </div>
+        <div style="background:#F8FAFC;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:11px">
+          <div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;border-radius:50%;background:#E8F5EE;color:#145236;font-size:12px;font-weight:700;display:grid;place-items:center;flex:none">1</div><div style="font-size:13px;color:#334155">Добавьте ученика — по имени, без контактов</div></div>
+          <div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;border-radius:50%;background:#E8F5EE;color:#145236;font-size:12px;font-weight:700;display:grid;place-items:center;flex:none">2</div><div style="font-size:13px;color:#334155">Соберите первое ДЗ из базы задач</div></div>
+          <div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;border-radius:50%;background:#E8F5EE;color:#145236;font-size:12px;font-weight:700;display:grid;place-items:center;flex:none">3</div><div style="font-size:13px;color:#334155">Подключите ученика — дальше задания уходят сами</div></div>
+        </div>
+        <button onClick="{{ addStudent }}" style="display:flex;align-items:center;justify-content:center;height:44px;background:#1B6B4A;border:0;border-radius:10px;cursor:pointer;color:#fff;font:inherit;font-size:14px;font-weight:600">Добавить первого ученика</button>
+        <button onClick="{{ closeOverlay }}" style="display:flex;align-items:center;justify-content:center;height:36px;background:transparent;border:0;cursor:pointer;color:#64748B;font:inherit;font-size:13px;font-weight:600">Осмотреться самостоятельно</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <!-- ░░ OVERLAY: SPOTLIGHT TOUR ░░ -->
+  <sc-if value="{{ overlaySpotlight }}" hint-placeholder-val="{{ false }}">
+  
+  <div style="position:absolute;left:258px;top:220px;width:300px;background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,.30);padding:16px;z-index:46">
+    <div style="position:absolute;left:-7px;top:30px;width:14px;height:14px;background:#fff;transform:rotate(45deg)"></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#1B6B4A;position:relative">Шаг 1 из 4</div>
+    <div style="font-size:15px;font-weight:600;color:#0F172A;margin-top:4px;position:relative">Начните с раздела «Ученики»</div>
+    <div style="font-size:13px;color:#64748B;line-height:1.5;margin-top:6px;position:relative">Здесь живут все ваши ученики. Добавьте первого — по имени, контакты не нужны.</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:14px;position:relative">
+      <div style="display:flex;gap:5px">
+        <span style="width:6px;height:6px;border-radius:50%;background:#1B6B4A"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:#E2E8F0"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:#E2E8F0"></span>
+        <span style="width:6px;height:6px;border-radius:50%;background:#E2E8F0"></span>
+      </div>
+      <span style="flex:1"></span>
+      <button onClick="{{ skipTour }}" style="height:32px;padding:0 10px;border:0;background:transparent;color:#64748B;font:inherit;font-size:13px;font-weight:600;cursor:pointer">Пропустить</button>
+      <button onClick="{{ tourNext }}" style="height:32px;padding:0 14px;border:0;border-radius:9px;background:#1B6B4A;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer">Далее</button>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1240,&quot;height&quot;:800},&quot;scene&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;normal&quot;,&quot;add-student&quot;,&quot;connect&quot;,&quot;nudge&quot;,&quot;empty-guided&quot;,&quot;empty-checklist&quot;,&quot;empty-checklist-2&quot;,&quot;spotlight&quot;,&quot;welcome&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;studentName&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;Иван Петров&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;joinLink&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;sokratai.ru/join/x8K2-VND&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;on&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(action: string) =&gt; void&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const scene = this.props.scene || 'normal';
+    const overlay =
+      (scene === 'add-student' || scene === 'add-onb') ? 'add' :
+      (scene === 'connect' || scene === 'connect-onb') ? 'connect' :
+      scene === 'welcome' ? 'welcome' :
+      scene === 'spotlight' ? 'spotlight' : 'none';
+    const body =
+      (scene === 'empty-checklist' || scene === 'add-onb') ? 'checklist' :
+      (scene === 'empty-checklist-2' || scene === 'connect-onb') ? 'checklist2' :
+      scene === 'nudge' ? 'nudge' :
+      (scene === 'empty-guided' || scene === 'welcome' || scene === 'spotlight') ? 'empty' : 'normal';
+    const onb = (body === 'empty' || body === 'checklist' || body === 'checklist2');
+
+    const studentName = this.props.studentName || 'Иван Петров';
+    const connectFirstName = studentName.split(' ')[0];
+    const joinLink = this.props.joinLink || 'sokratai.ru/join/x8K2-VND';
+    const fire = (name) => () => { if (this.props.on) this.props.on(name); };
+
+    // small stylized QR (decorative, not a real code)
+    const cell = (x, y, s) => React.createElement('rect', { key: x + '-' + y + '-' + s, x, y, width: s, height: s, fill: '#0F172A' });
+    const finder = (ox, oy) => [
+      React.createElement('rect', { key: 'f' + ox + oy, x: ox, y: oy, width: 12, height: 12, fill: 'none', stroke: '#0F172A', strokeWidth: 2.4 }),
+      React.createElement('rect', { key: 'fi' + ox + oy, x: ox + 4, y: oy + 4, width: 4, height: 4, fill: '#0F172A' }),
+    ];
+    const mods = [[16,2,3],[22,2,2],[28,2,3],[34,4,2],[2,16,2],[6,18,3],[16,16,2],[20,18,2],[26,16,3],[32,16,2],[36,18,2],[18,22,3],[24,24,2],[30,22,2],[16,28,2],[22,28,3],[28,30,2],[34,28,2],[16,34,3],[24,34,2],[30,34,3]];
+    const qrSvg = React.createElement('svg', { viewBox: '0 0 40 40', width: '100%', height: '100%', shapeRendering: 'crispEdges' },
+      ...finder(2, 2), ...finder(26, 2), ...finder(2, 26),
+      ...mods.map(([x, y, s]) => cell(x, y, s))
+    );
+
+    return {
+      showNormalBody: body === 'normal',
+      showEmptyBody: body === 'empty',
+      showChecklistBody: body === 'checklist',
+      showChecklist2Body: body === 'checklist2',
+      showNudgeBody: body === 'nudge',
+      countHw: onb ? '' : '12',
+      countStudents: onb ? '' : '28',
+      countGroups: onb ? '' : '3',
+      overlayAdd: overlay === 'add',
+      overlayConnect: overlay === 'connect',
+      overlayWelcome: overlay === 'welcome',
+      overlaySpotlight: overlay === 'spotlight',
+      studentName, connectFirstName, joinLink, qrSvg,
+      newHw: fire('new-hw'),
+      addStudent: fire('open-add'),
+      connectStudent: fire('open-connect'),
+      submitAdd: fire('submit-add'),
+      copyLink: fire('copy-link'),
+      closeOverlay: fire('close'),
+      dismiss: fire('dismiss'),
+      tourNext: fire('tour-next'),
+      skipTour: fire('close'),
+    };
+  }
+}
+</script>
+</body>
+</html>

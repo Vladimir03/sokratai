@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  @keyframes onb-nudge { 0%,100%{transform:translateX(0)} 50%{transform:translateX(4px)} }
+</style>
+</helmet>
+<div style="height:100vh;width:100%;display:flex;flex-direction:column;background:#EDEEF1;font-family:'Golos Text',system-ui,sans-serif;color:#0F172A;overflow:hidden">
+
+  <!-- ░░ TOOLBAR ░░ -->
+  <div style="flex:none;height:56px;background:#fff;border-bottom:1px solid #E2E8F0;display:flex;align-items:center;gap:14px;padding:0 18px;z-index:10">
+    <div style="display:flex;align-items:center;gap:9px">
+      <div style="width:26px;height:26px;border-radius:7px;background:#1B6B4A;display:grid;place-items:center;color:#fff;font-weight:700;font-size:13px">С</div>
+      <span style="font-size:14px;font-weight:700;color:#0F172A">Сократ · онбординг репетитора и ученика</span>
+    </div>
+    {{ phasePill }}
+    <div style="flex:1;display:flex;justify-content:center;align-items:center;gap:8px">
+      <span style="font-size:12px;color:#94A3B8;font-variant-numeric:tabular-nums">Шаг {{ stepHuman }} / 11</span>
+      <div style="display:flex;gap:5px;margin-left:6px">{{ dots }}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button onClick="{{ back }}" style="height:34px;padding:0 12px;border:1px solid #E2E8F0;background:#fff;border-radius:9px;font:inherit;font-size:13px;font-weight:600;color:#334155;cursor:pointer">Назад</button>
+      <button onClick="{{ next }}" style="height:34px;padding:0 12px;border:1px solid #E2E8F0;background:#fff;border-radius:9px;font:inherit;font-size:13px;font-weight:600;color:#334155;cursor:pointer">Далее</button>
+      <button onClick="{{ reset }}" style="height:34px;padding:0 12px;border:0;background:#1B6B4A;border-radius:9px;font:inherit;font-size:13px;font-weight:600;color:#fff;cursor:pointer">Сброс</button>
+    </div>
+  </div>
+
+  <!-- ░░ INSTRUCTION STRIP ░░ -->
+  <div style="flex:none;background:#0F172A;color:#fff;padding:11px 20px;display:flex;align-items:center;gap:14px;z-index:9">
+    <span style="font-size:12px;font-weight:700;color:#9ad3b8;flex:none">{{ deviceLabel }}</span>
+    <span style="width:1px;height:14px;background:rgba(255,255,255,.22);flex:none"></span>
+    <span style="font-size:14px;color:#E2E8F0;font-weight:500">{{ instruction }}</span>
+    <span style="margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#9ad3b8;flex:none">
+      {{ ctaHint }}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="animation:onb-nudge 1.1s ease-in-out infinite"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    </span>
+  </div>
+
+  <!-- ░░ STAGE (only the active step mounts) ░░ -->
+  <div style="flex:1;min-height:0;position:relative;overflow:hidden">
+
+    <!-- 0 · welcome -->
+    <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="welcome" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 1 · checklist -->
+    <sc-if value="{{ s1 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="empty-checklist" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 2 · add student -->
+    <sc-if value="{{ s2 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="add-onb" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 3 · checklist-2 -->
+    <sc-if value="{{ s3 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="empty-checklist-2" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 4 · connect -->
+    <sc-if value="{{ s4 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="connect-onb" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 5 · device switch -->
+    <sc-if value="{{ s5 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="width:452px;background:#fff;border:1px solid #E2E8F0;border-radius:20px;box-shadow:0 24px 60px rgba(15,23,42,.18);padding:34px 30px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px">
+        <div style="display:flex;align-items:center;gap:14px">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <svg width="26" height="34" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"/><path d="M11 18h2"/></svg>
+        </div>
+        <div style="font-size:19px;font-weight:700;color:#0F172A">Ссылка отправлена ученику</div>
+        <div style="font-size:14px;color:#64748B;line-height:1.55;max-width:340px">Гейт «подключить» был одноразовым — следующие задания приходят ученику сами. Открываем ссылку на его телефоне.</div>
+        <button onClick="{{ next }}" style="margin-top:6px;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:46px;padding:0 22px;background:#1B6B4A;border:0;border-radius:13px;color:#fff;font:inherit;font-size:15px;font-weight:600;cursor:pointer">
+          Перейти на телефон ученика
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 6 · student link-entry -->
+    <sc-if value="{{ s6 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;flex:none">
+        <dc-import name="УченикТелефон" screen="link-entry" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5;border-radius:46px"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 7 · student register (before homework) -->
+    <sc-if value="{{ s7 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;flex:none">
+        <dc-import name="УченикТелефон" screen="register" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5;border-radius:46px"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 8 · student task -->
+    <sc-if value="{{ s8 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;flex:none">
+        <dc-import name="УченикТелефон" screen="task" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5;border-radius:46px"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 9 · login (return) -->
+    <sc-if value="{{ s9 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;flex:none">
+        <dc-import name="УченикТелефон" screen="login" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+        <div onClick="{{ next }}" title="Нажмите, чтобы продолжить" style="position:absolute;inset:0;cursor:pointer;z-index:5;border-radius:46px"></div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- 10 · activation (tutor sees result) -->
+    <sc-if value="{{ s10 }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;width:1240px;height:800px;flex:none">
+        <div style="border-radius:18px;overflow:hidden;box-shadow:0 24px 60px rgba(15,23,42,.22);width:1240px;height:800px"><dc-import name="ТьюторДашборд" scene="normal" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import></div>
+        <div style="position:absolute;top:64px;right:18px;width:312px;background:#fff;border:1px solid #E8F5EE;border-radius:14px;box-shadow:0 16px 40px rgba(15,23,42,.18);padding:14px 16px;display:flex;gap:12px;align-items:flex-start;z-index:6">
+          <div style="width:36px;height:36px;border-radius:50%;background:#E8F5EE;color:#0F7A4A;display:grid;place-items:center;flex:none"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <div style="min-width:0">
+            <div style="font-size:14px;font-weight:700;color:#0F172A">Иван Петров сдал первое ДЗ</div>
+            <div style="font-size:12.5px;color:#64748B;margin-top:2px">Линзы · 5/5 · <span style="font-family:'SF Mono',monospace;color:#0F7A4A;font-weight:600">AI ✓</span> · прошёл сам</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1320,&quot;height&quot;:920}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    let saved = 0;
+    try { saved = Number(localStorage.getItem('sokrat.onb.step') || 0) || 0; } catch (e) {}
+    this.STEPS = [
+      { phase: 'Репетитор · онбординг', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Первый вход. Приветствие объясняет, что такое Сократ, и предлагает одно действие.', cta: 'Добавить первого ученика' },
+      { phase: 'Репетитор · онбординг', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Дашборд с чеклистом «С чего начать». Шаг 1 несёт единственный primary-CTA.', cta: 'Нажмите «Добавить»' },
+      { phase: 'Репетитор · онбординг', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Добавление по имени — контакт опционален, «Дополнительно» свёрнуто.', cta: 'Нажмите «Добавить ученика»' },
+      { phase: 'Репетитор · онбординг', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Ученик добавлен — чеклист обновился: шаг 1 закрыт, активен шаг 2.', cta: 'Нажмите «Собрать ДЗ»' },
+      { phase: 'Репетитор · онбординг', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Перед первой отправкой ДЗ — одноразовый гейт «Подключить». Ссылка первым способом.', cta: 'Нажмите «Скопировать»' },
+      { phase: 'Передача', color: '#475569', device: 'Переключение устройства', instr: 'Ссылку отправили ученику в мессенджер. Дальше задания уходят сами.', cta: 'Перейти на телефон' },
+      { phase: 'Ученик', color: '#334155', device: 'Телефон ученика', instr: 'Ученик открыл ссылку — он уже внутри. Сначала короткая регистрация, чтобы не потерять прогресс.', cta: 'Нажмите «Продолжить»' },
+      { phase: 'Ученик', color: '#334155', device: 'Телефон ученика', instr: 'Регистрация до домашки: email подставлен репетитором — ученик задаёт пароль. Без подтверждения почты.', cta: 'Нажмите «Открыть задание»' },
+      { phase: 'Ученик', color: '#334155', device: 'Телефон ученика', instr: 'Ученик сразу в задаче — формула (KaTeX), подсказки, поле ответа.', cta: 'Нажмите «Отправить решение»' },
+      { phase: 'Возврат', color: '#334155', device: 'Новое устройство ученика', instr: 'Вход с нового устройства: email + пароль или код на почту (OTP).', cta: 'Нажмите «Войти»' },
+      { phase: 'Активация', color: '#1B6B4A', device: 'Десктоп репетитора', instr: 'Репетитор видит: ученик сам прошёл первое ДЗ. Это и есть момент «ага».', cta: 'Сброс — пройти заново' },
+    ];
+    this.state = { step: Math.min(Math.max(saved, 0), this.STEPS.length - 1) };
+  }
+  setStep(n) {
+    n = Math.max(0, Math.min(this.STEPS.length - 1, n));
+    this.setState({ step: n });
+    try { localStorage.setItem('sokrat.onb.step', String(n)); } catch (e) {}
+  }
+  renderVals() {
+    const step = this.state.step;
+    const cur = this.STEPS[step];
+    const dots = this.STEPS.map((s, i) =>
+      React.createElement('span', {
+        key: i,
+        onClick: () => this.setStep(i),
+        title: s.phase,
+        style: {
+          width: i === step ? '20px' : '7px', height: '7px', borderRadius: '4px', cursor: 'pointer', display: 'inline-block',
+          background: i === step ? s.color : (i < step ? '#9ad3b8' : '#CBD5E1'),
+          transition: 'all .25s ease',
+        },
+      })
+    );
+    const phasePill = React.createElement('span', {
+      style: { display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', borderRadius: '999px', fontSize: '12px', fontWeight: 600, color: '#fff', background: cur.color },
+    }, cur.phase);
+    const vals = {
+      stepHuman: step + 1,
+      phasePill,
+      deviceLabel: cur.device,
+      instruction: cur.instr,
+      ctaHint: cur.cta,
+      dots,
+      next: () => this.setStep(step + 1),
+      back: () => this.setStep(step - 1),
+      reset: () => this.setStep(0),
+    };
+    for (let i = 0; i < this.STEPS.length; i++) vals['s' + i] = (i === step);
+    return vals;
+  }
+}
+</script>
+</body>
+</html>

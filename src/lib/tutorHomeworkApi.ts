@@ -260,6 +260,9 @@ export interface AssignStudentsResponse {
   assigned_group_id?: string | null;
   students_without_telegram?: string[];
   students_without_telegram_names?: string[];
+  /** Онбординг v2 (T3): не подключённые ученики без канала → гейт «Подключить». */
+  students_without_channel?: string[];
+  students_without_channel_names?: string[];
 }
 
 export type NotifyFailureReason =
@@ -406,6 +409,32 @@ export interface QuickAssignHomeworkStudentsResponse {
     failed: number;
     failed_no_channel: number;
   };
+  /** Онбординг v2 (T3): не подключённые ученики без канала → гейт «Подключить». */
+  students_without_channel?: string[];
+  students_without_channel_names?: string[];
+}
+
+/**
+ * Онбординг v2 (T3) — «Подключить» → «Отправить на email»: захватывает email как
+ * канал и шлёт ученику письмо с claim-ссылкой + ДЗ (RU-safe пайплайн).
+ */
+export interface ConnectStudentByEmailResponse {
+  ok: boolean;
+  email_enqueued: boolean;
+}
+
+export async function connectHomeworkStudentByEmail(
+  assignmentId: string,
+  studentId: string,
+  email: string,
+): Promise<ConnectStudentByEmailResponse> {
+  return requestHomeworkApi<ConnectStudentByEmailResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/connect-student-email`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ student_id: studentId, email }),
+    },
+  );
 }
 
 export async function quickAssignHomeworkStudents(

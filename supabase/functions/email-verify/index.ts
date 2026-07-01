@@ -69,8 +69,10 @@ const ALLOWED_REDIRECT_ORIGINS = [
   "http://localhost:3000",
 ];
 
-// P2 narrowing: only `signup` for now. Add others when templates are wired up.
-const ALLOWED_TYPES = new Set(["signup"]);
+// `signup` — email-confirm регистрации. `magiclink` — беспарольный вход «по коду»
+// (онбординг v2, T7): student-otp-request генерит magiclink hashed_token и шлёт
+// ссылку на ЭТОТ endpoint через наш RU-safe email-пайплайн (не *.supabase.co).
+const ALLOWED_TYPES = new Set(["signup", "magiclink"]);
 
 function isAllowedRedirect(target: string): boolean {
   try {
@@ -322,7 +324,7 @@ Deno.serve(async (req) => {
 
   const { data, error } = await anonClient.auth.verifyOtp({
     token_hash: tokenHash,
-    type: type as "signup",
+    type: type as "signup" | "magiclink",
   });
 
   if (error || !data?.session || !data?.user) {

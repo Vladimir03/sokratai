@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+</helmet>
+
+<!-- ░░░░ TITLE ░░░░ -->
+<div style="position:absolute;left:64px;top:40px;font:800 27px 'Golos Text',sans-serif;color:#0F172A;letter-spacing:-.01em">Онбординг-активация · хэндофф репетитор → ученик</div>
+<div style="position:absolute;left:64px;top:80px;font:500 14px 'Golos Text',sans-serif;color:#64748B">Сократ AI · hi-fi по дизайн-системе · добавил по имени → собрал ДЗ → подключил → ученик вошёл по ссылке → регистрация → первое ДЗ → возврат</div>
+
+<!-- ░░░░ INTRO · context & decisions ░░░░ -->
+<div style="position:absolute;left:64px;top:152px;width:1180px">
+  <div data-drags-parent="1" style="position:absolute;top:-28px;left:2px;font:700 13px 'Golos Text',sans-serif;color:#334155">Контекст и решения</div>
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:22px 24px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:30px">
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:10px">Модель входа ученика</div>
+        <ol style="margin:0;padding-left:18px;font:400 13.5px/1.62 'Golos Text',sans-serif;color:#334155">
+          <li><b style="color:#0F172A">Первый вход</b> — личная ссылка/QR минтит сессию. Регистрации на входе нет.</li>
+          <li><b style="color:#0F172A">Повседневно</b> — персистентная сессия: открыл sokratai.ru — уже внутри.</li>
+          <li><b style="color:#0F172A">Регистрация до домашки</b> — после «ты подключён», перед заданием: email (подставлен от репетитора) + пароль. Причина — не потерять прогресс.</li>
+          <li><b style="color:#0F172A">Новое устройство</b> — вход: email + пароль или «войти по коду» (OTP на почту).</li>
+          <li><b style="color:#0F172A">Нет email и пароля</b> — вход только по новой ссылке от репетитора.</li>
+        </ol>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:10px">Инварианты</div>
+        <ul style="margin:0 0 16px;padding-left:18px;font:400 13.5px/1.62 'Golos Text',sans-serif;color:#334155">
+          <li>Добавление по имени — контакт опционален</li>
+          <li>Гейт «подключить» — одноразовый, до первого ДЗ</li>
+          <li>Беспарольный вход по ссылке + персистентная сессия</li>
+          <li>Регистрация — до первой домашки (email + пароль); вход по ссылке остаётся беспарольным</li>
+          <li>Прогресс ДЗ автосохраняется по токену — не теряется, даже если не закончил</li>
+          <li>Только email, без телефона</li>
+        </ul>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:9px">Решения этой версии</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <span style="font:600 12px 'Golos Text',sans-serif;background:#E8F5EE;color:#145236;border-radius:999px;padding:4px 11px">Ссылка — первый способ</span>
+          <span style="font:600 12px 'Golos Text',sans-serif;background:#E8F5EE;color:#145236;border-radius:999px;padding:4px 11px">Регистрация до ДЗ — обязательно</span>
+          <span style="font:600 12px 'Golos Text',sans-serif;background:#E8F5EE;color:#145236;border-radius:999px;padding:4px 11px">Email без верификации (пока)</span>
+          <span style="font:600 12px 'Golos Text',sans-serif;background:#E8F5EE;color:#145236;border-radius:999px;padding:4px 11px">Модалки в кабинете</span>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:18px;padding:12px 14px;background:#f3f9f5;border:1px solid #E8F5EE;border-radius:10px;font:400 13px/1.55 'Golos Text',sans-serif;color:#145236">
+      <b>Тон.</b> Ученику — «ты» (правило дизайн-системы), репетитору и родителю — «вы». В брифе местами «вы» к ученику — я выровнял на «ты» по DS; легко вернуть, если хотите сохранить «вы».
+    </div>
+  </div>
+</div>
+
+<!-- ░░░░ DESIGN-SYSTEM legend ░░░░ -->
+<div style="position:absolute;left:1304px;top:152px;width:900px">
+  <div data-drags-parent="1" style="position:absolute;top:-28px;left:2px;font:700 13px 'Golos Text',sans-serif;color:#334155">По дизайн-системе</div>
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:10px">Цвет</div>
+      <div style="display:flex;flex-wrap:wrap;gap:14px">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:6px;background:#1B6B4A"></span><span style="font:500 12.5px 'Golos Text',sans-serif;color:#334155">green-700 · бренд, CTA</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:6px;background:#E8F5EE;border:1px solid #cbe5d6"></span><span style="font:500 12.5px 'Golos Text',sans-serif;color:#334155">green-100 · ЕГЭ, тинты</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:6px;background:#E8913A"></span><span style="font:500 12.5px 'Golos Text',sans-serif;color:#334155">ochre · только празднование (ученик)</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:6px;background:#EEF2F7;border:1px solid #E2E8F0"></span><span style="font:500 12.5px 'Golos Text',sans-serif;color:#334155">slate · поверхности, текст</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:22px;height:22px;border-radius:6px;background:#4F46E5"></span><span style="font:500 12.5px 'Golos Text',sans-serif;color:#334155">indigo · только текст ОГЭ</span></div>
+      </div>
+    </div>
+    <div style="height:1px;background:#EEF2F7"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:8px">Шрифт</div>
+        <div style="font:700 22px 'Golos Text',sans-serif;color:#0F172A;line-height:1.1">Golos Text</div>
+        <div style="font:400 12.5px 'Golos Text',sans-serif;color:#64748B;margin-top:2px">400 · 500 · 600 · 700 · 800</div>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:8px">Плотность</div>
+        <div style="font:400 12.5px/1.55 'Golos Text',sans-serif;color:#334155">Репетитор — compact: тело 14, хиты 36–40, строки 32.<br>Ученик — comfortable: тело 16–17, хиты 44, primary 52, инпуты ≥16.</div>
+      </div>
+    </div>
+    <div style="height:1px;background:#EEF2F7"></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">один primary-CTA</span>
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">sentence case</span>
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">иконки Lucide</span>
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">без эмодзи</span>
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">KaTeX для формул</span>
+      <span style="font:600 12px 'Golos Text',sans-serif;background:#F1F5F9;color:#475569;border-radius:8px;padding:4px 10px">без градиентов/теней на онбординге</span>
+    </div>
+  </div>
+</div>
+
+<!-- ░░░░ FLOW ░░░░ -->
+<div style="position:absolute;left:64px;top:560px;font:700 18px 'Golos Text',sans-serif;color:#334155">Поток активации</div>
+<div style="position:absolute;left:64px;top:600px;width:2140px">
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:18px 20px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:7px;font:600 13.5px 'Golos Text',sans-serif">
+      <span style="background:#F8FAFC;border:1px solid #E2E8F0;color:#0F172A;border-radius:999px;padding:7px 13px">Завёл по имени</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#F8FAFC;border:1px solid #E2E8F0;color:#0F172A;border-radius:999px;padding:7px 13px">Собрал ДЗ</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#F8FAFC;border:1px solid #E2E8F0;color:#0F172A;border-radius:999px;padding:7px 13px">Подключил · ссылка / QR</span>
+      <span style="color:#1B6B4A;font-weight:700">↳ устройство ученика</span>
+      <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:7px 13px">Вход по ссылке</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:7px 13px">Регистрация</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:7px 13px">Сразу в задаче</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#E8F5EE;color:#145236;border-radius:999px;padding:7px 13px">Сдал ДЗ</span>
+      <span style="color:#94A3B8">→</span>
+      <span style="background:#F8FAFC;border:1px solid #E2E8F0;color:#0F172A;border-radius:999px;padding:7px 13px">Возврат: сессия / вход</span>
+    </div>
+    <div style="margin-top:12px;font:400 13px/1.5 'Golos Text',sans-serif;color:#64748B">Cross-side «ага» репетитора — он видит в «последних действиях», что ученик сам прошёл ДЗ. Гейт «подключить» одноразовый — дальше отправка ДЗ идёт молча.</div>
+  </div>
+</div>
+
+<!-- ░░░░ SECTION 1 · TUTOR ░░░░ -->
+<div style="position:absolute;left:64px;top:806px;font:700 18px 'Golos Text',sans-serif;color:#334155">1 · Репетитор — десктоп · модалки в кабинете</div>
+
+<div style="position:absolute;left:64px;top:892px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 1 · Добавить ученика <span style="color:#94A3B8;font-weight:500">— обязательно только имя</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="add-student" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<div style="position:absolute;left:1404px;top:892px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 2 · Подключить <span style="color:#94A3B8;font-weight:500">— ссылка первым, одноразовый гейт</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="connect" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<div style="position:absolute;left:2744px;top:892px;width:1240px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Карточка ученика <span style="color:#94A3B8;font-weight:500">— статус «не подключился» + nudge</span></div>
+  <div style="border-radius:16px;overflow:hidden;box-shadow:0 16px 50px rgba(15,23,42,.18);background:#fff;width:1240px;height:800px">
+    <dc-import name="ТьюторДашборд" scene="nudge" hint-size="1240px,800px" style="width:1240px;height:800px;display:block"></dc-import>
+  </div>
+</div>
+
+<!-- ░░░░ SECTION 2 · STUDENT ░░░░ -->
+<div style="position:absolute;left:64px;top:1806px;font:700 18px 'Golos Text',sans-serif;color:#334155">2 · Ученик — mobile · первый раз → возврат</div>
+
+<div style="position:absolute;left:64px;top:1864px;width:360px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 4 · Первый вход по ссылке</div>
+  <dc-import name="УченикТелефон" screen="link-entry" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+</div>
+<div style="position:absolute;left:504px;top:1864px;width:360px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 5 · Регистрация до ДЗ <span style="color:#94A3B8;font-weight:500">· обязательно</span></div>
+  <dc-import name="УченикТелефон" screen="register" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+</div>
+<div style="position:absolute;left:944px;top:1864px;width:360px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 6 · Сразу в задаче <span style="color:#94A3B8;font-weight:500">· KaTeX</span></div>
+  <dc-import name="УченикТелефон" screen="task" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+</div>
+<div style="position:absolute;left:1384px;top:1864px;width:360px">
+  <div data-drags-parent="1" style="position:absolute;top:-26px;left:2px;font:600 13px 'Golos Text',sans-serif;color:#475569;white-space:nowrap">Экран 7 · Вход с нового устройства</div>
+  <dc-import name="УченикТелефон" screen="login" hint-size="360px,760px" style="width:360px;height:760px;display:block"></dc-import>
+</div>
+
+<!-- ░░░░ SECTION 3 · HANDOFF ░░░░ -->
+<div style="position:absolute;left:64px;top:2706px;font:700 18px 'Golos Text',sans-serif;color:#334155">3 · Хэндофф для Claude Code</div>
+<div style="position:absolute;left:64px;top:2752px;width:1760px">
+  <div style="background:#fff;border:1px solid #EEF2F7;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px 26px;display:flex;flex-direction:column;gap:22px">
+    <div style="font:400 13.5px/1.55 'Golos Text',sans-serif;color:#64748B">Импорт <code style="background:#F1F5F9;border-radius:5px;padding:1px 6px;font-family:'SF Mono',monospace;font-size:12px;color:#145236">colors_and_type.css</code> + Golos Text. Цвета — только через токены <code style="background:#F1F5F9;border-radius:5px;padding:1px 6px;font-family:'SF Mono',monospace;font-size:12px;color:#145236">--sokrat-*</code>. Репетитор: <code style="background:#F1F5F9;border-radius:5px;padding:1px 6px;font-family:'SF Mono',monospace;font-size:12px;color:#145236">data-sokrat-mode="tutor"</code> · Ученик: <code style="background:#F1F5F9;border-radius:5px;padding:1px 6px;font-family:'SF Mono',monospace;font-size:12px;color:#145236">data-sokrat-mode="student"</code>.</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:10px">Дерево компонентов · репетитор</div>
+        <div style="font:400 13px/1.6 'Golos Text',sans-serif;color:#334155">
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">1 · AddStudentDialog</b><br><span style="color:#64748B">Dialog · Segment(Вручную/По&nbsp;ссылке) · Input «Имя» <span style="color:#B91C1C">*</span> · Collapsible «Дополнительно» · Button outline «списком» · Chip success · <b style="color:#145236">Button primary</b></span></div>
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">2 · ConnectDialog</b><br><span style="color:#64748B">Dialog · <b style="color:#145236">LinkField (Input readonly + Button «Скопировать»)</b> · Option QR · Button email · Button Telegram · одноразовый гейт</span></div>
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">3 · StudentProfile + Nudge</b><br><span style="color:#64748B">StudentCard · Chip warning «не&nbsp;подключился» · Alert warning · Button «Добавить email/Telegram»</span></div>
+        </div>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#1B6B4A;margin-bottom:10px">Дерево компонентов · ученик</div>
+        <div style="font:400 13px/1.6 'Golos Text',sans-serif;color:#334155">
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">4 · LinkEntry</b><br><span style="color:#64748B">AppShell · CheckCircle · TutorChip · AssignmentCard · <b style="color:#145236">SButton lg «Открыть задание»</b></span></div>
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">5 · Register</b> <span style="color:#B15A12;font-weight:600">обязательно · до ДЗ</span><br><span style="color:#64748B">ShieldCheck · SInput email (подставлен от репетитора) · SInput password · <b style="color:#145236">SButton lg «Открыть задание»</b> · причина «не потерять прогресс» · без «Позже»/верификации</span></div>
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">6 · Problem</b><br><span style="color:#64748B">TopHeader + ProgressDots · SChip ege · GraphBlock(SVG) · SFormulaBlock(KaTeX) · SAnswerInput unit · SButton Подсказка/Формула · <b style="color:#145236">SButton lg «Отправить»</b> · автосейв по токену</span></div>
+          <div style="padding:8px 0;border-top:1px solid #EEF2F7"><b style="color:#0F172A">7 · Login</b><br><span style="color:#64748B">SInput email/password · <b style="color:#145236">SButton «Войти»</b> · divider · SButton outline «по&nbsp;коду» (OTP на email) · link «забыли»</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px">
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:10px">Токены</div>
+        <div style="font:400 12.5px/1.7 'SF Mono',monospace;color:#475569">--sokrat-green-700 / 800 / 100<br>--sokrat-ochre-500 <span style="font-family:'Golos Text';color:#94A3B8">(только празднование)</span><br>--sokrat-surface / card / border-light<br>--sokrat-fg1 / fg2 / fg3<br>--sokrat-state-success / warning<br>--sokrat-radius-md / lg<br>--sokrat-hit-md 40 · hit-xl 52</div>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:10px">Лэйаут</div>
+        <div style="font:400 13px/1.6 'Golos Text',sans-serif;color:#475569"><b style="color:#0F172A">Репетитор:</b> AppFrame — rail 240 + topbar 56; модалки по центру, shadow-xl, scrim rgba(15,23,42,.45)+blur.<br><b style="color:#0F172A">Ученик:</b> AppShell 390; sticky header 44; primary внизу (зона большого пальца); инпуты ≥16px.</div>
+      </div>
+      <div>
+        <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#64748B;margin-bottom:10px">Правила</div>
+        <div style="font:400 13px/1.6 'Golos Text',sans-serif;color:#475569">Один primary-CTA · sentence case · Lucide · без эмодзи · KaTeX · на онбординге ученика без градиентов/теней · вход беспарольный · регистрация после первой ценности · только email.</div>
+      </div>
+    </div>
+
+    <div style="background:#0F172A;border-radius:12px;padding:18px 20px">
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#9ad3b8;margin-bottom:10px">Одна инструкция для Claude Code</div>
+      <div style="font:400 12.5px/1.65 'SF Mono','Golos Text',monospace;color:#E2E8F0;white-space:pre-wrap">Реализуй онбординг-флоу «хэндофф репетитор→ученик» в репозитории Vladimir03/sokratai (React + Vite + Tailwind + shadcn). Импортируй colors_and_type.css и шрифт Golos Text; все цвета — через токены --sokrat-*. Репетитор: data-sokrat-mode="tutor" (десктоп, плотно, 36–40px). Ученик: data-sokrat-mode="student" (mobile, 44/52px, инпуты ≥16px). Экраны репетитора (модалки в кабинете): (1) AddStudentDialog — обязательно только имя, «Дополнительно» свёрнуто, добавление списком имён, плашка «без контакта — это нормально», один primary; (2) ConnectDialog — ссылка первым (поле + «Скопировать»), QR вторым, email/Telegram третьим (бэкенд сам шлёт приглашение + первое ДЗ), гейт одноразовый; (3) StudentProfile с чипом «не подключился» + nudge «добавьте email/Telegram». Экраны ученика: (4) /join → сессия по ссылке без пароля, «ты подключён» + превью задания + «Продолжить»; (5) Register — ОБЯЗАТЕЛЬНЫЙ экран ДО домашки: email (подставлен от репетитора, если есть) + пароль, причина «чтобы не потерять прогресс», без «Позже», без верификации почты; (6) Problem — сразу в задаче, KaTeX, HintLadder, SAnswerInput, прогресс автосохраняется на сервере по токену; (7) /login — email + пароль или OTP на email, «забыли пароль». Инварианты: вход по ссылке беспарольный + персистентная сессия; регистрация ДО первой домашки (email + пароль); прогресс ДЗ АВТОСОХРАНЯЕТСЯ по токену на сервере (не теряется, даже если ученик не закончил); только email; один primary-CTA; sentence case; Lucide; без эмодзи; на онбординг-экранах ученика без градиентов и теней. Верстай строго по дереву компонентов и токенам выше. Позиционирование: Сократ — AI-ПОМОЩНИК РЕПЕТИТОРА (не замена) — проверяет ДЗ и ведёт ученика наводящими вопросами, решения за репетитором. НЕ ПОКРЫТО этим дизайном, спроектировать при реализации в той же системе: (а) конструктор ДЗ между «собрать ДЗ» и «подключить» — выбор задач из базы + свои, назначение ученику/группе, отправка; (б) состояние «ученик подключился» у репетитора — ростер/карточка «не подключился»→«подключён», снять nudge, показать первую активность; (в) экран задачи на реальном контенте — KaTeX-условие, HintLadder, проверка ответа, AI-вердикт; плюс OTP-ввод кода («войти по коду»), подтверждения отправки на email/в Telegram, флоу «добавить списком имён», состояния загрузки/ошибок/повтора, deep-link /join/:token + персистентная сессия + уведомления о новом ДЗ.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ░░░░ NOT COVERED — for Claude Code ░░░░ -->
+<div style="position:absolute;left:1900px;top:2706px;font:700 18px 'Golos Text',sans-serif;color:#B15A12">Не покрыто дизайном — учесть при разработке</div>
+<div style="position:absolute;left:1900px;top:2752px;width:720px">
+  <div style="background:#FEF8F0;border:1px solid #F8D9A8;border-radius:14px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:24px 26px;display:flex;flex-direction:column;gap:18px">
+    <div style="font:400 13.5px/1.55 'Golos Text',sans-serif;color:#92400E">Прототип ведёт по «счастливому пути». Эти куски намеренно за кадром — их нужно спроектировать при разработке в той же дизайн-системе, прежде чем флоу заработает целиком.</div>
+
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#B15A12;margin-bottom:10px">3 главных пробела</div>
+      <div style="font:400 13px/1.6 'Golos Text',sans-serif;color:#334155">
+        <div style="display:flex;gap:12px;padding:10px 0;border-top:1px solid #F3E2C8"><span style="flex:none;width:22px;height:22px;border-radius:6px;background:#FBE7C8;color:#B15A12;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">1</span><div><b style="color:#0F172A">Конструктор ДЗ</b> — за кадром между шагом «Собрать ДЗ» и «Подключить». Экран: выбор задач из базы + свои задачи, назначение ученику/группе, отправка. В прототипе шаг есть в чеклисте, но экран не нарисован.</div></div>
+        <div style="display:flex;gap:12px;padding:10px 0;border-top:1px solid #F3E2C8"><span style="flex:none;width:22px;height:22px;border-radius:6px;background:#FBE7C8;color:#B15A12;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">2</span><div><b style="color:#0F172A">«Ученик подключился» у репетитора</b> — ростер и карточка переходят «не подключился» → «подключён»: снимается чип и nudge, появляется первая активность ученика.</div></div>
+        <div style="display:flex;gap:12px;padding:10px 0;border-top:1px solid #F3E2C8"><span style="flex:none;width:22px;height:22px;border-radius:6px;background:#FBE7C8;color:#B15A12;font:700 12px 'Golos Text';display:grid;place-items:center;margin-top:1px">3</span><div><b style="color:#0F172A">Реальное первое ДЗ</b> — экран задачи на настоящем контенте: KaTeX-условие, HintLadder (Сократовы подсказки), проверка ответа и AI-вердикт; что из этого видит репетитор.</div></div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font:700 11px 'Golos Text',sans-serif;text-transform:uppercase;letter-spacing:.06em;color:#B15A12;margin-bottom:9px">Вторично — для полноты</div>
+      <div style="display:flex;flex-direction:column;gap:7px;font:400 13px/1.5 'Golos Text',sans-serif;color:#475569">
+        <div style="display:flex;gap:8px"><span style="color:#B15A12;font-weight:700">—</span>OTP «войти по коду»: экран ввода кода (показан только вход по паролю)</div>
+        <div style="display:flex;gap:8px"><span style="color:#B15A12;font-weight:700">—</span>Подтверждения отправки на email / в Telegram (состояние «отправлено»)</div>
+        <div style="display:flex;gap:8px"><span style="color:#B15A12;font-weight:700">—</span>«Добавить списком имён» — сам флоу массового добавления</div>
+        <div style="display:flex;gap:8px"><span style="color:#B15A12;font-weight:700">—</span>Состояния: загрузка, ошибки, пустые, повтор отправки ссылки</div>
+        <div style="display:flex;gap:8px"><span style="color:#B15A12;font-weight:700">—</span>Бэкенд-механика: deep-link <code style="background:#FBEBD6;border-radius:5px;padding:1px 6px;font-family:'SF Mono',monospace;font-size:12px;color:#92400E">/join/:token</code>, персистентная сессия, уведомления о новом ДЗ</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

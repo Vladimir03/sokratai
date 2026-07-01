@@ -150,7 +150,7 @@ async function enqueue(
   if (error) {
     console.error('email_enqueue_failed', {
       label: payload.label,
-      to: payload.to,
+      to: redactEmail(payload.to),
       error: error.message,
     });
     return { success: false, error: error.message };
@@ -307,6 +307,145 @@ export async function sendHomeworkReminderEmail(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendHomeworkReminderEmail_error', { to, assignmentId, error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+// ─── Онбординг v2 — простые брендовые письма (login-link + invite) ──────────
+
+function escapeHtmlEmail(s: string): string {
+  return s.replace(/[<>"'&]/g, (c) =>
+    c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : c === "'" ? '&#39;' : '&amp;',
+  );
+}
+
+// Онбординг v2 (review P2 #8) — PII-редакция email для логов auth/invite писем
+// (`a***@domain.com`). Полный адрес в логах не пишем.
+function redactEmail(to: string): string {
+  const at = to.indexOf('@');
+  if (at <= 0) return '***';
+  return `${to[0]}***${to.slice(at)}`;
+}
+
+/** Минимальный брендовый шаблон (inline styles, RU-safe, Golos-fallback). */
+function buildSimpleEmail(params: {
+  heading: string;
+  intro: string;
+  ctaText: string;
+  ctaUrl: string;
+  footerNote?: string;
+  unsubscribeUrl: string;
+}): { html: string; text: string } {
+  const { heading, intro, ctaText, ctaUrl, footerNote, unsubscribeUrl } = params;
+  const h = escapeHtmlEmail(heading);
+  const i = escapeHtmlEmail(intro);
+  const c = escapeHtmlEmail(ctaText);
+  const fn = footerNote ? escapeHtmlEmail(footerNote) : '';
+  const html = `<!doctype html><html lang="ru"><body style="margin:0;background:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#0F172A">
+<div style="max-width:480px;margin:0 auto;padding:32px 20px">
+  <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:28px 24px">
+    <div style="font-size:18px;font-weight:600;margin-bottom:10px">${h}</div>
+    <p style="font-size:15px;line-height:1.6;color:#334155;margin:0 0 20px">${i}</p>
+    <a href="${ctaUrl}" style="display:inline-block;background:#1B6B4A;color:#fff;text-decoration:none;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px">${c}</a>
+    ${fn ? `<p style="font-size:13px;line-height:1.5;color:#64748B;margin:20px 0 0">${fn}</p>` : ''}
+  </div>
+  <p style="font-size:12px;color:#94A3B8;text-align:center;margin:16px 0 0">
+    Сократ AI · <a href="${unsubscribeUrl}" style="color:#94A3B8">отписаться</a>
+  </p>
+</div></body></html>`;
+  const text = `${heading}\n\n${intro}\n\n${ctaText}: ${ctaUrl}\n${footerNote ? `\n${footerNote}\n` : ''}\nСократ AI`;
+  return { html, text };
+}
+
+/**
+ * Онбординг v2 (T7) — письмо «войти по коду» (RU-safe magic-link).
+ * `loginUrl` ведёт на api.sokratai.ru/functions/v1/email-verify?type=magiclink
+ * (НЕ *.supabase.co). Suppression-проверку НЕ применяем — это auth-письмо,
+ * блокировать вход нельзя (только temp-email guard).
+ */
+export async function sendStudentLoginLinkEmail(
+  db: SupabaseClient,
+  to: string,
+  loginUrl: string,
+): Promise<EmailResult> {
+  try {
+    if (isTempEmail(to)) return { success: true, skipped: 'temp_email' };
+    const unsubToken = await getOrCreateUnsubscribeToken(db, to);
+    const rendered = buildSimpleEmail({
+      heading: 'Вход в Сократ AI',
+      intro: 'Нажми кнопку, чтобы войти без пароля. Ссылка действует ограниченное время и работает один раз.',
+      ctaText: 'Войти в Сократ',
+      ctaUrl: loginUrl,
+      footerNote: 'Если ты не запрашивал вход — просто проигнорируй это письмо.',
+      unsubscribeUrl: buildUnsubscribeUrl(unsubToken),
+    });
+    const payload: EnqueuePayload = {
+      message_id: crypto.randomUUID(),
+      run_id: crypto.randomUUID(),
+      to,
+      from: SENDER_FROM,
+      sender_domain: SENDER_DOMAIN,
+      subject: 'Вход в Сократ AI',
+      html: rendered.html,
+      text: rendered.text,
+      purpose: 'transactional',
+      label: 'student-login-link',
+      idempotency_key: `student-login-${to}-${Date.now()}`,
+      unsubscribe_token: unsubToken,
+      queued_at: new Date().toISOString(),
+    };
+    return await enqueue(db, payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('sendStudentLoginLinkEmail_error', { to: redactEmail(to), error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Онбординг v2 (T3) — письмо-приглашение ученику с claim-ссылкой (+ опц. ДЗ).
+ * `claimUrl` = api.sokratai.ru/functions/v1/student-claim?t={token} (OG + redirect).
+ */
+export async function sendStudentInviteEmail(
+  db: SupabaseClient,
+  to: string,
+  data: { tutorName: string | null; claimUrl: string; homeworkTitle?: string | null },
+): Promise<EmailResult> {
+  try {
+    const skip = await preSendChecks(db, to);
+    if (skip) return skip;
+    const unsubToken = await getOrCreateUnsubscribeToken(db, to);
+    const who = data.tutorName && data.tutorName.trim() ? data.tutorName.trim() : 'Твой репетитор';
+    const intro = data.homeworkTitle && data.homeworkTitle.trim()
+      ? `${who} подключил тебя к Сократ AI и прислал задание «${data.homeworkTitle.trim()}». Открой, чтобы начать.`
+      : `${who} подключил тебя к Сократ AI — помощнику для домашки. Открой, чтобы начать.`;
+    const rendered = buildSimpleEmail({
+      heading: 'Тебя пригласили в Сократ AI',
+      intro,
+      ctaText: 'Открыть задание',
+      ctaUrl: data.claimUrl,
+      footerNote: 'Ссылка персональная — не пересылай её другим.',
+      unsubscribeUrl: buildUnsubscribeUrl(unsubToken),
+    });
+    const payload: EnqueuePayload = {
+      message_id: crypto.randomUUID(),
+      run_id: crypto.randomUUID(),
+      to,
+      from: SENDER_FROM,
+      sender_domain: SENDER_DOMAIN,
+      subject: 'Тебя пригласили в Сократ AI',
+      html: rendered.html,
+      text: rendered.text,
+      purpose: 'transactional',
+      label: 'student-invite',
+      idempotency_key: `student-invite-${to}-${Date.now()}`,
+      unsubscribe_token: unsubToken,
+      queued_at: new Date().toISOString(),
+    };
+    return await enqueue(db, payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('sendStudentInviteEmail_error', { to: redactEmail(to), error: msg });
     return { success: false, error: msg };
   }
 }

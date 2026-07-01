@@ -169,6 +169,15 @@ export interface ManualAddTutorStudentResponse {
   plain_password?: string;
 }
 
+/**
+ * Онбординг v2 — массовое добавление плейсхолдеров по списку имён (контакт NULL).
+ * Per-name partial success: created[] + errors[].
+ */
+export interface BulkAddTutorStudentsResponse {
+  created: Array<{ tutor_student_id: string; student_id: string; name: string }>;
+  errors: Array<{ name: string; error: string }>;
+}
+
 export interface ResetStudentPasswordInput {
   student_id: string;
 }

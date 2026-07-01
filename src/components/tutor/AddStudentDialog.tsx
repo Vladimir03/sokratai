@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-qr-code';
 import {
@@ -28,13 +28,20 @@ import {
 } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
-import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2, Users, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
-import { manualAddTutorStudent } from '@/lib/tutors';
+import {
+  manualAddTutorStudent,
+  bulkAddTutorStudents,
+  createTutorGroup,
+  upsertTutorGroupMembership,
+} from '@/lib/tutors';
+import { useTutor, useTutorGroups } from '@/hooks/useTutor';
 import { supabase } from '@/lib/supabaseClient';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
-import type { ManualAddTutorStudentInput, TutorGroup } from '@/types/tutor';
+import { pluralizeRu } from '@/lib/pluralizeRu';
+import type { ManualAddTutorStudentInput } from '@/types/tutor';
 
 /**
  * Lightweight, RU-DPI-resilient fetch of the tutor's invite code.
@@ -65,10 +72,6 @@ interface AddStudentDialogProps {
   inviteCode: string | undefined;
   inviteWebLink: string;
   inviteTelegramLink: string;
-  miniGroupsEnabled: boolean;
-  groups: TutorGroup[];
-  onCreateGroup: (name: string) => Promise<TutorGroup | null>;
-  onSyncStudentMembership: (tutorStudentId: string, tutorGroupId: string | null) => Promise<void>;
   onManualAdded: (tutorStudentId: string) => void;
 }
 
@@ -83,14 +86,18 @@ export function AddStudentDialog({
   onOpenChange,
   inviteCode,
   inviteWebLink,
-  miniGroupsEnabled,
-  groups,
-  onCreateGroup,
-  onSyncStudentMembership,
   onManualAdded,
 }: AddStudentDialogProps) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  // Self-contained: диалог сам добывает мини-группы (единый UX на всех
+  // поверхностях — главная / «Все ученики» не могут разойтись пропсами).
+  // Ленивый фетч — только при открытой модалке (главная не тяжелеет).
+  const { tutor } = useTutor();
+  const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled ?? true);
+  const { groups: allGroups } = useTutorGroups(miniGroupsEnabled && open);
+  const groups = useMemo(() => allGroups.filter((g) => g.is_primary), [allGroups]);
 
   // Resilient invite-code fetch (decoupled from the slow tutor-profile query).
   // Seeds instantly from the prop on the happy path; falls back to the RPC
@@ -122,6 +129,11 @@ export function AddStudentDialog({
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+
+  // Онбординг v2 — массовое добавление по списку имён (контакт NULL).
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkNames, setBulkNames] = useState('');
+  const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
 
   // Form state for manual add
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
@@ -162,6 +174,8 @@ export function AddStudentDialog({
     setIsInMiniGroup(false);
     setSelectedGroupId('');
     setNewGroupName('');
+    setBulkMode(false);
+    setBulkNames('');
   };
 
   const handleDialogOpenChange = (nextOpen: boolean) => {
@@ -175,6 +189,8 @@ export function AddStudentDialog({
 
   const finalizeManualAdd = (tutorStudentId: string) => {
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'group-memberships'] });
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
     setCredentialsData(null);
     setPendingTutorStudentId(null);
     resetManualForm();
@@ -222,10 +238,12 @@ export function AddStudentDialog({
 
     setIsCreatingGroup(true);
     try {
-      const createdGroup = await onCreateGroup(name);
+      // Из AddStudentDialog создаётся учебная (основная) группа → is_primary: true.
+      const createdGroup = await createTutorGroup({ name, is_primary: true });
       if (!createdGroup) {
         throw new Error('Не удалось создать мини-группу');
       }
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
 
       setSelectedGroupId(createdGroup.id);
       setNewGroupName('');
@@ -251,6 +269,153 @@ export function AddStudentDialog({
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const handleBulkSubmit = async () => {
+    const names = bulkNames
+      .split('\n')
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0);
+    if (names.length === 0) {
+      toast({ title: 'Введите хотя бы одно имя', variant: 'destructive' });
+      return;
+    }
+    if (names.length > 50) {
+      toast({ title: 'За раз не больше 50 имён', variant: 'destructive' });
+      return;
+    }
+    if (miniGroupsEnabled && isInMiniGroup && !selectedGroupId) {
+      toast({
+        title: 'Выберите мини-группу',
+        description: 'Чтобы добавить список в группу, выберите или создайте её',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsBulkSubmitting(true);
+    try {
+      const res = await bulkAddTutorStudents(names);
+      const okN = res.created.length;
+      const errN = res.errors.length;
+
+      // Назначить весь добавленный список в выбранную группу (запрос владельца).
+      let groupFailN = 0;
+      if (miniGroupsEnabled && isInMiniGroup && selectedGroupId && okN > 0) {
+        const results = await Promise.allSettled(
+          res.created.map((c) => upsertTutorGroupMembership(c.tutor_student_id, selectedGroupId)),
+        );
+        // upsert возвращает false/null при сбое → любое falsy = неудача (review P1).
+        groupFailN = results.filter(
+          (r) => r.status === 'rejected' || !r.value,
+        ).length;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'group-memberships'] });
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
+
+      const descParts: string[] = [];
+      if (errN > 0) descParts.push(`не удалось добавить: ${errN}`);
+      if (groupFailN > 0) descParts.push(`в группу не попали: ${groupFailN}`);
+      const desc =
+        descParts.length > 0
+          ? descParts.join(' · ')
+          : isInMiniGroup && selectedGroupId
+            ? 'Добавлены в группу. Подключите каждого ссылкой при первой домашке.'
+            : 'Подключите их ссылкой при отправке первой домашки.';
+      toast({
+        title: `Добавлено ${okN} ${pluralizeRu(okN, ['ученик', 'ученика', 'учеников'])}`,
+        description: desc,
+        variant: errN > 0 || groupFailN > 0 ? 'destructive' : undefined,
+      });
+      if (okN > 0) {
+        setBulkNames('');
+        setIsInMiniGroup(false);
+        setSelectedGroupId('');
+        setBulkMode(false);
+        onOpenChange(false);
+      }
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: error instanceof Error ? error.message : 'Не удалось добавить учеников',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsBulkSubmitting(false);
+    }
+  };
+
+  // Секция мини-группы — единый рендер для одиночного и bulk режима (без
+  // grid-специфичных классов, чтобы работать в обоих контекстах).
+  const renderMiniGroupSection = () => {
+    if (!miniGroupsEnabled) return null;
+    return (
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">Занимается в мини-группе</Label>
+            <p className="text-xs text-muted-foreground">
+              Выкл — занимается индивидуально · Вкл — входит в выбранную группу
+            </p>
+          </div>
+          <Switch
+            checked={isInMiniGroup}
+            onCheckedChange={(checked) => {
+              setIsInMiniGroup(checked);
+              if (!checked) setSelectedGroupId('');
+            }}
+          />
+        </div>
+
+        {isInMiniGroup && (
+          <div className="space-y-3">
+            {groups.length > 0 && (
+              <div className="space-y-2">
+                <Label>Мини-группа</Label>
+                <Select
+                  value={selectedGroupId || undefined}
+                  onValueChange={(value) => setSelectedGroupId(value)}
+                >
+                  <SelectTrigger className="text-base">
+                    <SelectValue placeholder="Выберите мини-группу" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.short_name || group.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="newMiniGroupName">Быстрое создание мини-группы</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="newMiniGroupName"
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  placeholder="Например, 11 класс ЕГЭ база"
+                  className="text-base"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCreateMiniGroup}
+                  disabled={isCreatingGroup}
+                >
+                  {isCreatingGroup ? 'Создание…' : 'Создать'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -265,10 +430,8 @@ export function AddStudentDialog({
     }
     const hasEmail = formData.email?.trim();
     const hasTelegram = formData.telegram_username?.trim();
-    if (!hasEmail && !hasTelegram) {
-      toast({ title: 'Укажите email или Telegram ученика', variant: 'destructive' });
-      return;
-    }
+    // Онбординг v2 (rule 60): контакт БОЛЬШЕ НЕ обязателен. Имя — единственный
+    // обязательный gate; канал понадобится только перед первой отправкой ДЗ.
     if (hasEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(hasEmail)) {
       toast({ title: 'Некорректный формат email', variant: 'destructive' });
       return;
@@ -303,7 +466,8 @@ export function AddStudentDialog({
       let membershipSyncFailed = false;
       if (miniGroupsEnabled && isInMiniGroup && selectedGroupId) {
         try {
-          await onSyncStudentMembership(response.tutor_student_id, selectedGroupId);
+          const synced = await upsertTutorGroupMembership(response.tutor_student_id, selectedGroupId);
+          if (!synced) membershipSyncFailed = true;
         } catch (membershipError) {
           console.error('Membership sync failed after student creation:', membershipError);
           membershipSyncFailed = true;
@@ -318,16 +482,28 @@ export function AddStudentDialog({
         return;
       }
 
-      if (!response.login_email || !response.plain_password) {
-        throw new Error('Не удалось получить данные для входа ученика');
-      }
-
       if (membershipSyncFailed) {
         toast({
           title: 'Ученик добавлен',
           description: `${studentName} добавлен. Привязку к группе повторите в профиле ученика.`,
           variant: 'destructive',
         });
+      }
+
+      // Онбординг v2: плейсхолдер по имени (без реального контакта) — логин/пароль
+      // бесполезны (temp-email), поэтому НЕ показываем StudentCredentialsModal.
+      // Доставка доступа — через гейт «Подключить» (ссылка/QR). Модалка с
+      // credentials остаётся только когда репетитор задал реальный email/Telegram.
+      const isPlaceholder = !hasEmail && !hasTelegram;
+      if (isPlaceholder || !response.login_email || !response.plain_password) {
+        if (!membershipSyncFailed) {
+          toast({
+            title: 'Ученик добавлен',
+            description: `${studentName} добавлен. Подключите его ссылкой при отправке первой домашки.`,
+          });
+        }
+        finalizeManualAdd(response.tutor_student_id);
+        return;
       }
 
       setPendingTutorStudentId(response.tutor_student_id);
@@ -429,10 +605,68 @@ export function AddStudentDialog({
           
           {/* Tab: Manual */}
           <TabsContent value="manual" className="mt-4">
-            <DialogDescription className="mb-4">
-              Обязательно — имя и хотя бы один контакт (email или Telegram). Остальное можно заполнить позже.
-            </DialogDescription>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <DialogDescription className="m-0">
+                {bulkMode
+                  ? 'Добавьте сразу несколько учеников — по одному имени на строку. Контакты и подключение — позже.'
+                  : 'Обязательно — только имя. Контакт (email или Telegram) можно добавить позже.'}
+              </DialogDescription>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                onClick={() => setBulkMode((v) => !v)}
+                style={{ touchAction: 'manipulation' }}
+              >
+                {bulkMode ? (
+                  <>
+                    <UserPlus className="mr-2 h-4 w-4" />
+                    Одного
+                  </>
+                ) : (
+                  <>
+                    <Users className="mr-2 h-4 w-4" />
+                    Списком имён
+                  </>
+                )}
+              </Button>
+            </div>
 
+            {bulkMode ? (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="bulk_names">Имена учеников</Label>
+                  <Textarea
+                    id="bulk_names"
+                    value={bulkNames}
+                    onChange={(e) => setBulkNames(e.target.value)}
+                    rows={8}
+                    className="text-base"
+                    placeholder={'Иван Петров\nМария Иванова\nПётр Сидоров'}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    По одному имени на строку, до 50. Контакты добавите позже — каждого подключите ссылкой при первой домашке.
+                  </p>
+                </div>
+
+                {renderMiniGroupSection()}
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => handleDialogOpenChange(false)}
+                    disabled={isBulkSubmitting}
+                  >
+                    Отмена
+                  </Button>
+                  <Button type="button" onClick={handleBulkSubmit} disabled={isBulkSubmitting}>
+                    {isBulkSubmitting ? 'Добавление…' : 'Добавить учеников'}
+                  </Button>
+                </div>
+              </div>
+            ) : (
             <ScrollArea className="h-[60vh] pr-4">
               <form onSubmit={handleManualSubmit} className="space-y-6 py-2">
                 <div className="grid gap-4 md:grid-cols-2">
@@ -475,78 +709,19 @@ export function AddStudentDialog({
                     />
                   </div>
 
-                  <p className="text-xs text-muted-foreground md:col-span-2">
-                    Укажите хотя бы один контакт: email или Telegram. Рекомендуем email — Telegram может быть недоступен.
-                    Без email и Telegram ученик не сможет войти в Сократ и получать уведомления — добавьте позже.
-                  </p>
+                  <div className="md:col-span-2 space-y-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+                      <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      Без контакта — это нормально
+                    </span>
+                    <p className="text-xs text-muted-foreground">
+                      Контакт (email или Telegram) понадобится только перед первой отправкой домашки — тогда подключите ученика ссылкой или QR. Рекомендуем email: Telegram может быть недоступен.
+                    </p>
+                  </div>
 
-                  {miniGroupsEnabled && (
-                    <div className="space-y-3 rounded-md border p-3 md:col-span-2">
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="space-y-1">
-                          <Label className="text-sm font-medium">Занимается в мини-группе</Label>
-                          <p className="text-xs text-muted-foreground">
-                            OFF: индивидуально, ON: ученик входит в выбранную группу
-                          </p>
-                        </div>
-                        <Switch
-                          checked={isInMiniGroup}
-                          onCheckedChange={(checked) => {
-                            setIsInMiniGroup(checked);
-                            if (!checked) {
-                              setSelectedGroupId('');
-                            }
-                          }}
-                        />
-                      </div>
-
-                      {isInMiniGroup && (
-                        <div className="space-y-3">
-                          {groups.length > 0 && (
-                            <div className="space-y-2">
-                              <Label>Мини-группа</Label>
-                              <Select
-                                value={selectedGroupId || undefined}
-                                onValueChange={(value) => setSelectedGroupId(value)}
-                              >
-                                <SelectTrigger className="text-base">
-                                  <SelectValue placeholder="Выберите мини-группу" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {groups.map((group) => (
-                                    <SelectItem key={group.id} value={group.id}>
-                                      {group.short_name || group.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          )}
-
-                          <div className="space-y-2">
-                            <Label htmlFor="newMiniGroupName">Быстрое создание мини-группы</Label>
-                            <div className="flex gap-2">
-                              <Input
-                                id="newMiniGroupName"
-                                value={newGroupName}
-                                onChange={(e) => setNewGroupName(e.target.value)}
-                                placeholder="Например, 11 класс ЕГЭ база"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleCreateMiniGroup}
-                                disabled={isCreatingGroup}
-                              >
-                                {isCreatingGroup ? 'Создание...' : 'Создать'}
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
+
+                {renderMiniGroupSection()}
 
                 <Accordion type="single" collapsible>
                   <AccordionItem value="optional">
@@ -773,6 +948,7 @@ export function AddStudentDialog({
                 </div>
               </form>
             </ScrollArea>
+            )}
           </TabsContent>
           </Tabs>
         </DialogContent>

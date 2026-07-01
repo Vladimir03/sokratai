@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бриф: Онбординг-активация v2 — хэндофф репетитор→ученик</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+--p:#1E293B;--accent:#1B6B4A;--accent-bg:#DCFCE7;--accent-bd:#A7E0C2;
+--surface:#fff;--bg:#F8FAFC;--t1:#0F172A;--t2:#64748B;--t3:#94A3B8;
+--border:#E2E8F0;--warn:#B45309;--warn-bg:#FEF3C7;--warn-bd:#FCD34D;--danger:#DC2626;--radius:8px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--t1);font-family:'Golos Text',system-ui,sans-serif;line-height:1.6;font-size:16px}
+.wrap{max-width:1120px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:26px;font-weight:600;margin:0 0 6px}
+h2{font-size:20px;font-weight:600;margin:40px 0 4px}
+h3{font-size:15px;font-weight:600;margin:0}
+.meta{color:var(--t2);font-size:14px;margin-bottom:20px}
+.lead{color:var(--t2);font-size:14px;margin:0 0 8px}
+.box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin:12px 0}
+.box ol{margin:6px 0 0;padding-left:20px}.box li{margin:3px 0}
+.gallery{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start;margin-top:14px}
+.cap{font-size:13px;color:var(--t2);text-align:center;margin-bottom:8px;max-width:300px}
+.cap b{color:var(--t1);font-weight:600}
+.col{display:flex;flex-direction:column;align-items:center}
+.frame{width:380px;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.phone{width:300px;background:var(--surface);border:1px solid var(--border);border-radius:26px;overflow:hidden}
+.fh{padding:12px 16px;border-bottom:1px solid var(--border);font-weight:600;font-size:15px;display:flex;align-items:center;gap:8px}
+.fh .ico{color:var(--t2)}
+.fb{padding:16px;display:flex;flex-direction:column;gap:12px}
+.lbl{font-size:12px;color:var(--t2);display:block;margin-bottom:4px}
+.req{color:var(--danger)}
+.field{border:1px solid var(--border);border-radius:var(--radius);padding:9px 11px;font-size:14px;background:var(--surface);color:var(--t1)}
+.field.ph{color:var(--t3)}
+.hint{font-size:12px;color:var(--t2);line-height:1.5}
+.rowbtw{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 14px;border-radius:var(--radius);font-size:14px;border:1px solid var(--border);background:var(--surface);color:var(--t2);cursor:default}
+.btn.block{width:100%}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.pill{font-size:13px;padding:5px 12px;border-radius:999px;border:1px solid var(--border);color:var(--t2)}
+.pill.on{background:var(--accent-bg);color:#13593E;border-color:var(--accent-bd)}
+.chip{font-size:12px;padding:2px 9px;border-radius:999px;display:inline-flex;align-items:center;gap:5px}
+.chip.ok{background:var(--accent-bg);color:#13593E}
+.chip.warn{background:var(--warn-bg);color:var(--warn)}
+.opt{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:12px;padding:12px}
+.opt .ic{width:40px;height:40px;border-radius:8px;background:var(--accent-bg);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.opt .tt{font-weight:500;font-size:14px}
+.opt .ss{font-size:12px;color:var(--t2);line-height:1.4}
+.note{border:1px solid var(--border);border-radius:12px;padding:10px 12px;text-align:center}
+.note.warn{background:var(--warn-bg);border-color:var(--warn-bd)}
+.divider{display:flex;align-items:center;gap:10px;color:var(--t3);font-size:12px}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border)}
+.qr{width:118px;height:118px;border:1px dashed var(--t3);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:38px;margin:0 auto}
+.av{width:34px;height:34px;border-radius:50%;background:var(--accent-bg);color:var(--accent);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600}
+.dots{display:flex;gap:4px;align-items:center;margin-left:auto}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--border)}
+.dot.on{background:var(--accent)}
+.ph-img{border:1px dashed var(--t3);border-radius:8px;padding:18px;text-align:center;color:var(--t3);font-size:13px}
+.scard{border:1px solid var(--border);border-radius:12px;padding:12px 14px;width:380px}
+.scard .nm{font-weight:600}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--t2);font-size:14px}
+.flow .step{background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:5px 12px;color:var(--t1)}
+small{color:var(--t3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Бриф: онбординг-активация v2 — хэндофф репетитор → ученик</h1>
+<div class="meta">Mid-fi экраны для дизайна (Claude Design) и разработки · обновлено 2026-06-26 · регистрация обязательна ДО задачи, только email, автосейв прогресса по токену</div>
+
+<div class="box">
+<h3>Модель входа ученика (итог)</h3>
+<ol>
+<li><b>Первый вход</b> — одноразовая личная ссылка/QR минтит сессию (беспарольно).</li>
+<li><b>«Вы подключены»</b> + превью задания.</li>
+<li><b>Регистрация — обязательна ДО задачи.</b> email (подставлен репетитором, если реальный) + пароль. Без «Позже», без верификации. Причина — «чтобы не потерять прогресс».</li>
+<li><b>Задача.</b> Прогресс автосохраняется по токену — не теряется, даже если ученик бросил на полпути.</li>
+<li><b>Повседневно</b> — персистентная сессия. <b>Новое устройство</b> — email + пароль или «войти по коду» (OTP на email).</li>
+</ol>
+<div class="hint" style="margin-top:8px">Только email (без телефона). Регистрация = доустановка пароля поверх активной сессии; ссылку не хард-блокируем. Экран «сохрани доступ» после ДЗ убран (рега уже на входе).</div>
+</div>
+
+<h2>1. Экраны репетитора <small>· web, модалки в кабинете</small></h2>
+<div class="gallery">
+
+<div class="col">
+<div class="cap">Экран 1 · <b>Добавить ученика по имени</b></div>
+<div class="frame">
+<div class="fh"><span class="ico">+</span> Добавить ученика</div>
+<div class="fb">
+<div style="display:flex;gap:6px"><span class="pill on">Вручную</span><span class="pill">По ссылке</span></div>
+<div><span class="lbl">Имя ученика <span class="req">*</span></span><div class="field">Иван Петров</div></div>
+<div class="hint">Контакт можно добавить позже — он понадобится только перед отправкой первой домашки.</div>
+<div class="rowbtw"><span style="color:var(--t2);font-size:14px">▾ Дополнительно (необязательно)</span><span class="hint">email · Telegram · класс · цель</span></div>
+<div class="btn block">Добавить списком имён</div>
+<span class="chip ok" style="align-self:flex-start">✓ Без контакта — это нормально</span>
+<div class="btn primary block">Добавить ученика</div>
+</div>
+</div>
+</div>
+
+<div class="col">
+<div class="cap">Экран 2 · <b>Подключить ученика</b> · одноразовый гейт перед первой отправкой ДЗ</div>
+<div class="frame">
+<div class="fh"><span class="ico">⛓</span> Подключить Ивана</div>
+<div class="fb">
+<div class="hint">Дальше задания приходят ученику сами — этот экран только для первого подключения.</div>
+<div class="opt"><span class="ic">▣</span><div><div class="tt">Показать QR</div><div class="ss">Ученик сканирует камерой — в одной комнате или на видеозвонке</div></div></div>
+<div class="opt"><span class="ic">🔗</span><div><div class="tt">Скопировать ссылку</div><div class="ss">Отправить в любой чат ученику</div></div></div>
+<div class="rowbtw" style="justify-content:center;color:var(--t2);font-size:13px">или <span style="color:var(--accent);font-weight:500">отправить на email / Telegram</span></div>
+<div class="hint" style="text-align:center"><small>при выборе email/Telegram Сократ сам пришлёт приглашение и задание туда</small></div>
+</div>
+</div>
+</div>
+
+<div class="col">
+<div class="cap">Карточка ученика · <b>nudge для репетитора</b></div>
+<div class="scard">
+<div class="rowbtw"><span class="nm">Иван Петров</span><span class="chip warn">не подключился</span></div>
+<div class="note warn" style="text-align:left;margin-top:10px"><span class="hint">Добавьте email или Telegram, чтобы ученик мог входить с любого устройства и получать уведомления.</span></div>
+<div class="btn block" style="margin-top:10px">Добавить email или Telegram</div>
+</div>
+</div>
+
+</div>
+
+<h2>2. Экраны ученика — первый раз <small>· mobile-first · ссылка → подключён → регистрация → задача</small></h2>
+<div class="gallery">
+
+<div class="col">
+<div class="cap">Экран 3 · <b>Первый вход по ссылке</b> · «вы подключены» + превью</div>
+<div class="phone">
+<div class="fh" style="justify-content:center;color:var(--accent)">Сократ</div>
+<div class="fb">
+<div style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
+<div style="font-size:38px;color:var(--accent)">✓</div>
+<div style="font-weight:600">Вы подключены к репетитору</div>
+<div style="display:flex;align-items:center;gap:8px"><span class="av">ЕБ</span><span>Егор Блинов</span></div>
+</div>
+<div class="note"><div style="font-weight:600">Первое задание готово</div><div class="hint">Линзы · 5 задач</div></div>
+<div class="btn primary block">Продолжить →</div>
+<div class="hint" style="text-align:center"><small>остался один шаг — задать пароль, чтобы не потерять прогресс</small></div>
+</div>
+</div>
+</div>
+
+<div class="col">
+<div class="cap">Экран 4 · <b>Регистрация</b> · обязательно, до задачи</div>
+<div class="phone">
+<div class="fh" style="justify-content:center;color:var(--accent)">Сократ</div>
+<div class="fb">
+<div style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px">
+<div style="font-weight:600">Ещё один шаг</div>
+<div class="hint">Задай доступ, чтобы не потерять прогресс и заходить с любого устройства.</div>
+</div>
+<div><span class="lbl">Email <small>(от репетитора, можно изменить)</small></span><div class="field">ivan@mail.ru</div></div>
+<div><span class="lbl">Придумайте пароль</span><div class="field ph">пароль</div></div>
+<div class="btn primary block">Сохранить и продолжить</div>
+<div class="hint" style="text-align:center"><small>без подтверждения почты — сразу к задаче</small></div>
+</div>
+</div>
+</div>
+
+<div class="col">
+<div class="cap">Экран 5 · <b>Задача</b> · автосейв прогресса</div>
+<div class="phone">
+<div class="fh">‹ Задача 1 из 5 <span class="dots"><span class="dot on"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></span></div>
+<div class="fb">
+<span class="chip warn" style="align-self:flex-start">Линзы · ЕГЭ</span>
+<div style="font-size:14px">Предмет на расстоянии 30 см от собирающей линзы с фокусом 10 см. Где изображение?</div>
+<div class="ph-img">рисунок к задаче</div>
+<div class="field ph">Ваш ответ…</div>
+<div style="display:flex;gap:8px"><span class="btn" style="flex:1">Подсказка</span><span class="btn" style="flex:1">Формула</span></div>
+<div class="btn primary block">Отправить решение</div>
+<div class="hint" style="text-align:center"><small>прогресс сохраняется автоматически</small></div>
+</div>
+</div>
+</div>
+
+</div>
+
+<h2>3. Экран ученика — возврат <small>· с нового устройства / нет сессии</small></h2>
+<div class="gallery">
+<div class="col">
+<div class="cap">Экран 6 · <b>Вход с нового устройства</b></div>
+<div class="phone">
+<div class="fh">⇥ Вход</div>
+<div class="fb">
+<span class="hint">Вы заходите с нового устройства.</span>
+<div><span class="lbl">Email</span><div class="field ph">ivan@mail.ru</div></div>
+<div><span class="lbl">Пароль</span><div class="field ph">ваш пароль</div></div>
+<div class="btn primary block">Войти</div>
+<div class="divider">или</div>
+<div class="btn block">Войти по коду</div>
+<div class="hint" style="text-align:center"><small>пришлём код на почту — без пароля</small></div>
+<div class="hint" style="text-align:center;color:var(--t2)">Забыли пароль?</div>
+<div class="note"><span class="hint">Нет пароля и почты? Попросите у репетитора новую ссылку для входа.</span></div>
+</div>
+</div>
+</div>
+</div>
+
+<h2>4. Поток</h2>
+<div class="box">
+<div class="flow">
+<span class="step">Завёл по имени</span> →
+<span class="step">собрал ДЗ</span> →
+<span class="step">подключил (QR/ссылка)</span> →
+<span class="step">ученик: вход по ссылке</span> →
+<span class="step">«подключён» + превью</span> →
+<span class="step">регистрация (email+пароль)</span> →
+<span class="step">задача</span> →
+<span class="step">готово</span>
+</div>
+<div class="hint" style="margin-top:10px">Cross-side «ага» репетитора — когда он видит в «последних действиях», что ученик сам прошёл ДЗ. Гейт «подключить» — одноразовый, до подключения; дальше отправка ДЗ молча.</div>
+</div>
+
+<h2>5. Открытые решения</h2>
+<div class="box">
+<ol>
+<li><s>Тайминг регистрации</s> — решено: обязательна ДО задачи, без «Позже».</li>
+<li><s>Верификация email</s> — решено: пока без; включить позже при росте.</li>
+<li>QR vs ссылка — что первым по умолчанию (онлайн-сегмент чаще шлёт ссылку). Открыто.</li>
+</ol>
+</div>
+
+<div class="meta" style="margin-top:24px">Hi-fi версии и handoff-бандл — в <code>design/*.dc.html</code> (Claude Design). Инженерный бриф — <code>claude-code-brief.md</code>. Задачи — <code>tasks.md</code>. Контракт — <code>discovery-and-prd.md</code>.</div>
+
+</div>
+</body>
+</html>

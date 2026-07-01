@@ -9,7 +9,9 @@ import { sendPushNotification, type PushSubscriptionData, type PushPayload } fro
 import {
   sendHomeworkNotificationEmail,
   sendHomeworkTutorMessageEmail,
+  sendStudentInviteEmail,
 } from "../_shared/email-sender.ts";
+import { logAnalyticsEvent, logAnalyticsEventOnce } from "../_shared/analytics.ts";
 import {
   MAX_GUIDED_CHAT_ATTACHMENTS,
   MAX_RUBRIC_IMAGES,
@@ -937,6 +939,19 @@ async function handleCreateAssignment(
     tutor_id: tutorUserId,
     assignment_id: assignment.id,
   });
+
+  // Воронка (онбординг v2 T9): первое созданное ДЗ репетитора (раз на репетитора).
+  await logAnalyticsEventOnce(
+    db,
+    {
+      event_name: "tutor_first_homework_created",
+      tutor_id: tutorId,
+      actor_user_id: tutorUserId,
+      assignment_id: assignment.id as string,
+    },
+    { tutor_id: tutorId },
+  );
+
   return jsonOk(cors, { assignment_id: assignment.id }, 201);
 }
 
@@ -1959,6 +1974,66 @@ async function handleUpdateAssignment(
 
 // ─── Endpoint: POST /assignments/:id/assign ──────────────────────────────────
 
+// Онбординг v2 — display-name плейсхолдера для гейта «Подключить».
+function onboardingStudentName(
+  profile: { username?: unknown; telegram_username?: unknown } | undefined,
+  sid: string,
+): string {
+  if (profile?.username && String(profile.username).trim().length > 0) {
+    return String(profile.username);
+  }
+  if (profile?.telegram_username && String(profile.telegram_username).trim().length > 0) {
+    return `@${String(profile.telegram_username).replace(/^@/, "")}`;
+  }
+  return sid;
+}
+
+/**
+ * Онбординг v2 (T3) — ученики без канала доставки И не подключённые (нужен
+ * share-gate «Подключить»). Зеркало students_without_telegram (rule 40), но
+ * шире: учитывает claim (`tutor_students.claimed_at`) + реальный email + telegram.
+ *
+ * «Без канала» = НЕ claim'нул (claimed_at IS NULL) И нет telegram_user_id И
+ * email временный/отсутствует (`@temp.sokratai.ru`). Claim'нувшие / с реальным
+ * email / с telegram — исключены → после подключения гейт не появляется.
+ * Auth-email проверяется ТОЛЬКО для кандидатов (no-telegram + not-claimed) —
+ * это и есть свежие плейсхолдеры, их обычно немного.
+ */
+async function computeStudentsWithoutChannel(
+  db: SupabaseClient,
+  tutorId: string,
+  studentIds: string[],
+  profileById: Map<string, { username?: unknown; telegram_username?: unknown; telegram_user_id?: unknown }>,
+): Promise<{ ids: string[]; names: string[] }> {
+  const { data: links } = await db
+    .from("tutor_students")
+    .select("student_id, claimed_at")
+    .eq("tutor_id", tutorId)
+    .in("student_id", studentIds);
+  const claimedByStudent = new Map(
+    (links ?? []).map((l) => [l.student_id as string, l.claimed_at as string | null]),
+  );
+
+  const candidates = studentIds.filter(
+    (sid) => !profileById.get(sid)?.telegram_user_id && !claimedByStudent.get(sid),
+  );
+
+  const ids: string[] = [];
+  for (const sid of candidates) {
+    let noRealEmail = true;
+    try {
+      const { data } = await db.auth.admin.getUserById(sid);
+      const em = data?.user?.email ?? "";
+      noRealEmail = !em || em.toLowerCase().endsWith("@temp.sokratai.ru");
+    } catch {
+      noRealEmail = true; // при сбое — безопаснее показать гейт
+    }
+    if (noRealEmail) ids.push(sid);
+  }
+  const names = ids.map((sid) => onboardingStudentName(profileById.get(sid), sid));
+  return { ids, names };
+}
+
 async function handleAssignStudents(
   db: SupabaseClient,
   tutorUserId: string,
@@ -2040,6 +2115,9 @@ async function handleAssignStudents(
 
   let studentsWithoutTelegram: string[] = [];
   let studentsWithoutTelegramNames: string[] = [];
+  // Онбординг v2 (T3) — гейт «Подключить».
+  let studentsWithoutChannel: string[] = [];
+  let studentsWithoutChannelNames: string[] = [];
 
   const { data: studentProfiles, error: studentProfilesError } = await db
     .from("profiles")
@@ -2058,16 +2136,12 @@ async function handleAssignStudents(
       const profile = profileById.get(sid);
       return !profile?.telegram_user_id;
     });
-    studentsWithoutTelegramNames = studentsWithoutTelegram.map((sid) => {
-      const profile = profileById.get(sid);
-      if (profile?.username && String(profile.username).trim().length > 0) {
-        return String(profile.username);
-      }
-      if (profile?.telegram_username && String(profile.telegram_username).trim().length > 0) {
-        return `@${String(profile.telegram_username).replace(/^@/, "")}`;
-      }
-      return sid;
-    });
+    studentsWithoutTelegramNames = studentsWithoutTelegram.map((sid) =>
+      onboardingStudentName(profileById.get(sid), sid),
+    );
+    const withoutChannel = await computeStudentsWithoutChannel(db, tutorId, studentIds, profileById);
+    studentsWithoutChannel = withoutChannel.ids;
+    studentsWithoutChannelNames = withoutChannel.names;
   }
 
   const rows = studentIds.map((sid) => ({
@@ -2130,12 +2204,26 @@ async function handleAssignStudents(
     added: (upserted ?? []).length,
     assignment_status_after_assign: assignmentStatus,
   });
+
+  if ((upserted ?? []).length > 0) {
+    await logAnalyticsEvent(db, {
+      event_name: "homework_sent_to_student",
+      tutor_id: tutorId,
+      actor_user_id: tutorUserId,
+      assignment_id: assignmentId,
+      source: "assign",
+      meta: { added: (upserted ?? []).length, without_channel: studentsWithoutChannel.length },
+    });
+  }
+
   return jsonOk(cors, {
     added: (upserted ?? []).length,
     assignment_status: assignmentStatus,
     assigned_group_id: isUUID(b.group_id) ? b.group_id : null,
     students_without_telegram: studentsWithoutTelegram,
     students_without_telegram_names: studentsWithoutTelegramNames,
+    students_without_channel: studentsWithoutChannel,
+    students_without_channel_names: studentsWithoutChannelNames,
   });
 }
 
@@ -2563,6 +2651,20 @@ async function handleQuickAssignStudentsWithNotify(
     }
   }
 
+  // Онбординг v2 (T3) — гейт «Подключить» для новых учеников без канала.
+  let studentsWithoutChannel: string[] = [];
+  let studentsWithoutChannelNames: string[] = [];
+  {
+    const { data: newProfiles } = await db
+      .from("profiles")
+      .select("id, username, telegram_username, telegram_user_id")
+      .in("id", newStudentIds);
+    const profileById = new Map((newProfiles ?? []).map((p) => [p.id as string, p]));
+    const wc = await computeStudentsWithoutChannel(db, tutorId, newStudentIds, profileById);
+    studentsWithoutChannel = wc.ids;
+    studentsWithoutChannelNames = wc.names;
+  }
+
   console.info("homework_assign_students_quick_completed", {
     assignment_id: assignmentId,
     requested: requestedIds.length,
@@ -2576,6 +2678,17 @@ async function handleQuickAssignStudentsWithNotify(
     failed_no_channel: failedNoChannel,
   });
 
+  if (newStudentIds.length > 0) {
+    await logAnalyticsEvent(db, {
+      event_name: "homework_sent_to_student",
+      tutor_id: tutorId,
+      actor_user_id: tutorUserId,
+      assignment_id: assignmentId,
+      source: "quick_assign",
+      meta: { added: newStudentIds.length, without_channel: studentsWithoutChannel.length },
+    });
+  }
+
   return jsonOk(cors, {
     added: newStudentIds.length,
     skipped_existing: skippedExisting,
@@ -2586,7 +2699,172 @@ async function handleQuickAssignStudentsWithNotify(
       failed,
       failed_no_channel: failedNoChannel,
     },
+    students_without_channel: studentsWithoutChannel,
+    students_without_channel_names: studentsWithoutChannelNames,
   });
+}
+
+// ─── Endpoint: POST /assignments/:id/connect-student-email (онбординг v2 T3) ──
+//
+// Гейт «Подключить» → «Отправить на email»: захватывает email как канал
+// (admin.updateUserById, email_confirm:true — без верификации) + шлёт письмо с
+// claim-ссылкой и названием ДЗ через наш RU-safe пайплайн. Telegram-доставку
+// не делаем (бот не пишет первым без привязки) — фронт даёт deep-link/копировать.
+async function handleConnectStudentByEmail(
+  db: SupabaseClient,
+  tutorUserId: string,
+  tutorId: string,
+  assignmentId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+  const assignment = assignmentOrErr;
+
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const studentId = typeof b.student_id === "string" ? b.student_id.trim() : "";
+  const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+  if (!isUUID(studentId)) {
+    return jsonError(cors, 400, "VALIDATION", "student_id должен быть UUID");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.endsWith("@temp.sokratai.ru")) {
+    return jsonError(cors, 400, "INVALID_EMAIL", "Укажите корректный email ученика.");
+  }
+
+  // Ownership: ученик принадлежит репетитору (tutor_students.tutor_id → tutors.id).
+  const { data: link, error: linkErr } = await db
+    .from("tutor_students")
+    .select("id, claim_token")
+    .eq("tutor_id", tutorId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+  if (linkErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить ученика. Попробуйте ещё раз.");
+  }
+  if (!link) {
+    return jsonError(cors, 403, "INVALID_STUDENT", "Это не ваш ученик.");
+  }
+
+  // Review P1 #6: ученик должен быть назначен на ЭТО ДЗ (иначе письмо ссылается
+  // на задание, которое ему не выдано, а preview ведёт на другое/пустое).
+  const { data: saLink, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", studentId)
+    .maybeSingle();
+  if (saErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить назначение. Попробуйте ещё раз.");
+  }
+  if (!saLink) {
+    return jsonError(cors, 400, "STUDENT_NOT_ASSIGNED", "Сначала назначьте это ДЗ ученику, затем подключайте.");
+  }
+
+  // P0 (review round 2, defense-in-depth): connect-email — тоже token-gen путь
+  // + смена email. НЕ трогать уже активный аккаунт (last_sign_in_at) — иначе
+  // репетитор мог бы сменить email зарегистрированному ученику + сгенерить claim
+  // (impersonation). UI и так не показывает гейт активным, но API-путь закрываем.
+  const { data: connAuthU, error: connAuthErr } = await db.auth.admin.getUserById(studentId);
+  if (connAuthErr || !connAuthU?.user) {
+    // Auth-gate → fail-closed (review round-3 P2): не менять email вслепую при сбое.
+    return jsonError(cors, 503, "ACCOUNT_LOOKUP_FAILED", "Не удалось проверить ученика. Попробуйте ещё раз через минуту.");
+  }
+  if (connAuthU.user.last_sign_in_at) {
+    return jsonError(cors, 409, "STUDENT_ALREADY_ACTIVE", "Ученик уже подключён и активен — приглашение не нужно.");
+  }
+
+  // Collision: email уже у другого аккаунта.
+  const { data: foundId, error: lookupErr } = await db.rpc("find_auth_user_id_by_email", {
+    p_email: email,
+  });
+  if (lookupErr) {
+    return jsonError(cors, 503, "EMAIL_LOOKUP_FAILED", "Не удалось проверить email. Попробуйте ещё раз через минуту.");
+  }
+  if (foundId && foundId !== studentId) {
+    return jsonError(cors, 409, "EMAIL_TAKEN", "Этот email уже занят другим аккаунтом. Используйте другой.");
+  }
+
+  // Захват канала: ставим реальный email плейсхолдеру (без верификации).
+  const { error: updErr } = await db.auth.admin.updateUserById(studentId, {
+    email,
+    email_confirm: true,
+  });
+  if (updErr) {
+    const taken = (updErr as { code?: string })?.code === "email_exists" ||
+      updErr.message?.includes("already been registered");
+    if (taken) {
+      return jsonError(cors, 409, "EMAIL_TAKEN", "Этот email уже занят другим аккаунтом. Используйте другой.");
+    }
+    console.error(JSON.stringify({ event: "connect_email_update_failed", error: updErr.message }));
+    return jsonError(cors, 500, "UPDATE_FAILED", "Не удалось сохранить email. Попробуйте ещё раз.");
+  }
+
+  // Claim-токен (генерим-если-NULL; одноразовость гарантирует student-claim).
+  let token = (link.claim_token as string | null) ?? null;
+  let generated = false;
+  if (!token) {
+    const newToken = crypto.randomUUID().replace(/-/g, "");
+    const { data: upd } = await db
+      .from("tutor_students")
+      .update({ claim_token: newToken, claim_token_created_at: new Date().toISOString() })
+      .eq("id", link.id)
+      .is("claim_token", null)
+      .select("claim_token")
+      .maybeSingle();
+    if (upd?.claim_token) {
+      token = upd.claim_token as string;
+      generated = true;
+    } else {
+      // гонка — перечитать
+      const { data: re } = await db
+        .from("tutor_students")
+        .select("claim_token")
+        .eq("id", link.id)
+        .maybeSingle();
+      token = (re?.claim_token as string | null) ?? null;
+    }
+  }
+  if (!token) {
+    return jsonError(cors, 500, "TOKEN_FAILED", "Не удалось подготовить ссылку. Попробуйте ещё раз.");
+  }
+
+  // Имя репетитора + отправка письма-приглашения с claim-ссылкой.
+  const { data: tutorRow } = await db
+    .from("tutors")
+    .select("name")
+    .eq("id", tutorId)
+    .maybeSingle();
+  const claimUrl = `${SUPABASE_PROXY_URL}/functions/v1/student-claim?t=${token}`;
+  const emailResult = await sendStudentInviteEmail(db, email, {
+    tutorName: (tutorRow?.name as string | null) ?? null,
+    claimUrl,
+    homeworkTitle: (assignment.title as string | null) ?? null,
+  });
+
+  if (generated) {
+    await logAnalyticsEvent(db, {
+      event_name: "invite_generated",
+      tutor_id: tutorId,
+      actor_user_id: tutorUserId,
+      student_id: studentId,
+      tutor_student_id: link.id as string,
+      assignment_id: assignmentId,
+      source: "email",
+    });
+  }
+  await logAnalyticsEvent(db, {
+    event_name: "homework_sent_to_student",
+    tutor_id: tutorId,
+    actor_user_id: tutorUserId,
+    student_id: studentId,
+    tutor_student_id: link.id as string,
+    assignment_id: assignmentId,
+    source: "connect_email",
+    meta: { email_enqueued: emailResult.success },
+  });
+
+  return jsonOk(cors, { ok: true, email_enqueued: emailResult.success });
 }
 
 // ─── Endpoint: POST /assignments/:id/notify ──────────────────────────────────
@@ -7094,14 +7372,62 @@ async function handleGetStudentProblem(
   //     justify a new runtime dependency. Errors are non-fatal — a missed feed
   //     signal must never block the problem-screen load.
   if (threadId) {
-    const { error: openedErr } = await db
+    const { data: openedRows, error: openedErr } = await db
       .from("homework_tutor_task_states")
       .update({ student_opened_at: new Date().toISOString() })
       .eq("thread_id", threadId)
       .eq("task_id", taskId)
-      .is("student_opened_at", null);
+      .is("student_opened_at", null)
+      .select("task_id");
     if (openedErr) {
       console.error("student_problem_mark_opened_error", { error: openedErr.message });
+    } else if (openedRows && openedRows.length > 0) {
+      // Первое открытие этой задачи → события воронки (онбординг v2 T9).
+      let tId: string | null = null;
+      let tStudentId: string | null = null;
+      try {
+        const { data: aRow } = await db
+          .from("homework_tutor_assignments")
+          .select("tutor_id")
+          .eq("id", hwId)
+          .maybeSingle();
+        tId = (aRow?.tutor_id as string | null) ?? null;
+        const { data: tsRow } = await db
+          .from("tutor_students")
+          .select("id")
+          .eq("student_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        tStudentId = (tsRow?.id as string | null) ?? null;
+      } catch {
+        // best-effort
+      }
+      await logAnalyticsEventOnce(
+        db,
+        {
+          event_name: "student_first_homework_opened",
+          actor_user_id: userId,
+          student_id: userId,
+          tutor_id: tId,
+          tutor_student_id: tStudentId,
+          assignment_id: hwId,
+        },
+        { student_id: userId },
+      );
+      // cross-side «ага» — ученик получил и открыл ДЗ репетитора (раз на ДЗ).
+      await logAnalyticsEventOnce(
+        db,
+        {
+          event_name: "student_received_and_opened",
+          actor_user_id: userId,
+          student_id: userId,
+          tutor_id: tId,
+          tutor_student_id: tStudentId,
+          assignment_id: hwId,
+        },
+        { student_id: userId, assignment_id: hwId },
+      );
     }
   }
 
@@ -8836,6 +9162,42 @@ async function handleStudentSubmission(
     })
     .eq("id", threadId);
 
+  // 13b. Воронка (онбординг v2 T9): первая сдача ученика (раз на ученика).
+  {
+    let tId: string | null = null;
+    let tStudentId: string | null = null;
+    try {
+      const { data: aRow } = await db
+        .from("homework_tutor_assignments")
+        .select("tutor_id")
+        .eq("id", hwId)
+        .maybeSingle();
+      tId = (aRow?.tutor_id as string | null) ?? null;
+      const { data: tsRow } = await db
+        .from("tutor_students")
+        .select("id")
+        .eq("student_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      tStudentId = (tsRow?.id as string | null) ?? null;
+    } catch {
+      // best-effort
+    }
+    await logAnalyticsEventOnce(
+      db,
+      {
+        event_name: "student_first_submission",
+        actor_user_id: userId,
+        student_id: userId,
+        tutor_id: tId,
+        tutor_student_id: tStudentId,
+        assignment_id: hwId,
+      },
+      { student_id: userId },
+    );
+  }
+
   // 14. Run shared grading helper. feedbackKind="check_result" so the
   //     verdict bubble is semantically distinct from an ongoing dialog
   //     ai_reply.
@@ -10060,6 +10422,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req);
       return await handleQuickAssignStudentsWithNotify(db, userId, tutor.id, seg[1], body, cors);
+    }
+
+    // POST /assignments/:id/connect-student-email (онбординг v2 — гейт «Подключить» → email)
+    if (
+      seg.length === 3 &&
+      seg[0] === "assignments" &&
+      seg[2] === "connect-student-email" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleConnectStudentByEmail(db, userId, tutor.id, seg[1], body, cors);
     }
 
     // POST /assignments/:id/notify

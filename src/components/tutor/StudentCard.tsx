@@ -17,6 +17,7 @@ import {
   MessageCircle,
   ArchiveRestore,
   Tag,
+  Link2,
 } from 'lucide-react';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import {
@@ -39,6 +40,8 @@ interface StudentCardProps {
   /** Если задан — карточка архивная: показать «Вернуть из архива» (запрос Елены 2026-06-17). */
   onUnarchive?: () => void;
   isUnarchiving?: boolean;
+  /** Онбординг v2 (T8): открыть гейт «Подключить» (QR/ссылка) для не подключённого ученика без канала. */
+  onConnect?: () => void;
 }
 
 export const StudentCard = memo(function StudentCard({
@@ -50,6 +53,7 @@ export const StudentCard = memo(function StudentCard({
   tags,
   onUnarchive,
   isUnarchiving = false,
+  onConnect,
 }: StudentCardProps) {
   const progress = calculateProgress(student.current_score, student.target_score);
   const paymentStatus = getPaymentStatus(student.paid_until ?? null);
@@ -267,6 +271,28 @@ export const StudentCard = memo(function StudentCard({
               )}
             </span>
           </div>
+
+          {/* Онбординг v2 (T8): nudge для не подключённого ученика без канала */}
+          {!isActivated && !hasRealEmail && !hasTelegramBot && onConnect && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+              <p className="text-xs leading-relaxed text-amber-800">
+                Не подключился. Подключите ссылкой или QR — или добавьте email/Telegram, чтобы ученик мог входить с любого устройства.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                className="mt-2 w-full"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onConnect();
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                <Link2 className="h-4 w-4" aria-hidden="true" />
+                Подключить
+              </Button>
+            </div>
+          )}
 
           <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
             <Button
