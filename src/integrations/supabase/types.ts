@@ -4777,6 +4777,10 @@ export type Database = {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
       }
+      tutor_add_student_to_group_future_lessons: {
+        Args: { _tutor_group_id: string; _tutor_student_id: string }
+        Returns: number
+      }
       tutor_auto_debit_due_lessons: {
         Args: { _tutor_id?: string }
         Returns: Json
