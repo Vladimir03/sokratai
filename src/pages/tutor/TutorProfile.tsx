@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -8,6 +10,9 @@ import { LoginProvidersSection } from '@/components/tutor/profile/LoginProviders
 import { SecuritySection } from '@/components/tutor/profile/SecuritySection';
 import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
+import { TutorSupportCard } from '@/components/tutor/profile/TutorSupportCard';
+import { TutorTariffSection } from '@/components/tutor/profile/TutorTariffSection';
+import type { TutorPlan } from '@/hooks/useTutorPlan';
 import {
   useSetTutorMiniGroupsEnabled,
   useTutorProfile,
@@ -35,8 +40,37 @@ export default function TutorProfile() {
   const profileQuery = useTutorProfile();
   const profile = profileQuery.data ?? null;
 
+  // Возврат из YooKassa (redirect-flow, return_url /tutor/profile?payment=success):
+  // чистим URL и коротко поллим тариф до появления premium (вебхук асинхронный).
+  const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const paymentPollStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (searchParams.get('payment') !== 'success' || paymentPollStartedRef.current) return;
+    paymentPollStartedRef.current = true;
+    window.history.replaceState({}, '', '/tutor/profile');
+    toast.info('Проверяем оплату…');
+
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      void queryClient.refetchQueries({ queryKey: ['tutor', 'plan'] }).then(() => {
+        const entries = queryClient.getQueriesData<TutorPlan>({ queryKey: ['tutor', 'plan'] });
+        const isPremium = entries.some(([, data]) => data?.isPremium);
+        if (isPremium) {
+          toast.success('Тариф AI-старт подключён!');
+          clearInterval(interval);
+        } else if (Date.now() - startedAt > 60_000) {
+          clearInterval(interval);
+        }
+      });
+    }, 2500);
+
+    return () => clearInterval(interval);
+  }, [searchParams, queryClient]);
+
   return (
-    <div className="mx-auto w-full max-w-2xl px-4 py-8">
+    <div className="mx-auto w-full max-w-5xl px-4 py-8">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Профиль</h1>
         <p className="mt-1 text-sm text-slate-500">
@@ -49,16 +83,27 @@ export default function TutorProfile() {
       ) : profileQuery.error ? (
         <ProfileError message={(profileQuery.error as Error)?.message ?? 'Не удалось загрузить профиль'} />
       ) : (
-        <div className="flex flex-col gap-4">
-          <TutorIdentitySection profile={profile} />
+        // 2 колонки на десктопе (запрос Vladimir 2026-07-02 — раньше max-w-2xl
+        // оставлял ~960px пустоты). Явное распределение карточек по колонкам
+        // (не auto-flow), lg:items-start — колонки не тянутся по высоте.
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          <div className="flex flex-col gap-4">
+            <TutorIdentitySection profile={profile} />
 
-          <TutorSubjectsSection profile={profile} />
+            <TutorSubjectsSection profile={profile} />
 
-          <WorkModeSection profile={profile} />
+            <WorkModeSection profile={profile} />
+          </div>
 
-          <SecuritySection />
+          <div className="flex flex-col gap-4">
+            <TutorTariffSection userId={profile?.user_id} />
 
-          <LoginProvidersSection />
+            <TutorSupportCard />
+
+            <SecuritySection />
+
+            <LoginProvidersSection />
+          </div>
         </div>
       )}
     </div>

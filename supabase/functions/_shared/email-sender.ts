@@ -24,6 +24,10 @@ import {
   renderLessonMaterialsNotification,
   type LessonMaterialsNotificationData,
 } from './transactional-email-templates/lesson-materials-notification.ts';
+import {
+  renderTutorPlanExpiry,
+  type TutorPlanExpiryData,
+} from './transactional-email-templates/tutor-plan-expiry.ts';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -44,6 +48,9 @@ export type HomeworkTutorMessageInput = Omit<HomeworkTutorMessageData, 'unsubscr
 
 /** Data for lesson-materials notification email (unsubscribeUrl added internally). */
 export type LessonMaterialsNotificationInput = Omit<LessonMaterialsNotificationData, 'unsubscribeUrl'>;
+
+/** Data for tutor plan-expiry nudge email (unsubscribeUrl added internally). */
+export type TutorPlanExpiryInput = Omit<TutorPlanExpiryData, 'unsubscribeUrl'>;
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -446,6 +453,54 @@ export async function sendStudentInviteEmail(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error('sendStudentInviteEmail_error', { to: redactEmail(to), error: msg });
+    return { success: false, error: msg };
+  }
+}
+
+/**
+ * Round 3 конверсии тарифа (2026-07-02) — нудж «AI-старт истекает через 3 дня»
+ * (edge tutor-plan-expiry-reminder, email-fallback после telegram).
+ * Skips temp emails (@temp.sokratai.ru) and suppressed addresses.
+ *
+ * Idempotency key = user + дата истечения: одна попытка на конкретный expiry
+ * (двойную отправку дополнительно гасит лог-таблица tutor_plan_expiry_reminder_log).
+ */
+export async function sendTutorPlanExpiryEmail(
+  db: SupabaseClient,
+  to: string,
+  data: TutorPlanExpiryInput,
+  userId: string,
+  expiresAtIso: string,
+): Promise<EmailResult> {
+  try {
+    const skip = await preSendChecks(db, to);
+    if (skip) return skip;
+
+    const unsubToken = await getOrCreateUnsubscribeToken(db, to);
+    const unsubscribeUrl = buildUnsubscribeUrl(unsubToken);
+
+    const rendered = renderTutorPlanExpiry({ ...data, unsubscribeUrl });
+
+    const payload: EnqueuePayload = {
+      message_id: crypto.randomUUID(),
+      run_id: crypto.randomUUID(),
+      to,
+      from: SENDER_FROM,
+      sender_domain: SENDER_DOMAIN,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      purpose: 'transactional',
+      label: 'tutor-plan-expiry',
+      idempotency_key: `plan-expiry-${userId}-${expiresAtIso.slice(0, 10)}`,
+      unsubscribe_token: unsubToken,
+      queued_at: new Date().toISOString(),
+    };
+
+    return await enqueue(db, payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('sendTutorPlanExpiryEmail_error', { to: redactEmail(to), error: msg });
     return { success: false, error: msg };
   }
 }

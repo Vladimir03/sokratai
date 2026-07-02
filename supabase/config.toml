@@ -87,6 +87,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = true
   [functions.tutor-manual-add-student]
     verify_jwt = true
+  [functions.tutor-plan-expiry-reminder]
+    verify_jwt = false
   [functions.tutor-progress-api]
     verify_jwt = true
   [functions.tutor-update-student]

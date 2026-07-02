@@ -21,7 +21,11 @@ export type AnalyticsEventName =
   | "student_first_login"
   | "student_registered"
   | "student_first_homework_opened"
-  | "student_first_submission";
+  | "student_first_submission"
+  // воронка оплаты тарифа репетитора (round 3, 2026-07-02; CHECK-whitelist
+  // расширен миграцией 20260702130000)
+  | "tutor_payment_created"
+  | "tutor_payment_succeeded";
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;

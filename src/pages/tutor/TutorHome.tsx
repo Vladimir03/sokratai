@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { parseISO, subDays } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -14,6 +14,10 @@ import {
   StudentsActivityBlock,
 } from '@/components/tutor/home';
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
+import { TariffNudgeBanner } from '@/components/tutor/home/TariffNudgeBanner';
+
+// Lazy: модал оплаты YooKassa — грузим только по клику «Подключить» в плашке.
+const TutorPaymentModal = lazy(() => import('@/components/tutor/TutorPaymentModal'));
 import type { DialogItem } from '@/components/tutor/home/primitives/ChatRow';
 import type { TodaySession } from '@/components/tutor/home/primitives/SessionBlock';
 import { useTutorHomeData } from '@/hooks/useTutorHomeData';
@@ -58,6 +62,8 @@ function TutorHomeContent() {
   const { tutor, students, payments, studentActivity } = home;
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const handleConnectTariff = useCallback(() => setPaymentModalOpen(true), []);
 
   const inviteCode = tutor?.invite_code ?? undefined;
   // Phase 9 (2026-05-25): canonical claim URL sokratai.ru/invite/{code}.
@@ -210,6 +216,10 @@ function TutorHomeContent() {
           <HomeSkeleton />
         ) : (
           <>
+            {/* Статус тарифа (триал/free) — тихая строка, premium → null.
+                «Подключить» открывает оплату прямо здесь (конверсия). */}
+            <TariffNudgeBanner userId={tutor?.user_id} onConnect={handleConnectTariff} />
+
             <HomeHeader
               tutorName={tutorName}
               todaySummary={{
@@ -281,6 +291,15 @@ function TutorHomeContent() {
           </>
         )}
       </div>
+
+      {paymentModalOpen && (
+        <Suspense fallback={null}>
+          <TutorPaymentModal
+            isOpen={paymentModalOpen}
+            onClose={() => setPaymentModalOpen(false)}
+          />
+        </Suspense>
+      )}
 
       <AddStudentDialog
         open={inviteModalOpen}

@@ -17,7 +17,9 @@
 
 ## Оплата репетитора — paid-статус живёт ТОЛЬКО в `profiles`
 
-**Автоматической оплаты тарифа репетитора «AI-старт» НЕТ.** `yookassa-create-payment` захардкожен под ученический Premium (699₽/30д). В таблице `tutors` полей подписки **нет**. Поэтому «платящий репетитор» = `profiles.subscription_tier='premium'` (valid) ИЛИ trial на его собственном профиле — и больше нигде.
+В таблице `tutors` полей подписки **нет**. «Платящий репетитор» = `profiles.subscription_tier='premium'` (valid) ИЛИ trial на его собственном профиле — и больше нигде.
+
+**С 2026-07-02 есть самообслуживание — YooKassa-оплата тарифа «AI-старт»** (см. секцию ниже). До этого тариф выдавался только вручную админом.
 
 Симптом (инцидент 2026-06-15, Елена): у платящего репетитора профиль не помечен premium (вручную не проставлен / истёк / не та дата) → его ученики молча падают на 10/день в ДЗ; в 429-тосте — подсказка «проси AI-старт» (`tutor_can_upgrade=true`, т.к. активная связь есть, а платящего тутора детект не видит).
 
@@ -30,7 +32,28 @@
 
 UI: `/admin → вкладка «Тарифы»` (`src/components/admin/AdminTutorPlans.tsx` + клиент `src/lib/adminTutorPlansApi.ts`, RU-маппинг errcode→фраза). RPC-имена кастятся `as never` на границе `supabase.rpc` (как `useSubscription`; generated `types.ts` их не несёт — это осознанный escape-hatch, не баг).
 
-**Инвариант:** новый способ пометить репетитора платящим — ТОЛЬКО через `admin_grant_tutor_plan` (аудируется), не raw `UPDATE profiles`. Если появится реальная YooKassa-оплата тарифа репетитора — она пишет те же два поля `profiles` (single source) + аудит-строку.
+**Инвариант:** новый способ пометить репетитора платящим — ТОЛЬКО через `admin_grant_tutor_plan` ИЛИ YooKassa-webhook тарифа (оба аудируются в `admin_tutor_plan_grants`), не raw `UPDATE profiles`.
+
+## Самообслуживание — YooKassa-оплата тарифа «AI-старт» (2026-07-02)
+
+`yookassa-create-payment` принимает опциональный `plan: 'tutor_ai_start'` (absent → ученический Premium 699₽/30д, byte-identical; неизвестное значение → 400 `UNKNOWN_PLAN`). Инварианты money-path:
+
+- **Цена — ТОЛЬКО сервером** (клиенту не доверяем): интро **200₽** — только действительно новым по **трём** критериям (решение Vladimir 2026-07-02: Елена/Эмилия/Вадим с ручными грантами 200₽ не получают): (а) нет succeeded-оплат `plan='tutor_ai_start'`, (б) нет `action='grant'` строк в `admin_tutor_plan_grants`, (в) нет ДЕЙСТВУЮЩЕГО premium (ловит исторические raw-SQL гранты до аудит-таблицы). Иначе по активным ученикам: ≤10 → **1000₽**, 11–20 → **2000₽**. «Активный» = `tutor_students.status='active' AND archived_at IS NULL` (то же определение, что на фронте). FK-дрейф: счёт через `tutors.id`, не auth uid. **Клиентское зеркало** — RPC `tutor_intro_price_available()` (миграция `20260702140000`, SECURITY DEFINER) → `useTutorIntroAvailable`: гейтит «200 ₽» в hint'ах CTA и кнопке триал-плашки; premium-карточка показывает цену продления по вилке. Правя критерии — синхронно RPC и edge.
+- **`NOT_A_TUTOR` gate (КРИТИЧНО):** нет строки `tutors` по `user_id` → 403. Без него ученик купил бы Premium за 200₽ через тариф репетитора (webhook пишет те же поля `profiles`).
+- **21+ активных учеников → 409 `TEAM_PLAN_REQUIRED`** (AI-команда, связь через Telegram). UI прячет кнопку оплаты при 21+ (`PayCta` в `TutorTariffSection`), серверный 409 — backstop.
+- **Fail-closed на деньгах:** сбой любого lookup'а (tutors/students/prior-payments) → 500 с `code`, не «цена наугад». Tutor-path `dbError` при insert в `payments` → 500 `PAYMENT_SAVE_FAILED` ДО выдачи confirmation token (иначе оплата пройдёт, а вебхук не сможет валидировать → premium молча не включится). Ученический путь оставлен как был (log-and-continue) — отдельный follow-up.
+- **`payments.plan`** (миграция `20260702120000`) — trust anchor: вебхук ветвится по **строке payments**, НЕ по `metadata.plan` (body вебхука подделываем; verify_jwt=false).
+- **Вебхук (переработан по ревью ChatGPT-5.5, 2026-07-02, P0-фиксы):** YooKassa вебхуки НЕ подписаны → body = сигнал «проверь», не истина. Активация только после **верификации в YooKassa API** `GET /v3/payments/{id}` (shop-credentials; `status==='succeeded' && paid===true`, сумма `Number.isFinite` + матч против строки payments, валюта RUB) — закрыта pre-existing дыра «поддельный POST с известными id/user/amount активировал неоплаченный premium» (била и студенческий флоу). Транзиентный сбой верификации/активации → **500** (YooKassa ретраит до ~24ч); подделка → 200 без активации. Сама активация — **атомарная RPC `yookassa_activate_subscription(p_payment_id)`** (миграция `20260702150000`, SECURITY DEFINER, только service_role): FOR UPDATE claim платежа + расчёт expiry (extend-from-future) + UPDATE profiles + audit-строка тарифа одной транзакцией → конкурентный дубль не продлит дважды; `subscription_days` — из строки payments, НЕ из body. Сбой аудита внутри RPC — RAISE WARNING, premium не откатывается. Общая для ученика и репетитора.
+- **Деплой-порядок (КРИТИЧНО):** миграция `payments.plan` ОБЯЗАНА примениться ДО деплоя вебхука — иначе SELECT `plan` роняет валидацию ВСЕХ платежей (включая ученические) и молча сиротит успешные оплаты.
+- **Frontend:** `TutorPaymentModal` (`src/components/tutor/TutorPaymentModal.tsx`, зеркало механики студенческого `PaymentModal` — тот НЕ тронут); CTA в `TutorTariffSection` (free/trial/premium-продление) + плашка `TariffNudgeBanner` на Главной (открывает модал сразу). **Успех модал поллит по СВОЕЙ строке `payments.subscription_activated_at` (по `payment_id`, RLS даёт SELECT своих строк), НЕ по `is_premium`** — иначе продлевающий premium-репетитор получал мгновенный ложный success без оплаты (ревью P1-3). Успех → invalidate `['tutor','plan']`. Возврат из redirect-flow → `/tutor/profile?payment=success` (поллинг в `TutorProfile`).
+- **Known drift (follow-up):** `admin_list_tutor_plans.active_students` считает без `archived_at IS NULL` → может расходиться с ценовой вилкой.
+
+### Round 3 — конверсия (2026-07-02)
+
+- **Нудж об истечении:** edge `tutor-plan-expiry-reminder` (SCHEDULER_SECRET-guard, `verify_jwt=false`, pg_cron через Management API — ops) — premium-репетиторы с `subscription_expires_at` в окне ≤3 дней → каскад telegram (`tutors.telegram_id`) → email (`sendTutorPlanExpiryEmail`, temp-guard). Идемпотентность: `tutor_plan_expiry_reminder_log` UNIQUE `(user_id, expires_at)` (миграция `20260702130000`); продление сдвигает expires_at → новый нудж. Гейт «только tutors-строки» ОБЯЗАТЕЛЕН — premium учеников тоже в profiles.
+- **Агрессивный триал-CTA:** `TariffNudgeBanner` при `trialDaysLeft <= 2` показывает кнопку «Подключить за 200 ₽» (открывает `TutorPaymentModal`); 200₽ честно — триал не платил → серверная интро-цена.
+- **Social proof:** `yookassa-create-payment` (тарифная ветка) возвращает `paying_tutors_count` (premium-valid + trial-active среди владельцев tutors-строк; fail-open). Модал показывает «Уже N репетиторов…» только при N ≥ 5.
+- **Телеметрия воронки:** server — `analytics_events` `tutor_payment_created` (create-payment) + `tutor_payment_succeeded` (webhook, внутри atomic-claim); client — `src/lib/tutorPlanTelemetry.ts` (`tariff_cta_clicked` c source profile_card/home_banner/trial_banner, `payment_modal_opened`, `payment_succeeded`) → console/dataLayer/gtag. CHECK-whitelist analytics_events расширять миграцией.
 
 ## Копи-инвариант лимита
 
