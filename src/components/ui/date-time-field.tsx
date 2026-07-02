@@ -216,7 +216,16 @@ export function DateTimeField({
               className="mb-2 h-9 w-full rounded-md border border-input bg-background px-2 text-base tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
               style={{ touchAction: 'manipulation' }}
             />
-            <div className="max-h-[190px] overflow-y-auto pr-1" role="listbox" aria-label="Выбор времени">
+            <div
+              className="max-h-[190px] overflow-y-auto pr-1"
+              role="listbox"
+              aria-label="Выбор времени"
+              // Пикер часто открыт внутри модального Dialog (перенос группы): его
+              // react-remove-scroll глотает wheel на портированном поповере →
+              // колесо не крутит список. stopPropagation не даёт событию дойти до
+              // document-листенера lock'а, нативный скролл контейнера работает.
+              onWheel={(e) => e.stopPropagation()}
+            >
               {TIME_SLOTS.map((slot) => {
                 const isSelected = Boolean(value) && slot.hour === hour && slot.minute === minute;
                 return (
