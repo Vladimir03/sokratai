@@ -488,7 +488,10 @@ function TutorStudentProfileContent() {
           refetchMemberships();
         } catch (membershipError) {
           console.error('Membership sync failed after student profile update:', membershipError);
-          membershipWarning = 'Профиль ученика сохранён, но мини-группа не обновилась. Повторите позже.';
+          const detail = membershipError instanceof Error ? membershipError.message : '';
+          membershipWarning = detail
+            ? `Профиль сохранён, но группа не обновилась: ${detail}`
+            : 'Профиль ученика сохранён, но мини-группа не обновилась. Повторите позже.';
         }
       }
 

@@ -512,8 +512,11 @@ export async function setStudentPrimaryGroup(
       { onConflict: 'tutor_student_id,tutor_group_id' },
     );
     if (error) {
+      // Прокидываем реальную причину (rule 97) — иначе UI показывал бесполезное
+      // «Повторите позже», а корень (напр. воскресший partial-unique индекс
+      // idx_tutor_group_memberships_active_student_unique) оставался невидимым.
       console.error('Error setting primary group:', error);
-      return false;
+      throw new Error(error.message || 'Не удалось сохранить основную группу');
     }
     return true;
   }
@@ -528,7 +531,7 @@ export async function setStudentPrimaryGroup(
     .eq('is_active', true);
   if (selErr) {
     console.error('Error loading memberships:', selErr);
-    return false;
+    throw new Error(selErr.message || 'Не удалось загрузить группы ученика');
   }
   const primaryIds = ((active ?? []) as { id: string; tutor_group?: { is_primary?: boolean } | null }[])
     .filter((m) => m.tutor_group?.is_primary)
@@ -540,7 +543,7 @@ export async function setStudentPrimaryGroup(
     .in('id', primaryIds);
   if (error) {
     console.error('Error clearing primary group:', error);
-    return false;
+    throw new Error(error.message || 'Не удалось снять основную группу');
   }
   return true;
 }
