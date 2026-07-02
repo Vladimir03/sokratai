@@ -41,6 +41,12 @@ import { useTutor, useTutorGroups } from '@/hooks/useTutor';
 import { supabase } from '@/lib/supabaseClient';
 import { getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { pluralizeRu } from '@/lib/pluralizeRu';
+import {
+  addStudentToGroupFutureLessons,
+  countGroupFutureLessons,
+} from '@/lib/tutorScheduleGroupCreate';
+import { invalidateGroupRosterCaches } from '@/lib/tutorStudentCacheSync';
+import { AddToGroupLessonsPrompt } from '@/components/tutor/AddToGroupLessonsPrompt';
 import type { ManualAddTutorStudentInput } from '@/types/tutor';
 
 /**
@@ -121,6 +127,22 @@ export function AddStudentDialog({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [credentialsData, setCredentialsData] = useState<StudentCredentialsData | null>(null);
   const [pendingTutorStudentId, setPendingTutorStudentId] = useState<string | null>(null);
+  // Roster-driven: после добавления нового ученика в учебную группу предлагаем
+  // добавить его в её будущие занятия. finalize/credentials откладываются до
+  // ответа на prompt (pending), чтобы диалог не закрылся раньше времени.
+  const [groupLessonsPrompt, setGroupLessonsPrompt] = useState<{
+    groupId: string;
+    groupName: string;
+    studentName: string;
+    futureCount: number;
+    pending: {
+      response: Awaited<ReturnType<typeof manualAddTutorStudent>>;
+      studentName: string;
+      membershipSyncFailed: boolean;
+      isPlaceholder: boolean;
+    };
+  } | null>(null);
+  const [isAddingToGroupLessons, setIsAddingToGroupLessons] = useState(false);
 
   // Learning goal preset state
   const [learningGoalPreset, setLearningGoalPreset] = useState<string>('');
@@ -196,6 +218,75 @@ export function AddStudentDialog({
     resetManualForm();
     onOpenChange(false);
     onManualAdded(tutorStudentId);
+  };
+
+  // Пост-добавочная развилка (existing / плейсхолдер / показ credentials),
+  // вынесена чтобы её можно было отложить за roster-driven prompt.
+  const finalizeAfterAdd = (
+    response: Awaited<ReturnType<typeof manualAddTutorStudent>>,
+    studentName: string,
+    membershipSyncFailed: boolean,
+    isPlaceholder: boolean,
+  ) => {
+    if (response.existing) {
+      toast({ title: 'Ученик уже зарегистрирован' });
+      finalizeManualAdd(response.tutor_student_id);
+      return;
+    }
+    if (membershipSyncFailed) {
+      toast({
+        title: 'Ученик добавлен',
+        description: `${studentName} добавлен. Привязку к группе повторите в профиле ученика.`,
+        variant: 'destructive',
+      });
+    }
+    // Онбординг v2: плейсхолдер по имени (без реального контакта) — логин/пароль
+    // бесполезны (temp-email), поэтому НЕ показываем StudentCredentialsModal.
+    if (isPlaceholder || !response.login_email || !response.plain_password) {
+      if (!membershipSyncFailed) {
+        toast({
+          title: 'Ученик добавлен',
+          description: `${studentName} добавлен. Подключите его ссылкой при отправке первой домашки.`,
+        });
+      }
+      finalizeManualAdd(response.tutor_student_id);
+      return;
+    }
+    setPendingTutorStudentId(response.tutor_student_id);
+    setCredentialsData({
+      studentName,
+      loginEmail: response.login_email,
+      plainPassword: response.plain_password,
+    });
+  };
+
+  const handleConfirmAddToGroupLessons = async () => {
+    if (!groupLessonsPrompt) return;
+    const { groupId, pending } = groupLessonsPrompt;
+    setIsAddingToGroupLessons(true);
+    try {
+      const res = await addStudentToGroupFutureLessons(groupId, pending.response.tutor_student_id);
+      if (res.ok) {
+        toast({ title: `Добавлен в ${res.addedCount ?? 0} будущих занятий группы` });
+        await invalidateGroupRosterCaches(queryClient);
+      } else {
+        toast({ title: 'Не удалось добавить в занятия', description: res.error, variant: 'destructive' });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'Ошибка при добавлении в занятия группы', variant: 'destructive' });
+    } finally {
+      setIsAddingToGroupLessons(false);
+      setGroupLessonsPrompt(null);
+      finalizeAfterAdd(pending.response, pending.studentName, pending.membershipSyncFailed, pending.isPlaceholder);
+    }
+  };
+
+  const handleCancelAddToGroupLessons = () => {
+    if (!groupLessonsPrompt) return;
+    const { pending } = groupLessonsPrompt;
+    setGroupLessonsPrompt(null);
+    finalizeAfterAdd(pending.response, pending.studentName, pending.membershipSyncFailed, pending.isPlaceholder);
   };
 
   const handleCredentialsModalOpenChange = (nextOpen: boolean) => {
@@ -474,44 +565,32 @@ export function AddStudentDialog({
         }
       }
 
-      if (response.existing) {
-        toast({
-          title: 'Ученик уже зарегистрирован',
-        });
-        finalizeManualAdd(response.tutor_student_id);
-        return;
-      }
-
-      if (membershipSyncFailed) {
-        toast({
-          title: 'Ученик добавлен',
-          description: `${studentName} добавлен. Привязку к группе повторите в профиле ученика.`,
-          variant: 'destructive',
-        });
-      }
-
-      // Онбординг v2: плейсхолдер по имени (без реального контакта) — логин/пароль
-      // бесполезны (temp-email), поэтому НЕ показываем StudentCredentialsModal.
-      // Доставка доступа — через гейт «Подключить» (ссылка/QR). Модалка с
-      // credentials остаётся только когда репетитор задал реальный email/Telegram.
       const isPlaceholder = !hasEmail && !hasTelegram;
-      if (isPlaceholder || !response.login_email || !response.plain_password) {
-        if (!membershipSyncFailed) {
-          toast({
-            title: 'Ученик добавлен',
-            description: `${studentName} добавлен. Подключите его ссылкой при отправке первой домашки.`,
-          });
+
+      // Roster-driven: новый ученик добавлен в учебную группу с будущими занятиями
+      // → предложить добавить его и в них. finalize/credentials откладываем до
+      // ответа на prompt (существующий / тег / сбой привязки — без prompt, как раньше).
+      if (!response.existing && miniGroupsEnabled && isInMiniGroup && selectedGroupId && !membershipSyncFailed) {
+        let futureCount = 0;
+        try {
+          futureCount = await countGroupFutureLessons(selectedGroupId);
+        } catch (countErr) {
+          console.error('countGroupFutureLessons failed:', countErr);
         }
-        finalizeManualAdd(response.tutor_student_id);
-        return;
+        if (futureCount > 0) {
+          const group = groups.find((g) => g.id === selectedGroupId);
+          setGroupLessonsPrompt({
+            groupId: selectedGroupId,
+            groupName: group?.short_name || group?.name || 'группа',
+            studentName,
+            futureCount,
+            pending: { response, studentName, membershipSyncFailed, isPlaceholder },
+          });
+          return;
+        }
       }
 
-      setPendingTutorStudentId(response.tutor_student_id);
-      setCredentialsData({
-        studentName,
-        loginEmail: response.login_email,
-        plainPassword: response.plain_password,
-      });
+      finalizeAfterAdd(response, studentName, membershipSyncFailed, isPlaceholder);
     } catch (error) {
       toast({
         title: 'Ошибка',
@@ -963,6 +1042,16 @@ export function AddStudentDialog({
           plainPassword={credentialsData.plainPassword}
         />
       )}
+
+      <AddToGroupLessonsPrompt
+        open={!!groupLessonsPrompt}
+        studentName={groupLessonsPrompt?.studentName ?? ''}
+        groupName={groupLessonsPrompt?.groupName ?? ''}
+        futureCount={groupLessonsPrompt?.futureCount ?? 0}
+        isSubmitting={isAddingToGroupLessons}
+        onConfirm={handleConfirmAddToGroupLessons}
+        onCancel={handleCancelAddToGroupLessons}
+      />
     </>
   );
 }

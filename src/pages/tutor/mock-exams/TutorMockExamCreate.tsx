@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DateTimeField } from '@/components/ui/date-time-field';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
@@ -832,12 +833,12 @@ function TutorMockExamCreateContent() {
 
           <div className="space-y-1.5">
             <Label htmlFor="mock-exam-deadline">Дедлайн (опционально)</Label>
-            <Input
+            <DateTimeField
               id="mock-exam-deadline"
-              type="datetime-local"
               value={deadlineInput}
-              onChange={(e) => setDeadlineInput(e.target.value)}
-              className="text-base sm:max-w-xs"
+              onChange={setDeadlineInput}
+              clearable
+              className="sm:max-w-xs"
             />
             <p className="text-xs text-muted-foreground">{DURATION_HINT}</p>
           </div>

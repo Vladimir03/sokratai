@@ -6,6 +6,7 @@ import { parseISO } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { DateTimeField } from '@/components/ui/date-time-field';
 import { ArrowLeft, Loader2, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTutor, useTutorStudents, useTutorGroups } from '@/hooks/useTutor';
@@ -1917,12 +1918,12 @@ function TutorHomeworkCreateContent() {
         {/* Deadline (L0 — optional) */}
         <section className="space-y-2">
           <Label htmlFor="hw-deadline">Дедлайн (необязательно)</Label>
-          <Input
+          <DateTimeField
             id="hw-deadline"
-            type="datetime-local"
             value={meta.deadline}
-            onChange={(e) => setMeta({ ...meta, deadline: e.target.value })}
-            className="text-base"
+            onChange={(v) => setMeta({ ...meta, deadline: v })}
+            clearable
+            className="sm:w-[280px]"
           />
         </section>
 

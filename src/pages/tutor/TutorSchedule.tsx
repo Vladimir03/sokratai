@@ -18,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { DateTimeField } from '@/components/ui/date-time-field';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
@@ -64,6 +65,7 @@ import {
   getLessonParticipants,
   addLessonParticipant,
   removeLessonParticipant,
+  addStudentToGroupFutureLessons,
   type MiniGroupCreateResult,
 } from '@/lib/tutorScheduleGroupCreate';
 import {
@@ -535,6 +537,8 @@ function GroupDetailsDialog({
   const [isDeletingGroup, setIsDeletingGroup] = useState(false);
   const [isMutatingParticipants, setIsMutatingParticipants] = useState(false);
   const [addParticipantId, setAddParticipantId] = useState('');
+  // Охват добавления участника: только это занятие / все будущие занятия группы.
+  const [addScope, setAddScope] = useState<'this' | 'future'>('this');
   const [showGroupEdit, setShowGroupEdit] = useState(false);
   const [editGroupSubject, setEditGroupSubject] = useState('');
   const [editGroupNotes, setEditGroupNotes] = useState('');
@@ -558,6 +562,11 @@ function GroupDetailsDialog({
 
   // Load participants for unified group lessons
   useEffect(() => {
+    // Сбрасываем выбор добавления при смене занятия/группы — иначе scope
+    // «Все будущие занятия группы» залипал бы и молча создавал обязательства
+    // на следующей открытой группе (review P1).
+    setAddScope('this');
+    setAddParticipantId('');
     if (!open || !bucket || !isUnifiedGroupLesson) {
       setParticipants([]);
       return;
@@ -826,16 +835,31 @@ function GroupDetailsDialog({
 
   const handleAddParticipant = useCallback(async () => {
     if (!mainLesson || !addParticipantId || isMutatingParticipants) return;
+    const groupSourceId = bucket?.groupSourceTutorGroupId ?? null;
+    // «Все будущие» доступно только для занятий с группой-источником (не legacy).
+    const useFuture = addScope === 'future' && !!groupSourceId;
     setIsMutatingParticipants(true);
     try {
-      const res = await addLessonParticipant(mainLesson.id, addParticipantId);
-      if (res.ok) {
-        toast.success('Ученик добавлен в занятие');
-        setAddParticipantId('');
-        await reloadParticipants();
-        onActionApplied?.();
+      if (useFuture && groupSourceId) {
+        const res = await addStudentToGroupFutureLessons(groupSourceId, addParticipantId);
+        if (res.ok) {
+          toast.success(`Добавлен в ${res.addedCount ?? 0} будущих занятий группы`);
+          setAddParticipantId('');
+          await reloadParticipants();
+          onActionApplied?.(); // parent: refetchLessons() + invalidateBalanceCaches() (rule 60)
+        } else {
+          toast.error(res.error || 'Не удалось добавить ученика');
+        }
       } else {
-        toast.error(res.error || 'Не удалось добавить ученика');
+        const res = await addLessonParticipant(mainLesson.id, addParticipantId);
+        if (res.ok) {
+          toast.success('Ученик добавлен в занятие');
+          setAddParticipantId('');
+          await reloadParticipants();
+          onActionApplied?.();
+        } else {
+          toast.error(res.error || 'Не удалось добавить ученика');
+        }
       }
     } catch (error) {
       console.error(error);
@@ -843,7 +867,7 @@ function GroupDetailsDialog({
     } finally {
       setIsMutatingParticipants(false);
     }
-  }, [mainLesson, addParticipantId, isMutatingParticipants, reloadParticipants, onActionApplied]);
+  }, [mainLesson, addParticipantId, isMutatingParticipants, reloadParticipants, onActionApplied, addScope, bucket]);
 
   const handleRemoveParticipant = useCallback(async (tutorStudentId: string) => {
     if (!mainLesson || isMutatingParticipants) return;
@@ -1152,13 +1176,11 @@ function GroupDetailsDialog({
               <p className="text-sm font-medium">Действия для группы</p>
               <div className="space-y-2">
                 <Label htmlFor="group-move-datetime" className="text-xs">Перенести группу на дату и время</Label>
-                <Input
+                <DateTimeField
                   id="group-move-datetime"
-                  type="datetime-local"
                   value={moveDateTimeValue}
-                  onChange={(event) => setMoveDateTimeValue(event.target.value)}
+                  onChange={setMoveDateTimeValue}
                   disabled={isActionSaving}
-                  className="text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
                   {isUnifiedGroupLesson
@@ -1233,28 +1255,41 @@ function GroupDetailsDialog({
                     )}
                   </div>
                   {availableStudentsToAdd.length > 0 && (
-                    <div className="flex items-center gap-2 pt-1">
-                      <Select value={addParticipantId} onValueChange={setAddParticipantId}>
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Добавить ученика" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableStudentsToAdd.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.profiles?.username || s.profiles?.telegram_username || 'Ученик'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        style={{ touchAction: 'manipulation' }}
-                        disabled={!addParticipantId || isMutatingParticipants}
-                        onClick={handleAddParticipant}
-                      >
-                        Добавить
-                      </Button>
+                    <div className="space-y-1.5 pt-1">
+                      {bucket?.groupSourceTutorGroupId && (
+                        <Select value={addScope} onValueChange={(v) => setAddScope(v as 'this' | 'future')}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="this">Только это занятие</SelectItem>
+                            <SelectItem value="future">Все будущие занятия группы</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Select value={addParticipantId} onValueChange={setAddParticipantId}>
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Добавить ученика" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {availableStudentsToAdd.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.profiles?.username || s.profiles?.telegram_username || 'Ученик'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          style={{ touchAction: 'manipulation' }}
+                          disabled={!addParticipantId || isMutatingParticipants}
+                          onClick={handleAddParticipant}
+                        >
+                          Добавить
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -48,10 +48,16 @@ import {
 import {
   applyTutorStudentPatchToCache,
   invalidateTutorStudentDependentQueries,
+  invalidateGroupRosterCaches,
   removeTutorStudentFromCache,
 } from '@/lib/tutorStudentCacheSync';
+import {
+  addStudentToGroupFutureLessons,
+  countGroupFutureLessons,
+} from '@/lib/tutorScheduleGroupCreate';
 import type { TutorGroup, TutorGroupMembership } from '@/types/tutor';
 import { StudentTagsEditor } from '@/components/tutor/StudentTagsEditor';
+import { AddToGroupLessonsPrompt } from '@/components/tutor/AddToGroupLessonsPrompt';
 import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
 /**
@@ -174,6 +180,14 @@ function TutorStudentProfileContent() {
   const [editIsInMiniGroup, setEditIsInMiniGroup] = useState(false);
   const [editSelectedGroupId, setEditSelectedGroupId] = useState('');
   const [editNewGroupName, setEditNewGroupName] = useState('');
+  // Roster-driven: после смены основной группы предлагаем добавить в её будущие занятия.
+  const [groupLessonsPrompt, setGroupLessonsPrompt] = useState<{
+    groupId: string;
+    groupName: string;
+    studentName: string;
+    futureCount: number;
+  } | null>(null);
+  const [isAddingToGroupLessons, setIsAddingToGroupLessons] = useState(false);
   const [isCreatingEditGroup, setIsCreatingEditGroup] = useState(false);
   // Несколько групп на ученика (2026-06-18): основная группа (is_primary) — для
   // селектора «мини-группа»; метки (is_primary=false) — отдельный редактор.
@@ -486,6 +500,29 @@ function TutorStudentProfileContent() {
       setEditStudentOpen(false);
       setEditFormInitialized(false);
       refetchStudent();
+
+      // Roster-driven: основная группа сменилась на НОВУЮ непустую → предложить
+      // добавить ученика в её будущие занятия. Гейт: только при реальной смене
+      // (иначе несвязанный сейв нудит + молча создаёт обязательства).
+      if (!membershipWarning && miniGroupsEnabled && editIsInMiniGroup && editSelectedGroupId) {
+        const prevPrimaryGroupId = activeMembership?.tutor_group_id ?? null;
+        if (editSelectedGroupId !== prevPrimaryGroupId) {
+          try {
+            const futureCount = await countGroupFutureLessons(editSelectedGroupId);
+            if (futureCount > 0) {
+              const group = primaryGroups.find((g) => g.id === editSelectedGroupId);
+              setGroupLessonsPrompt({
+                groupId: editSelectedGroupId,
+                groupName: group?.short_name || group?.name || 'группа',
+                studentName: normalizedDisplayName || name || 'ученик',
+                futureCount,
+              });
+            }
+          } catch (countErr) {
+            console.error('countGroupFutureLessons failed:', countErr);
+          }
+        }
+      }
     } catch (error: any) {
       console.error('Error updating student:', error);
       toast.error(error.message || 'Не удалось обновить ученика');
@@ -517,8 +554,30 @@ function TutorStudentProfileContent() {
     student?.student_id,
     student?.display_name,
     student,
+    activeMembership,
+    primaryGroups,
   ]);
-  
+
+  const handleConfirmAddToGroupLessons = useCallback(async () => {
+    if (!groupLessonsPrompt) return;
+    setIsAddingToGroupLessons(true);
+    try {
+      const res = await addStudentToGroupFutureLessons(groupLessonsPrompt.groupId, tutorStudentId);
+      if (res.ok) {
+        toast.success(`Добавлен в ${res.addedCount ?? 0} будущих занятий группы`);
+        await invalidateGroupRosterCaches(queryClient);
+      } else {
+        toast.error(res.error || 'Не удалось добавить в занятия группы');
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('Ошибка при добавлении в занятия группы');
+    } finally {
+      setIsAddingToGroupLessons(false);
+      setGroupLessonsPrompt(null);
+    }
+  }, [groupLessonsPrompt, tutorStudentId, queryClient]);
+
   // Загрузка
   if (initialLoading) {
     return (
@@ -1264,6 +1323,16 @@ function TutorStudentProfileContent() {
             </ScrollArea>
           </DialogContent>
         </Dialog>
+
+        <AddToGroupLessonsPrompt
+          open={!!groupLessonsPrompt}
+          studentName={groupLessonsPrompt?.studentName ?? ''}
+          groupName={groupLessonsPrompt?.groupName ?? ''}
+          futureCount={groupLessonsPrompt?.futureCount ?? 0}
+          isSubmitting={isAddingToGroupLessons}
+          onConfirm={handleConfirmAddToGroupLessons}
+          onCancel={() => setGroupLessonsPrompt(null)}
+        />
       </div>
   );
 }

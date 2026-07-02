@@ -270,6 +270,7 @@ export interface LessonParticipantMutationResult {
 
 function mapParticipantError(message: string): { error: string; code?: string } {
   if (message.includes('NOT_GROUP')) return { error: 'Добавлять участников можно только в групповое занятие.', code: 'NOT_GROUP' };
+  if (message.includes('NOT_LEARNING_GROUP')) return { error: 'Добавлять в занятия можно только учебную группу, не метку.', code: 'NOT_LEARNING_GROUP' };
   if (message.includes('NOT_BOOKED')) return { error: 'Менять состав можно только у запланированных занятий.', code: 'NOT_BOOKED' };
   if (message.includes('LAST_PARTICIPANT')) return { error: 'Нельзя убрать последнего участника — удалите занятие целиком.', code: 'LAST_PARTICIPANT' };
   if (message.includes('INVALID_STUDENT')) return { error: 'Ученик не найден.', code: 'INVALID_STUDENT' };
@@ -307,4 +308,54 @@ export async function removeLessonParticipant(
     return { ok: false, ...mapParticipantError(error.message || '') };
   }
   return { ok: true };
+}
+
+export interface AddStudentToGroupFutureResult extends LessonParticipantMutationResult {
+  /** Сколько будущих занятий реально получили ученика (idempotent: 0 если уже везде). */
+  addedCount?: number;
+  /** Всего будущих booked-занятий группы (для «добавлено N из M»). */
+  futureCount?: number;
+}
+
+/**
+ * Roster-driven: добавить ученика во ВСЕ будущие booked-занятия учебной группы
+ * (`group_source_tutor_group_id = tutorGroupId`) одним вызовом. Идемпотентно —
+ * пропускает занятия, где ученик уже участник. Только строки участников, без
+ * ledger/payments-побочек (дебет будущих занятий создаётся позже при завершении).
+ * SECURITY DEFINER RPC (миграция 20260702130000). Тег (is_primary=false) → ошибка.
+ */
+export async function addStudentToGroupFutureLessons(
+  tutorGroupId: string,
+  tutorStudentId: string,
+): Promise<AddStudentToGroupFutureResult> {
+  // RPC ещё не в сгенерированном types.ts до регенерации Lovable → as never (rule 99).
+  const { data, error } = await supabase.rpc(
+    'tutor_add_student_to_group_future_lessons' as never,
+    { _tutor_group_id: tutorGroupId, _tutor_student_id: tutorStudentId } as never,
+  );
+  if (error) {
+    console.error('Error adding student to group future lessons:', error);
+    return { ok: false, ...mapParticipantError((error as { message?: string }).message || '') };
+  }
+  const row = (data ?? {}) as { added_count?: number; future_count?: number };
+  return { ok: true, addedCount: Number(row.added_count ?? 0), futureCount: Number(row.future_count ?? 0) };
+}
+
+/**
+ * Количество будущих booked unified-занятий учебной группы (для roster-подсказки
+ * «добавить в N будущих занятий?»). RLS-scoped, дешёвый head-count.
+ */
+export async function countGroupFutureLessons(tutorGroupId: string): Promise<number> {
+  const { count, error } = await supabase
+    .from('tutor_lessons')
+    .select('id', { count: 'exact', head: true })
+    .eq('group_source_tutor_group_id', tutorGroupId)
+    .eq('status', 'booked')
+    .gte('start_at', new Date().toISOString())
+    .not('group_session_id', 'is', null);
+  if (error) {
+    console.error('countGroupFutureLessons error:', error);
+    return 0;
+  }
+  return count ?? 0;
 }

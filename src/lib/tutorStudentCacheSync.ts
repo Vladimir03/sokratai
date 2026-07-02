@@ -166,3 +166,26 @@ export async function invalidateTutorStudentDependentQueries(
     }),
   ]);
 }
+
+/**
+ * Инвалидация после добавления ученика в будущие занятия группы (roster-driven,
+ * `addStudentToGroupFutureLessons`). Затрагивает состав/размеры групп (lessons),
+ * ожидаемый доход (MonthIncomeStrip читает payment_amount будущих занятий) и
+ * money-кэши (rule 60). Единый fan-out для всех 3 поверхностей (профиль ученика,
+ * AddStudentDialog, расписание) — чтобы не разъехалось.
+ */
+export async function invalidateGroupRosterCaches(queryClient: QueryClient): Promise<void> {
+  await Promise.all(
+    [
+      ['tutor', 'lessons'],
+      ['tutor', 'payments'],
+      ['tutor', 'balance'],
+      ['tutor', 'ledger'],
+      ['tutor', 'received-payments'],
+      ['tutor', 'students'],
+      ['tutor', 'student'],
+    ].map((queryKey) =>
+      queryClient.invalidateQueries({ queryKey, refetchType: 'active' }),
+    ),
+  );
+}
