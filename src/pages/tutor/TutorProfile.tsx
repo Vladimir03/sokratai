@@ -6,9 +6,9 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LoginProvidersSection } from '@/components/tutor/profile/LoginProvidersSection';
-import { SecuritySection } from '@/components/tutor/profile/SecuritySection';
+import { AccountSecuritySection } from '@/components/tutor/profile/AccountSecuritySection';
 import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
+import { TutorHelpSection } from '@/components/tutor/profile/TutorHelpSection';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
 import { TutorSupportCard } from '@/components/tutor/profile/TutorSupportCard';
 import { TutorTariffSection } from '@/components/tutor/profile/TutorTariffSection';
@@ -70,11 +70,11 @@ export default function TutorProfile() {
   }, [searchParams, queryClient]);
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-8">
+    <div className="mx-auto w-full max-w-6xl px-4 py-8 2xl:max-w-7xl">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold text-slate-900">Профиль</h1>
         <p className="mt-1 text-sm text-slate-500">
-          Имя и фото видны ученикам в чате с домашним заданием.
+          Ваши данные, тариф и подключения — всё в одном месте.
         </p>
       </header>
 
@@ -86,23 +86,23 @@ export default function TutorProfile() {
         // 2 колонки на десктопе (запрос Vladimir 2026-07-02 — раньше max-w-2xl
         // оставлял ~960px пустоты). Явное распределение карточек по колонкам
         // (не auto-flow), lg:items-start — колонки не тянутся по высоте.
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-          <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start lg:gap-6">
+          <div className="flex flex-col gap-4 lg:gap-6">
             <TutorIdentitySection profile={profile} />
 
             <TutorSubjectsSection profile={profile} />
 
             <WorkModeSection profile={profile} />
+
+            <AccountSecuritySection />
           </div>
 
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4 lg:gap-6">
             <TutorTariffSection userId={profile?.user_id} />
 
             <TutorSupportCard />
 
-            <SecuritySection />
-
-            <LoginProvidersSection />
+            <TutorHelpSection />
           </div>
         </div>
       )}

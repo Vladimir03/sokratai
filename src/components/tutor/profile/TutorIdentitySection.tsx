@@ -165,7 +165,7 @@ export function TutorIdentitySection({ profile }: TutorIdentitySectionProps) {
             <RadioGroup
               value={genderDraft}
               onValueChange={(value) => setGenderDraft(value as GenderFormValue)}
-              className="flex flex-wrap gap-2"
+              className="grid grid-cols-3 gap-2"
               aria-label="Пол"
             >
               <GenderOption value="male" label="Мужской" />
@@ -173,7 +173,7 @@ export function TutorIdentitySection({ profile }: TutorIdentitySectionProps) {
               <GenderOption value="unspecified" label="Не указано" />
             </RadioGroup>
             <p className="text-xs text-slate-500">
-              Влияет только на placeholder-аватар, если фото не загружено.
+              Влияет только на аватар по умолчанию, если фото не загружено.
             </p>
           </fieldset>
 
@@ -200,12 +200,15 @@ interface GenderOptionProps {
 
 function GenderOption({ value, label }: GenderOptionProps) {
   const id = `tutor-profile-gender-${value}`;
+  // Сегментированный контрол: 3 равные ячейки в один ряд (grid-cols-3).
+  // Радио визуально скрыт (sr-only) — выбор показывает фон/рамка/цвет; фокус
+  // подсвечивается на всей ячейке через has-[:focus-visible] (a11y сохранена).
   return (
     <Label
       htmlFor={id}
-      className="flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full border border-border bg-card px-4 text-sm font-medium text-slate-700 transition-colors hover:border-accent has-[[data-state=checked]]:border-accent has-[[data-state=checked]]:bg-accent/10 has-[[data-state=checked]]:text-accent"
+      className="flex min-h-[44px] cursor-pointer items-center justify-center rounded-lg border border-border bg-card px-2 text-center text-sm font-medium text-slate-700 transition-colors hover:border-accent has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/40 has-[:focus-visible]:ring-offset-1 has-[[data-state=checked]]:border-accent has-[[data-state=checked]]:bg-accent/10 has-[[data-state=checked]]:text-accent"
     >
-      <RadioGroupItem id={id} value={value} />
+      <RadioGroupItem id={id} value={value} className="sr-only" />
       {label}
     </Label>
   );

@@ -39,7 +39,12 @@ const MIN_PASSWORD_LENGTH = 8;
 
 type AuthState = 'A' | 'B' | 'C' | 'unknown';
 
-export function SecuritySection() {
+/**
+ * `embedded` (2026-07-02): при true рендерится БЕЗ собственной карточки и с
+ * подзаголовком h3 «Почта и пароль» — для объединённой карточки «Вход и
+ * безопасность» (AccountSecuritySection). Вся auth-логика неизменна.
+ */
+export function SecuritySection({ embedded = false }: { embedded?: boolean } = {}) {
   const [data, setData] = useState<SecurityData | null>(null);
   const [isLoadingData, setIsLoadingData] = useState(true);
 
@@ -303,14 +308,19 @@ export function SecuritySection() {
     );
   };
 
+  const Wrapper = embedded ? 'div' : 'section';
   return (
-    <section
-      aria-labelledby="tutor-security-heading"
-      className="rounded-lg border border-border bg-card p-4 sm:p-6"
+    <Wrapper
+      aria-labelledby={embedded ? undefined : 'tutor-security-heading'}
+      className={embedded ? undefined : 'rounded-lg border border-border bg-card p-4 sm:p-6'}
     >
-      <h2 id="tutor-security-heading" className="text-lg font-semibold text-slate-900">
-        Безопасность
-      </h2>
+      {embedded ? (
+        <h3 className="text-sm font-semibold text-slate-900">Почта и пароль</h3>
+      ) : (
+        <h2 id="tutor-security-heading" className="text-lg font-semibold text-slate-900">
+          Безопасность
+        </h2>
+      )}
       <p className="mt-1 text-sm text-slate-500">
         Email для входа и пароль. Telegram показан, если он привязан к аккаунту.
       </p>
@@ -594,7 +604,7 @@ export function SecuritySection() {
           </div>
         </div>
       )}
-    </section>
+    </Wrapper>
   );
 }
 

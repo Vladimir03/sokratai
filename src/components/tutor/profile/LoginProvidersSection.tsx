@@ -46,7 +46,12 @@ interface ProfileTelegramRow {
   telegram_username: string | null;
 }
 
-export function LoginProvidersSection() {
+/**
+ * `embedded` (2026-07-02): при true рендерится БЕЗ собственной карточки и с
+ * подзаголовком h3 — для объединённой карточки «Вход и безопасность»
+ * (AccountSecuritySection). Логика привязки провайдеров неизменна.
+ */
+export function LoginProvidersSection({ embedded = false }: { embedded?: boolean } = {}) {
   const { hasEmailPassword, hasGoogle, identities, isLoading: identitiesLoading } =
     useUserIdentities();
   const queryClient = useQueryClient();
@@ -193,19 +198,24 @@ export function LoginProvidersSection() {
     }
   };
 
+  const Wrapper = embedded ? 'div' : 'section';
   return (
-    <section
-      aria-labelledby="tutor-login-providers-heading"
-      className="rounded-lg border border-border bg-card p-4 sm:p-6"
+    <Wrapper
+      aria-labelledby={embedded ? undefined : 'tutor-login-providers-heading'}
+      className={embedded ? undefined : 'rounded-lg border border-border bg-card p-4 sm:p-6'}
     >
       <div className="flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-slate-500" aria-hidden="true" />
-        <h2
-          id="tutor-login-providers-heading"
-          className="text-[14px] font-semibold text-slate-900"
-        >
-          Способы входа
-        </h2>
+        {embedded ? (
+          <h3 className="text-sm font-semibold text-slate-900">Способы входа</h3>
+        ) : (
+          <h2
+            id="tutor-login-providers-heading"
+            className="text-[14px] font-semibold text-slate-900"
+          >
+            Способы входа
+          </h2>
+        )}
       </div>
       <p className="mt-1 text-sm text-slate-500">
         Привяжи Google или Telegram, чтобы заходить без email и пароля.
@@ -346,7 +356,7 @@ export function LoginProvidersSection() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </Wrapper>
   );
 }
 

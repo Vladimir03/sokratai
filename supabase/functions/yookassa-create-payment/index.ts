@@ -341,6 +341,11 @@ Deno.serve(async (req) => {
       confirmation: {
         type: confirmationType, // embedded = widget in DOM, redirect = open in new tab (better for webviews/3DS)
         return_url: returnUrl,
+        // Форсим русский язык платёжной формы. Без явного locale виджет ЮKassa
+        // берёт язык устройства покупателя → на англоязычном девайсе форма была
+        // на английском (репорт Vladimir 2026-07-02). Общий для ученика и
+        // репетитора — оба сегмента русскоязычные.
+        locale: "ru_RU",
       },
       capture: true,
       description,
