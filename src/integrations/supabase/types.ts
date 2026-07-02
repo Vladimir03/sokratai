@@ -2509,6 +2509,7 @@ export type Database = {
           currency: string
           id: string
           idempotency_key: string | null
+          plan: string | null
           status: string
           subscription_activated_at: string | null
           subscription_days: number
@@ -2523,6 +2524,7 @@ export type Database = {
           currency?: string
           id: string
           idempotency_key?: string | null
+          plan?: string | null
           status?: string
           subscription_activated_at?: string | null
           subscription_days?: number
@@ -2537,6 +2539,7 @@ export type Database = {
           currency?: string
           id?: string
           idempotency_key?: string | null
+          plan?: string | null
           status?: string
           subscription_activated_at?: string | null
           subscription_days?: number
@@ -3742,6 +3745,30 @@ export type Database = {
         }
         Relationships: []
       }
+      tutor_plan_expiry_reminder_log: {
+        Row: {
+          channel: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          channel?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          channel?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       tutor_reminder_settings: {
         Row: {
           created_at: string | null
@@ -4782,6 +4809,7 @@ export type Database = {
       }
       tutor_get_invite_code: { Args: never; Returns: string }
       tutor_ids_with_due_lessons: { Args: never; Returns: string[] }
+      tutor_intro_price_available: { Args: never; Returns: boolean }
       tutor_received_payments_summary: {
         Args: { _from?: string; _student_id?: string; _to?: string }
         Returns: Json
@@ -4865,6 +4893,10 @@ export type Database = {
       update_user_stats_on_solve: {
         Args: { p_is_correct: boolean; p_user_id: string }
         Returns: undefined
+      }
+      yookassa_activate_subscription: {
+        Args: { p_payment_id: string }
+        Returns: Json
       }
     }
     Enums: {
