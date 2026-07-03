@@ -56,6 +56,7 @@ const Practice = lazy(() => import("./pages/Practice"));
 const Diagnostic = lazy(() => import("./pages/Diagnostic"));
 const TrainerPage = lazy(() => import("./pages/TrainerPage"));
 const RegisterTutor = lazy(() => import("./pages/RegisterTutor"));
+const EgorLanding = lazy(() => import("./pages/EgorLanding"));
 const TutorHome = lazy(() => import("./pages/tutor/TutorHome"));
 const TutorSchedule = lazy(() => import("./pages/tutor/TutorSchedule"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
@@ -142,6 +143,14 @@ const App = () => (
               }
             />
             <Route path="/tutors" element={<Navigate to="/" replace />} />
+            <Route
+              path="/egor"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <EgorLanding />
+                </Suspense>
+              }
+            />
             <Route
               path="/login"
               element={
