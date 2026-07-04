@@ -1245,6 +1245,7 @@ export type Database = {
       }
       homework_tutor_tasks: {
         Row: {
+          ai_reference_solution: Json | null
           assignment_id: string
           cefr_level: string | null
           check_format: string
@@ -1265,6 +1266,7 @@ export type Database = {
           task_text: string
         }
         Insert: {
+          ai_reference_solution?: Json | null
           assignment_id: string
           cefr_level?: string | null
           check_format?: string
@@ -1285,6 +1287,7 @@ export type Database = {
           task_text: string
         }
         Update: {
+          ai_reference_solution?: Json | null
           assignment_id?: string
           cefr_level?: string | null
           check_format?: string
