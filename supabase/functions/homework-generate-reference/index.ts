@@ -67,11 +67,13 @@ function parseStorageRef(ref: string | null | undefined): ParsedRef | null {
 }
 
 async function createSignedUrl(db: SupabaseClient, ref: string | null): Promise<string | null> {
+  // SSRF guard (review fix P1 #5): принимаем ТОЛЬКО storage://bucket/path.
+  // `task_image_url` tutor-controlled, а валидатор create/update его не ограничивает
+  // storage:// → произвольный http(s) здесь = server-side SSRF из edge с
+  // service-role. Резолвим только storage-ref в подписанный Supabase URL
+  // (inlineImageUrlToBase64 сам rewriteToDirect).
   const parsed = parseStorageRef(ref);
-  if (!parsed) {
-    if (typeof ref === "string" && ref.startsWith("https://")) return ref;
-    return null;
-  }
+  if (!parsed) return null;
   const { data, error } = await db.storage
     .from(parsed.bucket)
     .createSignedUrl(parsed.path, SIGNED_URL_TTL_SEC);
@@ -239,18 +241,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const eligible = ((tasks ?? []) as TaskRow[]).filter(isEligibleTask);
   if (eligible.length === 0) return json(200, { ok: true, generated: 0 });
 
-  // Claim (best-effort idempotency vs concurrent triggers): mark pending
-  // only rows currently NULL/failed. Tutor-view then shows «генерируется».
+  // Authoritative claim (review fix P1 #4): атомарно флипаем null/failed → pending
+  // и получаем ТОЛЬКО реально захваченные строки. Конкурентный триггер увидит их
+  // уже 'pending' (row-lock сериализует UPDATE ... WHERE) → получит disjoint set.
+  // Цикл идёт по claimed, не по устаревшему eligible.
   const eligibleIds = eligible.map((t) => t.id);
-  await db
+  const { data: claimed, error: claimErr } = await db
     .from("homework_tutor_tasks")
     .update({ ai_reference_status: "pending" })
     .in("id", eligibleIds)
-    .or("ai_reference_status.is.null,ai_reference_status.eq.failed");
+    .or("ai_reference_status.is.null,ai_reference_status.eq.failed")
+    .select("id, task_text, task_image_url, max_score, kim_number");
+  if (claimErr) return json(500, { error: "claim_failed" });
+  const claimedRows = (claimed ?? []) as unknown as TaskRow[];
+  if (claimedRows.length === 0) return json(200, { ok: true, generated: 0 });
 
   let generated = 0;
   let failed = 0;
-  for (const task of eligible) {
+  for (const task of claimedRows) {
     try {
       const ref = await generateReferenceForTask(db, assignment, task);
       if (!ref) throw new Error("empty_reference");
@@ -262,7 +270,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
           ai_reference_status: "ready",
           ai_reference_generated_at: new Date().toISOString(),
         })
-        .eq("id", task.id);
+        .eq("id", task.id)
+        .eq("ai_reference_status", "pending"); // guard: не перетираем чужой ready
       generated++;
     } catch (err) {
       failed++;
@@ -273,7 +282,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await db
         .from("homework_tutor_tasks")
         .update({ ai_reference_status: "failed", ai_reference_generated_at: new Date().toISOString() })
-        .eq("id", task.id);
+        .eq("id", task.id)
+        .eq("ai_reference_status", "pending"); // guard: не откатываем ready→failed
     }
   }
 
