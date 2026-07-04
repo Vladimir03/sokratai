@@ -619,5 +619,26 @@ if (loneBackslashHits.length > 0) {
 }
 ok(`trainer v1 formula LaTeX escaping clean (${egorLines.length} lines scanned)`);
 
+// ─── 12. Physics ФИПИ flowchart walker (strict-criteria-grading Phase 3) ─────
+// Балл Часть 2 (№ 21-26) считается КОДОМ по блок-схемам ФИПИ (подтверждены
+// Егором), не моделью. Guards развязку узлов + ключевой кейс адиабаты
+// (потеряна Δ в преобразованиях → 2/3, не 3). Subprocess (async + esbuild).
+console.log("");
+console.log("12. Physics ФИПИ flowchart walker (Часть 2 № 21-26)...");
+const physicsFlowTestPath = path.join(rootDir, "scripts", "test-physics-flowcharts.mjs");
+if (!fs.existsSync(physicsFlowTestPath)) {
+  fail("scripts/test-physics-flowcharts.mjs missing — flowchart walker unguarded");
+}
+const physicsFlowResult = spawnSync(process.execPath, [physicsFlowTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (physicsFlowResult.status !== 0) {
+  console.error(physicsFlowResult.stdout ?? "");
+  console.error(physicsFlowResult.stderr ?? "");
+  fail("physics flowchart walker FAILED — see node:test output above");
+}
+ok("physics ФИПИ flowchart walker pass (№ 21-26 tiers + adiabatic Δ → 2/3)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");
