@@ -23,6 +23,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.homework-api]
     verify_jwt = false
+  [functions.homework-generate-reference]
+    verify_jwt = false
   [functions.homework-reminder]
     verify_jwt = false
   [functions.invite-preview]

@@ -39,6 +39,33 @@ const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
 
+/**
+ * Fire-and-forget: фоновая генерация AI-эталона решения задач ДЗ
+ * (strict-criteria-grading Phase 3 / Phase A). НЕ ждём и НЕ валим create/update
+ * при сбое. Функция `homework-generate-reference` сама фильтрует eligible задачи
+ * (физика, развёрнутые, без tutor solution_text, без готового эталона). Если она
+ * ещё не задеплоена — fetch свалится молча (как mock-exam-grade). Паттерн:
+ * un-awaited fetch к отдельной edge-функции (rule 95, EdgeRuntime.waitUntil не
+ * используется в кодовой базе).
+ */
+function enqueueReferenceGeneration(assignmentId: string): void {
+  try {
+    fetch(`${SUPABASE_URL}/functions/v1/homework-generate-reference`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+      },
+      body: JSON.stringify({ assignment_id: assignmentId }),
+    }).catch((err) => {
+      console.warn("hw_reference_enqueue_failed", { error: String(err) });
+    });
+  } catch (err) {
+    console.warn("hw_reference_enqueue_throw", { error: String(err) });
+  }
+}
+
 const VALID_SUBJECTS_CREATE = [
   "maths", "physics", "informatics",
   "russian", "literature", "history", "social",
@@ -952,6 +979,9 @@ async function handleCreateAssignment(
     { tutor_id: tutorId },
   );
 
+  // Phase A: фоновая генерация AI-эталона (физика — фильтрует сама функция).
+  enqueueReferenceGeneration(assignment.id as string);
+
   return jsonOk(cors, { assignment_id: assignment.id }, 201);
 }
 
@@ -1261,7 +1291,7 @@ async function handleGetAssignment(
 
   const { data: tasks } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -1969,6 +1999,10 @@ async function handleUpdateAssignment(
     tutor_id: tutorUserId,
     assignment_id: assignmentId,
   });
+
+  // Phase A: (ре)генерация AI-эталона для новых/failed задач (фильтрует функция).
+  enqueueReferenceGeneration(assignmentId);
+
   return jsonOk(cors, { ok: true });
 }
 

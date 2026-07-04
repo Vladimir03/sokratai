@@ -55,6 +55,7 @@ jobs:
           supabase functions deploy homework-api --project-ref "$REF"
           supabase functions deploy push-subscribe --project-ref "$REF"
           supabase functions deploy homework-reminder --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy homework-generate-reference --project-ref "$REF" --no-verify-jwt
           supabase functions deploy tutor-plan-expiry-reminder --project-ref "$REF" --no-verify-jwt
           supabase functions deploy yookassa-create-payment --project-ref "$REF"
           supabase functions deploy yookassa-webhook --project-ref "$REF" --no-verify-jwt
