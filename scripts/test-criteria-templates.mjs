@@ -169,9 +169,21 @@ test("grading_discipline: russian essay № 27 numeric → null (numeric gate)",
 test("grading_discipline: russian non-essay № 8 → null (not calibrated)", () => {
   assert.equal(gradingDiscipline("russian", 8, "extended"), null);
 });
-for (const subject of ["physics", "maths", "chemistry", "french", "english"]) {
+// Phase 2 (2026-06-30): физика Часть 2 (развёрнутая, № 21-26) откалибрована →
+// non-empty. Numeric физика (Часть 1 № 1-20) → null через гейт.
+for (const kim of [21, 22, 24, 26]) {
+  test(`grading_discipline: physics № ${kim} (extended) → non-empty clause`, () => {
+    const clause = gradingDiscipline("physics", kim, "extended");
+    assert.ok(typeof clause === "string" && clause.length > 0, `physics № ${kim} must carry strict clause`);
+    assert.match(clause, /СТРОГ/i, "clause mentions строгость");
+  });
+}
+test("grading_discipline: physics numeric (Часть 1) → null (numeric gate)", () => {
+  assert.equal(gradingDiscipline("physics", 5, "numeric"), null);
+});
+for (const subject of ["maths", "chemistry", "french", "english"]) {
   test(`grading_discipline: ${subject} → null (not calibrated yet)`, () => {
-    assert.equal(gradingDiscipline(subject, subject === "physics" ? 21 : null, "extended"), null);
+    assert.equal(gradingDiscipline(subject, null, "extended"), null);
   });
 }
 
