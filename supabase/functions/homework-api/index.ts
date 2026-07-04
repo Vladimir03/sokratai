@@ -1324,13 +1324,23 @@ async function handleGetAssignment(
   if (assignmentOrErr instanceof Response) return assignmentOrErr;
   const assignment = assignmentOrErr;
 
-  const { data: tasks } = await db
+  // НЕ глотать error (rule 45, инцидент 2026-07-04): проглоченный
+  // «column does not exist» превращался в tasks=[] → «В задании нет задач»
+  // во всех ДЗ. Схема-дрейф должен падать громко, не тихо пустеть.
+  const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
     .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
+  if (tasksError) {
+    console.error("homework_api_get_assignment_tasks_error", {
+      assignment_id: assignmentId,
+      error: tasksError.message,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить задачи задания");
+  }
 
-  const { data: kbTaskLinks } = await db
+  const { data: kbTaskLinks, error: kbTaskLinksError } = await db
     .from("homework_kb_tasks")
     .select(`
       task_id,
@@ -1345,6 +1355,14 @@ async function handleGetAssignment(
       )
     `)
     .eq("homework_id", assignmentId);
+  if (kbTaskLinksError) {
+    // KB-провенанс — декоративный слой (бейджи «из БЗ»): логируем и
+    // продолжаем без него, задачи ДЗ важнее.
+    console.error("homework_api_get_assignment_kb_links_error", {
+      assignment_id: assignmentId,
+      error: kbTaskLinksError.message,
+    });
+  }
 
   const kbProvenanceBySortOrder = new Map<number, {
     kb_task_id: string | null;
