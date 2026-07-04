@@ -28,6 +28,8 @@ import {
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
+import { physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
+import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_shared/physics-node-prompt.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -241,6 +243,8 @@ export interface EvaluateStudentAnswerParams {
   solutionText?: string | null;
   /** Эталонное решение (фото). До 5. Inline-ятся в base64 через inlinePromptImageUrls. */
   solutionImageUrls?: string[] | null;
+  /** AI-эталон решения (Phase 3/A, tutor-only). Реф для физ-Часть-2 узел-грейдинга; побеждает при наличии, иначе solutionText. */
+  aiReferenceSolution?: string | null;
   subject: string;
   /** ЕГЭ/ОГЭ — passed to subject-rubric resolver. Defaults to 'ege'. */
   examType?: ExamType | null;
@@ -2111,6 +2115,127 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
+/** Безопасный физ-feedback, когда AI-feedback пуст или заскрабблен за leak. */
+function defaultPhysicsFeedback(verdict: GuidedVerdict): string {
+  if (verdict === "CORRECT") {
+    return "Верно! Решение оформлено правильно по элементам ФИПИ.";
+  }
+  if (verdict === "INCORRECT") {
+    return "Решение пока не засчитано. Проверь по шагам: записаны ли исходные законы/формулы, введены ли обозначения новых величин, верны ли преобразования и есть ли единицы измерения в ответе.";
+  }
+  return "Ты на верном пути, но по критериям ФИПИ не хватает части. Проверь запись исходных законов, обозначения новых величин, преобразования и единицы измерения в ответе.";
+}
+
+/**
+ * strict-criteria-grading Phase 3 / Phase B: грейдинг развёрнутой физики Часть 2
+ * (№ 21-26). AI выносит СУЖДЕНИЯ по узлам блок-схемы ФИПИ (сравнивая решение
+ * ученика с эталоном), а БАЛЛ считает КОД (`walkPhysicsFlowchart`) —
+ * детерминированно, модели балл НЕ доверяется (зеркало русского cascade).
+ * Возвращает тот же GuidedCheckResult, что холистический путь. Изображения уже
+ * резолвнуты (data: URL) вызывающим (evaluateStudentAnswer).
+ */
+async function evaluatePhysicsPart2(
+  params: EvaluateStudentAnswerParams,
+  taskImageUrls: string[],
+  studentImageUrls: string[],
+  solutionImageUrls: string[],
+): Promise<GuidedCheckResult> {
+  const kim = params.kimNumber ?? null;
+  if (kim == null) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+
+  const rubric = resolveSubjectRubric({
+    subject: "physics",
+    exam_type: params.examType,
+    kim_number: kim,
+    task_kind: "extended",
+    task_text: params.taskText,
+    tutor_rubric: params.rubricText,
+  });
+  const reference = params.aiReferenceSolution?.trim() || params.solutionText?.trim() || null;
+
+  const systemContent = buildPhysicsNodeSystemContent({
+    kim,
+    role: rubric.role,
+    methodology: rubric.methodology,
+    reference,
+    maxScore: params.maxScore,
+  });
+  if (!systemContent) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+
+  const userParts: Array<LovableTextPart | LovableImagePart> = [];
+  const condLabel = taskImageUrls.length > 0 ? "Условие задачи (текст + фото):" : "Условие задачи:";
+  userParts.push({ type: "text", text: `${condLabel} ${clampPromptText(params.taskText)}` });
+  for (const url of taskImageUrls) userParts.push({ type: "image_url", image_url: { url } });
+  if (solutionImageUrls.length > 0) {
+    userParts.push({ type: "text", text: "Эталон (фото — для сверки, не показывай ученику):" });
+    for (const url of solutionImageUrls) userParts.push({ type: "image_url", image_url: { url } });
+  }
+  userParts.push({
+    type: "text",
+    text: `Решение ученика: ${params.studentAnswer?.trim() || "(см. фото решения)"}`,
+  });
+  for (const url of studentImageUrls) userParts.push({ type: "image_url", image_url: { url } });
+
+  const messages: LovableMessage[] = [
+    { role: "system", content: systemContent },
+    { role: "user", content: userParts },
+  ];
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = await callLovableJson(messages, "guided_check_physics_nodes");
+  } catch (err) {
+    console.warn("guided_check_physics_call_failed", {
+      kim,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+  }
+
+  const sane = sanitizePhysicsJudgments(parsed, kim);
+  if (!sane) {
+    console.warn("guided_check_physics_parse_failed", { kim });
+    return { ...CHECK_FALLBACK, failure_reason: "invalid_json" };
+  }
+
+  const walk = walkPhysicsFlowchart(kim, sane.judgments);
+  if (!walk) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+
+  // Балл: шкала блок-схемы → шкала задачи (обычно совпадают: max_score = ФИПИ max).
+  const mapped = walk.maxScore > 0
+    ? Math.round((walk.score / walk.maxScore) * params.maxScore * 10) / 10
+    : walk.score;
+  const aiScore = Math.max(0, Math.min(params.maxScore, mapped));
+  const isFull = walk.score >= walk.maxScore;
+  const verdict: GuidedVerdict = isFull ? "CORRECT" : walk.score <= 0 ? "INCORRECT" : "ON_TRACK";
+
+  // Анти-спойлер (physics → token-detector по числам/формулам эталона).
+  let feedback = sane.feedback || defaultPhysicsFeedback(verdict);
+  if (reference && outputContainsSolutionLeak(feedback, reference, params.taskText)) {
+    console.warn(JSON.stringify({ event: "check_physics_feedback_leak_scrubbed", kim }));
+    feedback = defaultPhysicsFeedback(verdict);
+  }
+
+  // ai_score_comment — tutor-only (strip'ается ученику): сводка по трассе.
+  const failedNodes = walk.trace.filter((s) => s.verdict !== "yes").map((s) => s.node);
+  const aiScoreComment = aiScore < params.maxScore
+    ? `Балл по блок-схеме ФИПИ: ${walk.score}/${walk.maxScore}.` +
+      (failedNodes.length > 0 ? ` Не выполнено/частично: ${failedNodes.join("; ")}.` : "")
+    : null;
+
+  const errorType: HomeworkAiErrorType = isFull ? "correct" : walk.score <= 0 ? "concept" : "partial";
+
+  return {
+    verdict,
+    feedback,
+    confidence: sane.confidence,
+    error_type: errorType,
+    ai_score: aiScore,
+    ai_score_comment: aiScoreComment,
+    criteria_breakdown: null, // трасса-таблица — Phase C
+  };
+}
+
 export async function evaluateStudentAnswer(
   params: EvaluateStudentAnswerParams,
 ): Promise<GuidedCheckResult> {
@@ -2220,6 +2345,17 @@ export async function evaluateStudentAnswer(
           "Не удалось загрузить картинку с условием задачи. Это техническая проблема — попробуй ещё раз через минуту. Баллы не списаны.",
         failure_reason: "task_image_missing",
       };
+    }
+
+    // strict-criteria-grading Phase 3 / Phase B: физика Часть 2 (№21-26 развёрнутая)
+    // → узел-грейдинг по блок-схеме ФИПИ (балл считает КОД). Прочие предметы/
+    // numeric/generic-физика (physicsFlowchartKind=null) идут холистическим путём.
+    if (
+      params.subject === "physics" &&
+      (params.taskKind === "extended" || params.taskKind === "proof") &&
+      physicsFlowchartKind(params.kimNumber) !== null
+    ) {
+      return await evaluatePhysicsPart2(params, taskImageUrls, studentImageUrls, solutionImageUrls);
     }
 
     const messages = buildCheckPrompt({

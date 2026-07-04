@@ -640,5 +640,25 @@ if (physicsFlowResult.status !== 0) {
 }
 ok("physics ФИПИ flowchart walker pass (№ 21-26 tiers + adiabatic Δ → 2/3)");
 
+// ─── 13. Physics node-prompt sanitizer (strict-criteria-grading Phase B) ─────
+// Санитайзер AI-узлов-суждений → типизированные judgments (коэрсинг) + связка
+// узлы→walker (адиабата Δ→2/3) + чеклист №26 в системном промпте. Subprocess.
+console.log("");
+console.log("13. Physics node-prompt sanitizer (Часть 2 узлы)...");
+const physicsNodeTestPath = path.join(rootDir, "scripts", "test-physics-node-prompt.mjs");
+if (!fs.existsSync(physicsNodeTestPath)) {
+  fail("scripts/test-physics-node-prompt.mjs missing — node sanitizer unguarded");
+}
+const physicsNodeResult = spawnSync(process.execPath, [physicsNodeTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (physicsNodeResult.status !== 0) {
+  console.error(physicsNodeResult.stdout ?? "");
+  console.error(physicsNodeResult.stderr ?? "");
+  fail("physics node-prompt sanitizer FAILED — see node:test output above");
+}
+ok("physics node-prompt sanitizer pass (judgments coercion + node→walker)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

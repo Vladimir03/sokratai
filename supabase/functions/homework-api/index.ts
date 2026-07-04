@@ -8300,6 +8300,9 @@ async function runStudentAnswerGrading(args: {
     cefr_level?: string | null;
     /** Criteria-grading feature (2026-06): tutor structured criteria (any subject). */
     grading_criteria_json?: unknown;
+    /** Phase 3/A: AI-эталон решения (tutor-only) + статус генерации. Реф для физ-Часть-2 узел-грейдинга. */
+    ai_reference_solution?: string | null;
+    ai_reference_status?: string | null;
   };
   assignment: {
     subject: string | null;
@@ -8359,6 +8362,20 @@ async function runStudentAnswerGrading(args: {
   const studentName = studentIdentity.name;
   const studentGender = studentIdentity.gender;
 
+  // Phase 3/B lazy backstop: физ-Часть-2 (№21-26 развёрнутая) без готового
+  // эталона → фоновая генерация для СЛЕДУЮЩИХ учеников (покрывает HWDrawer path B
+  // и сбой eager fire-and-forget). Текущий грейдинг идёт без эталона (узлы судятся
+  // по собственному решению AI). Не ждём — non-blocking.
+  if (
+    assignment.subject === "physics" &&
+    (task.task_kind === "extended" || task.task_kind === "proof") &&
+    typeof task.kim_number === "number" && task.kim_number >= 21 && task.kim_number <= 26 &&
+    task.ai_reference_status !== "ready" && task.ai_reference_status !== "pending" &&
+    !(typeof task.solution_text === "string" && task.solution_text.trim().length > 0)
+  ) {
+    enqueueReferenceGeneration(studentAssignment.assignment_id);
+  }
+
   // Call AI evaluation
   const totalTasks = tasks.length;
   const result = await evaluateStudentAnswer({
@@ -8374,6 +8391,7 @@ async function runStudentAnswerGrading(args: {
     rubricImageUrls,
     solutionText: task.solution_text,
     solutionImageUrls,
+    aiReferenceSolution: typeof task.ai_reference_solution === "string" ? task.ai_reference_solution : null,
     subject: assignment.subject ?? "math",
     // Phase 2 (2026-05-15) subject-rubric resolver inputs.
     examType: (assignment.exam_type === "oge" || assignment.exam_type === "ege")
@@ -8708,7 +8726,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_status")
     .eq("id", currentState.task_id)
     .single();
 
@@ -8928,7 +8946,7 @@ async function handleStudentSubmission(
   // 5. Load target task (full SELECT — grading needs solution/rubric).
   const { data: task, error: taskError } = await db
     .from("homework_tutor_tasks")
-    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json")
+    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_status")
     .eq("id", taskId)
     .maybeSingle();
   if (taskError) {
