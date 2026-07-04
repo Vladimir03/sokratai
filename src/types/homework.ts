@@ -303,6 +303,15 @@ export interface HomeworkTaskState {
    * `evaluateStudentAnswer`). Visible to student post-submit.
    */
   ai_criteria_json?: HomeworkAiCriteriaItem[] | null;
+  /**
+   * strict-criteria-grading Phase C (2026-07-04): physics Часть 2 ФИПИ
+   * flowchart trace — a DECISION PATH (not a sum-table like ai_criteria_json).
+   * Non-null ONLY for развёрнутая physics № 21-26. The score is computed
+   * deterministically by the walker (`walkPhysicsFlowchart`); nodes are
+   * positive-polarity (verdict `yes` = criterion satisfied → ✓/⚠/✗ UI).
+   * Visible to student post-submit. Mutually exclusive with `ai_criteria_json`.
+   */
+  ai_nodes_json?: HomeworkFlowchartTrace | null;
 }
 
 /**
@@ -332,6 +341,38 @@ export interface HomeworkAiCriteriaItem {
   kind?: 'ai' | 'tutor_only';
 }
 
+/**
+ * strict-criteria-grading Phase C (2026-07-04): one node of the physics Часть 2
+ * ФИПИ flowchart trace. Persisted inside
+ * `homework_tutor_task_states.ai_nodes_json.steps`. Rendered by
+ * `PhysicsFlowchartTrace`. Positive polarity: `verdict='yes'` = criterion
+ * satisfied (green ✓), `partial` = amber ⚠, `no` = rose ✗.
+ */
+export interface HomeworkFlowchartStep {
+  /** Node label, phrased as a satisfied-or-not criterion. */
+  node: string;
+  verdict: 'yes' | 'no' | 'partial';
+  /** Optional AI note (e.g. «потеряна Δ в ΔU=3/2·pV»). Usually absent. */
+  note?: string;
+}
+
+/**
+ * Physics Часть 2 flowchart trace — the deterministic walker result for visual
+ * display (student + tutor). Distinct from `HomeworkAiCriteriaItem[]`
+ * (`ai_criteria_json`, a sum-of-criteria table for languages): here the score
+ * is a decision-tree OUTCOME, not a sum of node scores. NULL for
+ * non-physics-Часть-2 grading (languages / numeric / other).
+ */
+export interface HomeworkFlowchartTrace {
+  /** ФИПИ-scale score from the walker. */
+  score: number;
+  /** ФИПИ-scale max (3 for №21/24-25, 2 for №22-23, 4 for №26). */
+  max_score: number;
+  /** Node-judgment confidence 0..1 (tutor may surface a low-confidence hint). */
+  confidence: number;
+  steps: HomeworkFlowchartStep[];
+}
+
 // Phase 3: API response types
 
 export interface CheckAnswerResponse {
@@ -354,6 +395,11 @@ export interface CheckAnswerResponse {
    * grading call. NULL for non-language / numeric tasks.
    */
   criteria_breakdown?: HomeworkAiCriteriaItem[] | null;
+  /**
+   * strict-criteria-grading Phase C: physics flowchart trace echo (mirror of
+   * `HomeworkTaskState.ai_nodes_json` after grading). NULL for non-physics.
+   */
+  flowchart_trace?: HomeworkFlowchartTrace | null;
 }
 
 export interface RequestHintResponse {

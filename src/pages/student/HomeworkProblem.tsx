@@ -33,6 +33,7 @@ import GuidedChatMessage, { type GuidedMessageData } from '@/components/homework
 import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
 } from '@/components/homework/CriteriaBreakdownTable';
+import PhysicsFlowchartTrace from '@/components/homework/PhysicsFlowchartTrace';
 import { TypingDots } from '@/components/student/homework-problem/TypingDots';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 import { useStudentProblemTask } from '@/hooks/useStudentProblemTask';
@@ -1689,6 +1690,17 @@ export default function HomeworkProblem() {
             <CriteriaBreakdownTable
               criteria={currentTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
             />
+          </div>
+        ) : null}
+        {/* strict-criteria-grading Phase C (2026-07-04): physics Часть 2 ФИПИ
+            flowchart trace. Mutually exclusive with the criteria table above
+            (physics leaves ai_criteria_json null). Same ref'd scroll target so
+            the completed-task effect reveals it. */}
+        {!Array.isArray(currentTaskState?.ai_criteria_json) &&
+        Array.isArray(currentTaskState?.ai_nodes_json?.steps) &&
+        currentTaskState!.ai_nodes_json!.steps.length > 0 ? (
+          <div ref={criteriaRef}>
+            <PhysicsFlowchartTrace trace={currentTaskState!.ai_nodes_json!} />
           </div>
         ) : null}
       </div>

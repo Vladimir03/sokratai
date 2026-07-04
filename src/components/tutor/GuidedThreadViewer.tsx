@@ -29,6 +29,7 @@ import GuidedChatMessage from '@/components/homework/GuidedChatMessage';
 import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
 } from '@/components/homework/CriteriaBreakdownTable';
+import PhysicsFlowchartTrace from '@/components/homework/PhysicsFlowchartTrace';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { reviewTask } from '@/lib/tutorProgressApi';
 import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
@@ -790,6 +791,19 @@ export function GuidedThreadViewer({
                   selectedTaskState!.ai_criteria_json!.length > 0 ? (
                     <CriteriaBreakdownTable
                       criteria={selectedTaskState!.ai_criteria_json as CriteriaBreakdownItem[]}
+                    />
+                  ) : null}
+
+                  {/* strict-criteria-grading Phase C (2026-07-04): physics
+                      Часть 2 ФИПИ flowchart trace. Mutually exclusive with the
+                      criteria table above (physics leaves ai_criteria_json null).
+                      showConfidence → low-confidence hint for the tutor. */}
+                  {!Array.isArray(selectedTaskState?.ai_criteria_json) &&
+                  Array.isArray(selectedTaskState?.ai_nodes_json?.steps) &&
+                  selectedTaskState!.ai_nodes_json!.steps.length > 0 ? (
+                    <PhysicsFlowchartTrace
+                      trace={selectedTaskState!.ai_nodes_json!}
+                      showConfidence
                     />
                   ) : null}
 

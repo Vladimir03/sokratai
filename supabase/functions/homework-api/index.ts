@@ -66,6 +66,41 @@ function enqueueReferenceGeneration(assignmentId: string): void {
   }
 }
 
+/**
+ * Phase C (strict-criteria-grading, 2026-07-04): при правке существующей задачи
+ * возвращает поля для сброса кэша AI-эталона — НО ТОЛЬКО если реально изменилось
+ * условие (`task_text` / `task_image_url`) ИЛИ эталон репетитора (`solution_text`).
+ * Иначе стаёт баг: (а) условие поменяли, а эталон старый → грейдинг сверяет новое
+ * решение со старым эталоном; (б) тутор добавил своё решение, а stale AI-эталон
+ * побеждает его (reference-priority `aiReferenceSolution ?? solutionText`). После
+ * сброса `enqueueReferenceGeneration` перегенерирует eligible задачи (физика,
+ * развёрнутые, без tutor solution_text). Сравниваем ТОЛЬКО поля, реально
+ * присутствующие в `updateFields` (в partial-update ветке они условны).
+ */
+function referenceResetFieldsIfChanged(
+  stored: Record<string, unknown> | undefined,
+  updateFields: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!stored) return {};
+  const norm = (v: unknown) => (typeof v === "string" ? v.trim() : v == null ? "" : String(v));
+  const keys = ["task_text", "task_image_url", "solution_text"] as const;
+  let changed = false;
+  for (const k of keys) {
+    if (!(k in updateFields)) continue; // поле не пишется → не изменилось
+    if (norm(stored[k]) !== norm(updateFields[k])) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) return {};
+  return {
+    ai_reference_solution: null,
+    ai_reference_confidence: null,
+    ai_reference_status: null,
+    ai_reference_generated_at: null,
+  };
+}
+
 const VALID_SUBJECTS_CREATE = [
   "maths", "physics", "informatics",
   "russian", "literature", "history", "social",
@@ -1704,10 +1739,15 @@ async function handleUpdateAssignment(
 
     const { data: existingTasks } = await db
       .from("homework_tutor_tasks")
-      .select("id, order_num")
+      // Phase C: task_text/task_image_url/solution_text — для сравнения «до/после»
+      // и сброса кэша AI-эталона только при реальном изменении условия/решения.
+      .select("id, order_num, task_text, task_image_url, solution_text")
       .eq("assignment_id", assignmentId);
     const existingTaskRows = existingTasks ?? [];
     const existingIds = new Set(existingTaskRows.map((t) => t.id));
+    const existingTaskById = new Map(
+      existingTaskRows.map((t) => [t.id as string, t as Record<string, unknown>]),
+    );
     const maxCurrentOrder = Math.max(
       0,
       ...existingTaskRows.map((t) => (typeof t.order_num === "number" ? t.order_num : 0)),
@@ -1821,6 +1861,11 @@ async function handleUpdateAssignment(
           updateFields.grading_criteria_json = normalizeGradingCriteria(t.grading_criteria_json);
         }
 
+        // Phase C: сброс кэша AI-эталона при изменении условия/эталона (regen ниже).
+        Object.assign(
+          updateFields,
+          referenceResetFieldsIfChanged(existingTaskById.get(t.id as string), updateFields),
+        );
         const { error } = await db
           .from("homework_tutor_tasks")
           .update(updateFields)
@@ -1966,6 +2011,11 @@ async function handleUpdateAssignment(
           kim_number: normalizeKimNumber(t.kim_number),
           grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
         };
+        // Phase C: сброс кэша AI-эталона при изменении условия/эталона (regen ниже).
+        Object.assign(
+          updateFields,
+          referenceResetFieldsIfChanged(existingTaskById.get(entry.existingId as string), updateFields),
+        );
         const { error } = await db
           .from("homework_tutor_tasks")
           .update(updateFields)
@@ -7894,7 +7944,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, tutor_reviewed_at, tutor_reviewed_by, ai_criteria_json)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, tutor_reviewed_at, tutor_reviewed_by, ai_criteria_json, ai_nodes_json)
 `;
 
 /**
@@ -8483,6 +8533,18 @@ async function runStudentAnswerGrading(args: {
       ? renormalizeCriteriaToScore(rawCriteriaBreakdown, effectiveAiScore, maxScore)
       : rawCriteriaBreakdown;
 
+  // Phase C (strict-criteria-grading, 2026-07-04): physics Часть 2 flowchart
+  // trace → `ai_nodes_json` (student-visible). Distinct from criteria (decision
+  // path, not sum-table). No renormalization: physics sets `deterministic_score`
+  // so the confidence-downgrade above never fires → effectiveAiScore ===
+  // result.ai_score, and the walker score/max stay authoritative. NULL for
+  // languages / numeric / other (they use criteria_breakdown or neither).
+  const nodesJson =
+    result.flowchart_trace && Array.isArray(result.flowchart_trace.steps) &&
+      result.flowchart_trace.steps.length > 0
+      ? result.flowchart_trace
+      : null;
+
   // Save AI feedback message (caller-controlled kind: ai_reply for chat,
   // check_result for explicit submission so the submission flow gets a
   // semantically distinct verdict bubble).
@@ -8518,6 +8580,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       ai_criteria_json: criteriaBreakdown,
+      ai_nodes_json: nodesJson,
       best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
@@ -8533,6 +8596,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       criteria_breakdown: criteriaBreakdown,
+      flowchart_trace: nodesJson,
       earned_score: earnedScore,
       available_score: currentAvailableScore,
       max_score: maxScore,
@@ -8590,6 +8654,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       ai_criteria_json: criteriaBreakdown,
+      ai_nodes_json: nodesJson,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -8600,6 +8665,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       criteria_breakdown: criteriaBreakdown,
+      flowchart_trace: nodesJson,
       earned_score: null,
       available_score: onTrackAvailableScore,
       max_score: maxScore,
@@ -8626,6 +8692,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       ai_criteria_json: criteriaBreakdown,
+      ai_nodes_json: nodesJson,
       last_ai_feedback: result.feedback,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
@@ -8636,6 +8703,7 @@ async function runStudentAnswerGrading(args: {
       ai_score: effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       criteria_breakdown: criteriaBreakdown,
+      flowchart_trace: nodesJson,
       earned_score: null,
       available_score: newAvailableScore,
       max_score: maxScore,

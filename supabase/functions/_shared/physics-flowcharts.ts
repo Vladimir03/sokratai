@@ -86,9 +86,15 @@ export type PhysicsJudgments =
   | Calc26Judgments;
 
 export interface FlowchartTraceStep {
-  /** Человекочитаемое имя узла (для отображения). */
+  /**
+   * Человекочитаемое имя узла (для отображения). ВСЕ узлы сформулированы в
+   * ПОЛОЖИТЕЛЬНОЙ полярности («критерий выполнен?»), поэтому `verdict` единообразно:
+   * yes = выполнено (✓), partial = частично (⚠), no = не выполнено (✗). Это
+   * важно для UI-трассы (Phase C): нельзя иметь узел, где yes = плохо (напр.
+   * «Лишние записи: yes»), иначе зелёная галочка вводит в заблуждение.
+   */
   node: string;
-  /** Вердикт по узлу. */
+  /** Вердикт по узлу: yes = критерий выполнен, partial = частично, no = не выполнен. */
   verdict: "yes" | "no" | "partial";
   /** Опц. AI-комментарий: что именно не так (напр. «потеряна Δ в ΔU=3/2·pV»). */
   note?: string;
@@ -127,7 +133,7 @@ function walk21(j: Qualitative21Judgments): FlowchartResult {
       trace: [
         step("Верный ответ", "yes"),
         step("Полное объяснение", "yes"),
-        step("Ошибки в объяснении", j.has_errors ? "yes" : "no"),
+        step("Объяснение без ошибок", j.has_errors ? "no" : "yes"),
       ],
     };
   }
@@ -139,7 +145,7 @@ function walk21(j: Qualitative21Judgments): FlowchartResult {
     trace: [
       step("Верный ответ", "yes"),
       step("Полное объяснение", "no"),
-      step(missingOne ? "Не хватает 1 закона/явления" : "Не хватает 2+ законов/явлений", "yes"),
+      step("Все необходимые законы/явления приведены", missingOne ? "partial" : "no"),
     ],
   };
 }
@@ -179,7 +185,7 @@ function walk22_23(j: Calc22_23Judgments): FlowchartResult {
       step("Все формулы/законы", "yes"),
       step("Ответ, размерность", "yes"),
       step("Обозначения, преобразования, вычисления", "yes"),
-      step("Лишние записи", j.extra_records ? "yes" : "no"),
+      step("Нет лишних записей", j.extra_records ? "no" : "yes"),
     ],
   };
 }
@@ -216,7 +222,7 @@ function walk24_25(j: Calc24_25Judgments): FlowchartResult {
       maxScore,
       trace: [
         step("Все формулы/законы", "no"),
-        step("Ошибка в одной / нет одной формулы", "yes"),
+        step("Не более одной ошибки в формулах", "partial"),
         step("Преобразования", j.transforms_correct ? "yes" : "no"),
       ],
     };
@@ -226,7 +232,7 @@ function walk24_25(j: Calc24_25Judgments): FlowchartResult {
     maxScore,
     trace: [
       step("Все формулы/законы", "no"),
-      step("Ошибка в одной / нет одной формулы", "no"),
+      step("Не более одной ошибки в формулах", "no"),
     ],
   };
 }

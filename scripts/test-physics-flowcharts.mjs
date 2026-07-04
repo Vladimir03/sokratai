@@ -149,3 +149,57 @@ test("№26: НЕТ обоснования + расчёт 0 (нет формул
 test("№26: maxScore = 4", () => {
   assert.equal(walkPhysicsFlowchart(26, c26()).maxScore, 4);
 });
+
+// ─── Трасса: положительная полярность узлов (Phase C UI) ──────────────────────
+// Все узлы сформулированы как «критерий выполнен?» → yes=✓, partial=⚠, no=✗.
+// Регрессия-гард: ни один узел не должен иметь yes = «плохо» (иначе зелёная
+// галочка в UI-трассе вводит в заблуждение — напр. старое «Лишние записи: yes»).
+const trace = (kim, j) => walkPhysicsFlowchart(kim, j).trace;
+
+test("трасса: полный балл → ВСЕ узлы yes (№21/22-23/24-25/26)", () => {
+  for (const [kim, j] of [[21, q21()], [22, c2223()], [24, c2425()], [26, c26()]]) {
+    const t = trace(kim, j);
+    assert.ok(t.length > 0, `${kim}: пустая трасса`);
+    assert.ok(t.every((s) => s.verdict === "yes"), `${kim}: ${JSON.stringify(t)}`);
+  }
+});
+
+test("трасса: №22-23 лишние записи → «Нет лишних записей» = no (а не yes=плохо)", () => {
+  const node = trace(22, c2223({ extra_records: true })).find((s) => s.node.includes("лишних записей"));
+  assert.ok(node);
+  assert.equal(node.verdict, "no");
+});
+
+test("трасса: №21 есть ошибки → «Объяснение без ошибок» = no", () => {
+  const node = trace(21, q21({ has_errors: true })).find((s) => s.node.includes("без ошибок"));
+  assert.ok(node);
+  assert.equal(node.verdict, "no");
+});
+
+test("трасса: №21 не хватает 1 закона → «Все необходимые законы/явления приведены» = partial", () => {
+  const node = trace(21, q21({ full_explanation: false, missing_laws: 1 })).find((s) => s.node.includes("законы/явления приведены"));
+  assert.ok(node);
+  assert.equal(node.verdict, "partial");
+});
+
+test("трасса: №24-25 одна ошибка в формулах → узел = partial (не yes)", () => {
+  const node = trace(24, c2425({ all_formulas: false, only_one_formula_wrong_or_missing: true, transforms_correct: true }))
+    .find((s) => s.node.includes("одной ошибки в формулах"));
+  assert.ok(node);
+  assert.equal(node.verdict, "partial");
+});
+
+test("трасса: любой узел любого исхода имеет verdict ∈ {yes, partial, no}", () => {
+  const cases = [
+    [21, q21()], [21, q21({ has_errors: true })], [21, q21({ full_explanation: false, missing_laws: 2 })],
+    [21, q21({ correct_answer: false })],
+    [22, c2223()], [22, c2223({ extra_records: true })], [22, c2223({ all_formulas: false })],
+    [24, c2425()], [24, c2425({ all_formulas: false, only_one_formula_wrong_or_missing: false })],
+    [26, c26()], [26, c26({ justification_complete: false })],
+  ];
+  for (const [kim, j] of cases) {
+    for (const s of trace(kim, j)) {
+      assert.ok(["yes", "partial", "no"].includes(s.verdict), `${kim}: ${s.node} → ${s.verdict}`);
+    }
+  }
+});

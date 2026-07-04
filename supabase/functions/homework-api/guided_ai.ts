@@ -28,7 +28,7 @@ import {
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
-import { physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
+import { type FlowchartTraceStep, physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
 import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_shared/physics-node-prompt.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -204,6 +204,25 @@ export interface GuidedCriteriaItem {
   kind?: "ai" | "tutor_only";
 }
 
+/**
+ * strict-criteria-grading Phase C (2026-07-04): физика Часть 2 flowchart trace
+ * для визуального разбора (ученик + тутор). Балл считает КОД
+ * (`walkPhysicsFlowchart`) — здесь только путь по блок-схеме ФИПИ для отображения.
+ * Узлы в ПОЛОЖИТЕЛЬНОЙ полярности (yes = критерий выполнен → ✓/⚠/✗ в UI).
+ * Persisted в `homework_tutor_task_states.ai_nodes_json` (student-visible).
+ * NULL для не-физики-Часть-2 (языки → `criteria_breakdown`; numeric → оба null).
+ */
+export interface PhysicsFlowchartTracePayload {
+  /** Балл по блок-схеме ФИПИ (шкала схемы, обычно = max_score задачи). */
+  score: number;
+  /** Максимум по блок-схеме ФИПИ (3 для №21/24-25, 2 для №22-23, 4 для №26). */
+  max_score: number;
+  /** Уверенность модели в узлах-суждениях (0..1). */
+  confidence: number;
+  /** Узлы блок-схемы с вердиктами (для трассы). */
+  steps: FlowchartTraceStep[];
+}
+
 export interface GuidedCheckResult {
   verdict: GuidedVerdict;
   feedback: string;
@@ -217,6 +236,12 @@ export interface GuidedCheckResult {
    * See `GuidedCriteriaItem` for shape + invariant.
    */
   criteria_breakdown?: GuidedCriteriaItem[] | null;
+  /**
+   * Physics Часть 2 flowchart trace (Phase C). NON-null ТОЛЬКО для физики
+   * развёрнутой № 21-26 (детерминированный walker). Mutually exclusive с
+   * `criteria_breakdown`. См. `PhysicsFlowchartTracePayload`.
+   */
+  flowchart_trace?: PhysicsFlowchartTracePayload | null;
   failure_reason?: GuidedCheckFailureReason;
   /**
    * true → балл посчитан ДЕТЕРМИНИРОВАННО в коде (физика flowchart-walker), не
@@ -2250,7 +2275,16 @@ async function evaluatePhysicsPart2(
     error_type: errorType,
     ai_score: aiScore,
     ai_score_comment: aiScoreComment,
-    criteria_breakdown: null, // трасса-таблица — Phase C
+    criteria_breakdown: null, // языковой sum-table не применим к физике (см. flowchart_trace)
+    // Phase C: трасса блок-схемы для визуального разбора (ученик + тутор).
+    // Балл детерминирован (score/max_score = walker); узлы уже в положительной
+    // полярности (yes = выполнено). Персистится в ai_nodes_json (student-visible).
+    flowchart_trace: {
+      score: walk.score,
+      max_score: walk.maxScore,
+      confidence: sane.confidence,
+      steps: walk.trace,
+    },
     deterministic_score: true, // балл walker'а — НЕ понижать по confidence (review P0)
   };
 }
