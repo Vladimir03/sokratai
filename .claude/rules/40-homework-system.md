@@ -262,6 +262,25 @@ Spec: `docs/delivery/features/voice-speaking-mvp/spec.md`.
 - **Известный follow-up (#1, НЕ сделан):** `sanitizeCriteriaBreakdown` нормализует критерии ПОД холистический `ai_score` модели (не наоборот). Для строгой покритериальной — `ai_score` должен выводиться из Σ критериев. Трогает общую нормализацию (языки + `renormalizeCriteriaToScore` downgrade) → отдельная задача со своей валидацией.
 - **При расширении строгости на предмет:** добавь `grading_discipline` в его `*-ege.ts` (generic-клауза переиспользуема); НЕ инжектируй в hint/chat; numeric остаётся null.
 
+### Строгая физика Часть 2 — flowchart-грейдинг (Phase 3, 2026-06-30)
+
+Развёрнутая физика ЕГЭ Часть 2 (№ 21-26) грейдится **НЕ холистически**, а по блок-схемам ФИПИ. **ЯДРО-инвариант: AI судит УЗЛЫ блок-схемы (да/нет/частично), БАЛЛ считает КОД** `walkPhysicsFlowchart` — детерминированно, модели балл НЕ доверяется (зеркало русского cascade). Схемы подтверждены Егором. Spec: `docs/delivery/features/physics-flowchart-grading/spec.md`. Build-лог: memory `project_strict_criteria_grading_2026_06_29.md`.
+
+**Пайплайн:** эталон (`ai_reference_solution`, генерится фоново при create/update ДЗ, кэш на задаче, tutor-only) → узел-суждения (1 мультимодальный вызов, сравнение ученика с эталоном) → `walkPhysicsFlowchart(kim, judgments)` → балл + трасса → `GuidedCheckResult`.
+
+**Файлы:** `_shared/physics-flowcharts.ts` (`walkPhysicsFlowchart` + `*Judgments` типы + `physicsFlowchartKind`, чистый, тесты `test-physics-flowcharts.mjs` smoke §12) · `_shared/physics-node-prompt.ts` (`buildPhysicsNodeSystemContent` + `sanitizePhysicsJudgments` + чеклист обоснования №26, чистый, тесты `test-physics-node-prompt.mjs` smoke §13) · `guided_ai.ts::evaluatePhysicsPart2` + ветка в `evaluateStudentAnswer` · `homework-generate-reference` edge (solve+кэш) · миграции `20260630160000` (ai_reference_*) + `20260630170000` (column-GRANT).
+
+**Инварианты (НЕ нарушать):**
+- **Гейт ветки** (`evaluateStudentAnswer`, после инлайна картинок, перед `buildCheckPrompt`): `subject==="physics" && (taskKind==="extended"||"proof") && physicsFlowchartKind(kimNumber)!==null`. Всё остальное (numeric-физика Часть 1, физика без № 21-26, русский/языки/математика) → **холистический путь БЕЗ изменений**.
+- **`GuidedCheckResult.deterministic_score=true`** у физ-результата → `runStudentAnswerGrading` НЕ понижает балл по низкой confidence (иначе walker-балл 3/3 при low-confidence узлов + пустом `correct_answer` перетирался в 2.5 — review P0). Новый детерминированный путь → ставь этот флаг.
+- **Балл walker'а = ФИПИ-шкала** (№21/24-25/26 → 3/3/4, №22-23 → 2). Маппится на task `max_score` (обычно совпадают); mismatch → telemetry `physics_flowchart_max_score_mismatch`.
+- **Эталон tutor-only:** `ai_reference_solution` НЕ в student-SELECT + НЕ гранится authenticated (`20260630170000` column-GRANT). Tutor `solution_text` побеждает (AI не решает при наличии). Reference-priority: `aiReferenceSolution ?? solutionText ?? null`.
+- **Eager генерация** — fire-and-forget `enqueueReferenceGeneration` из `handleCreate/UpdateAssignment`; **ленивый бэкстоп** — при грейдинге если `ai_reference_status==null` (ТОЛЬКО null, не failed — иначе спам; покрывает HWDrawer path B). Reference-gen НЕ через `checkAiQuota`.
+- **Анти-спойлер:** `outputContainsSolutionLeak(feedback, reference, taskText)` (token-detector) → скраб в `defaultPhysicsFeedback`. `ai_score_comment` = сводка по трассе (tutor-only, strip'ается ученику).
+- **`criteria_breakdown=null`** — трасса-таблица (визуальный разбор по элементам ученику+тутору) = **Phase C, не сделано** (walker считает `trace`, но она пока только в `ai_score_comment`).
+
+**При расширении:** новый узел/схема → `physics-flowcharts.ts` (+ тест) + описание узла в `physics-node-prompt.ts`; balл — только код `walkPhysicsFlowchart` (не модель); новый детерминированный грейдинг-путь → `deterministic_score`; generic-физика (без № 21-26) → holistic fallback (осознанно). Phase C (трасса) + Phase D (eval на работах Егора) — отложены.
+
 ### Уровень CEFR языковых ДЗ — `cefr_level` (явный, форсит рубрику)
 
 Баг (репортер — Эмилия, FR/DELF, 2026-05-29): письменные работы ВСЕХ уровней проверялись по критериям **B1**. Причина: уровень определялся ТОЛЬКО эвристикой `cefr-detector.ts::detectCefrLevel` из `task_text` с **дефолтом B1**, поле «Критерии» не читалось, а во французской ветке вообще **не было A2-рубрики** (A2 проваливался в B1). Тот же класс, что speaking→oral: heuristic вместо explicit signal.
