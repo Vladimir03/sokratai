@@ -1,6 +1,6 @@
 # Физика Часть 2 — flowchart-driven AI grading (spec)
 
-**Статус:** Phase 3 в разработке (2026-06-30). Phase B walker + тесты — реализованы (`physics-flowcharts.ts`, `scripts/test-physics-flowcharts.mjs`, smoke §12). Осталось: Phase A (эталон+миграция), wiring node-prompt, Phase C (отображение), Phase D (eval). План: `~/.claude/plans/unified-dreaming-crane.md` (Phase 3).
+**Статус:** Phase 3 в разработке (2026-06-30). **Phase B walker + тесты** — готовы (`physics-flowcharts.ts`, `scripts/test-physics-flowcharts.mjs`, smoke §12). **Phase A эталон+миграция** — задеплоена (`5ef135e`): миграция `20260630160000`, edge `homework-generate-reference`, fire-and-forget из homework-api. Осталось: **B-wiring** (node-prompt AI→`*Judgments` + `walkPhysicsFlowchart` в грейдинг + №26 обоснование-чеклист в промпт + инвалидация эталона при правке текста), **C** (отображение трассы + tutor-view эталона), **D** (eval на работах Егора). План: `~/.claude/plans/unified-dreaming-crane.md` (Phase 3).
 
 ## Section 0 — Job Context
 Core Job (AJTBD wedge): репетитор делегирует AI рутинную проверку ДЗ, но должен **доверять** оценке настолько, чтобы не перепроверять каждую работу. Мягкая/неточная проверка Часть 2 (AI хвалил «21 задачу», пропускал `ΔU=3/2·pV` без Δ — скрин Всеволода) разрушает доверие. Job: «проверять развёрнутую физику ЕГЭ так же строго и по тем же критериям, как реальный эксперт ФИПИ / как сам репетитор».
