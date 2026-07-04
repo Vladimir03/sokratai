@@ -1141,6 +1141,7 @@ export type Database = {
       homework_tutor_task_states: {
         Row: {
           ai_criteria_json: Json | null
+          ai_nodes_json: Json | null
           ai_score: number | null
           ai_score_comment: string | null
           attempts: number
@@ -1170,6 +1171,7 @@ export type Database = {
         }
         Insert: {
           ai_criteria_json?: Json | null
+          ai_nodes_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
@@ -1199,6 +1201,7 @@ export type Database = {
         }
         Update: {
           ai_criteria_json?: Json | null
+          ai_nodes_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
@@ -1245,7 +1248,10 @@ export type Database = {
       }
       homework_tutor_tasks: {
         Row: {
-          ai_reference_solution: Json | null
+          ai_reference_confidence: string | null
+          ai_reference_generated_at: string | null
+          ai_reference_solution: string | null
+          ai_reference_status: string | null
           assignment_id: string
           cefr_level: string | null
           check_format: string
@@ -1266,7 +1272,10 @@ export type Database = {
           task_text: string
         }
         Insert: {
-          ai_reference_solution?: Json | null
+          ai_reference_confidence?: string | null
+          ai_reference_generated_at?: string | null
+          ai_reference_solution?: string | null
+          ai_reference_status?: string | null
           assignment_id: string
           cefr_level?: string | null
           check_format?: string
@@ -1287,7 +1296,10 @@ export type Database = {
           task_text: string
         }
         Update: {
-          ai_reference_solution?: Json | null
+          ai_reference_confidence?: string | null
+          ai_reference_generated_at?: string | null
+          ai_reference_solution?: string | null
+          ai_reference_status?: string | null
           assignment_id?: string
           cefr_level?: string | null
           check_format?: string
