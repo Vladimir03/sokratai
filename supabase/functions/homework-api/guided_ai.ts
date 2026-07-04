@@ -218,6 +218,13 @@ export interface GuidedCheckResult {
    */
   criteria_breakdown?: GuidedCriteriaItem[] | null;
   failure_reason?: GuidedCheckFailureReason;
+  /**
+   * true → балл посчитан ДЕТЕРМИНИРОВАННО в коде (физика flowchart-walker), не
+   * моделью. runStudentAnswerGrading НЕ понижает такой балл по низкой confidence
+   * (иначе walker-балл перетирался бы — review fix P0, 2026-06-30). Модель может
+   * вернуть low confidence по узлам, но САМ балл детерминирован.
+   */
+  deterministic_score?: boolean;
 }
 
 export interface GuidedHintResult {
@@ -2201,6 +2208,17 @@ async function evaluatePhysicsPart2(
   const walk = walkPhysicsFlowchart(kim, sane.judgments);
   if (!walk) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
 
+  // Телеметрия misconfig (review fix P2): tutor max_score ≠ ФИПИ max → пропор-
+  // циональный ремап даёт дробные баллы. Не блок (вердикт сохраняется), но surface.
+  if (params.maxScore !== walk.maxScore) {
+    console.warn(JSON.stringify({
+      event: "physics_flowchart_max_score_mismatch",
+      kim,
+      task_max: params.maxScore,
+      fipi_max: walk.maxScore,
+    }));
+  }
+
   // Балл: шкала блок-схемы → шкала задачи (обычно совпадают: max_score = ФИПИ max).
   const mapped = walk.maxScore > 0
     ? Math.round((walk.score / walk.maxScore) * params.maxScore * 10) / 10
@@ -2233,6 +2251,7 @@ async function evaluatePhysicsPart2(
     ai_score: aiScore,
     ai_score_comment: aiScoreComment,
     criteria_breakdown: null, // трасса-таблица — Phase C
+    deterministic_score: true, // балл walker'а — НЕ понижать по confidence (review P0)
   };
 }
 

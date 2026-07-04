@@ -8362,15 +8362,18 @@ async function runStudentAnswerGrading(args: {
   const studentName = studentIdentity.name;
   const studentGender = studentIdentity.gender;
 
-  // Phase 3/B lazy backstop: физ-Часть-2 (№21-26 развёрнутая) без готового
-  // эталона → фоновая генерация для СЛЕДУЮЩИХ учеников (покрывает HWDrawer path B
-  // и сбой eager fire-and-forget). Текущий грейдинг идёт без эталона (узлы судятся
-  // по собственному решению AI). Не ждём — non-blocking.
+  // Phase 3/B lazy backstop: физ-Часть-2 (№21-26 развёрнутая) БЕЗ эталона (status
+  // ещё null — никогда не генерился) → фоновая генерация для СЛЕДУЮЩИХ учеников
+  // (покрывает HWDrawer path B, где eager не фаерится). Текущий грейдинг идёт без
+  // эталона (узлы судятся по собственному решению AI). Non-blocking.
+  // Только null (review fix P1): 'failed' НЕ ретраим здесь (иначе спам на каждой
+  // сдаче) — failed переретраит eager-путь при следующей правке ДЗ (генератор
+  // клеймит null/failed → pending).
   if (
     assignment.subject === "physics" &&
     (task.task_kind === "extended" || task.task_kind === "proof") &&
     typeof task.kim_number === "number" && task.kim_number >= 21 && task.kim_number <= 26 &&
-    task.ai_reference_status !== "ready" && task.ai_reference_status !== "pending" &&
+    task.ai_reference_status == null &&
     !(typeof task.solution_text === "string" && task.solution_text.trim().length > 0)
   ) {
     enqueueReferenceGeneration(studentAssignment.assignment_id);
@@ -8428,9 +8431,17 @@ async function runStudentAnswerGrading(args: {
     studentGender,
   });
 
-  // Safety guard: without correct_answer, only trust high-confidence CORRECT
+  // Safety guard: without correct_answer, only trust high-confidence CORRECT.
+  // Исключение (review fix P0, 2026-06-30): физ-flowchart балл ДЕТЕРМИНИРОВАН
+  // (walkPhysicsFlowchart), НЕ понижаем его по confidence узлов — иначе walker-балл
+  // 3/3 при low-confidence + пустом correct_answer перетирался бы в 2.5.
   let effectiveVerdict = result.verdict;
-  if (effectiveVerdict === "CORRECT" && !task.correct_answer?.trim() && result.confidence < 0.7) {
+  if (
+    effectiveVerdict === "CORRECT" &&
+    !task.correct_answer?.trim() &&
+    result.confidence < 0.7 &&
+    !result.deterministic_score
+  ) {
     console.log("guided_check_downgrade_low_confidence", {
       taskId: task.id,
       confidence: result.confidence,
