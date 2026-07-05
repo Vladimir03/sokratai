@@ -6344,11 +6344,18 @@ async function handleSaveTasksToKB(
 //     fingerprint-дедуп) + relink провенанса. Ответ { forked: true }.
 // Классификацию (topic/subtopic/exam/difficulty) push НЕ трогает — снимок ДЗ
 // её не несёт, правится в Базе.
+const PUSH_TO_KB_DRAFT_FIELDS = [
+  "task_text", "task_image_url", "correct_answer", "max_score",
+  "rubric_text", "rubric_image_urls", "solution_text", "solution_image_urls",
+  "check_format", "task_kind", "cefr_level", "kim_number", "grading_criteria_json",
+] as const;
+
 async function handleTaskPushToKb(
   db: SupabaseClient,
   tutorUserId: string,
   assignmentId: string,
   taskId: string,
+  body: unknown,
   cors: Record<string, string>,
 ): Promise<Response> {
   const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
@@ -6358,7 +6365,7 @@ async function handleTaskPushToKb(
     return jsonError(cors, 400, "INVALID_ID", "Некорректный идентификатор задачи");
   }
 
-  const { data: task, error: taskErr } = await db
+  const { data: taskRow, error: taskErr } = await db
     .from("homework_tutor_tasks")
     .select(
       "id, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, " +
@@ -6368,8 +6375,19 @@ async function handleTaskPushToKb(
     .eq("id", taskId)
     .eq("assignment_id", assignmentId)
     .maybeSingle();
-  if (taskErr || !task) {
+  if (taskErr || !taskRow) {
     return jsonError(cors, 404, "NOT_FOUND", "Задача не найдена");
+  }
+
+  // Опциональный body = ДРАФТ-поля из конструктора (пуш до сохранения ДЗ —
+  // естественный флоу «поправил задачу → Обновить в Базе»). Whitelist-merge
+  // поверх сохранённой строки; провенанс/ownership — всегда по строке.
+  const task: Record<string, unknown> = { ...taskRow };
+  if (body && typeof body === "object") {
+    const draft = body as Record<string, unknown>;
+    for (const key of PUSH_TO_KB_DRAFT_FIELDS) {
+      if (key in draft) task[key] = draft[key];
+    }
   }
   if (!isUUID(task.source_kb_task_id)) {
     return jsonError(
@@ -11591,7 +11609,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[4] === "push-to-kb" &&
       route.method === "POST"
     ) {
-      return await handleTaskPushToKb(db, userId, seg[1], seg[3], cors);
+      const body = await parseJsonBody(req);
+      return await handleTaskPushToKb(db, userId, seg[1], seg[3], body, cors);
     }
 
     // POST /assignments/:id/share-links (homework-reuse-v1 TASK-7)

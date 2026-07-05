@@ -23,6 +23,7 @@ import {
   getTutorHomeworkTemplate,
   createTutorHomeworkTemplate,
   getHomeworkImageSignedUrl,
+  pushHomeworkTaskToKb,
   type HomeworkSubject,
   type ModernHomeworkSubject,
   type CreateAssignmentTask,
@@ -53,6 +54,7 @@ import {
   type SubmitPhase,
   type SubmitSuccessResult,
   SUBJECTS,
+  computeTaskContentFingerprint,
   createEmptyTask,
   generateUUID,
   isCriteriaEligibleTask,
@@ -97,6 +99,11 @@ function buildTaskSignature(tasks: Array<{
   cefr_level?: string | null;
   kim_number?: number | null;
   grading_criteria_json?: unknown;
+  exam?: string | null;
+  difficulty?: number | null;
+  topic_id?: string | null;
+  subtopic_id?: string | null;
+  source_label?: string | null;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -125,6 +132,13 @@ function buildTaskSignature(tasks: Array<{
       // Criteria-grading feature (2026-06): структурные критерии в подписи → правка
       // ТОЛЬКО критериев (без других полей) помечает tasksDirty (иначе не сохранится).
       grading_criteria_json: task.grading_criteria_json ?? null,
+      // unified-task-model F2 (2026-07-05): классификация каскада в подписи —
+      // правка ТОЛЬКО темы/типа/источника помечает tasksDirty (rule 40 field-parity).
+      exam: task.exam ?? null,
+      difficulty: task.difficulty ?? null,
+      topic_id: task.topic_id ?? null,
+      subtopic_id: task.subtopic_id ?? null,
+      source_label: task.source_label ?? null,
     })),
   );
 }
@@ -420,6 +434,15 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
       kim_number: t.kim_number ?? null,
       // Criteria-grading feature (2026-06): структурные критерии из шаблона → ДЗ.
       grading_criteria_json: t.grading_criteria_json ?? null,
+      // unified-task-model (2026-07-05): ссылочный шаблон несёт source_kb_task_id
+      // (синтез бэкенда) → выдача из шаблона = снимок ТЕХ ЖЕ задач Базы
+      // (провенанс + usage-цепочка Банка). Legacy-шаблон без него → null =
+      // задача авто-зеркалится в Базу при сохранении (двойное авторство).
+      kb_task_id: t.source_kb_task_id ?? null,
+      // Тип для каскада: из № КИМ + exam_type шаблона (снимок ДЗ тип не хранит).
+      exam: t.kim_number != null && (tpl.exam_type === 'ege' || tpl.exam_type === 'oge')
+        ? tpl.exam_type
+        : '',
     }),
   };
 }
@@ -480,6 +503,56 @@ function TutorHomeworkCreateContent() {
   const handleDeferImageDelete = useCallback((storagePath: string) => {
     deferredImageDeletesRef.current.push(storagePath);
   }, []);
+
+  // unified-task-model F2 (2026-07-05): «Обновить в Базе» / «Своя копия» —
+  // пуш ДРАФТ-полей задачи в источник Базы (edit-mode; работает до сохранения
+  // ДЗ — бэкенд whitelist-мержит драфт поверх строки). Каталожный источник →
+  // copy-on-write форк (forked=true) + relink провенанса в драфте.
+  const handleRequestPushToKB = useCallback(
+    async (task: DraftTask) => {
+      if (!editId || !task.id) return;
+      try {
+        const res = await pushHomeworkTaskToKb(editId, task.id, {
+          task_text: task.task_text.trim() || '[Задача на фото]',
+          task_image_url: task.task_image_path ?? null,
+          correct_answer: task.correct_answer.trim() || null,
+          max_score: task.max_score,
+          rubric_text: task.rubric_text.trim() || null,
+          rubric_image_urls: task.rubric_image_paths ?? null,
+          solution_text: task.solution_text.trim() || null,
+          solution_image_urls: task.solution_image_paths ?? null,
+          check_format: task.check_format,
+          task_kind: task.task_kind,
+          cefr_level: task.cefr_level ?? null,
+          kim_number: task.kim_number ?? null,
+          grading_criteria_json: isCriteriaEligibleTask(task) ? (task.grading_criteria_json ?? null) : null,
+        });
+        // Синхронизировали → сброс divergence-fingerprint на текущий контент;
+        // при форке — relink на личную копию (бейдж «Каталог»→«Моя база»).
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.localId === task.localId
+              ? {
+                  ...t,
+                  kb_task_id: res.kb_task_id,
+                  kb_source: 'my' as const,
+                  kb_content_fingerprint: computeTaskContentFingerprint(t),
+                }
+              : t,
+          ),
+        );
+        toast.success(
+          res.forked
+            ? 'Создана ваша копия в Базе — задача теперь ссылается на неё'
+            : 'Задача обновлена в вашей Базе (уже выданные ДЗ не изменились)',
+        );
+        void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Не удалось обновить задачу в Базе');
+      }
+    },
+    [editId, queryClient],
+  );
 
   // ── Assign ──
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(
@@ -705,6 +778,22 @@ function TutorHomeworkCreateContent() {
         kb_snapshot_edited: t.kb_snapshot_edited ?? undefined,
         kb_snapshot_solution_image_refs: t.kb_snapshot_solution_image_refs ?? undefined,
         kb_source_label: t.kb_source_label ?? undefined,
+        // unified-task-model F2 (2026-07-05): владелец источника (my/socrat) из
+        // per-row провенанса бэкенда (kb_source_owner) — управляет лейблом
+        // «Обновить в Базе» vs «Своя копия».
+        kb_source: (t as { kb_source_owner?: string | null }).kb_source_owner === 'socrat'
+          ? 'socrat' as const
+          : ((t as { kb_source_owner?: string | null }).kb_source_owner === 'my' ? 'my' as const : undefined),
+        // Тип каскада: снимок хранит только № КИМ → derive из exam_type ДЗ.
+        exam: t.kim_number != null
+          ? (((a.exam_type as string) === 'oge' ? 'oge' : 'ege') as DraftTask['exam'])
+          : ('' as DraftTask['exam']),
+      }))
+      // Fingerprint «как загружено» — divergence-детект «Обновить в Базе»
+      // ловит правки ТЕКУЩЕЙ сессии (session-local; push шлёт драфт-поля).
+      .map((base) => ({
+        ...base,
+        kb_content_fingerprint: base.kb_task_id ? computeTaskContentFingerprint(base) : null,
       }));
 
     setTasks(newTasks);
@@ -1139,6 +1228,15 @@ function TutorHomeworkCreateContent() {
           // Gated на eligible-задачи (review fix P2) — критерии, заданные на
           // развёрнутой задаче и затем переключённой в «Краткий ответ», НЕ пишутся.
           grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
+          // unified-task-model F2 (2026-07-05): tri-state провенанс — новый
+          // клиент ВСЕГДА шлёт uuid (снимок задачи Базы) или null (ЯВНО новая
+          // → бэкенд авто-зеркалит в «Из ДЗ»). undefined = только старые клиенты.
+          kb_task_id: t.kb_task_id ?? null,
+          exam: t.exam === 'ege' || t.exam === 'oge' ? t.exam : null,
+          difficulty: t.difficulty ?? null,
+          topic_id: t.topic_id ?? null,
+          subtopic_id: t.subtopic_id ?? null,
+          source_label: t.source_label ?? null,
         }));
 
         const result = await createTutorHomeworkAssignment({
@@ -1483,6 +1581,13 @@ function TutorHomeworkCreateContent() {
             // Criteria-grading feature (2026-06): структурные критерии (any subject).
             // Gated на eligible-задачи (review fix P2) — см. create body.
             grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
+            // unified-task-model F2: tri-state провенанс (mirror create body).
+            kb_task_id: t.kb_task_id ?? null,
+            exam: t.exam === 'ege' || t.exam === 'oge' ? t.exam : null,
+            difficulty: t.difficulty ?? null,
+            topic_id: t.topic_id ?? null,
+            subtopic_id: t.subtopic_id ?? null,
+            source_label: t.source_label ?? null,
           }));
         }
 
@@ -1976,6 +2081,7 @@ function TutorHomeworkCreateContent() {
             onDeferImageDelete={isEditMode ? handleDeferImageDelete : undefined}
             confirmOnRemove={isEditMode && existingAssignment?.assignment.status === 'active'}
             assignmentId={isEditMode ? editId : null}
+            onRequestPushToKB={isEditMode ? handleRequestPushToKB : undefined}
             voiceSpeakingEnabled={voiceSpeakingEnabled}
             cefrLevelEnabled={['french', 'english', 'spanish'].includes(meta.subject)}
           />

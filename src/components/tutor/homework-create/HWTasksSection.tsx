@@ -14,7 +14,7 @@ import {
 } from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
 import { HWTaskCard } from './HWTaskCard';
-import { type DraftTask, createEmptyTask, generateUUID, isCriteriaEligibleTask, revokeObjectUrl } from './types';
+import { type DraftTask, computeTaskContentFingerprint, createEmptyTask, generateUUID, isCriteriaEligibleTask, revokeObjectUrl } from './types';
 
 // Lazy-load the Save-to-KB dialog — it's only needed when the tutor actually
 // clicks BookmarkPlus on a task card in edit-mode. Bundle stays slim for the
@@ -82,10 +82,16 @@ function kbTaskToDraftTask(
     ?? mapAnswerFormatToCheckFormat(task.answer_format)
     ?? inferCheckFormat(task.kim_number);
 
-  return {
-    draft: {
-      localId: generateUUID(),
-      task_text: task.text,
+  // unified-task-model F2 (2026-07-05): классификация едет из Базы в каскад
+  // конструктора (Тип/КИМ уже редактируемы в карточке; Тема/Подтема/Источник —
+  // для зеркала при пересохранении и для publish-требования темы).
+  const exam: DraftTask['exam'] = task.exam === 'ege' || task.exam === 'oge'
+    ? task.exam
+    : (task.difficulty != null ? 'olympiad' : '');
+
+  const draftBase = {
+    localId: generateUUID(),
+    task_text: task.text,
       task_image_path: taskImagePath,
       // Legacy single-photo metadata — заполняем из первого ref'а для backward compat
       // (остальные фото рендерятся через parseAttachmentUrls(task_image_path) в HWTaskCard).
@@ -115,6 +121,20 @@ function kbTaskToDraftTask(
       kb_source_label: task.source_label ?? null,
       // Провенанс: сохраняем тот же dual-format snapshot, что и в task_image_path.
       kb_attachment_url: taskImagePath,
+      // unified-task-model F2: классификация каскада.
+      exam,
+      difficulty: task.difficulty ?? null,
+      topic_id: task.topic_id ?? null,
+      subtopic_id: task.subtopic_id ?? null,
+      source_label: task.source_label ?? null,
+    } satisfies DraftTask;
+
+  return {
+    draft: {
+      ...draftBase,
+      // Fingerprint контента на момент импорта — база divergence-детекта
+      // «Обновить в Базе» (кнопка видна только при реальном расхождении).
+      kb_content_fingerprint: computeTaskContentFingerprint(draftBase),
     },
     truncatedFrom,
     solutionTruncatedFrom,
@@ -152,6 +172,12 @@ export interface HWTasksSectionProps {
    */
   voiceSpeakingEnabled?: boolean;
   /**
+   * unified-task-model F2 (2026-07-05): «Обновить в Базе» / «Своя копия» на
+   * карточке (edit-mode; parent владеет API-вызовом + dirty-гейтом). Пробрасывается
+   * в HWTaskCard как есть.
+   */
+  onRequestPushToKB?: (task: DraftTask) => void;
+  /**
    * CEFR-level fix: passes through to each HWTaskCard to surface the «Уровень»
    * (CEFR) selector. On for foreign-language subjects (french/english/spanish).
    */
@@ -168,6 +194,7 @@ export function HWTasksSection({
   onDeferImageDelete,
   confirmOnRemove,
   assignmentId,
+  onRequestPushToKB,
   voiceSpeakingEnabled = false,
   cefrLevelEnabled = false,
 }: HWTasksSectionProps) {
@@ -303,11 +330,19 @@ export function HWTasksSection({
           isFirst={i === 0}
           isLast={i === tasks.length - 1}
           onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
+          onRequestPushToKB={onRequestPushToKB}
           voiceSpeakingEnabled={voiceSpeakingEnabled}
           cefrLevelEnabled={cefrLevelEnabled}
           criteriaEditorEnabled={isCriteriaEligibleTask(task)}
         />
       ))}
+      {/* unified-task-model F2: новые задачи авто-зеркалятся в Базу при
+          сохранении ДЗ (папка «Из ДЗ») — тихая подсказка, не блокер. */}
+      {tasks.some((t) => !t.kb_task_id && !isEmptyTask(t)) ? (
+        <p className="text-xs text-muted-foreground">
+          Новые задачи автоматически сохранятся в вашу Базу (папка «Из ДЗ»).
+        </p>
+      ) : null}
       {disableTaskAdd && (
         <p className="text-xs text-muted-foreground">
           Нельзя добавлять или удалять задачи — ученики уже отправили ответы.

@@ -121,11 +121,28 @@ export interface DraftTask {
    */
   cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
   /**
-   * № КИМ из KB-задачи (Phase 2, 2026-06-21). Переносится в
-   * `homework_tutor_tasks.kim_number` → AI грейдит по критериям ФИПИ этого номера
-   * (`resolveSubjectRubric`). Только из KB-импорта; в UI конструктора не правится.
+   * № КИМ задачи (Phase 2, 2026-06-21 → редактируем с unified-task-model F2,
+   * 2026-07-05: каскад «Тип → № КИМ → Тема» прямо в карточке конструктора —
+   * запрос Егора). Переносится в `homework_tutor_tasks.kim_number` → AI грейдит
+   * по критериям ФИПИ этого номера (физика Часть 2 → flowchart-грейдинг).
    */
   kim_number?: number | null;
+  /**
+   * unified-task-model F2 (2026-07-05) — классификация каскада конструктора.
+   * На снимок ДЗ едет только kim_number; остальное — в зеркало Базы
+   * (авто-создание kb_task при kb_task_id === undefined → payload null).
+   */
+  exam?: '' | 'ege' | 'oge' | 'olympiad';
+  difficulty?: number | null;
+  topic_id?: string | null;
+  subtopic_id?: string | null;
+  source_label?: string | null;
+  /**
+   * Fingerprint контента на момент импорта из Базы / загрузки на edit —
+   * client-side divergence-детект для «Обновить в Базе» (показывается только
+   * при реальном расхождении). Пересчитывается computeTaskContentFingerprint.
+   */
+  kb_content_fingerprint?: string | null;
   /**
    * Структурные критерии покритериальной AI-проверки (criteria-grading, 2026-06).
    * Любой предмет: репетитор задаёт критерии → AI раскладывает балл по ним →
@@ -237,4 +254,39 @@ export function revokeObjectUrl(url: string | null | undefined) {
   if (url && url.startsWith('blob:')) {
     URL.revokeObjectURL(url);
   }
+}
+
+/**
+ * unified-task-model F2 (2026-07-05): каноническая проекция контента задачи
+ * для client-side divergence-детекта «Обновить в Базе». Считается при импорте
+ * из Базы (kbTaskToDraftTask) / edit-prefill и сравнивается с живым драфтом —
+ * кнопка показывается только при реальном расхождении. НЕ криптография —
+ * обычный JSON-стринг (стабильный порядок ключей).
+ */
+export function computeTaskContentFingerprint(t: {
+  task_text?: string | null;
+  correct_answer?: string | null;
+  task_image_path?: string | null;
+  solution_text?: string | null;
+  solution_image_paths?: string | null;
+  rubric_text?: string | null;
+  rubric_image_paths?: string | null;
+  check_format?: string | null;
+  kim_number?: number | null;
+  max_score?: number | null;
+  grading_criteria_json?: GradingCriterion[] | null;
+}): string {
+  return JSON.stringify([
+    (t.task_text ?? '').trim(),
+    (t.correct_answer ?? '').trim(),
+    t.task_image_path ?? null,
+    (t.solution_text ?? '').trim(),
+    t.solution_image_paths ?? null,
+    (t.rubric_text ?? '').trim(),
+    t.rubric_image_paths ?? null,
+    t.check_format ?? null,
+    t.kim_number ?? null,
+    t.max_score ?? null,
+    t.grading_criteria_json ?? null,
+  ]);
 }

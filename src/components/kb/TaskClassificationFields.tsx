@@ -54,6 +54,14 @@ interface TaskClassificationFieldsProps extends TaskClassificationValue {
   onSourceLabelChange: (v: string) => void;
   onAnswerFormatChange: (v: string) => void;
   disabled?: boolean;
+  /**
+   * unified-task-model F2 (2026-07-05): вариант для конструктора ДЗ — там
+   * «Формат ответа» конфликтует с check_format (два формата рядом), а балл
+   * ведёт «Макс. баллов» карточки (авто-балл по КИМ подсказывается там).
+   * КБ-модалки не передают эти флаги (поведение без изменений).
+   */
+  hideAnswerFormat?: boolean;
+  hidePrimaryScore?: boolean;
 }
 
 /**
@@ -80,6 +88,8 @@ export function TaskClassificationFields({
   onSourceLabelChange,
   onAnswerFormatChange,
   disabled = false,
+  hideAnswerFormat = false,
+  hidePrimaryScore = false,
 }: TaskClassificationFieldsProps) {
   const topicFilter: CatalogFilter | undefined = taskType === '' ? undefined : taskType;
   const { topics = [], loading: topicsLoading } = useTopics(topicFilter);
@@ -167,7 +177,7 @@ export function TaskClassificationFields({
 
       {/* Балл: для олимпиады = сложность (подсказка); для ЕГЭ/ОГЭ — авто/ручной;
           для «Не указан» — ручной ввод. */}
-      {isOlympiad ? (
+      {hidePrimaryScore ? null : isOlympiad ? (
         difficulty.trim() ? (
           <p className="-mt-2 text-xs text-slate-500">
             Уровень сложности = балл за задачу (1 — лёгкая, 5 — сложная).
@@ -291,19 +301,21 @@ export function TaskClassificationFields({
       </fieldset>
 
       {/* Формат ответа */}
-      <fieldset>
-        <legend className={LEGEND_CLASS}>Формат ответа</legend>
-        <select
-          value={answerFormat}
-          onChange={(e) => onAnswerFormatChange(e.target.value)}
-          disabled={disabled}
-          className={SELECT_CLASS}
-        >
-          {ANSWER_FORMAT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      </fieldset>
+      {hideAnswerFormat ? null : (
+        <fieldset>
+          <legend className={LEGEND_CLASS}>Формат ответа</legend>
+          <select
+            value={answerFormat}
+            onChange={(e) => onAnswerFormatChange(e.target.value)}
+            disabled={disabled}
+            className={SELECT_CLASS}
+          >
+            {ANSWER_FORMAT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </fieldset>
+      )}
     </div>
   );
 }

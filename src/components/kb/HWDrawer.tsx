@@ -302,6 +302,10 @@ export function HWDrawer({
           kim_number: task.kim_number ?? null,
           // Review fix P1 (2026-06-21): балл задачи из KB (иначе DB DEFAULT 1).
           max_score: task.maxScoreSnapshot ?? 1,
+          // unified-task-model F2 (2026-07-05): per-row провенанс (rule 40
+          // dual-write) — до полной конвергенции path B через edge.
+          source_kb_task_id: task.taskId ?? null,
+          source_kb_synced_at: task.taskId ? new Date().toISOString() : null,
         };
       });
 

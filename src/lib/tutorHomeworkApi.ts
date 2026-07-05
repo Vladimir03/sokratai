@@ -125,6 +125,20 @@ export interface CreateAssignmentTask {
    * покритериальная AI-оценка. null/undefined → нет покритериального разбора.
    */
   grading_criteria_json?: GradingCriterion[] | null;
+  /**
+   * unified-task-model F2 (2026-07-05) — TRI-STATE провенанс (deploy-skew-защита):
+   *   uuid      → снимок задачи Базы (source_kb_task_id);
+   *   null      → ЯВНО новая задача → бэкенд авто-зеркалит её в Базу («Из ДЗ»);
+   *   undefined → legacy-клиент → без зеркала и провенанса.
+   * Новый клиент ВСЕГДА шлёт uuid или null, никогда undefined.
+   */
+  kb_task_id?: string | null;
+  /** Классификация зеркала (Тип каскада конструктора). На снимок едет только kim_number. */
+  exam?: 'ege' | 'oge' | null;
+  difficulty?: number | null;
+  topic_id?: string | null;
+  subtopic_id?: string | null;
+  source_label?: string | null;
 }
 
 export interface CreateAssignmentPayload {
@@ -143,6 +157,13 @@ export interface CreateAssignmentPayload {
   feedback_language?: 'auto' | 'russian' | 'target';
   /** Папка-организация (homework_folders). null/undefined → «Без папки». Запрос Елены 2026-06-17. */
   folder_id?: string | null;
+  /**
+   * unified-task-model (2026-07-05): шаблон-источник — «выдано из шаблона»
+   * (source_template_id + usage_count Банка ДЗ). Опционально.
+   */
+  template_id?: string | null;
+  /** Папка Базы для авто-зеркала новых задач (default — «Из ДЗ»). */
+  mirror_folder_id?: string | null;
 }
 
 // ─── Templates ───────────────────────────────────────────────────────────────
@@ -173,6 +194,13 @@ export interface HomeworkTemplateTask {
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии round-trip через шаблон. */
   grading_criteria_json?: GradingCriterion[] | null;
+  /**
+   * unified-task-model (2026-07-05): провенанс задачи Базы. Для ссылочных
+   * шаблонов tasks_json СИНТЕЗИРУЕТСЯ бэкендом из живых kb-задач и всегда
+   * несёт source_kb_task_id → resolveTemplateLoad кладёт его в
+   * DraftTask.kb_task_id (выдача из шаблона = снимок тех же задач).
+   */
+  source_kb_task_id?: string | null;
 }
 
 export interface HomeworkTemplateListItem {
@@ -183,6 +211,10 @@ export interface HomeworkTemplateListItem {
   tags: string[];
   created_at: string;
   task_count?: number;
+  /** unified-task-model (2026-07-05) — Банк ДЗ (additive; старый бэк не отдаёт). */
+  visibility?: 'private' | 'shared';
+  usage_count?: number;
+  published_at?: string | null;
 }
 
 export interface HomeworkTemplate {
@@ -1210,9 +1242,44 @@ export async function getTutorRubricImagesSignedUrls(
 
 export async function listTutorHomeworkTemplates(
   subject?: HomeworkSubject,
+  /** unified-task-model (2026-07-05): 'shared' = Банк ДЗ Сократа. Default 'mine'. */
+  scope?: 'mine' | 'shared',
 ): Promise<HomeworkTemplateListItem[]> {
-  const qs = subject ? `?subject=${encodeURIComponent(subject)}` : '';
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (scope === 'shared') params.set('scope', 'shared');
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return requestHomeworkApi<HomeworkTemplateListItem[]>(`/templates${qs}`);
+}
+
+/**
+ * unified-task-model (2026-07-05): «Создать свою копию» шаблона Банка (или
+ * своего). Копирует строку + ССЫЛКИ на те же задачи (задачи не дублируются).
+ */
+export async function forkTutorHomeworkTemplate(
+  templateId: string,
+): Promise<{ template_id: string }> {
+  return requestHomeworkApi<{ template_id: string }>(
+    `/templates/${encodeURIComponent(templateId)}/fork`,
+    { method: 'POST' },
+  );
+}
+
+/**
+ * unified-task-model F2 (2026-07-05): «Обновить в Базе» — пуш diverged-снимка
+ * задачи ДЗ обратно в источник Базы. Каталожный источник → copy-on-write
+ * (forked: true, kb_task_id = новая личная копия).
+ */
+export async function pushHomeworkTaskToKb(
+  assignmentId: string,
+  taskId: string,
+  /** Драфт-поля конструктора (пуш ДО сохранения ДЗ); whitelist-merge на бэке. */
+  draft?: Partial<UpdateAssignmentTask>,
+): Promise<{ kb_task_id: string; forked: boolean }> {
+  return requestHomeworkApi<{ kb_task_id: string; forked: boolean }>(
+    `/assignments/${encodeURIComponent(assignmentId)}/tasks/${encodeURIComponent(taskId)}/push-to-kb`,
+    { method: 'POST', body: JSON.stringify(draft ?? {}) },
+  );
 }
 
 export async function getTutorHomeworkTemplate(id: string): Promise<HomeworkTemplate> {
@@ -1429,6 +1496,14 @@ export interface UpdateAssignmentTask {
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии (любой предмет). */
   grading_criteria_json?: GradingCriterion[] | null;
+  /** unified-task-model F2 — tri-state провенанс (см. CreateAssignmentTask.kb_task_id). */
+  kb_task_id?: string | null;
+  /** Классификация зеркала для новых задач ДЗ (mirror CreateAssignmentTask). */
+  exam?: 'ege' | 'oge' | null;
+  difficulty?: number | null;
+  topic_id?: string | null;
+  subtopic_id?: string | null;
+  source_label?: string | null;
 }
 
 export async function updateTutorHomeworkAssignment(

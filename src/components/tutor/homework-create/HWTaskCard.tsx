@@ -38,7 +38,11 @@ import { SolutionField } from '@/components/task-editor/SolutionField';
 import { RubricField } from '@/components/task-editor/RubricField';
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { CheckFormatField } from '@/components/task-editor/CheckFormatField';
-import { type DraftTask, type GradingCriterion, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, revokeObjectUrl } from './types';
+// unified-task-model F2 (2026-07-05): каскад классификации (Тип → № КИМ →
+// Тема/Подтема) — ТОТ ЖЕ компонент, что в Базе (решение владельца №2).
+import { TaskClassificationFields, type TaskClassType } from '@/components/kb/TaskClassificationFields';
+import { getKimPrimaryScore } from '@/lib/kbKimScores';
+import { type DraftTask, type GradingCriterion, MAX_IMAGE_SIZE_BYTES, IMAGE_REQUIREMENTS_HINT, computeTaskContentFingerprint, revokeObjectUrl } from './types';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 
 // ─── Drag-drop overlay (Phase 9, 2026-05-25) ─────────────────────────────────
@@ -96,6 +100,14 @@ export interface HWTaskCardProps {
    * (numeric tasks grade by exact-answer match, no per-criterion breakdown).
    */
   criteriaEditorEnabled?: boolean;
+  /**
+   * unified-task-model F2 (2026-07-05): «Обновить в Базе» / «Создать свою
+   * копию» — пуш diverged-снимка обратно в задачу-источник Базы (edit-mode
+   * only: требует persisted task.id + kb_task_id). Parent (TutorHomeworkCreate)
+   * владеет API-вызовом и dirty-гейтом. Кнопка видна ТОЛЬКО при реальном
+   * расхождении с fingerprint-снимком импорта.
+   */
+  onRequestPushToKB?: (task: DraftTask) => void;
 }
 
 export function HWTaskCard({
@@ -113,6 +125,7 @@ export function HWTaskCard({
   voiceSpeakingEnabled = false,
   cefrLevelEnabled = false,
   criteriaEditorEnabled = false,
+  onRequestPushToKB,
 }: HWTaskCardProps) {
   const taskRefs = useMemo(() => parseAttachmentUrls(task.task_image_path), [task.task_image_path]);
   const rubricRefs = useMemo(() => parseAttachmentUrls(task.rubric_image_paths), [task.rubric_image_paths]);
@@ -164,6 +177,52 @@ export function HWTaskCard({
     },
     [task, onUpdate],
   );
+  // unified-task-model F2 (2026-07-05): каскад классификации + авто-балл + divergence.
+  // Секция default-open всегда — № КИМ должен быть на виду (запрос Егора:
+  // «как система поймёт, что это за КИМ?»); сворачивание — опция экономии места.
+  const [classificationOpen, setClassificationOpen] = useState<boolean>(true);
+
+  const autoScore = useMemo(() => {
+    if (task.exam === 'olympiad') {
+      return task.difficulty != null && task.difficulty >= 1 ? task.difficulty : null;
+    }
+    const examForScore = task.exam === 'ege' ? 'ege' : task.exam === 'oge' ? 'oge' : null;
+    return getKimPrimaryScore(examForScore, task.kim_number ?? null);
+  }, [task.exam, task.kim_number, task.difficulty]);
+
+  /**
+   * Применить авто-балл только если тутор его не переопределял: max_score ещё
+   * дефолт (1) ИЛИ равен авто-баллу ПРЕЖНЕЙ классификации. Критерии выигрывают
+   * (Σ критериев управляет max_score — не трогаем).
+   */
+  const applyAutoScore = useCallback(
+    (patch: Partial<DraftTask>): Partial<DraftTask> => {
+      const next = { ...task, ...patch };
+      if (Array.isArray(next.grading_criteria_json) && next.grading_criteria_json.length > 0) {
+        return patch;
+      }
+      const nextAuto = next.exam === 'olympiad'
+        ? (next.difficulty != null && next.difficulty >= 1 ? next.difficulty : null)
+        : getKimPrimaryScore(
+            next.exam === 'ege' ? 'ege' : next.exam === 'oge' ? 'oge' : null,
+            next.kim_number ?? null,
+          );
+      if (nextAuto == null) return patch;
+      const untouched = task.max_score === 1 || (autoScore != null && task.max_score === autoScore);
+      return untouched ? { ...patch, max_score: nextAuto } : patch;
+    },
+    [task, autoScore],
+  );
+
+  // Divergence «Обновить в Базе»: только при fingerprint-снимке импорта и
+  // реальном отличии текущего контента от него.
+  const pushDiverged = useMemo(
+    () =>
+      task.kb_content_fingerprint != null &&
+      computeTaskContentFingerprint(task) !== task.kb_content_fingerprint,
+    [task],
+  );
+
   // Ref mirrors created blob URLs so unmount cleanup sees the latest set (closure over [] would be stale).
   const blobUrlsRef = useRef<Set<string>>(new Set());
   const { urls: resolvedTaskUrls } = useKBImagesSignedUrls(taskRefs, { enabled: taskRefs.length > 0 });
@@ -662,8 +721,41 @@ export function HWTaskCard({
                 {task.kb_source_label}
               </span>
             )}
+            {/* unified-task-model F2: новая задача → авто-зеркало в Базу при
+                сохранении ДЗ (папка «Из ДЗ»). Чип-подсказка, не блокер. */}
+            {!task.kb_task_id ? (
+              <span
+                className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500"
+                title="Создастся в вашей Базе при сохранении ДЗ (папка «Из ДЗ»)"
+              >
+                → в Базу
+              </span>
+            ) : null}
+            {task.kb_task_id && pushDiverged ? (
+              <span
+                className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-900"
+                title="Задача отличается от версии в Базе"
+              >
+                изменено
+              </span>
+            ) : null}
           </div>
           <div className="flex items-center gap-1">
+            {onRequestPushToKB && task.id && task.kb_task_id && pushDiverged ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRequestPushToKB(task)}
+                aria-label={task.kb_source === 'socrat' ? 'Создать свою копию в Базе' : 'Обновить задачу в Базе'}
+                title={task.kb_source === 'socrat'
+                  ? 'Создать свою копию в Базе (каталожная задача не редактируется)'
+                  : 'Обновить задачу в вашей Базе (уже выданные ДЗ не изменятся)'}
+                className="h-8 px-2 text-xs text-muted-foreground"
+                style={{ touchAction: 'manipulation' }}
+              >
+                {task.kb_source === 'socrat' ? 'Своя копия' : 'Обновить в Базе'}
+              </Button>
+            ) : null}
             {onRequestSaveToKB && task.id ? (
               <Button
                 variant="ghost"
@@ -758,8 +850,96 @@ export function HWTaskCard({
                 onBlur={handleScoreBlur}
                 className="text-base"
               />
-              <p className="text-xs text-muted-foreground">Шаг 0.5 — например 1, 1.5, 12, 12.5</p>
+              {/* unified-task-model F2: авто-балл по ФИПИ (mirror чипа Базы).
+                  Критерии выигрывают (Σ управляет баллом) — хинт скрыт. */}
+              {autoScore != null && criteriaList.length === 0 ? (
+                task.max_score === autoScore ? (
+                  <p className="text-xs text-muted-foreground">= первичный балл ФИПИ</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    по ФИПИ — {autoScore} ·{' '}
+                    <button
+                      type="button"
+                      className="font-medium text-accent hover:underline"
+                      style={{ touchAction: 'manipulation' }}
+                      onClick={() => {
+                        onUpdate({ ...task, max_score: autoScore });
+                        setScoreText(String(autoScore));
+                      }}
+                    >
+                      Сбросить
+                    </button>
+                  </p>
+                )
+              ) : (
+                <p className="text-xs text-muted-foreground">Шаг 0.5 — например 1, 1.5, 12, 12.5</p>
+              )}
             </div>
+          </div>
+
+          {/* unified-task-model F2 (2026-07-05): каскад классификации — тот же
+              компонент, что в Базе (Тип → № КИМ/сложность → Тема → Подтема →
+              Источник). Для физики Части 2 (№ 21-26) № КИМ включает строгую
+              ФИПИ-проверку по блок-схеме. «Формат ответа» скрыт (конфликт с
+              check_format ниже), «Первичный балл» скрыт (ведёт «Макс. баллов»). */}
+          <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50/40 p-3">
+            <button
+              type="button"
+              onClick={() => setClassificationOpen((v) => !v)}
+              className="flex items-center gap-1 text-xs font-medium text-foreground hover:text-accent transition-colors"
+              style={{ touchAction: 'manipulation' }}
+            >
+              {classificationOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              Классификация (Тип, № КИМ, тема)
+              {!classificationOpen && (task.exam || task.kim_number != null) ? (
+                <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                  {task.exam === 'ege' ? 'ЕГЭ' : task.exam === 'oge' ? 'ОГЭ' : task.exam === 'olympiad' ? 'Олимпиада' : ''}
+                  {task.kim_number != null ? ` · № ${task.kim_number}` : ''}
+                </span>
+              ) : null}
+            </button>
+            {classificationOpen ? (
+              <TaskClassificationFields
+                taskType={(task.exam ?? '') as TaskClassType}
+                kimNumber={task.kim_number != null ? String(task.kim_number) : ''}
+                difficulty={task.difficulty != null ? String(task.difficulty) : ''}
+                primaryScore=""
+                topicId={task.topic_id ?? ''}
+                subtopicId={task.subtopic_id ?? ''}
+                sourceLabel={task.source_label ?? ''}
+                answerFormat=""
+                hideAnswerFormat
+                hidePrimaryScore
+                onTaskTypeChange={(v) => {
+                  // Смена типа: сброс КИМ/сложности/темы/подтемы (mirror КБ-модалок).
+                  onUpdate({
+                    ...task,
+                    ...applyAutoScore({
+                      exam: v,
+                      kim_number: null,
+                      difficulty: null,
+                      topic_id: null,
+                      subtopic_id: null,
+                    }),
+                  });
+                }}
+                onKimNumberChange={(v) => {
+                  const kim = v.trim() ? Math.min(Math.max(parseInt(v.trim(), 10) || 0, 1), 40) : null;
+                  onUpdate({ ...task, ...applyAutoScore({ kim_number: kim }) });
+                }}
+                onDifficultyChange={(v) => {
+                  const d = v.trim() ? parseInt(v.trim(), 10) : null;
+                  onUpdate({ ...task, ...applyAutoScore({ difficulty: d }) });
+                }}
+                onPrimaryScoreChange={() => undefined}
+                onTopicIdChange={(v) =>
+                  onUpdate({ ...task, topic_id: v || null, subtopic_id: null })
+                }
+                onSubtopicIdChange={(v) => onUpdate({ ...task, subtopic_id: v || null })}
+                onSourceLabelChange={(v) => onUpdate({ ...task, source_label: v || null })}
+                onAnswerFormatChange={() => undefined}
+              />
+            ) : null}
           </div>
 
           {/* voice-speaking-mvp: «Тип ответа» selector — gated to pilot tutors.
