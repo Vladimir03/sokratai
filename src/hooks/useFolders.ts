@@ -241,6 +241,38 @@ async function removeFolder(folderId: string): Promise<void> {
   // violating kb_tasks_space_check for personal tasks (topic_id is also NULL).
   const allFolderIds = await fetchDescendantFolderIds(folderId);
 
+  // unified-task-model F3 (2026-07-05): delete-гард — если ЛЮБАЯ задача дерева
+  // папки используется шаблонами (свои/Банк), блокируем удаление ДО батча
+  // (иначе RESTRICT FK на junction рвёт батч посередине → полу-удалённая папка).
+  const taskIdBatches: string[][] = [];
+  for (let i = 0; i < allFolderIds.length; i += 200) {
+    const batch = allFolderIds.slice(i, i + 200);
+    const { data: taskRows } = await supabase
+      .from('kb_tasks')
+      .select('id')
+      .in('folder_id', batch);
+    const ids = (taskRows ?? []).map((t) => t.id as string);
+    if (ids.length > 0) taskIdBatches.push(ids);
+  }
+  for (const ids of taskIdBatches) {
+    const { data: refRows } = await supabase.rpc(
+      'kb_task_template_refs' as never,
+      { p_task_ids: ids } as never,
+    );
+    const refs = Array.isArray(refRows)
+      ? refRows as Array<{ template_count: number; template_titles: string[] }>
+      : [];
+    const used = refs.filter((r) => r.template_count > 0);
+    if (used.length > 0) {
+      const titles = Array.from(
+        new Set(used.flatMap((r) => r.template_titles ?? [])),
+      ).slice(0, 5).map((t) => `«${t}»`).join(', ');
+      throw new Error(
+        `В папке есть задачи, используемые в шаблонах: ${titles}. Сначала уберите их из шаблонов.`,
+      );
+    }
+  }
+
   for (let i = 0; i < allFolderIds.length; i += 200) {
     const batch = allFolderIds.slice(i, i + 200);
     const { error: tasksError } = await supabase

@@ -931,6 +931,9 @@ function TutorHomeworkCreateContent() {
   // ── Auto-load template from ?template_id query param ──
   const templateId = searchParams.get('template_id');
   const templateLoadedRef = useRef(false);
+  // unified-task-model F3 (2026-07-05): id загруженного шаблона → в create-payload
+  // (source_template_id + usage_count Банка). Оба load-пути его ставят.
+  const loadedTemplateIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!templateId || templateLoadedRef.current) return;
     templateLoadedRef.current = true;
@@ -940,6 +943,7 @@ function TutorHomeworkCreateContent() {
         const resolved = resolveTemplateLoad(tpl);
         setMeta((m) => ({ ...m, ...resolved.meta(m) }));
         setTasks(tpl.tasks_json.map((t) => resolved.task(t)));
+        loadedTemplateIdRef.current = tpl.id;
         toast.success(`Шаблон «${tpl.title}» загружен`);
       })
       .catch(() => toast.error('Не удалось загрузить шаблон'))
@@ -1023,6 +1027,7 @@ function TutorHomeworkCreateContent() {
       const resolved = resolveTemplateLoad(full);
       setMeta((m) => ({ ...m, ...resolved.meta(m) }));
       setTasks(full.tasks_json.map((t) => resolved.task(t)));
+      loadedTemplateIdRef.current = full.id;
       toast.success(`Шаблон «${full.title}» применён`);
     } catch {
       toast.error('Не удалось загрузить шаблон');
@@ -1253,6 +1258,8 @@ function TutorHomeworkCreateContent() {
           feedback_language: meta.feedback_language ?? 'auto',
           // Папка (create-only, запрос Елены 2026-06-17). null = «Без папки».
           folder_id: createFolderId,
+          // unified-task-model F3: «выдано из шаблона» → usage_count Банка.
+          template_id: loadedTemplateIdRef.current,
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;

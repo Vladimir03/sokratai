@@ -101,15 +101,19 @@ export function useTutorHomeworkAssignments(params: {
   };
 }
 
-export function useTutorHomeworkTemplates(subject?: HomeworkSubject) {
+export function useTutorHomeworkTemplates(
+  subject?: HomeworkSubject,
+  /** unified-task-model (2026-07-05): 'shared' = Банк ДЗ Сократа. Default 'mine'. */
+  scope: 'mine' | 'shared' = 'mine',
+) {
   const queryKey = useMemo(
-    () => ['tutor', 'homework', 'templates', subject ?? 'all'] as const,
-    [subject],
+    () => ['tutor', 'homework', 'templates', scope, subject ?? 'all'] as const,
+    [subject, scope],
   );
 
   const query = useQuery<HomeworkTemplateListItem[], unknown>({
     queryKey,
-    queryFn: () => withTutorTimeout(queryKey, listTutorHomeworkTemplates(subject)),
+    queryFn: () => withTutorTimeout(queryKey, listTutorHomeworkTemplates(subject, scope)),
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: createTutorRetry(queryKey),

@@ -18,10 +18,17 @@ export interface HWTemplatePickerProps {
   onSelect: (template: HomeworkTemplateListItem) => void;
 }
 
+// unified-task-model F3 (2026-07-05): вкладка «Банк Сократа» — общие шаблоны,
+// опубликованные модераторами (mirror KBPickerSheet Каталог/Моя база). Выбор
+// шаблона Банка = prefill конструктора (снимок при выдаче) — форк НЕ нужен.
+type PickerTab = 'mine' | 'shared';
+
 export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
+  const [tab, setTab] = useState<PickerTab>('mine');
   const [filterSubject, setFilterSubject] = useState<string>('all');
   const { templates, loading } = useTutorHomeworkTemplates(
     filterSubject !== 'all' ? (filterSubject as HomeworkSubject) : undefined,
+    tab,
   );
   const [open, setOpen] = useState(false);
 
@@ -46,6 +53,27 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
           <SheetTitle>Шаблоны домашних заданий</SheetTitle>
         </SheetHeader>
         <div className="mt-4 space-y-4">
+          {/* Вкладки Мои / Банк (mirror KBPickerSheet) */}
+          <div role="group" aria-label="Источник шаблонов" className="flex gap-1">
+            {([
+              { value: 'mine', label: 'Мои шаблоны' },
+              { value: 'shared', label: 'Банк Сократа' },
+            ] as const).map((t) => (
+              <button
+                key={t.value}
+                onClick={() => setTab(t.value)}
+                aria-pressed={tab === t.value}
+                style={{ touchAction: 'manipulation' }}
+                className={`flex-1 min-h-[44px] px-3 py-1.5 text-sm font-medium rounded-md border transition-colors ${
+                  tab === t.value
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/50'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-1">
             {['all', ...SUBJECTS.map(s => s.value)].map((s) => (
               <button
@@ -67,7 +95,9 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
             </div>
           ) : templates.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              Нет шаблонов. Создайте ДЗ и сохраните как шаблон.
+              {tab === 'shared'
+                ? 'В Банке пока нет шаблонов по этому предмету.'
+                : 'Нет шаблонов. Создайте ДЗ и сохраните как шаблон.'}
             </p>
           ) : (
             <div className="space-y-2">
@@ -82,6 +112,9 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
                     <span>{getSubjectLabel(tpl.subject)}</span>
                     {tpl.topic && <span>· {tpl.topic}</span>}
                     {tpl.task_count != null && <span>· {tpl.task_count} задач</span>}
+                    {tab === 'shared' && (tpl.usage_count ?? 0) > 0 && (
+                      <span>· использовано {tpl.usage_count} раз</span>
+                    )}
                   </div>
                 </button>
               ))}

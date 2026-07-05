@@ -143,6 +143,24 @@ async function updateTask(
 }
 
 async function removeTask(taskId: string): Promise<void> {
+  // unified-task-model F3 (2026-07-05): delete-гард — задача, на которую
+  // ссылаются шаблоны (свои/Банк), не удаляется (RESTRICT FK на junction =
+  // backstop; тут — человекочитаемый блок ДО удаления). `as never` — types.ts
+  // ещё без RPC (реген Lovable).
+  const { data: refRows } = await supabase.rpc(
+    'kb_task_template_refs' as never,
+    { p_task_ids: [taskId] } as never,
+  );
+  const refs = Array.isArray(refRows)
+    ? refRows as Array<{ template_count: number; template_titles: string[] }>
+    : [];
+  if (refs.length > 0 && refs[0].template_count > 0) {
+    const titles = (refs[0].template_titles ?? []).map((t) => `«${t}»`).join(', ');
+    throw new Error(
+      `Задача используется в шаблонах: ${titles}. Сначала уберите её из шаблонов.`,
+    );
+  }
+
   // Fetch task first to get attachment refs for storage cleanup
   const { data: task } = await supabase
     .from('kb_tasks')
