@@ -28,6 +28,13 @@ import {
   transcribeAudio,
   VoiceTranscriptionError,
 } from "../_shared/voice-transcribe.ts";
+import {
+  homeworkTaskFieldsToKbRow,
+  homeworkTaskFieldsToKbUpdate,
+  KB_TASK_SNAPSHOT_SELECT,
+  type KbTaskLike,
+  kbTaskToTemplateTaskJson,
+} from "./kb_snapshot.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -99,6 +106,177 @@ function referenceResetFieldsIfChanged(
     ai_reference_status: null,
     ai_reference_generated_at: null,
   };
+}
+
+// ─── unified-task-model (2026-07-05): авто-зеркало + провенанс ────────────────
+
+/** Имя авто-папки Базы для задач, созданных прямо в конструкторе ДЗ. */
+const KB_MIRROR_FOLDER_NAME = "Из ДЗ";
+
+/**
+ * Find-or-create корневой папки Базы владельца (case-insensitive дедуп —
+ * извлечено из handleSaveTasksToKB, чтобы двойной вызов не плодил близнецов).
+ * null при сбое (caller деградирует).
+ */
+async function resolveOrCreateRootKbFolder(
+  db: SupabaseClient,
+  ownerId: string,
+  name: string,
+): Promise<string | null> {
+  const nameTrimmed = name.trim();
+  const { data: existingFolders, error: existingErr } = await db
+    .from("kb_folders")
+    .select("id, name")
+    .eq("owner_id", ownerId)
+    .is("parent_id", null)
+    .ilike("name", nameTrimmed);
+  if (existingErr) {
+    console.warn("hw_kb_mirror_folder_lookup_failed", { error: existingErr.message });
+    return null;
+  }
+  const existing = (existingFolders ?? []).find(
+    (f) => typeof f.name === "string" && f.name.trim().toLowerCase() === nameTrimmed.toLowerCase(),
+  );
+  if (existing) return existing.id as string;
+  const { data: inserted, error: insertErr } = await db
+    .from("kb_folders")
+    .insert({ owner_id: ownerId, parent_id: null, name: nameTrimmed })
+    .select("id")
+    .single();
+  if (insertErr || !inserted) {
+    console.warn("hw_kb_mirror_folder_create_failed", { error: insertErr?.message });
+    return null;
+  }
+  return inserted.id as string;
+}
+
+/** Fingerprint через каноничную RPC (формула идентична moderation V2). null при сбое. */
+async function computeKbFingerprint(
+  db: SupabaseClient,
+  text: string,
+  answer: string,
+  attachmentUrl: string,
+): Promise<string | null> {
+  const { data, error } = await db.rpc("kb_normalize_fingerprint", {
+    p_text: text,
+    p_answer: answer,
+    p_attachment_url: attachmentUrl,
+  });
+  if (error || typeof data !== "string") {
+    console.warn("hw_kb_fingerprint_failed", { error: error?.message ?? "non_string" });
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Валидация client-supplied kb_task_id (tri-state, провенанс снимка): задача
+ * читаема тутором = своя ИЛИ активная каталожная. Невалидный id → null
+ * (degrade: снимок сохраняется без провенанса, ДЗ не блокируется).
+ */
+async function resolveProvidedKbTaskId(
+  db: SupabaseClient,
+  tutorUserId: string,
+  kbTaskId: unknown,
+): Promise<string | null> {
+  if (!isUUID(kbTaskId)) return null;
+  const { data, error } = await db
+    .from("kb_tasks")
+    .select("id, owner_id, moderation_status")
+    .eq("id", kbTaskId as string)
+    .maybeSingle();
+  if (error || !data) return null;
+  const readable = data.owner_id === tutorUserId ||
+    (data.owner_id === null && data.moderation_status === "active");
+  return readable ? (data.id as string) : null;
+}
+
+/**
+ * Авто-зеркало НОВОЙ задачи конструктора в Базу («двойное авторство»,
+ * решение владельца 2026-07-05): fingerprint-дедуп против существующих задач
+ * владельца (идемпотентный ретрай save) → иначе INSERT в папку «Из ДЗ» (или
+ * mirror_folder_id). ДЕГРАДАЦИЯ, НЕ БЛОК: любой сбой → null (ДЗ сохраняется
+ * без провенанса; recovery — «Сохранить в мою базу»). Выдача ДЗ — money-path.
+ */
+async function mirrorNewTaskToKb(
+  db: SupabaseClient,
+  tutorUserId: string,
+  t: Record<string, unknown>,
+  opts: { folderId: string | null; exam: string | null },
+): Promise<string | null> {
+  try {
+    const folderId = opts.folderId ??
+      await resolveOrCreateRootKbFolder(db, tutorUserId, KB_MIRROR_FOLDER_NAME);
+    if (!folderId) return null;
+
+    const taskText = isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]";
+    const answer = isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : "";
+    const attachment = isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : "";
+
+    const fingerprint = await computeKbFingerprint(db, taskText, answer, attachment);
+    if (!fingerprint) return null;
+
+    const { data: existing } = await db
+      .from("kb_tasks")
+      .select("id")
+      .eq("owner_id", tutorUserId)
+      .eq("fingerprint", fingerprint)
+      .limit(1)
+      .maybeSingle();
+    if (existing) return existing.id as string;
+
+    // Классификация зеркала из нового каскада конструктора (best-effort:
+    // невалидные topic/subtopic просто не пишутся — метаданные, не money-path).
+    const topicId = isUUID(t.topic_id) ? (t.topic_id as string) : null;
+    const subtopicId = isUUID(t.subtopic_id) ? (t.subtopic_id as string) : null;
+    const row = homeworkTaskFieldsToKbRow(t, {
+      ownerId: tutorUserId,
+      folderId,
+      fingerprint,
+      exam: opts.exam,
+      topicId,
+      subtopicId,
+      difficulty: typeof t.difficulty === "number" ? (t.difficulty as number) : null,
+      sourceLabel: isNonEmptyString(t.source_label) ? (t.source_label as string) : null,
+    });
+    const { data: inserted, error: insertErr } = await db
+      .from("kb_tasks")
+      .insert(row)
+      .select("id")
+      .single();
+    if (insertErr || !inserted) {
+      console.warn("homework_api_auto_mirror_failed", { error: insertErr?.message });
+      return null;
+    }
+    return inserted.id as string;
+  } catch (e) {
+    console.warn("homework_api_auto_mirror_failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return null;
+  }
+}
+
+/**
+ * Провенанс задачи из tri-state `kb_task_id` payload (deploy-skew-защита):
+ *   uuid      → валидированный провенанс (снимок KB-задачи);
+ *   null      → ЯВНО новая задача → авто-зеркало в Базу;
+ *   undefined → старый клиент → legacy-поведение (без зеркала, без провенанса).
+ */
+async function resolveTaskProvenance(
+  db: SupabaseClient,
+  tutorUserId: string,
+  t: Record<string, unknown>,
+  opts: { mirrorFolderId: string | null; exam: string | null },
+): Promise<string | null> {
+  if (t.kb_task_id === undefined) return null;
+  if (t.kb_task_id === null) {
+    return await mirrorNewTaskToKb(db, tutorUserId, t, {
+      folderId: opts.mirrorFolderId,
+      exam: opts.exam,
+    });
+  }
+  return await resolveProvidedKbTaskId(db, tutorUserId, t.kb_task_id);
 }
 
 const VALID_SUBJECTS_CREATE = [
@@ -886,6 +1064,30 @@ async function handleCreateAssignment(
   const folderIdOrErr = await validateOwnedFolderId(db, tutorUserId, b.folder_id, cors);
   if (folderIdOrErr instanceof Response) return folderIdOrErr;
 
+  // unified-task-model (2026-07-05): провенанс шаблона — «выдано из шаблона»
+  // (source_template_id + usage_count для Банка ДЗ). Невалидный/чужой id →
+  // молча null (не блокируем выдачу).
+  let sourceTemplateId: string | null = null;
+  if (isUUID(b.template_id)) {
+    const { data: tpl } = await db
+      .from("homework_tutor_templates")
+      .select("id, tutor_id, visibility, usage_count")
+      .eq("id", b.template_id as string)
+      .maybeSingle();
+    if (tpl && (tpl.tutor_id === tutorUserId || tpl.visibility === "shared")) {
+      sourceTemplateId = tpl.id as string;
+      // Best-effort счётчик (social proof Банка): read-then-write, редкая гонка
+      // теряет инкремент — приемлемо для счётчика использований.
+      const { error: usageErr } = await db
+        .from("homework_tutor_templates")
+        .update({ usage_count: ((tpl.usage_count as number) ?? 0) + 1 })
+        .eq("id", sourceTemplateId);
+      if (usageErr) {
+        console.warn("homework_api_template_usage_count_failed", { error: usageErr.message });
+      }
+    }
+  }
+
   const { data: assignment, error: assignErr } = await db
     .from("homework_tutor_assignments")
     .insert({
@@ -903,6 +1105,8 @@ async function handleCreateAssignment(
       source_group_id: sourceGroupIdOrErr ?? null,
       // folder_id: undefined (поле не передано) → NULL «Без папки».
       folder_id: folderIdOrErr ?? null,
+      // unified-task-model: шаблон-источник (null для ДЗ не из шаблона).
+      source_template_id: sourceTemplateId,
     })
     .select("id")
     .single();
@@ -911,6 +1115,44 @@ async function handleCreateAssignment(
     console.error("homework_api_request_error", { route: "POST /assignments", error: assignErr?.message });
     return jsonError(cors, 500, "DB_ERROR", "Failed to create assignment");
   }
+
+  // unified-task-model (2026-07-05): провенанс/авто-зеркало per task.
+  // Tri-state kb_task_id: uuid = снимок KB-задачи; null = ЯВНО новая →
+  // авто-зеркало в Базу («двойное авторство»); undefined = старый клиент →
+  // legacy (без зеркала). Сбой зеркала = degrade (warn + null), НЕ блок выдачи.
+  const tasksPayloadForProvenance = b.tasks as Record<string, unknown>[];
+  const needsMirror = tasksPayloadForProvenance.some((t) => t.kb_task_id === null);
+  let mirrorFolderId: string | null = null;
+  if (needsMirror) {
+    if (isUUID(b.mirror_folder_id)) {
+      const { data: mf } = await db
+        .from("kb_folders")
+        .select("id, owner_id")
+        .eq("id", b.mirror_folder_id as string)
+        .maybeSingle();
+      if (mf && mf.owner_id === tutorUserId) mirrorFolderId = mf.id as string;
+    }
+    if (!mirrorFolderId) {
+      mirrorFolderId = await resolveOrCreateRootKbFolder(db, tutorUserId, KB_MIRROR_FOLDER_NAME);
+    }
+  }
+  const assignmentExam = (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string)
+    ? (b.exam_type as string)
+    : "ege";
+  const sourceKbIds: (string | null)[] = [];
+  for (const t of tasksPayloadForProvenance) {
+    // Per-task Тип из каскада выигрывает; undefined + № КИМ → exam_type ДЗ.
+    const perTaskExam = t.exam === "ege" || t.exam === "oge"
+      ? (t.exam as string)
+      : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? assignmentExam : null);
+    sourceKbIds.push(
+      await resolveTaskProvenance(db, tutorUserId, t, {
+        mirrorFolderId,
+        exam: perTaskExam,
+      }),
+    );
+  }
+  const provenanceSyncedAt = new Date().toISOString();
 
   const taskRows = (b.tasks as Record<string, unknown>[]).map((t, i) => {
     const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
@@ -939,6 +1181,10 @@ async function handleCreateAssignment(
       // Criteria-grading feature (2026-06): структурные критерии репетитора (любой
       // предмет) → покритериальная AI-оценка. Normalize защищает от битого payload.
       grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
+      // unified-task-model: провенанс снимка (per-row, вместо позиционного
+      // homework_kb_tasks). NULL = legacy-клиент или сбой авто-зеркала.
+      source_kb_task_id: sourceKbIds[i] ?? null,
+      source_kb_synced_at: sourceKbIds[i] ? provenanceSyncedAt : null,
     };
   });
 
@@ -1329,7 +1575,7 @@ async function handleGetAssignment(
   // во всех ДЗ. Схема-дрейф должен падать громко, не тихо пустеть.
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at, source_kb_task_id, source_kb_synced_at")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
   if (tasksError) {
@@ -1388,7 +1634,63 @@ async function handleGetAssignment(
     });
   }
 
+  // unified-task-model (2026-07-05): per-row провенанс source_kb_task_id
+  // ПРЕДПОЧИТАЕТСЯ позиционному homework_kb_tasks (legacy-fallback). Гидрация
+  // живых kb-полей для divergence-бейджа («Обновить в Базе») у тутора.
+  const sourceKbIdsForHydration = Array.from(
+    new Set(
+      (tasks ?? [])
+        .map((t) => t.source_kb_task_id)
+        .filter((id): id is string => isUUID(id)),
+    ),
+  );
+  const kbSourceById = new Map<string, {
+    owner_id: string | null;
+    source_label: string | null;
+    solution_attachment_url: string | null;
+    updated_at: string | null;
+  }>();
+  if (sourceKbIdsForHydration.length > 0) {
+    const { data: kbSources, error: kbSourcesErr } = await db
+      .from("kb_tasks")
+      .select("id, owner_id, source_label, solution_attachment_url, updated_at")
+      .in("id", sourceKbIdsForHydration);
+    if (kbSourcesErr) {
+      // Провенанс — декоративный слой: логируем и продолжаем.
+      console.error("homework_api_get_assignment_kb_sources_error", {
+        assignment_id: assignmentId,
+        error: kbSourcesErr.message,
+      });
+    }
+    for (const row of kbSources ?? []) {
+      kbSourceById.set(row.id as string, {
+        owner_id: (row.owner_id as string | null) ?? null,
+        source_label: (row.source_label as string | null) ?? null,
+        solution_attachment_url: (row.solution_attachment_url as string | null) ?? null,
+        updated_at: (row.updated_at as string | null) ?? null,
+      });
+    }
+  }
+
   const tasksWithKbProvenance = (tasks ?? []).map((task) => {
+    // Приоритет 1: per-row провенанс (новый путь).
+    if (isUUID(task.source_kb_task_id)) {
+      const kb = kbSourceById.get(task.source_kb_task_id as string);
+      return {
+        ...task,
+        kb_task_id: task.source_kb_task_id,
+        kb_snapshot_text: null,
+        kb_snapshot_answer: null,
+        kb_snapshot_solution: null,
+        kb_snapshot_edited: false,
+        kb_snapshot_solution_image_refs: kb?.solution_attachment_url ?? null,
+        kb_source_label: kb?.source_label ?? (kb ? (kb.owner_id ? "my" : "socrat") : null),
+        // Живые метки для divergence-детекта на фронте:
+        kb_source_updated_at: kb?.updated_at ?? null,
+        kb_source_owner: kb ? (kb.owner_id ? "my" : "socrat") : null,
+      };
+    }
+    // Приоритет 2: legacy позиционный homework_kb_tasks.
     const sortOrder = Number(task.order_num ?? 0) - 1;
     const provenance = kbProvenanceBySortOrder.get(sortOrder);
     if (!provenance) {
@@ -1910,12 +2212,43 @@ async function handleUpdateAssignment(
           0,
         ) + 1000;
       const insertedTaskIds: string[] = [];
+      // unified-task-model (2026-07-05): провенанс/авто-зеркало для НОВЫХ задач
+      // (mirror create-path; существующие задачи провенанс НЕ ретро-зеркалят —
+      // решение владельца №5, recovery = «Сохранить в мою базу»).
+      let updMirrorFolderId: string | null = null;
+      if (toInsert.some((entry) => entry.task.kb_task_id === null)) {
+        if (isUUID(b.mirror_folder_id)) {
+          const { data: mf } = await db
+            .from("kb_folders")
+            .select("id, owner_id")
+            .eq("id", b.mirror_folder_id as string)
+            .maybeSingle();
+          if (mf && mf.owner_id === tutorUserId) updMirrorFolderId = mf.id as string;
+        }
+        if (!updMirrorFolderId) {
+          updMirrorFolderId = await resolveOrCreateRootKbFolder(db, tutorUserId, KB_MIRROR_FOLDER_NAME);
+        }
+      }
+      const updAssignmentExam = (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string)
+        ? (b.exam_type as string)
+        : ((VALID_EXAM_TYPES as readonly string[]).includes(
+            (assignmentOrErr as Record<string, unknown>).exam_type as string,
+          )
+          ? ((assignmentOrErr as Record<string, unknown>).exam_type as string)
+          : "ege");
       if (toInsert.length > 0) {
         for (let i = 0; i < toInsert.length; i++) {
           const t = toInsert[i].task;
           const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
             ? (t.check_format as string)
             : "short_answer";
+          const perTaskExam = t.exam === "ege" || t.exam === "oge"
+            ? (t.exam as string)
+            : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? updAssignmentExam : null);
+          const sourceKbId = await resolveTaskProvenance(db, tutorUserId, t, {
+            mirrorFolderId: updMirrorFolderId,
+            exam: perTaskExam,
+          });
           const { data: insertedRow, error } = await db
             .from("homework_tutor_tasks")
             .insert({
@@ -1936,6 +2269,9 @@ async function handleUpdateAssignment(
               cefr_level: normalizeCefrLevel(t.cefr_level),
               kim_number: normalizeKimNumber(t.kim_number),
               grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
+              // unified-task-model: провенанс снимка (tri-state, mirror create).
+              source_kb_task_id: sourceKbId,
+              source_kb_synced_at: sourceKbId ? new Date().toISOString() : null,
             })
             .select("id")
             .single();
@@ -4722,12 +5058,21 @@ async function handleListTemplates(
   if (subject && !(VALID_SUBJECTS_UPDATE as readonly string[]).includes(subject)) {
     return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_UPDATE.join(", ")}`);
   }
+  // unified-task-model (2026-07-05): scope=mine (default, legacy-совместимо) |
+  // shared (Банк ДЗ — шаблоны, опубликованные модераторами).
+  const scope = searchParams.get("scope") === "shared" ? "shared" : "mine";
 
   let query = db
     .from("homework_tutor_templates")
-    .select("id, title, subject, topic, tags, created_at, tasks_json")
-    .eq("tutor_id", tutorUserId)
+    .select(
+      "id, title, subject, topic, tags, created_at, tasks_json, visibility, usage_count, published_at, tasks_migrated_at",
+    )
     .order("created_at", { ascending: false });
+  if (scope === "shared") {
+    query = query.eq("visibility", "shared");
+  } else {
+    query = query.eq("tutor_id", tutorUserId);
+  }
 
   if (subject) {
     query = query.eq("subject", subject);
@@ -4739,14 +5084,41 @@ async function handleListTemplates(
     return jsonError(cors, 500, "DB_ERROR", "Failed to fetch templates");
   }
 
-  const result = (data ?? []).map((t) => ({
+  // task_count: ссылочные шаблоны (migrated) считаются по junction; legacy —
+  // по tasks_json (skew-совместимость: старый фронт видит те же цифры).
+  const rows = data ?? [];
+  const migratedIds = rows
+    .filter((t) => t.tasks_migrated_at != null)
+    .map((t) => t.id as string);
+  const refCountByTemplate = new Map<string, number>();
+  if (migratedIds.length > 0) {
+    const { data: refRows, error: refErr } = await db
+      .from("homework_template_tasks")
+      .select("template_id")
+      .in("template_id", migratedIds);
+    if (refErr) {
+      console.warn("homework_api_template_ref_count_failed", { error: refErr.message });
+    }
+    for (const r of refRows ?? []) {
+      const key = r.template_id as string;
+      refCountByTemplate.set(key, (refCountByTemplate.get(key) ?? 0) + 1);
+    }
+  }
+
+  const result = rows.map((t) => ({
     id: t.id,
     title: t.title,
     subject: t.subject,
     topic: t.topic,
     tags: t.tags,
     created_at: t.created_at,
-    task_count: Array.isArray(t.tasks_json) ? t.tasks_json.length : 0,
+    task_count: t.tasks_migrated_at != null
+      ? (refCountByTemplate.get(t.id as string) ?? 0)
+      : (Array.isArray(t.tasks_json) ? t.tasks_json.length : 0),
+    // Банк ДЗ (additive — старый фронт игнорирует):
+    visibility: t.visibility ?? "private",
+    usage_count: typeof t.usage_count === "number" ? t.usage_count : 0,
+    published_at: t.published_at ?? null,
   }));
 
   return jsonOk(cors, result);
@@ -4771,6 +5143,88 @@ async function handleCreateTemplate(
   if (!isNonEmptyString(b.subject) || !(VALID_SUBJECTS_CREATE as readonly string[]).includes(b.subject)) {
     return jsonError(cors, 400, "VALIDATION", `subject must be one of: ${VALID_SUBJECTS_CREATE.join(", ")}`);
   }
+
+  // unified-task-model (2026-07-05): новый клиент шлёт task_refs (ссылки на
+  // kb_tasks) — шаблон создаётся ссылочным. Legacy tasks_json (старый клиент)
+  // принимается как раньше (материализуется потом hw_materialize_legacy_templates).
+  const hasTaskRefs = Array.isArray(b.task_refs) && (b.task_refs as unknown[]).length > 0;
+  if (hasTaskRefs) {
+    const refsIn = b.task_refs as Array<Record<string, unknown>>;
+    for (const r of refsIn) {
+      if (!r || typeof r !== "object" || !isUUID(r.kb_task_id)) {
+        return jsonError(cors, 400, "VALIDATION", "task_refs must be [{kb_task_id: uuid, sort_order?: number}]");
+      }
+    }
+    const kbIds = Array.from(new Set(refsIn.map((r) => r.kb_task_id as string)));
+    const { data: kbRows, error: kbErr } = await db
+      .from("kb_tasks")
+      .select("id, owner_id, moderation_status")
+      .in("id", kbIds);
+    if (kbErr) {
+      console.error("homework_api_request_error", { route: "POST /templates", error: kbErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to validate template tasks");
+    }
+    const readable = new Set(
+      (kbRows ?? [])
+        .filter((k) =>
+          k.owner_id === tutorUserId || (k.owner_id === null && k.moderation_status === "active")
+        )
+        .map((k) => k.id as string),
+    );
+    const missing = kbIds.filter((id) => !readable.has(id));
+    if (missing.length > 0) {
+      return jsonError(
+        cors,
+        400,
+        "INVALID_TASK_REFS",
+        "Некоторые задачи недоступны в Базе — обновите страницу и попробуйте снова",
+      );
+    }
+
+    const isLangTpl = LANGUAGE_SUBJECTS_REQUIRING_CEFR.has(b.subject as string);
+    const { data: created, error: createErr } = await db
+      .from("homework_tutor_templates")
+      .insert({
+        tutor_id: tutorUserId,
+        title: (b.title as string).trim(),
+        subject: b.subject,
+        topic: isNonEmptyString(b.topic) ? (b.topic as string).trim() : null,
+        tags: Array.isArray(b.tags) ? b.tags.filter((t) => isString(t)) : [],
+        tasks_json: [],
+        tasks_migrated_at: new Date().toISOString(),
+        exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+        disable_ai_bootstrap: b.disable_ai_bootstrap === true,
+        feedback_language: isLangTpl ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
+      })
+      .select("id")
+      .single();
+    if (createErr || !created) {
+      console.error("homework_api_request_error", { route: "POST /templates", error: createErr?.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+    }
+    // Дедуп повторных kb_task_id (UNIQUE в junction) с сохранением порядка.
+    const seenIds = new Set<string>();
+    const junctionRows = refsIn
+      .filter((r) => {
+        const id = r.kb_task_id as string;
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
+      })
+      .map((r, i) => ({
+        template_id: created.id,
+        kb_task_id: r.kb_task_id as string,
+        sort_order: typeof r.sort_order === "number" ? r.sort_order : i,
+      }));
+    const { error: junctionErr } = await db.from("homework_template_tasks").insert(junctionRows);
+    if (junctionErr) {
+      console.error("homework_api_request_error", { route: "POST /templates", error: junctionErr.message });
+      await db.from("homework_tutor_templates").delete().eq("id", created.id);
+      return jsonError(cors, 500, "DB_ERROR", "Failed to create template tasks");
+    }
+    return jsonOk(cors, { template_id: created.id }, 201);
+  }
+
   if (!Array.isArray(b.tasks_json)) {
     return jsonError(cors, 400, "VALIDATION", "tasks_json must be an array");
   }
@@ -4844,11 +5298,67 @@ async function handleGetTemplate(
   if (error || !data) {
     return jsonError(cors, 404, "NOT_FOUND", "Template not found");
   }
-  if (data.tutor_id !== tutorUserId) {
+  // unified-task-model: shared-шаблоны (Банк ДЗ) читаемы любым тутором.
+  if (data.tutor_id !== tutorUserId && data.visibility !== "shared") {
     return jsonError(cors, 403, "FORBIDDEN", "Template does not belong to you");
   }
 
-  return jsonOk(cors, data);
+  // Legacy-шаблон (не мигрирован) → как раньше, сырой tasks_json.
+  if (data.tasks_migrated_at == null) {
+    return jsonOk(cors, data);
+  }
+
+  // Ссылочный шаблон → dual-shape (deploy-skew): task_refs (новый клиент) +
+  // СИНТЕЗИРОВАННЫЙ tasks_json из живых kb-задач (старый клиент читает его же
+  // через resolveTemplateLoad без правок). Недоступная задача → unavailable,
+  // НЕ 500 (rule 45-паттерн graceful hydration).
+  const { data: refs, error: refsErr } = await db
+    .from("homework_template_tasks")
+    .select("kb_task_id, sort_order")
+    .eq("template_id", templateId)
+    .order("sort_order", { ascending: true });
+  if (refsErr) {
+    console.error("homework_api_request_error", { route: "GET /templates/:id", error: refsErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load template tasks");
+  }
+  const kbIds = (refs ?? []).map((r) => r.kb_task_id as string);
+  const kbById = new Map<string, KbTaskLike>();
+  if (kbIds.length > 0) {
+    const { data: kbRows, error: kbRowsErr } = await db
+      .from("kb_tasks")
+      .select(KB_TASK_SNAPSHOT_SELECT)
+      .in("id", kbIds);
+    if (kbRowsErr) {
+      console.error("homework_api_request_error", { route: "GET /templates/:id", error: kbRowsErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to load template tasks");
+    }
+    for (const row of (kbRows ?? []) as unknown as KbTaskLike[]) {
+      kbById.set(row.id, row);
+    }
+  }
+
+  // Читаемость задачи ВЫЗЫВАЮЩИМ: своя ИЛИ активная каталожная. Чужая личная
+  // (не должно быть у shared по инварианту publish) / скрытая → unavailable.
+  const taskRefs = (refs ?? []).map((r) => {
+    const kb = kbById.get(r.kb_task_id as string);
+    const readable = kb != null &&
+      (kb.owner_id === tutorUserId || (kb.owner_id === null && kb.moderation_status === "active"));
+    return {
+      kb_task_id: r.kb_task_id,
+      sort_order: r.sort_order,
+      unavailable: !readable,
+      task: readable && kb ? kb : null,
+    };
+  });
+  const synthesizedTasksJson = taskRefs
+    .filter((r) => r.task != null)
+    .map((r) => kbTaskToTemplateTaskJson(r.task as KbTaskLike));
+
+  return jsonOk(cors, {
+    ...data,
+    tasks_json: synthesizedTasksJson,
+    task_refs: taskRefs,
+  });
 }
 
 // ─── Endpoint: DELETE /templates/:id ─────────────────────────────────────────
@@ -4887,6 +5397,89 @@ async function handleDeleteTemplate(
   }
 
   return jsonOk(cors, { ok: true });
+}
+
+// ─── Endpoint: POST /templates/:id/fork ──────────────────────────────────────
+//
+// unified-task-model (2026-07-05): «Создать свою копию» — форк шаблона Банка
+// (или своего). Копирует строку шаблона + ССЫЛКИ на ТЕ ЖЕ задачи (задачи НЕ
+// копируются — решение из скриншотов советчика: иначе общий банк становится
+// неуправляемым). Форк всегда private; правка каталожной задачи внутри форка →
+// copy-on-write через push-to-kb.
+async function handleForkTemplate(
+  db: SupabaseClient,
+  tutorUserId: string,
+  templateId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(templateId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid template ID format");
+  }
+
+  const { data: tpl, error: tplErr } = await db
+    .from("homework_tutor_templates")
+    .select("*")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (tplErr || !tpl) {
+    return jsonError(cors, 404, "NOT_FOUND", "Шаблон не найден");
+  }
+  if (tpl.tutor_id !== tutorUserId && tpl.visibility !== "shared") {
+    return jsonError(cors, 403, "FORBIDDEN", "Шаблон недоступен");
+  }
+
+  const { data: created, error: createErr } = await db
+    .from("homework_tutor_templates")
+    .insert({
+      tutor_id: tutorUserId,
+      title: tpl.title,
+      subject: tpl.subject,
+      topic: tpl.topic ?? null,
+      tags: Array.isArray(tpl.tags) ? tpl.tags : [],
+      // Legacy-шаблон → копия tasks_json (материализуется потом); ссылочный →
+      // пустой json + копия junction ниже.
+      tasks_json: tpl.tasks_migrated_at != null ? [] : (tpl.tasks_json ?? []),
+      tasks_migrated_at: tpl.tasks_migrated_at != null ? new Date().toISOString() : null,
+      exam_type: tpl.exam_type ?? null,
+      feedback_language: tpl.feedback_language ?? null,
+      disable_ai_bootstrap: tpl.disable_ai_bootstrap === true,
+      forked_from_template_id: tpl.id,
+    })
+    .select("id")
+    .single();
+  if (createErr || !created) {
+    console.error("homework_api_request_error", { route: "POST /templates/:id/fork", error: createErr?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось создать копию шаблона");
+  }
+
+  if (tpl.tasks_migrated_at != null) {
+    const { data: refs, error: refsErr } = await db
+      .from("homework_template_tasks")
+      .select("kb_task_id, sort_order")
+      .eq("template_id", templateId)
+      .order("sort_order", { ascending: true });
+    if (refsErr) {
+      console.error("homework_api_request_error", { route: "POST /templates/:id/fork", error: refsErr.message });
+      await db.from("homework_tutor_templates").delete().eq("id", created.id);
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось скопировать задачи шаблона");
+    }
+    if ((refs ?? []).length > 0) {
+      const { error: junctionErr } = await db.from("homework_template_tasks").insert(
+        (refs ?? []).map((r) => ({
+          template_id: created.id,
+          kb_task_id: r.kb_task_id,
+          sort_order: r.sort_order,
+        })),
+      );
+      if (junctionErr) {
+        console.error("homework_api_request_error", { route: "POST /templates/:id/fork", error: junctionErr.message });
+        await db.from("homework_tutor_templates").delete().eq("id", created.id);
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось скопировать задачи шаблона");
+      }
+    }
+  }
+
+  return jsonOk(cors, { template_id: created.id }, 201);
 }
 
 // ─── Endpoint: POST /assignments/:id/save-as-template ────────────────────────
@@ -4969,7 +5562,8 @@ async function handleCreateTemplateFromAssignment(
     .select(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
-        "check_format, task_kind, kim_number, cefr_level, grading_criteria_json",
+        "check_format, task_kind, kim_number, cefr_level, grading_criteria_json, " +
+        "source_kb_task_id",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -5107,6 +5701,71 @@ async function handleCreateTemplateFromAssignment(
     });
   }
 
+  // unified-task-model (2026-07-05): пробуем сделать шаблон ССЫЛОЧНЫМ —
+  // провенанс из source_kb_task_id, недостающие задачи авто-зеркалятся в Базу
+  // («Из ДЗ»). Успех для ВСЕХ задач → junction + tasks_migrated_at (GET будет
+  // синтезировать tasks_json из живых ссылок; сохранённый snapshot = audit).
+  // Любой сбой → legacy-снапшот, как раньше (degrade, не блок).
+  try {
+    const assignmentExamType = (VALID_EXAM_TYPES as readonly string[]).includes(assignment.exam_type as string)
+      ? (assignment.exam_type as string)
+      : "ege";
+    let mirrorFolder: string | null = null;
+    const refIds: string[] = [];
+    let allResolved = true;
+    for (const t of (taskRows ?? []) as Array<Record<string, unknown>>) {
+      let kbId = await resolveProvidedKbTaskId(db, tutorUserId, t.source_kb_task_id);
+      if (!kbId) {
+        if (!mirrorFolder) {
+          mirrorFolder = await resolveOrCreateRootKbFolder(db, tutorUserId, KB_MIRROR_FOLDER_NAME);
+        }
+        kbId = mirrorFolder
+          ? await mirrorNewTaskToKb(db, tutorUserId, t, {
+            folderId: mirrorFolder,
+            exam: typeof t.kim_number === "number" ? assignmentExamType : null,
+          })
+          : null;
+      }
+      if (!kbId) {
+        allResolved = false;
+        break;
+      }
+      refIds.push(kbId);
+    }
+    if (allResolved && refIds.length > 0) {
+      const seenRefIds = new Set<string>();
+      const junctionRows = refIds
+        .filter((id) => {
+          if (seenRefIds.has(id)) return false;
+          seenRefIds.add(id);
+          return true;
+        })
+        .map((id, i) => ({ template_id: inserted.id, kb_task_id: id, sort_order: i }));
+      const { error: junctionErr } = await db.from("homework_template_tasks").insert(junctionRows);
+      if (!junctionErr) {
+        await db
+          .from("homework_tutor_templates")
+          .update({ tasks_migrated_at: new Date().toISOString() })
+          .eq("id", inserted.id);
+      } else {
+        console.warn("homework_api_save_template_refs_failed", {
+          template_id: inserted.id,
+          error: junctionErr.message,
+        });
+      }
+    } else if (!allResolved) {
+      console.warn("homework_api_save_template_refs_degraded", {
+        template_id: inserted.id,
+        reason: "not_all_tasks_resolved_to_kb",
+      });
+    }
+  } catch (refErr) {
+    console.warn("homework_api_save_template_refs_failed", {
+      template_id: inserted.id,
+      error: refErr instanceof Error ? refErr.message : String(refErr),
+    });
+  }
+
   return jsonOk(cors, inserted, 201);
 }
 
@@ -5121,7 +5780,7 @@ async function handleCreateTemplateFromAssignment(
 //
 // Редактирование задач шаблона вынесено в Sprint 2+ (требует отдельного
 // dialog с task picker и более аккуратного provenance тракинга).
-const UPDATE_TEMPLATE_ALLOWED_KEYS = new Set(["title", "tags", "topic"]);
+const UPDATE_TEMPLATE_ALLOWED_KEYS = new Set(["title", "tags", "topic", "task_refs"]);
 
 async function handleUpdateTemplate(
   db: SupabaseClient,
@@ -5203,6 +5862,71 @@ async function handleUpdateTemplate(
     } else {
       return jsonError(cors, 400, "VALIDATION", "topic must be a string or null");
     }
+  }
+
+  // unified-task-model (2026-07-05): full-replace ссылок шаблона (own only).
+  if ("task_refs" in b) {
+    if (!Array.isArray(b.task_refs) || (b.task_refs as unknown[]).length === 0) {
+      return jsonError(cors, 400, "VALIDATION", "task_refs must be a non-empty array");
+    }
+    const refsIn = b.task_refs as Array<Record<string, unknown>>;
+    for (const r of refsIn) {
+      if (!r || typeof r !== "object" || !isUUID(r.kb_task_id)) {
+        return jsonError(cors, 400, "VALIDATION", "task_refs must be [{kb_task_id: uuid, sort_order?: number}]");
+      }
+    }
+    const kbIds = Array.from(new Set(refsIn.map((r) => r.kb_task_id as string)));
+    const { data: kbRows, error: kbErr } = await db
+      .from("kb_tasks")
+      .select("id, owner_id, moderation_status")
+      .in("id", kbIds);
+    if (kbErr) {
+      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: kbErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to validate template tasks");
+    }
+    const readable = new Set(
+      (kbRows ?? [])
+        .filter((k) =>
+          k.owner_id === tutorUserId || (k.owner_id === null && k.moderation_status === "active")
+        )
+        .map((k) => k.id as string),
+    );
+    if (kbIds.some((id) => !readable.has(id))) {
+      return jsonError(
+        cors,
+        400,
+        "INVALID_TASK_REFS",
+        "Некоторые задачи недоступны в Базе — обновите страницу и попробуйте снова",
+      );
+    }
+    const { error: delErr } = await db
+      .from("homework_template_tasks")
+      .delete()
+      .eq("template_id", templateId);
+    if (delErr) {
+      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: delErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to replace template tasks");
+    }
+    const seenIds = new Set<string>();
+    const junctionRows = refsIn
+      .filter((r) => {
+        const id = r.kb_task_id as string;
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
+      })
+      .map((r, i) => ({
+        template_id: templateId,
+        kb_task_id: r.kb_task_id as string,
+        sort_order: typeof r.sort_order === "number" ? r.sort_order : i,
+      }));
+    const { error: insErr } = await db.from("homework_template_tasks").insert(junctionRows);
+    if (insErr) {
+      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: insErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Failed to replace template tasks");
+    }
+    patch.tasks_migrated_at = new Date().toISOString();
+    patch.updated_at = new Date().toISOString();
   }
 
   if (Object.keys(patch).length === 0) {
@@ -5387,7 +6111,10 @@ async function handleSaveTasksToKB(
   const { data: tasks, error: tasksErr } = await db
     .from("homework_tutor_tasks")
     .select(
-      "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, rubric_text, rubric_image_urls",
+      "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, rubric_text, rubric_image_urls, " +
+        // unified-task-model (2026-07-05): грейдинг-мета теперь едет в Базу
+        // (закрывает потерю check_format/КИМ/критериев на save-back — Q3 снят).
+        "max_score, check_format, task_kind, cefr_level, kim_number, grading_criteria_json",
     )
     .eq("assignment_id", assignmentId)
     .in("id", taskIds);
@@ -5423,7 +6150,9 @@ async function handleSaveTasksToKB(
       continue;
     }
 
-    const taskText = isNonEmptyString(task.task_text) ? (task.task_text as string) : "";
+    // unified-task-model: текст коалесцируется как в конвертере (kb_snapshot),
+    // чтобы fingerprint и записанная строка были консистентны.
+    const taskText = isNonEmptyString(task.task_text) ? (task.task_text as string) : "[Задача на фото]";
     const correctAnswer = isString(task.correct_answer)
       ? (task.correct_answer as string)
       : "";
@@ -5517,6 +6246,12 @@ async function handleSaveTasksToKB(
           });
         }
       }
+      // unified-task-model: retro-link провенанса — legacy-задача обретает
+      // источник в Базе, «Обновить в Базе» начинает работать.
+      await db
+        .from("homework_tutor_tasks")
+        .update({ source_kb_task_id: existing.id as string, source_kb_synced_at: new Date().toISOString() })
+        .eq("id", taskId);
       saved.push({
         task_id: taskId,
         kb_task_id: existing.id as string,
@@ -5537,24 +6272,16 @@ async function handleSaveTasksToKB(
     // (kb_publish_task / kb_resync_task) копируют явный список колонок без
     // rubric_*, поэтому каталожная копия (owner_id IS NULL) рубрику не несёт.
     // check_format / cefr_level в Базу обратно НЕ дописываем (Q3, отложено).
+    // unified-task-model (2026-07-05): грейдинг-мета (check_format / task_kind /
+    // cefr / № КИМ / критерии / балл→primary_score) теперь едет в Базу — Q3 снят.
+    const kbRow = homeworkTaskFieldsToKbRow(task as Record<string, unknown>, {
+      ownerId: tutorUserId,
+      folderId,
+      fingerprint,
+    });
     const { data: inserted, error: insertErr } = await db
       .from("kb_tasks")
-      .insert({
-        owner_id: tutorUserId,
-        folder_id: folderId,
-        topic_id: null,
-        subtopic_id: null,
-        source_label: "my",
-        text: taskText,
-        answer: correctAnswer || null,
-        solution: solutionText,
-        answer_format: null,
-        attachment_url: taskImageUrl || null,
-        solution_attachment_url: solutionImageUrls,
-        rubric_text: rubricText,
-        rubric_image_urls: rubricImageUrls,
-        fingerprint,
-      })
+      .insert(kbRow)
       .select("id")
       .single();
     if (insertErr || !inserted) {
@@ -5566,6 +6293,12 @@ async function handleSaveTasksToKB(
       skipped.push(taskId);
       continue;
     }
+
+    // Retro-link провенанса (mirror already_in_base ветки).
+    await db
+      .from("homework_tutor_tasks")
+      .update({ source_kb_task_id: inserted.id as string, source_kb_synced_at: new Date().toISOString() })
+      .eq("id", taskId);
 
     saved.push({
       task_id: taskId,
@@ -5597,6 +6330,149 @@ async function handleSaveTasksToKB(
     skipped,
     created_folder: createdFolder,
   });
+}
+
+// ─── Endpoint: POST /assignments/:id/tasks/:taskId/push-to-kb ────────────────
+//
+// unified-task-model (2026-07-05): «Обновить в Базе» — diverged-снимок ДЗ
+// пушится обратно в задачу-источник Базы (решение владельца №1: правки в
+// конструкторе локальны, push — явное действие).
+//   - Источник СВОЙ → UPDATE контента + всей AI-настройки + новый fingerprint
+//     (resync-триггер сам синхронит каталожную копию опубликованного источника;
+//     fingerprint-коллизия → 409 KB_DUPLICATE_BLOCKED).
+//   - Источник КАТАЛОЖНЫЙ → copy-on-write: форк в личную Базу («Из ДЗ»,
+//     fingerprint-дедуп) + relink провенанса. Ответ { forked: true }.
+// Классификацию (topic/subtopic/exam/difficulty) push НЕ трогает — снимок ДЗ
+// её не несёт, правится в Базе.
+async function handleTaskPushToKb(
+  db: SupabaseClient,
+  tutorUserId: string,
+  assignmentId: string,
+  taskId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const assignmentOrErr = await getOwnedAssignmentOrThrow(db, assignmentId, tutorUserId, cors);
+  if (assignmentOrErr instanceof Response) return assignmentOrErr;
+
+  if (!isUUID(taskId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Некорректный идентификатор задачи");
+  }
+
+  const { data: task, error: taskErr } = await db
+    .from("homework_tutor_tasks")
+    .select(
+      "id, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, " +
+        "solution_text, solution_image_urls, check_format, task_kind, cefr_level, kim_number, " +
+        "grading_criteria_json, source_kb_task_id",
+    )
+    .eq("id", taskId)
+    .eq("assignment_id", assignmentId)
+    .maybeSingle();
+  if (taskErr || !task) {
+    return jsonError(cors, 404, "NOT_FOUND", "Задача не найдена");
+  }
+  if (!isUUID(task.source_kb_task_id)) {
+    return jsonError(
+      cors,
+      409,
+      "NO_KB_SOURCE",
+      "У задачи нет источника в Базе — используйте «Сохранить в мою базу»",
+    );
+  }
+
+  const { data: kb, error: kbErr } = await db
+    .from("kb_tasks")
+    .select("id, owner_id, moderation_status")
+    .eq("id", task.source_kb_task_id as string)
+    .maybeSingle();
+  if (kbErr || !kb) {
+    return jsonError(cors, 409, "KB_SOURCE_MISSING", "Задача-источник удалена из Базы");
+  }
+
+  const taskText = isNonEmptyString(task.task_text) ? (task.task_text as string).trim() : "[Задача на фото]";
+  const answer = isNonEmptyString(task.correct_answer) ? (task.correct_answer as string).trim() : "";
+  const attachment = isNonEmptyString(task.task_image_url) ? (task.task_image_url as string).trim() : "";
+  const fingerprint = await computeKbFingerprint(db, taskText, answer, attachment);
+  if (!fingerprint) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось вычислить отпечаток задачи");
+  }
+
+  const syncedAt = new Date().toISOString();
+
+  if (kb.owner_id === tutorUserId) {
+    // Свой источник → прямой UPDATE (fingerprint пересчитан; resync-триггер
+    // опубликованного источника может кинуть fingerprint collision).
+    const { error: updErr } = await db
+      .from("kb_tasks")
+      .update(homeworkTaskFieldsToKbUpdate(task as Record<string, unknown>, fingerprint))
+      .eq("id", kb.id as string)
+      .eq("owner_id", tutorUserId);
+    if (updErr) {
+      const msg = updErr.message ?? "";
+      if (/fingerprint|collision|duplicate/i.test(msg)) {
+        return jsonError(
+          cors,
+          409,
+          "KB_DUPLICATE_BLOCKED",
+          "В Базе уже есть другая задача с таким же условием и ответом — обновление заблокировано",
+        );
+      }
+      console.error("homework_api_request_error", {
+        route: "POST /assignments/:id/tasks/:taskId/push-to-kb",
+        error: msg,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось обновить задачу в Базе");
+    }
+    await db
+      .from("homework_tutor_tasks")
+      .update({ source_kb_synced_at: syncedAt })
+      .eq("id", taskId);
+    return jsonOk(cors, { kb_task_id: kb.id, forked: false });
+  }
+
+  if (kb.owner_id === null) {
+    // Каталожный источник → copy-on-write форк в личную Базу.
+    const { data: existing } = await db
+      .from("kb_tasks")
+      .select("id")
+      .eq("owner_id", tutorUserId)
+      .eq("fingerprint", fingerprint)
+      .limit(1)
+      .maybeSingle();
+    let personalId: string | null = existing ? (existing.id as string) : null;
+    if (!personalId) {
+      const folderId = await resolveOrCreateRootKbFolder(db, tutorUserId, KB_MIRROR_FOLDER_NAME);
+      if (!folderId) {
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось создать папку в Базе");
+      }
+      const row = homeworkTaskFieldsToKbRow(task as Record<string, unknown>, {
+        ownerId: tutorUserId,
+        folderId,
+        fingerprint,
+      });
+      const { data: inserted, error: insErr } = await db
+        .from("kb_tasks")
+        .insert(row)
+        .select("id")
+        .single();
+      if (insErr || !inserted) {
+        console.error("homework_api_request_error", {
+          route: "POST /assignments/:id/tasks/:taskId/push-to-kb",
+          error: insErr?.message,
+        });
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось создать копию задачи в Базе");
+      }
+      personalId = inserted.id as string;
+    }
+    await db
+      .from("homework_tutor_tasks")
+      .update({ source_kb_task_id: personalId, source_kb_synced_at: syncedAt })
+      .eq("id", taskId);
+    return jsonOk(cors, { kb_task_id: personalId, forked: true });
+  }
+
+  // Чужая личная задача (не должно случаться — defensive).
+  return jsonError(cors, 403, "FORBIDDEN", "Задача-источник принадлежит другому репетитору");
 }
 
 // ─── Homework share links (homework-reuse-v1 TASK-7) ─────────────────────────
@@ -10664,6 +11540,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleCreateTemplate(db, userId, body, cors);
     }
 
+    // POST /templates/:id/fork (unified-task-model, 2026-07-05)
+    if (seg.length === 3 && seg[0] === "templates" && seg[2] === "fork" && route.method === "POST") {
+      return await handleForkTemplate(db, userId, seg[1], cors);
+    }
+
     // GET /templates/:id
     if (seg.length === 2 && seg[0] === "templates" && route.method === "GET") {
       return await handleGetTemplate(db, userId, seg[1], cors);
@@ -10700,6 +11581,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ) {
       const body = await parseJsonBody(req);
       return await handleSaveTasksToKB(db, userId, seg[1], body, cors);
+    }
+
+    // POST /assignments/:id/tasks/:taskId/push-to-kb (unified-task-model, 2026-07-05)
+    if (
+      seg.length === 5 &&
+      seg[0] === "assignments" &&
+      seg[2] === "tasks" &&
+      seg[4] === "push-to-kb" &&
+      route.method === "POST"
+    ) {
+      return await handleTaskPushToKb(db, userId, seg[1], seg[3], cors);
     }
 
     // POST /assignments/:id/share-links (homework-reuse-v1 TASK-7)
