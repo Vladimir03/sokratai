@@ -8,9 +8,23 @@
 - Legacy student-only (`homework_sets`, `homework_tasks`, `homework_chat_messages`) — дроп `20260310110000_drop_legacy_homework.sql`.
 - Classic mode (photo upload + OCR) — дроп `20260406120000_drop_classic_homework.sql`. Колонка `workflow_mode` и таблицы `homework_tutor_submissions`/`homework_tutor_submission_items` дропнуты. **Не возрождать.**
 
+### Единая модель задач (unified-task-model, 2026-07-05) — База↔Шаблон↔ДЗ
+
+Целевая 3-слойная модель (план `~/.claude/plans/unified-dreaming-crane.md`, решения владельца LOCKED): **СЛОЙ 1** — задача живёт в `kb_tasks` (полный паритет AI-полей: `check_format`, `task_kind`, `cefr_level`, `grading_criteria_json` — M1 `20260705120000`); **СЛОЙ 2** — шаблон ДЗ = упорядоченные ССЫЛКИ на kb_tasks (junction `homework_template_tasks`, RESTRICT; `visibility='shared'` = Банк ДЗ, публикуют модераторы через RPC `hw_mod_publish_template`); **СЛОЙ 3** — выданное ДЗ = СНИМОК (`homework_tutor_tasks`, единственная точка заморозки) с per-row провенансом `source_kb_task_id` (M4, SET NULL — снимки не блокируют Базу).
+
+**Инварианты:**
+- **Tri-state `kb_task_id`** в task-payload create/update (deploy-skew-защита): `uuid` = снимок KB-задачи; `null` = ЯВНО новая → **авто-зеркало** в Базу (fingerprint-дедуп, папка «Из ДЗ», degrade-not-block: сбой = warn + NULL-провенанс, выдача НЕ блокируется); `undefined` = legacy-клиент → без зеркала. Новый клиент ВСЕГДА шлёт uuid или null.
+- **Правка в конструкторе локальна** (снимок при добавлении); «Обновить в Базе» (`POST /assignments/:id/tasks/:taskId/push-to-kb`, принимает ДРАФТ-поля body) — явный push; каталожный источник → copy-on-write форк. Divergence-детект — client-side `kb_content_fingerprint` (`computeTaskContentFingerprint`).
+- **ЕДИНСТВЕННЫЙ конвертер полей** — `homework-api/kb_snapshot.ts` (`kbTaskToTemplateTaskJson`, `homeworkTaskFieldsToKbRow/Update`). Новое поле задачи → добавляй ТУДА + миграция паритета kb↔homework + `buildTaskSignature`/`DraftTask`/`kbTaskToDraftTask` (правка ТОЛЬКО нового поля обязана давать tasksDirty).
+- **Шаблоны dual-shape (deploy-skew):** `GET /templates/:id` для мигрированных (tasks_migrated_at) отдаёт `task_refs[]` + СИНТЕЗИРОВАННЫЙ `tasks_json` из живых kb-задач (старый `resolveTemplateLoad` работает без правок; недоступный ref → `unavailable:true`, не 500). `tasks_json` НЕ дропается (audit/fallback); материализация legacy — `hw_materialize_legacy_templates()` (M5, re-runnable).
+- **Банк:** публикация = pre-валидация topic_id личных задач → `kb_publish_task` (полная AI-настройка ВКЛЮЧАЯ рубрику — M2 policy change, см. rule 50) → remap junction на каталожные копии (инвариант «общий шаблон ссылается только на общие задачи» by construction). Fork = копия строки + ссылки на ТЕ ЖЕ задачи (задачи НЕ копируются). «Выдать» без форка = prefill конструктора + `template_id` в create → `usage_count+1`. Governance-колонки шаблонов НЕ грантятся authenticated (column-level write whitelist M3) — самопубликация через PostgREST невозможна.
+- **Delete-гарды:** задача/папка Базы с задачами, на которые ссылаются шаблоны → блок с русским сообщением (`kb_task_template_refs` pre-check в `removeTask`/`removeFolder`; RESTRICT FK = backstop).
+- **Классификация в конструкторе** — полный каскад `TaskClassificationFields` (variant: `hideAnswerFormat`+`hidePrimaryScore`) в HWTaskCard; № КИМ редактируем → физика Часть 2 получает ФИПИ-flowchart-грейдинг из ручных задач (вопрос Егора закрыт). Авто-балл по ФИПИ подсказывается под «Макс. баллов» (критерии выигрывают). На снимок едет только `kim_number`; topic/exam/difficulty — на зеркало Базы.
+- **`handleSaveTasksToKB`** — upgraded (несёт check_format/task_kind/cefr/КИМ/критерии/балл→primary_score) + **retro-link** `source_kb_task_id` (legacy ДЗ обретают провенанс); фронт прячет кнопку при заданном провенансе. Recovery-путь для деградировавшего авто-зеркала.
+
 ### Двойной write-path в `homework_tutor_tasks` — КРИТИЧНО при добавлении новых колонок
 
-**ДВА независимых места** инсертят строки в `homework_tutor_tasks`. При добавлении новой колонки / нового поля в AI-prompt / любом cross-cutting изменении — править **ОБА**, иначе feature молча ломается через один flow.
+**ДВА независимых места** инсертят строки в `homework_tutor_tasks`. При добавлении новой колонки / нового поля в AI-prompt / любом cross-cutting изменении — править **ОБА**, иначе feature молча ломается через один flow. (unified-task-model 2026-07-05: path B дополнен снапшотами критериев/CEFR/speaking + `source_kb_task_id`; полная конвергенция path B через edge — отложенный cleanup.)
 
 | Путь | Entry point | Источник данных | Kто пишет в БД |
 |---|---|---|---|
@@ -28,6 +42,7 @@
 2. Оба пути пишут новое поле.
 3. `HWDraftTask` + `DraftTask` содержат новое поле (если оно переносится через корзину/конструктор).
 4. `handleGetStudentAssignment` (student-side API) НЕ селектит поля, которые должны оставаться tutor-only.
+5. unified-task-model: поле в `kb_snapshot.ts`-конвертере + паритетной kb-колонке (если оно часть AI-настройки задачи).
 
 ### Два endpoint'а для assign students — quick-add vs edit-flow
 
