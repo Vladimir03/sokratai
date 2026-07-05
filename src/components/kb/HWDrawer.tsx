@@ -297,7 +297,14 @@ export function HWDrawer({
           rubric_image_urls: rubricImageRefs.length > 0 ? serializeAttachmentUrls(rubricImageRefs) : null,
           order_num: index + 1,
           check_format: checkFormat,
-          task_kind: deriveTaskKindFromCheckFormat(checkFormat),
+          // unified-task-model F1 (2026-07-05): explicit 'speaking' wins over
+          // derive (§0 voice-speaking-mvp) — path B перестаёт ронять устный тип.
+          task_kind: task.taskKindSnapshot === 'speaking'
+            ? 'speaking'
+            : deriveTaskKindFromCheckFormat(checkFormat),
+          // unified-task-model F1: критерии + CEFR больше не теряются (rule 40).
+          grading_criteria_json: task.gradingCriteriaSnapshot ?? null,
+          cefr_level: task.cefrLevelSnapshot ?? null,
           // Phase 2 (2026-06-21): № КИМ → grading по критериям ФИПИ (path B).
           kim_number: task.kim_number ?? null,
           // Review fix P1 (2026-06-21): балл задачи из KB (иначе DB DEFAULT 1).

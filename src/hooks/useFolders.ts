@@ -294,6 +294,13 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       answer: original.answer,
       solution: original.solution,
       answer_format: original.answer_format,
+      // Grading mode (P1-4): копируется для парности с draftToCreateInput/insertTask
+      // — иначе base→base копия Часть-2 задачи теряла бы развёрнутый формат проверки.
+      check_format: original.check_format,
+      // unified-task-model F1 (2026-07-05): AI-настройка копируется целиком.
+      task_kind: original.task_kind,
+      cefr_level: original.cefr_level,
+      grading_criteria_json: original.grading_criteria_json,
       source_label: 'my',
       attachment_url: original.attachment_url,
       solution_attachment_url: original.solution_attachment_url,

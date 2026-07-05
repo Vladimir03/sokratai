@@ -110,6 +110,12 @@ function kbTaskToDraftTask(
       max_score: task.primary_score ?? 1,
       uploading: false,
       check_format: checkFormat,
+      // unified-task-model F1 (2026-07-05): AI-настройка Базы едет в ДЗ целиком.
+      task_kind: task.task_kind === 'speaking' ? 'speaking' as const : undefined,
+      cefr_level: task.cefr_level ?? undefined,
+      grading_criteria_json: Array.isArray(task.grading_criteria_json) && task.grading_criteria_json.length > 0
+        ? task.grading_criteria_json
+        : null,
       // Phase 2 (2026-06-21): переносим № КИМ в ДЗ → AI грейдит по критериям ФИПИ.
       kim_number: task.kim_number ?? null,
       kb_task_id: task.id,

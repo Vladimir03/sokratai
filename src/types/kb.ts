@@ -2,6 +2,10 @@
 // Knowledge Base Types
 // =============================================
 
+// unified-task-model M1 (2026-07-05): единый носитель формы критерия
+// (type-only import — без runtime-связи с homework-модулем).
+import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
+
 export type ExamType = 'ege' | 'oge';
 
 /** Тип темы каталога: экзаменационная (ЕГЭ/ОГЭ, группировка по № КИМ) или олимпиадная. */
@@ -137,6 +141,15 @@ export interface KBTask {
   rubric_text: string | null;
   /** Rubric photos — same dual-format as attachment_url (limit 3). «Моя база» only. */
   rubric_image_urls: string | null;
+  /**
+   * unified-task-model M1 (2026-07-05): полный паритет AI-настройки с
+   * homework_tutor_tasks — задача «живёт» в Базе со всей конфигурацией
+   * проверки, ДЗ хранит её снимок. С M2 публикуются в каталог (включая
+   * рубрику — осознанное решение владельца; publish только модераторами).
+   */
+  task_kind: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
+  cefr_level: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  grading_criteria_json: GradingCriterion[] | null;
   /** Source task → its canonical public copy (set on source tasks in сократ) */
   published_task_id: string | null;
   /** Canonical public copy → its source task (set on catalog copies) */
@@ -169,6 +182,12 @@ export interface CreateKBTaskInput {
   answer?: string;
   solution?: string;
   answer_format?: string;
+  /**
+   * Grading mode for ДЗ (P1-4, 2026-06-27): persisted so AI-loaded tasks grade
+   * by the ФИПИ rubric on import (`resolveSubjectRubric` reads kim+check_format).
+   * Column `kb_tasks.check_format` exists (migration 20260401140000).
+   */
+  check_format?: 'short_answer' | 'detailed_solution';
   attachment_url?: string;
   solution_attachment_url?: string;
   /** Grading criteria (field-parity fix 2026-06-03, «Моя база» only). */
@@ -180,6 +199,10 @@ export interface CreateKBTaskInput {
   primary_score?: number;
   /** Уровень сложности 1–5 для олимпиадных задач (= балл). */
   difficulty?: number | null;
+  /** unified-task-model M1 (2026-07-05): AI-настройка — паритет с ДЗ. */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 export interface UpdateKBTaskInput {
@@ -192,6 +215,8 @@ export interface UpdateKBTaskInput {
   answer?: string | null;
   solution?: string | null;
   answer_format?: string | null;
+  /** Grading mode (P1-4) — parity with CreateKBTaskInput. */
+  check_format?: 'short_answer' | 'detailed_solution' | null;
   attachment_url?: string | null;
   solution_attachment_url?: string | null;
   /** Grading criteria (field-parity fix 2026-06-03, «Моя база» only). */
@@ -201,6 +226,10 @@ export interface UpdateKBTaskInput {
   subtopic_id?: string | null;
   folder_id?: string | null;
   source_label?: string | null;
+  /** unified-task-model M1 (2026-07-05): AI-настройка — паритет с ДЗ. */
+  task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
+  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  grading_criteria_json?: GradingCriterion[] | null;
 }
 
 // =============================================
@@ -275,6 +304,13 @@ export interface HWDraftTask {
    * Optional для backward-compat со старыми черновиками (undefined → 1).
    */
   maxScoreSnapshot?: number | null;
+  /**
+   * unified-task-model F1 (2026-07-05): freeze AI-настройки (rule 40 dual-write)
+   * — path B перестаёт ронять критерии/CEFR/speaking. Optional (старые черновики).
+   */
+  gradingCriteriaSnapshot?: GradingCriterion[] | null;
+  cefrLevelSnapshot?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  taskKindSnapshot?: 'speaking' | null;
 }
 
 /** Row from homework_kb_tasks table */

@@ -17,6 +17,10 @@ import {
   TaskClassificationFields,
   type TaskClassType,
 } from '@/components/kb/TaskClassificationFields';
+// unified-task-model F1 (2026-07-05): паритет AI-настройки с конструктором ДЗ.
+import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
+import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
+import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
 import type { KBTask, UpdateKBTaskInput } from '@/types/kb';
 
 interface EditTaskModalProps {
@@ -52,6 +56,22 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [solution, setSolution] = useState(task.solution ?? '');
   // Field-parity fix (2026-06-03): рубрика — first-class поле задачи в «Моей базе».
   const [rubricText, setRubricText] = useState(task.rubric_text ?? '');
+  // unified-task-model F1 (2026-07-05): AI-настройка — паритет с конструктором.
+  const [checkFormat, setCheckFormat] = useState<'' | 'short_answer' | 'detailed_solution'>(
+    task.check_format === 'short_answer' || task.check_format === 'detailed_solution'
+      ? task.check_format
+      : '',
+  );
+  const [criteria, setCriteria] = useState<GradingCriterion[]>(
+    Array.isArray(task.grading_criteria_json) ? task.grading_criteria_json : [],
+  );
+  const handleCriteriaChange = (next: GradingCriterion[]) => {
+    setCriteria(next);
+    if (next.length > 0) {
+      const total = sumAiGradableCriteriaMax(next);
+      if (total > 0) setPrimaryScore(String(Math.round(total)));
+    }
+  };
 
   // Classification (cascade)
   const [taskType, setTaskType] = useState<TaskClassType>(() => deriveTaskType(task));
@@ -189,6 +209,9 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         topic_id: topicId || null,
         subtopic_id: subtopicId || null,
         source_label: sourceLabel.trim() || null,
+        // unified-task-model F1: AI-настройка — паритет с конструктором ДЗ.
+        check_format: checkFormat || null,
+        grading_criteria_json: criteria.length > 0 ? criteria : null,
       };
 
       if (hasConditionChanges) {
@@ -323,9 +346,43 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
               {/* Solution images */}
               <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
 
+              {/* unified-task-model F1 (2026-07-05): формат проверки — паритет
+                  с конструктором ДЗ («Не указан» = derive при импорте). */}
+              <fieldset>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат проверки</legend>
+                <select
+                  value={checkFormat}
+                  onChange={(e) => setCheckFormat(e.target.value as '' | 'short_answer' | 'detailed_solution')}
+                  disabled={isBusy}
+                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+                >
+                  <option value="">Не указан (определится по № КИМ)</option>
+                  <option value="short_answer">Краткий ответ</option>
+                  <option value="detailed_solution">Развёрнутое решение</option>
+                </select>
+              </fieldset>
+
+              {/* unified-task-model F1: структурные критерии (тот же редактор,
+                  что в конструкторе ДЗ). */}
+              <CriteriaEditor
+                criteria={criteria}
+                taskMaxScore={(() => {
+                  const s = parseInt(primaryScore.trim(), 10);
+                  if (Number.isFinite(s) && s > 0) return s;
+                  const auto = getKimPrimaryScore(
+                    taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null,
+                    kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null,
+                  );
+                  return auto ?? (sumAiGradableCriteriaMax(criteria) || 1);
+                })()}
+                onChange={handleCriteriaChange}
+              />
+
               {/* Rubric / criteria (field-parity fix 2026-06-03) */}
               <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Критерии оценки</legend>
+                <legend className="mb-1.5 text-xs font-semibold text-slate-500">
+                  {criteria.length > 0 ? 'Дополнительные заметки для AI' : 'Критерии оценки'}
+                </legend>
                 <textarea
                   value={rubricText}
                   onChange={(e) => setRubricText(e.target.value)}

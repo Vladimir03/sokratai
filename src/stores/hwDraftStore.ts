@@ -60,6 +60,14 @@ export const useHWDraftStore = create<HWDraftStore>()(
           // Review fix P1 (2026-06-21): freeze балл задачи (primary_score) → HWDrawer
           // пишет max_score, иначе KB-задача с авто-баллом/сложностью >1 падала в 1.
           maxScoreSnapshot: task.primary_score ?? 1,
+          // unified-task-model F1 (2026-07-05): freeze AI-настройки (rule 40
+          // dual-write) — path B перестаёт ронять критерии/CEFR/speaking.
+          gradingCriteriaSnapshot:
+            Array.isArray(task.grading_criteria_json) && task.grading_criteria_json.length > 0
+              ? task.grading_criteria_json
+              : null,
+          cefrLevelSnapshot: task.cefr_level ?? null,
+          taskKindSnapshot: task.task_kind === 'speaking' ? 'speaking' : null,
         };
 
         set((state) => ({ tasks: [...state.tasks, draftTask] }));
