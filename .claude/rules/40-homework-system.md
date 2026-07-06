@@ -1382,7 +1382,7 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 
 **Manual QA checklist (ВСЕ пункты):**
 
-1. **Tab-switch preservation (P0):** открыть ДЗ через `/tutor/homework/:id/edit` → дождаться prefill → добавить 2-3 задачи («+ Добавить задачу» + KB picker) → переключиться на другую вкладку, подождать **31+ секунд** → вернуться → **все задачи на месте**, list unchanged → save → verify в БД.
+1. **Tab-switch preservation (P0):** открыть ДЗ через `/tutor/homework/:id/edit` → дождаться prefill → добавить 2-3 задачи («+ Добавить задачу» + KB picker) → переключиться на другую вкладку, подождать **31+ секунд** → вернуться → **все задачи на месте**, list unchanged → save → verify в БД. **Два независимых механизма потери задач при tab-switch:** (а) React Query focus-refetch race в конструкторе (эта секция, smoke §8); (б) `TutorGuard` размонтирует ВЕСЬ `/tutor` кабинет на `SIGNED_IN`-от-supabase при возврате вкладки — инвариант/фикс в **rule 96 §5a** (баг Егора #41, 2026-07-06; задел и `create`-режим, и `AddStudentDialog`/KB). Тест гонять в обоих режимах (`create` + `edit`).
 
 1a. **Image-original-task signed URL race (P0):** открыть ДЗ с **картинкой в условии** → сразу (signed URL pending) добавить новые задачи → **БЫСТРО** переключиться на другую вкладку (signed URL throttled) → подождать 30-60s → вернуться → **все задачи на месте**, картинки имеют preview, user additions НЕ overwritten signed URL `.then()` callback'ом.
 

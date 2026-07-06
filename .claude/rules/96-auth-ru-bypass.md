@@ -159,6 +159,17 @@ Windows / Linux desktop без Telegram Desktop не обрабатывает `t
 )}
 ```
 
+### 5a. **НИКОГДА** guard re-verification на auth-событии не должна размонтировать кабинет (form-loss на tab-switch)
+
+`supabase-js` переэмитит `SIGNED_IN` на возврате вкладки (session-recovery на `visibilitychange`), **не только при логине**. Guard, обёртывающий write-поверхности (`TutorGuard` → `AppFrame` → все `/tutor/*`; `AuthGuard` → student-роуты), на повторном auth-событии **НЕ должен** дёргать `setLoading(true)` / `setError()`, пока пользователь уже `authorized` — иначе `<Outlet/>` размонтируется и **открытые формы теряют локальный `useState`** (ДЗ-конструктор, `AddStudentDialog`, KB `CreateTaskModal`, AI-загрузчик) при переключении **вкладок** (баг Егора #41, 3 репетитора, 2026-07-06; alt-tab между окнами не триггерит — там нет `visibilitychange`).
+
+Каноничные паттерны:
+- **`AuthGuard`** — fire-once: `handleSession` выходит по `if (sessionHandled.current) return;` → повторный `SIGNED_IN` = no-op.
+- **`TutorGuard`** — «тихая» ре-верификация: `authorizedRef` (зеркало `authorized` без stale-closure) + `silent = authorizedRef.current && !forceRecheck` → при `silent` НЕ трогать `loading`/`error` (фоновая проверка не сносит кабинет; согласуется с rule 95 tiered-errors). Блокирующий UI — ТОЛЬКО первая проверка (`authorized === false`) или `forceRecheck` (кнопка «Повторить»).
+- **`SIGNED_IN` — 3-way по юзеру/кэшу:** `isCacheValid(id)` (тот же юзер, кэш свежий) → держим mounted, **`verifiedAt` НЕ бампать** (иначе 10-мин role-TTL становится скользящим «последний фокус», роль не перепроверяется); `tutorAuthCache.userId === id` (тот же юзер, кэш протух) → silent `checkAccess()`; иначе (другой/неизвестный юзер) → `setAuthorized(false)` + `checkAccess(true)` (блок спиннером до проверки новой роли — не показываем данные прежнего юзера).
+
+**Инвариант:** новый guard / новое auth-событие с re-check → mirror `authorizedRef` / `sessionHandled`; не бампать TTL-таймстамп на cached focus-событии; user-change → блокирующая проверка, same-user re-verify → тихо. **Симптом нарушения:** «введённые данные и форма пропадают при переходе на соседнюю вкладку». Build-лог: memory `project_tab_switch_form_loss_2026_07_06.md`.
+
 ---
 
 ## Hard Rules — Backend (Edge Functions)
@@ -346,5 +357,6 @@ deploy-sokratai
 | 2026-05-03 | Phase B migration: Lovable → Selectel Moscow VPS (api.sokratai.ru) | CLAUDE.md «Network & Infrastructure» |
 | 2026-05-04 | Patch B+1: rewriteToProxy для signed URLs | dc39116 |
 | 2026-05-16 | RU auth critical fix — Rounds 1-3 (initial fix + reviewer feedback) | `~/.claude/plans/compressed-sparking-spindle.md` |
+| 2026-07-06 | Tab-switch form-loss: `TutorGuard` `SIGNED_IN` (session-recovery на visibilitychange) → `checkAccess`→`setLoading(true)` размонтировал `/tutor` кабинет → потеря стейта форм ДЗ/ученик/задача. Фикс: тихая ре-верификация + 3-way `SIGNED_IN` (rule 5a) | memory `project_tab_switch_form_loss_2026_07_06.md` |
 
 При появлении новых regression'ов в auth flow в РФ — **сначала** проверь этот файл, потом runbook, потом plan-файл.

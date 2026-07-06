@@ -52,10 +52,24 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
   const [authorized, setAuthorized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isMounted = useRef(true);
+  // Зеркало `authorized`, читаемое внутри `checkAccess` без stale-closure —
+  // позволяет повторной верификации быть «тихой» (без лоадера/размонтирования),
+  // когда репетитор УЖЕ внутри кабинета. См. обработчик SIGNED_IN ниже.
+  const authorizedRef = useRef(false);
 
   const checkAccess = useCallback(async (forceRecheck = false) => {
-    setLoading(true);
-    setError(null);
+    // Повторная верификация, пока репетитор УЖЕ внутри кабинета, не должна
+    // размонтировать текущую страницу: setLoading(true) / setError() подменили бы
+    // <Outlet/> спиннером или экраном ошибки и стёрли несохранённый локальный
+    // стейт любой открытой формы при переключении вкладки (баг Егора #41).
+    // Блокирующий UI показываем ТОЛЬКО на первой проверке (authorized === false)
+    // или при явном ручном retry (forceRecheck); фоновая перепроверка идёт тихо
+    // и оставляет детей смонтированными (согласуется с rule 95 tiered-errors).
+    const silent = authorizedRef.current && !forceRecheck;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
       const {
@@ -150,7 +164,9 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
           stage: "guard",
           error: lastError,
         });
-        if (isMounted.current) {
+        // Тихая фоновая перепроверка НЕ должна сносить рабочий кабинет на экран
+        // ошибки при транзиентном сбое под RU-DPI — логируем и оставляем страницу.
+        if (!silent && isMounted.current) {
           setError("Ошибка проверки доступа. Проверьте соединение.");
         }
         return;
@@ -182,15 +198,21 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
         stage: "guard",
         error: guardError instanceof Error ? guardError.message : String(guardError),
       });
-      if (isMounted.current) {
+      if (!silent && isMounted.current) {
         setError("Ошибка соединения. Попробуйте ещё раз.");
       }
     } finally {
-      if (isMounted.current) {
+      if (!silent && isMounted.current) {
         setLoading(false);
       }
     }
   }, [navigate]);
+
+  // Держим ref в синхроне с `authorized`, чтобы `checkAccess` видел актуальное
+  // значение (для «тихой» перепроверки без размонтирования кабинета).
+  useEffect(() => {
+    authorizedRef.current = authorized;
+  }, [authorized]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -226,9 +248,32 @@ const TutorGuard = ({ children }: TutorGuardProps) => {
       } else if (event === "TOKEN_REFRESHED") {
         tutorAuthCache.verifiedAt = Date.now();
       } else if (event === "SIGNED_IN") {
-        // Fresh sign-in (Telegram polling setSession, email/password login):
-        // re-run checkAccess to re-verify tutor role for the new user.
-        checkAccess();
+        // supabase-js переэмитит SIGNED_IN на возврате вкладки (session-recovery
+        // на visibilitychange), а не только при свежем логине. Безусловный
+        // checkAccess() здесь вызвал бы setLoading(true) → весь /tutor поддерев
+        // размонтируется и теряет несохранённый локальный стейт формы (баг Егора
+        // #41; 3 репетитора). 3-way маршрутизация по юзеру/кэшу:
+        if (isCacheValid(session.user.id)) {
+          // Тот же верифицированный юзер, кэш свежий → держим кабинет
+          // смонтированным. verifiedAt НЕ трогаем: 10-мин TTL должен отражать
+          // последнюю РЕАЛЬНУЮ is_tutor-проверку, а не последний фокус вкладки
+          // (иначе роль у активного репетитора не перепроверяется — review P1).
+          if (isMounted.current) {
+            setAuthorized(true);
+            setLoading(false);
+          }
+        } else if (tutorAuthCache.userId === session.user.id) {
+          // Тот же юзер, кэш протух → тихая фоновая перепроверка роли (без
+          // анмаунта); при провале verifiedAt не бампается → естественный
+          // ретрай на следующий фокус вкладки.
+          checkAccess();
+        } else {
+          // Другой/неизвестный юзер → немедленно блокируем кабинет до проверки
+          // новой роли, не показываем данные прежнего репетитора (review P1).
+          // forceRecheck делает checkAccess неслайлентным (спиннер) + минует кэш.
+          if (isMounted.current) setAuthorized(false);
+          checkAccess(true);
+        }
       }
     });
 
