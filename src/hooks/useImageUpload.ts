@@ -45,6 +45,13 @@ export interface UseImageUploadReturn {
   handleRemoveNew: (index: number) => void;
   handleRemoveExisting: (ref: string) => void;
 
+  /**
+   * Программное добавление файлов (например, страницы PDF, отрендеренные
+   * client-side в pdfToImages.ts). Реюзает ту же валидацию/кап, что drag-drop.
+   * Возвращает число реально добавленных.
+   */
+  addFiles: (newFiles: File[]) => number;
+
   // Ref for hidden file input
   fileInputRef: React.RefObject<HTMLInputElement>;
 
@@ -270,6 +277,20 @@ export function useImageUpload(options: UseImageUploadOptions = {}): UseImageUpl
     [handleFileSelect, disabled],
   );
 
+  // ── Programmatic add (PDF pages etc.) ─────────────────────────────────────
+
+  const addFiles = useCallback(
+    (newFiles: File[]): number => {
+      if (disabled) return 0;
+      let added = 0;
+      for (const file of newFiles) {
+        if (handleFileSelect(file)) added++;
+      }
+      return added;
+    },
+    [handleFileSelect, disabled],
+  );
+
   // ── Save accessors (synchronous reads from refs) ──────────────────────────
 
   const getNewFiles = useCallback(() => filesRef.current, []);
@@ -305,6 +326,7 @@ export function useImageUpload(options: UseImageUploadOptions = {}): UseImageUpl
     handleDrop,
     handleRemoveNew,
     handleRemoveExisting,
+    addFiles,
     fileInputRef,
     getNewFiles,
     getExistingRefs,

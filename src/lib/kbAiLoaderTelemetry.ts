@@ -9,9 +9,10 @@
  * |--------------------|--------------------------------------------|------------------------------------------|
  * | kb_ai_extract_run  | InputStage (after a successful extract)     | folderId, materialType, found, lowConf   |
  * | kb_ai_tasks_saved  | AiTaskLoaderPage (after a commit attempt)   | folderId, saved, skipped                 |
+ * | kb_ai_pdf_rendered | InputStage (after PDF → page images)        | pageCount, renderedPages                 |
  */
 
-type KbAiLoaderEvent = 'kb_ai_extract_run' | 'kb_ai_tasks_saved';
+type KbAiLoaderEvent = 'kb_ai_extract_run' | 'kb_ai_tasks_saved' | 'kb_ai_pdf_rendered';
 
 interface KbAiExtractRunPayload
   extends Record<string, string | number | boolean | null | undefined> {
@@ -28,7 +29,13 @@ interface KbAiTasksSavedPayload
   skipped: number;
 }
 
-type KbAiLoaderPayload = KbAiExtractRunPayload | KbAiTasksSavedPayload;
+interface KbAiPdfRenderedPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  pageCount: number;
+  renderedPages: number;
+}
+
+type KbAiLoaderPayload = KbAiExtractRunPayload | KbAiTasksSavedPayload | KbAiPdfRenderedPayload;
 
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
@@ -46,6 +53,7 @@ function toSafePayload(payload: KbAiLoaderPayload): Record<string, unknown> {
 
 export function trackKbAiLoaderEvent(event: 'kb_ai_extract_run', payload: KbAiExtractRunPayload): void;
 export function trackKbAiLoaderEvent(event: 'kb_ai_tasks_saved', payload: KbAiTasksSavedPayload): void;
+export function trackKbAiLoaderEvent(event: 'kb_ai_pdf_rendered', payload: KbAiPdfRenderedPayload): void;
 export function trackKbAiLoaderEvent(event: KbAiLoaderEvent, payload: KbAiLoaderPayload): void {
   const safePayload = toSafePayload(payload);
   const timestamp = new Date().toISOString();

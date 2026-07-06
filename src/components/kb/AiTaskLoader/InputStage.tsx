@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronDown, Folder, Loader2, Sparkles } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { ChevronDown, FileText, Folder, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useImageUpload } from '@/hooks/useImageUpload';
@@ -49,11 +49,54 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
   const [text, setText] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isRenderingPdf, setIsRenderingPdf] = useState(false);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  // isRenderingPdf НЕ входит в disabled хука: addFiles сам гейтится на disabled,
+  // а страницы добавляются как раз во время рендера PDF (гейт — на контролах).
   const imageUpload = useImageUpload({ maxImages: MAX_LOADER_IMAGES, disabled: isExtracting });
 
   const flatFolders = flattenTree(tree);
   const hasMaterial = text.trim().length > 0 || imageUpload.files.length > 0;
-  const canExtract = folderId !== '' && hasMaterial && !isExtracting;
+  const canExtract = folderId !== '' && hasMaterial && !isExtracting && !isRenderingPdf;
+
+  // PDF → картинки страниц (client-side, pdfjs lazy) → существующий image-пайплайн.
+  const handlePdfSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || isExtracting || isRenderingPdf) return;
+
+    const remainingSlots = imageUpload.maxImages - imageUpload.totalImages;
+    if (remainingSlots <= 0) {
+      toast.error(`Максимум ${imageUpload.maxImages} изображений за раз — удалите лишние или распознайте текущие.`);
+      return;
+    }
+
+    setIsRenderingPdf(true);
+    try {
+      // Lazy: pdfjs (~тяжёлый) грузится только при реальном выборе PDF.
+      const { renderPdfPagesToFiles, PdfRenderError } = await import('@/lib/pdfToImages');
+      try {
+        const { files, pageCount, renderedPages } = await renderPdfPagesToFiles(file, {
+          maxPages: remainingSlots,
+        });
+        imageUpload.addFiles(files);
+        trackKbAiLoaderEvent('kb_ai_pdf_rendered', { pageCount, renderedPages });
+        if (pageCount > renderedPages) {
+          // No silent caps (rule 40): честно говорим, что взяли не всё.
+          toast.info(`В PDF ${pageCount} стр. — обработаны первые ${renderedPages}. Остальные загрузите вторым прогоном.`);
+        } else {
+          toast.success(renderedPages === 1 ? 'Страница PDF добавлена' : `Добавлено страниц: ${renderedPages}`);
+        }
+      } catch (err) {
+        toast.error(err instanceof PdfRenderError ? err.message : 'Не удалось обработать PDF. Попробуйте другой файл.');
+      }
+    } catch {
+      // Сбой загрузки самого чанка pdfjs (сеть/DPI) — отдельно от ошибок файла.
+      toast.error('Не удалось загрузить модуль PDF. Проверьте соединение и попробуйте ещё раз.');
+    } finally {
+      setIsRenderingPdf(false);
+    }
+  };
 
   const handleExtract = async () => {
     if (!canExtract) return;
@@ -156,7 +199,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2 text-[16px] leading-relaxed transition-colors focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
           placeholder="Вставьте текст задач или вставьте скриншоты страницы сборника (Ctrl+V прямо в это поле)…"
         />
-        <p className="mt-1 text-[11px] text-slate-400">PDF и Excel — скоро.</p>
+        <p className="mt-1 text-[11px] text-slate-400">Excel — скоро.</p>
       </fieldset>
 
       {/* Photo upload (drag / click / paste), up to 10 */}
@@ -165,6 +208,41 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         imageUpload={imageUpload}
         disabled={isExtracting}
       />
+
+      {/* PDF → страницы-картинки (P1 TASK-10; листы до 10 страниц) */}
+      <div>
+        <input
+          ref={pdfInputRef}
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={handlePdfSelect}
+          className="hidden"
+        />
+        <button
+          type="button"
+          disabled={isExtracting || isRenderingPdf}
+          onClick={() => pdfInputRef.current?.click()}
+          className={cn(
+            'flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-socrat-border bg-white px-4 py-3 text-sm font-medium text-slate-600 transition-colors duration-200 hover:border-socrat-primary/40 hover:text-socrat-primary [touch-action:manipulation]',
+            (isExtracting || isRenderingPdf) && 'cursor-not-allowed opacity-50',
+          )}
+        >
+          {isRenderingPdf ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Обрабатываем страницы PDF…
+            </>
+          ) : (
+            <>
+              <FileText className="h-4 w-4" aria-hidden="true" />
+              Загрузить PDF с заданиями (до {MAX_LOADER_IMAGES} страниц)
+            </>
+          )}
+        </button>
+        <p className="mt-1 text-[11px] text-slate-400">
+          Страницы PDF станут изображениями выше — лишние можно удалить до распознавания.
+        </p>
+      </div>
 
       {/* Primary CTA */}
       <button
