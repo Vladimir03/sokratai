@@ -37,6 +37,19 @@ export interface LovableMessage {
   content: LovableMessageContent;
 }
 
+/**
+ * Token-usage shape surfaced by the optional `onUsage` hook on `callLovableJson`
+ * (ai-usage-logging, 2026-07-06). Structurally compatible with
+ * `_shared/token-usage.ts::TokenUsage`. Defined inline (this file mirrors the
+ * gateway call locally per the repo convention — no cross-function import).
+ */
+export interface LovableUsage {
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens?: number | null;
+  model?: string | null;
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const LOVABLE_API_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
@@ -48,6 +61,29 @@ const MAX_RETRIES = 1;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** ai-usage-logging: extract `{ prompt/completion/total_tokens, model }` from a
+ * gateway payload and hand it to `onUsage`. Fully defensive — never throws. */
+function emitUsage(payload: unknown, onUsage?: (usage: LovableUsage | null) => void): void {
+  if (!onUsage) return;
+  try {
+    const record = isRecord(payload) ? payload : null;
+    const usage = record && isRecord(record.usage) ? record.usage : null;
+    const model = record && typeof record.model === "string" ? record.model : null;
+    onUsage(
+      usage
+        ? {
+          prompt_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : null,
+          completion_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : null,
+          total_tokens: typeof usage.total_tokens === "number" ? usage.total_tokens : null,
+          model,
+        }
+        : null,
+    );
+  } catch {
+    // Fire-and-forget — a logging hook must never break the AI call.
+  }
 }
 
 export function softTruncate(value: string, maxLen: number): string {
@@ -148,6 +184,10 @@ function shouldRetry(error: unknown): boolean {
 export async function callLovableJson(
   messages: LovableMessage[],
   telemetryTag: string,
+  // ai-usage-logging (2026-07-06): fire-and-forget hook invoked with the parsed
+  // gateway `usage` on a successful (HTTP 200) response. Observability only —
+  // does not affect grading / verdict / prompt.
+  onUsage?: (usage: LovableUsage | null) => void,
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
@@ -178,6 +218,7 @@ export async function callLovableJson(
       }
 
       const payload = await response.json();
+      emitUsage(payload, onUsage);
       const messageContent = payload?.choices?.[0]?.message?.content;
       const rawContent = extractMessageContent(messageContent);
 

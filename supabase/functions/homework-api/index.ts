@@ -9543,6 +9543,9 @@ async function runStudentAnswerGrading(args: {
       : undefined,
     studentName,
     studentGender,
+    // ai-usage-logging (2026-07-06): source='homework_check'. Fire-and-forget.
+    logDb: db,
+    logUserId: userId,
   });
 
   // Safety guard: without correct_answer, only trust high-confidence CORRECT.
@@ -10278,6 +10281,11 @@ async function handleStudentSubmission(
       const transcription = await transcribeAudio(audioBuffer, {
         language: subjectToWhisperLang(assignment.subject),
         mimeType,
+      }, {
+        // ai-usage-logging (2026-07-06): source='voice'. hwId = assignment id.
+        admin: db,
+        userId,
+        assignmentId: hwId,
       });
       transcript = transcription.text.trim();
     } catch (err) {
@@ -10628,6 +10636,9 @@ async function handleRequestHint(
     hintCount: (activeState.hint_count as number) ?? 0,
     studentName,
     studentGender,
+    // ai-usage-logging (2026-07-06): source='homework_hint'. Fire-and-forget.
+    logDb: db,
+    logUserId: userId,
   });
 
   // Save hint reply

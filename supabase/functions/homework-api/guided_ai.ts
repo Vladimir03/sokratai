@@ -30,6 +30,10 @@ import {
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 import { type FlowchartTraceStep, physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
 import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_shared/physics-node-prompt.ts";
+// ai-usage-logging (2026-07-06): per-call token-usage attribution. Observability
+// only — the homework check/hint AI call is the single grading path for BOTH
+// homework write-paths (rule 40), so instrumenting here covers both.
+import { makeUsageLogger, type TokenUsageAdminClient } from "../_shared/token-usage.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -326,6 +330,14 @@ export interface EvaluateStudentAnswerParams {
    * neutral имён (Anastasiia / Marie / Саша → AI guess fails → wrong conjugation).
    */
   studentGender?: "male" | "female" | null;
+  /**
+   * Observability (ai-usage-logging, 2026-07-06): service-role client + student
+   * user id → `token_usage_logs` (source='homework_check', assignment_id from
+   * `assignmentId`). Fire-and-forget; absence = no logging. Does NOT affect the
+   * prompt, grading, verdict, or quota.
+   */
+  logDb?: TokenUsageAdminClient | null;
+  logUserId?: string | null;
 }
 
 export interface GenerateHintParams {
@@ -373,6 +385,14 @@ export interface GenerateHintParams {
   studentName?: string | null;
   /** See EvaluateStudentAnswerParams.studentGender (Phase 8). */
   studentGender?: "male" | "female" | null;
+  /**
+   * Observability (ai-usage-logging, 2026-07-06): service-role client + student
+   * user id → `token_usage_logs` (source='homework_hint', assignment_id from
+   * `assignmentId`). Fire-and-forget; absence = no logging. Does NOT affect the
+   * prompt, grading, verdict, or quota.
+   */
+  logDb?: TokenUsageAdminClient | null;
+  logUserId?: string | null;
 }
 
 // ─── Score computation ──────────────────────────────────────────────────────
@@ -2213,9 +2233,15 @@ async function evaluatePhysicsPart2(
     { role: "user", content: userParts },
   ];
 
+  // ai-usage-logging: physics flowchart node-judgement call is a homework check.
+  const physicsUsageLogger = makeUsageLogger(params.logDb, {
+    userId: params.logUserId,
+    source: "homework_check",
+    assignmentId: params.assignmentId ?? null,
+  });
   let parsed: Record<string, unknown>;
   try {
-    parsed = await callLovableJson(messages, "guided_check_physics_nodes");
+    parsed = await callLovableJson(messages, "guided_check_physics_nodes", physicsUsageLogger);
   } catch (err) {
     console.warn("guided_check_physics_call_failed", {
       kim,
@@ -2418,7 +2444,13 @@ export async function evaluateStudentAnswer(
       solutionImageUrls,
       studentImageUrls,
     });
-    const parsed = await callLovableJson(messages, "guided_check");
+    // ai-usage-logging: covers the main check + leak-retry (both billable).
+    const checkUsageLogger = makeUsageLogger(params.logDb, {
+      userId: params.logUserId,
+      source: "homework_check",
+      assignmentId: params.assignmentId ?? null,
+    });
+    const parsed = await callLovableJson(messages, "guided_check", checkUsageLogger);
     let result = sanitizeCheckResult(parsed, params.correctAnswer, {
       checkFormat: params.checkFormat,
       maxScore: params.maxScore,
@@ -2512,7 +2544,7 @@ export async function evaluateStudentAnswer(
           content: retryInstruction,
         }];
         try {
-          const retryParsed = await callLovableJson(retryMessages, "guided_check");
+          const retryParsed = await callLovableJson(retryMessages, "guided_check", checkUsageLogger);
           const retryResult = sanitizeCheckResult(retryParsed, params.correctAnswer, {
             checkFormat: params.checkFormat,
             maxScore: params.maxScore,
@@ -2703,7 +2735,13 @@ export async function generateHint(
       solutionImageUrls,
       studentImageUrls,
     });
-    const parsed = await callLovableJson(messages, "guided_hint");
+    // ai-usage-logging: covers the main hint + retry (both billable).
+    const hintUsageLogger = makeUsageLogger(params.logDb, {
+      userId: params.logUserId,
+      source: "homework_hint",
+      assignmentId: params.assignmentId ?? null,
+    });
+    const parsed = await callLovableJson(messages, "guided_hint", hintUsageLogger);
     const firstHint = sanitizeHintText(parsed.hint, params.correctAnswer);
     // Phase 7 round 2 (2026-05-20): pass subject → getGeneratedHintCheck
     // выбирает verbatim span detector для humanities (вместо token detector
@@ -2769,7 +2807,7 @@ export async function generateHint(
         "1-3 предложения, без общих фраз, без правильного ответа и без дословного цитирования эталонного решения (особенно избегай повторения 8+ слов подряд из эталона).",
     });
 
-    const retryParsed = await callLovableJson(retryMessages, "guided_hint");
+    const retryParsed = await callLovableJson(retryMessages, "guided_hint", hintUsageLogger);
     const secondHint = sanitizeHintText(retryParsed.hint, params.correctAnswer);
     const secondCheck = getGeneratedHintCheck(secondHint, params.solutionText, params.taskText, params.subject);
 

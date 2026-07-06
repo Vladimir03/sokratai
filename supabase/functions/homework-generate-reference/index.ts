@@ -28,6 +28,8 @@ import {
 import { resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
 import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
 import { rewriteToDirect } from "../_shared/proxy-url.ts";
+// ai-usage-logging (2026-07-06): source='reference_gen'. Observability only.
+import { makeUsageLogger, type TokenUsage } from "../_shared/token-usage.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -167,6 +169,8 @@ async function generateReferenceForTask(
   db: SupabaseClient,
   assignment: { exam_type: unknown },
   task: TaskRow,
+  // ai-usage-logging: pre-bound onUsage (source='reference_gen'). Undefined = none.
+  onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<{ solution: string; confidence: string } | null> {
   const rubric = resolveSubjectRubric({
     subject: "physics",
@@ -179,7 +183,7 @@ async function generateReferenceForTask(
 
   const imageDataUrls = await resolveTaskImages(db, task.task_image_url);
   const messages = buildSolveMessages(rubric, task, imageDataUrls);
-  const result = await callLovableJson(messages, "hw_reference_solve");
+  const result = await callLovableJson(messages, "hw_reference_solve", onUsage);
 
   const solutionRaw = result?.reference_solution;
   const solution = typeof solutionRaw === "string" ? solutionRaw.trim() : "";
@@ -222,7 +226,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: assignment, error: aErr } = await db
     .from("homework_tutor_assignments")
-    .select("id, subject, exam_type")
+    // tutor_id added for ai-usage-logging (token_usage_logs.user_id — this is a
+    // background job, so the owning tutor is the natural cost attribution).
+    .select("id, subject, exam_type, tutor_id")
     .eq("id", assignmentId)
     .single();
   if (aErr || !assignment) return json(404, { error: "assignment_not_found" });
@@ -256,11 +262,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const claimedRows = (claimed ?? []) as unknown as TaskRow[];
   if (claimedRows.length === 0) return json(200, { ok: true, generated: 0 });
 
+  // ai-usage-logging (2026-07-06): background reference generation → attribute
+  // token cost to the owning tutor (source='reference_gen'). No-op if tutor_id
+  // is missing. Fire-and-forget.
+  const referenceUsageLogger = makeUsageLogger(db, {
+    userId: (assignment as { tutor_id?: string | null }).tutor_id ?? null,
+    source: "reference_gen",
+    assignmentId,
+  });
+
   let generated = 0;
   let failed = 0;
   for (const task of claimedRows) {
     try {
-      const ref = await generateReferenceForTask(db, assignment, task);
+      const ref = await generateReferenceForTask(db, assignment, task, referenceUsageLogger);
       if (!ref) throw new Error("empty_reference");
       await db
         .from("homework_tutor_tasks")

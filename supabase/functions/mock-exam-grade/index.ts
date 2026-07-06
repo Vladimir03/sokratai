@@ -65,6 +65,7 @@ import {
   type PushPayload,
   type PushSubscriptionData,
 } from "../_shared/push-sender.ts";
+import { makeUsageLogger, type TokenUsage } from "../_shared/token-usage.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 
@@ -441,7 +442,13 @@ function shouldRetry(error: unknown): boolean {
 async function callLovableJson(
   messages: LovableMessage[],
   telemetryTag: string,
-  options?: { modelOverride?: string; captureRaw?: (raw: string) => void },
+  options?: {
+    modelOverride?: string;
+    captureRaw?: (raw: string) => void;
+    // ai-usage-logging (2026-07-06): fire-and-forget hook with the parsed gateway
+    // `usage` on a successful (HTTP 200) response. Observability only.
+    onUsage?: (usage: TokenUsage | null) => void;
+  },
 ): Promise<Record<string, unknown>> {
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -476,6 +483,24 @@ async function callLovableJson(
       }
 
       const payload = await response.json();
+      // ai-usage-logging: surface token usage before content parsing (tokens are
+      // billed on any 200, even an empty/invalid body). Defensive, never throws.
+      if (options?.onUsage) {
+        try {
+          const usageRec = payload && typeof payload === "object" ? (payload as Record<string, unknown>).usage : null;
+          const modelEcho = payload && typeof payload === "object" ? (payload as Record<string, unknown>).model : null;
+          options.onUsage(
+            usageRec && typeof usageRec === "object"
+              ? {
+                prompt_tokens: typeof (usageRec as Record<string, unknown>).prompt_tokens === "number" ? (usageRec as Record<string, number>).prompt_tokens : null,
+                completion_tokens: typeof (usageRec as Record<string, unknown>).completion_tokens === "number" ? (usageRec as Record<string, number>).completion_tokens : null,
+                total_tokens: typeof (usageRec as Record<string, unknown>).total_tokens === "number" ? (usageRec as Record<string, number>).total_tokens : null,
+                model: typeof modelEcho === "string" ? modelEcho : (options.modelOverride ?? null),
+              }
+              : null,
+          );
+        } catch { /* fire-and-forget */ }
+      }
       const messageContent = payload?.choices?.[0]?.message?.content;
       const rawContent = extractMessageContent(messageContent);
       if (!rawContent) throw new Error("Model response is empty");
@@ -556,6 +581,8 @@ async function gradePart2Task(
   task: VariantTaskRow,
   solution: SolutionRow,
   attemptId: string,
+  // ai-usage-logging (2026-07-06): source='mock_grade'. Undefined = no logging.
+  onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<GradeOutcome> {
   const start = Date.now();
   const kimNumber = task.kim_number;
@@ -620,7 +647,7 @@ async function gradePart2Task(
   });
 
   try {
-    const parsed = await callLovableJson(messages, "mock_exam_grade");
+    const parsed = await callLovableJson(messages, "mock_exam_grade", { onUsage });
     const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber });
     return {
       kim_number: kimNumber,
@@ -660,6 +687,8 @@ async function gradePart2TaskBulk(
   attemptId: string,
   assignedPhotoDataUrls: string[],
   assignedPhotoIndices: number[],
+  // ai-usage-logging (2026-07-06): source='mock_grade'. Undefined = no logging.
+  onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<GradeOutcome> {
   const start = Date.now();
   const kimNumber = task.kim_number;
@@ -698,7 +727,7 @@ async function gradePart2TaskBulk(
   });
 
   try {
-    const parsed = await callLovableJson(messages, "mock_exam_grade_bulk");
+    const parsed = await callLovableJson(messages, "mock_exam_grade_bulk", { onUsage });
     const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber });
     return {
       kim_number: kimNumber,
@@ -771,6 +800,8 @@ async function runPart1OCR(
   photoRef: string,
   variantId: string,
   promptMode: "blank" | "freeform" = "blank",
+  // ai-usage-logging (2026-07-06): source='mock_ocr'. Undefined = no logging.
+  onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<{ ocr: Part1OCRResult; totalEarned: number } | null> {
   if (!photoRef || !variantId) return null;
 
@@ -850,6 +881,7 @@ async function runPart1OCR(
       parsed = await callLovableJson(ocrMessages, "mock_exam_part1_ocr", {
         modelOverride: LOVABLE_MODEL_OCR,
         captureRaw: (raw) => { rawResponseSnapshot = raw.slice(0, 4000); },
+        onUsage,
       });
     } catch (callErr) {
       // TASK-16-R2 fix #4 (ChatGPT-5.5 review): canonical shape
@@ -1282,6 +1314,22 @@ async function handleGrade(
   }
   const assignmentRow = assignment as AssignmentRow;
 
+  // ai-usage-logging (2026-07-06): observability only. user_id = student who took
+  // the attempt (fallback tutor for anonymous attempts, so the NOT NULL column is
+  // satisfied); assignment_id = the mock assignment for tutor-level rollups.
+  // Fire-and-forget — `makeUsageLogger` no-ops when userId is missing.
+  const usageUserId = attemptRow.student_id ?? assignmentRow.tutor_id ?? null;
+  const gradeUsageLogger = makeUsageLogger(db, {
+    userId: usageUserId,
+    source: "mock_grade",
+    assignmentId: attemptRow.assignment_id,
+  });
+  const ocrUsageLogger = makeUsageLogger(db, {
+    userId: usageUserId,
+    source: "mock_ocr",
+    assignmentId: attemptRow.assignment_id,
+  });
+
   // Ownership guard for user-JWT path. Service-role bypasses (internal call).
   if (auth.triggered_by === "user") {
     const userId = auth.user_id ?? "";
@@ -1576,7 +1624,7 @@ async function handleGrade(
           // tutor_modified не перезаписываем); Pass 2 отсеет нерелевантные через
           // существующий photo_off_topic.
           try {
-            const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign");
+            const parsedAssign = await callLovableJson(assignMessages, "mock_exam_bulk_assign", { onUsage: gradeUsageLogger });
             bulkAssignment = sanitizeBulkAssignmentResult(
               parsedAssign,
               inlinedBulkPhotos.length,
@@ -1654,7 +1702,7 @@ async function handleGrade(
     && ocrPath !== null
     && (options?.forceRetryOCR === true || !attemptRow.ai_part1_ocr_json);
   const part1OCRPromise = shouldRunPart1OCR && ocrPath
-    ? runPart1OCR(db, attemptId, ocrPath.ref, assignmentRow.variant_id ?? "", ocrPath.mode)
+    ? runPart1OCR(db, attemptId, ocrPath.ref, assignmentRow.variant_id ?? "", ocrPath.mode, ocrUsageLogger)
     : Promise.resolve(null);
 
   console.info(JSON.stringify({
@@ -1695,10 +1743,11 @@ async function handleGrade(
             attemptId,
             assignedPhotos,
             assignedIndices,
+            gradeUsageLogger,
           );
         }
         // Legacy per-kim path (Egor's pilot attempts).
-        return await gradePart2Task(db, task, solution, attemptId);
+        return await gradePart2Task(db, task, solution, attemptId, gradeUsageLogger);
       } catch (err) {
         console.error("mock_exam_grade_unexpected_error", {
           attempt_id: attemptId,

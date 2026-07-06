@@ -23,6 +23,8 @@ import {
   type LovableTextPart,
 } from "../_shared/ai-lovable.ts";
 import { serializeAttachmentUrls } from "../_shared/attachment-refs.ts";
+// ai-usage-logging (2026-07-06): source='kb_extract'. Observability only.
+import { makeUsageLogger, type TokenUsage } from "../_shared/token-usage.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -360,7 +362,11 @@ function normalizeTask(raw: unknown, imageRefs: string[]): ExtractedTask | null 
 
 // ─── AI extraction (with schema-level retry-once) ────────────────────────────
 
-async function runExtraction(messages: LovableMessage[]): Promise<unknown[]> {
+async function runExtraction(
+  messages: LovableMessage[],
+  // ai-usage-logging: pre-bound onUsage (source='kb_extract'). Undefined = none.
+  onUsage?: (usage: TokenUsage | null) => void,
+): Promise<unknown[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptMessages = attempt === 0
       ? messages
@@ -373,7 +379,7 @@ async function runExtraction(messages: LovableMessage[]): Promise<unknown[]> {
         },
       ];
     try {
-      const obj = await callLovableJson(attemptMessages, "kb_ai_extract");
+      const obj = await callLovableJson(attemptMessages, "kb_ai_extract", onUsage);
       if (Array.isArray(obj.tasks)) return obj.tasks;
       console.warn("kb_ai_extract_schema_invalid", { attempt: attempt + 1, has_tasks: "tasks" in obj });
     } catch (error) {
@@ -585,9 +591,16 @@ async function handleExtract(
   ];
 
   // Call AI + retry-once on schema-invalid.
+  // ai-usage-logging (2026-07-06): attribute extraction cost to the requesting
+  // tutor (source='kb_extract'; no assignment). Fire-and-forget.
+  const extractUsageLogger = makeUsageLogger(db, {
+    userId,
+    source: "kb_extract",
+    assignmentId: null,
+  });
   let rawTasks: unknown[];
   try {
-    rawTasks = await runExtraction(messages);
+    rawTasks = await runExtraction(messages, extractUsageLogger);
   } catch {
     return jsonError(cors, 502, "EXTRACT_FAILED", "Не удалось распознать задачи. Попробуйте ещё раз или измените материал.");
   }

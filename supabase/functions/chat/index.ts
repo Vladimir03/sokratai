@@ -1987,6 +1987,15 @@ async function processAIRequest(
           Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
         );
 
+        // ai-usage-logging (2026-07-06): tag each row by origin. The Telegram bot
+        // calls /chat with responseProfile='telegram_compact' (rule 60), so we
+        // distinguish bot chat from web chat here — no telegram-bot change needed
+        // (the bot has no direct gateway call; all its AI goes through /chat).
+        // assignment_id is set for guided-homework discussion so AI cost can be
+        // sliced by tutor. Observability only — no logic change.
+        const tokenUsageSource = responseProfile === "telegram_compact"
+          ? "telegram_chat"
+          : "chat_discussion";
         await adminSupabase.from("token_usage_logs").insert({
           user_id: userId,
           chat_id: chatId || null,
@@ -1994,6 +2003,8 @@ async function processAIRequest(
           prompt_tokens: usageData.prompt_tokens,
           completion_tokens: usageData.completion_tokens,
           total_tokens: usageData.total_tokens,
+          source: tokenUsageSource,
+          assignment_id: guidedHomeworkAssignmentId ?? null,
         });
       }
     } catch (e) {

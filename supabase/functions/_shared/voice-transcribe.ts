@@ -35,6 +35,9 @@
  *     с проектным cross-browser правилом, хотя это Deno-сервер).
  */
 
+// ai-usage-logging (2026-07-06): optional per-transcription token-usage row.
+import { logTokenUsage, type TokenUsageAdminClient } from "./token-usage.ts";
+
 // Groq audio transcription endpoint (OpenAI-compatible).
 const GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 
@@ -63,6 +66,36 @@ const MAX_ATTEMPTS = 2;
  * Groq (25 МБ) с margin 5 МБ (Spec §8 «7 мин ≈ 3-7 МБ — под лимитом Groq 25 МБ»).
  */
 export const MAX_VOICE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * ai-usage-logging (2026-07-06): rough bytes→seconds estimate for `audio_seconds`.
+ * Groq bills per audio-second but Whisper's `json` response returns only `text`
+ * (no duration), and we intentionally do NOT change the request format. So we
+ * estimate from the compressed buffer size. This module's own bitrate notes span
+ * ~4–32 kB/s (opus webm → high-bitrate m4a), so 12 kB/s (~96 kbps) is a middle
+ * guess with ±3× error — good enough for internal volume tracking, and callers
+ * may pass an exact `audioSeconds` to override it. Tokens stay 0 for voice.
+ */
+const ESTIMATED_AUDIO_BYTES_PER_SEC = 12_000;
+
+function estimateAudioSeconds(byteLength: number): number {
+  if (!Number.isFinite(byteLength) || byteLength <= 0) return 0;
+  return Math.max(1, Math.round(byteLength / ESTIMATED_AUDIO_BYTES_PER_SEC));
+}
+
+/**
+ * Optional observability context for `transcribeAudio`. When provided, one
+ * `token_usage_logs` row (source='voice', tokens 0, audio_seconds) is written
+ * fire-and-forget on a successful Groq response. `userId` comes from the caller
+ * (this leaf helper has none of its own).
+ */
+export interface VoiceTranscribeLogContext {
+  admin: TokenUsageAdminClient;
+  userId: string | null;
+  assignmentId?: string | null;
+  /** Exact clip duration if the caller knows it; otherwise estimated from bytes. */
+  audioSeconds?: number | null;
+}
 
 export type VoiceTranscriptionErrorCode =
   | "MISSING_API_KEY"
@@ -153,6 +186,9 @@ async function postToGroq(form: FormData, apiKey: string, timeoutMs: number): Pr
 export async function transcribeAudio(
   audioBuffer: ArrayBuffer,
   opts: { language?: string; mimeType: string },
+  // ai-usage-logging (2026-07-06): when provided, logs a source='voice' row on a
+  // successful transcription. Fire-and-forget — never affects the return value.
+  logContext?: VoiceTranscribeLogContext,
 ): Promise<{ text: string }> {
   const { language, mimeType } = opts;
 
@@ -218,6 +254,18 @@ export async function transcribeAudio(
         durationMs: Date.now() - startedAt,
         empty: text.length === 0,
       });
+      // ai-usage-logging: Groq is billed even on an empty transcript (Whisper ran),
+      // so log on any 200. Tokens 0; audio_seconds estimated from the buffer.
+      if (logContext) {
+        void logTokenUsage(logContext.admin, {
+          userId: logContext.userId,
+          source: "voice",
+          model: WHISPER_MODEL,
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          assignmentId: logContext.assignmentId ?? null,
+          audioSeconds: logContext.audioSeconds ?? estimateAudioSeconds(size),
+        });
+      }
       return { text };
     }
 
