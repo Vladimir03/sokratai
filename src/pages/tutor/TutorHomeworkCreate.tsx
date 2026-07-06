@@ -1263,6 +1263,15 @@ function TutorHomeworkCreateContent() {
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
+        // Ревью-фикс P1 (2026-07-06): авто-зеркало degrade-not-block — но не
+        // молча. failed > 0 → нейтральный info (ДЗ выдано успешно; recovery =
+        // «Сохранить в мою базу» на карточке задачи в режиме правки).
+        if (result.kb_mirror && result.kb_mirror.failed > 0) {
+          toast.info(
+            `ДЗ создано, но ${result.kb_mirror.failed} из ${result.kb_mirror.requested} новых задач не сохранились в Базу — используйте «Сохранить в мою базу» позже.`,
+            { duration: 8000 },
+          );
+        }
       } else {
         await updateTutorHomeworkAssignment(assignmentId, {
           source_group_id: sourceGroupId,

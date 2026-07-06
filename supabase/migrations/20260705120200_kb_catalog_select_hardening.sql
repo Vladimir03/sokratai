@@ -21,6 +21,9 @@ BEGIN;
 
 DROP POLICY IF EXISTS "KB tasks select public or own" ON public.kb_tasks;
 
+-- Initplan-обёртки `(SELECT fn(...))` — кешируют вызов на statement, а не
+-- per-row (ревью-фикс P2 2026-07-06; безопасно править на месте — миграция
+-- ещё нигде не применена).
 CREATE POLICY "KB tasks select catalog tutors or own"
   ON public.kb_tasks
   FOR SELECT
@@ -29,7 +32,10 @@ CREATE POLICY "KB tasks select catalog tutors or own"
     owner_id = auth.uid()
     OR (
       owner_id IS NULL
-      AND (public.is_tutor(auth.uid()) OR public.has_role(auth.uid(), 'moderator'))
+      AND (
+        (SELECT public.is_tutor(auth.uid()))
+        OR (SELECT public.has_role(auth.uid(), 'moderator'))
+      )
     )
   );
 

@@ -284,6 +284,13 @@ export type DeliveryStatus =
 
 export interface CreateAssignmentResponse {
   assignment_id: string;
+  /**
+   * unified-task-model (ревью-фикс P1 2026-07-06): telemetry авто-зеркала
+   * новых задач в Базу. failed > 0 → нейтральный toast (обещание «→ в Базу»
+   * не нарушается молча; выдача ДЗ при этом успешна). Optional — старый бэк
+   * поля не отдаёт.
+   */
+  kb_mirror?: { requested: number; succeeded: number; failed: number } | null;
 }
 
 export interface AssignStudentsResponse {

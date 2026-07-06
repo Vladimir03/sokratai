@@ -257,26 +257,147 @@ async function mirrorNewTaskToKb(
   }
 }
 
+/** Статистика авто-зеркала для create/update-ответа (ревью-фикс P1 2026-07-06). */
+interface KbMirrorStats {
+  requested: number;
+  succeeded: number;
+  failed: number;
+}
+
 /**
- * Провенанс задачи из tri-state `kb_task_id` payload (deploy-skew-защита):
- *   uuid      → валидированный провенанс (снимок KB-задачи);
- *   null      → ЯВНО новая задача → авто-зеркало в Базу;
- *   undefined → старый клиент → legacy-поведение (без зеркала, без провенанса).
+ * БАТЧ-провенанс задач из tri-state `kb_task_id` (ревью-фикс P1 2026-07-06 —
+ * прежний последовательный per-task цикл давал до ~3×N round-trips до вставки
+ * задач, затягивая «Отправить»):
+ *   uuid      → валидированный провенанс (ОДИН .in()-SELECT на все);
+ *   null      → ЯВНО новая → авто-зеркало: fingerprints параллельно →
+ *               дедуп внутри payload (закрывает same-request гонку) →
+ *               ОДИН lookup существующих → ОДИН batch-INSERT недостающих;
+ *   undefined → legacy-клиент → без зеркала.
+ * Итог ≈ 4-5 round-trips + параллельные fingerprint-RPC вместо 60-90.
+ * ДЕГРАДАЦИЯ, НЕ БЛОК: любой сбой → null-провенанс + failed-счётчик (ответ
+ * несёт kb_mirror — фронт показывает нейтральный toast, выдача не блокируется).
+ * Cross-request гонка дубля (нет unique на owner+fingerprint) — то же
+ * best-effort, что у handleSaveTasksToKB (rule 40, осознанно).
  */
-async function resolveTaskProvenance(
+async function resolveTaskProvenanceBatch(
   db: SupabaseClient,
   tutorUserId: string,
-  t: Record<string, unknown>,
-  opts: { mirrorFolderId: string | null; exam: string | null },
-): Promise<string | null> {
-  if (t.kb_task_id === undefined) return null;
-  if (t.kb_task_id === null) {
-    return await mirrorNewTaskToKb(db, tutorUserId, t, {
-      folderId: opts.mirrorFolderId,
-      exam: opts.exam,
+  tasks: Record<string, unknown>[],
+  opts: { mirrorFolderId: string | null; examFor: (t: Record<string, unknown>) => string | null },
+): Promise<{ ids: (string | null)[]; mirror: KbMirrorStats }> {
+  const ids: (string | null)[] = new Array(tasks.length).fill(null);
+  const providedIdx: number[] = [];
+  const newIdx: number[] = [];
+  tasks.forEach((t, i) => {
+    if (isUUID(t.kb_task_id)) providedIdx.push(i);
+    else if (t.kb_task_id === null) newIdx.push(i);
+    // undefined → legacy, остаётся null
+  });
+  const mirror: KbMirrorStats = { requested: newIdx.length, succeeded: 0, failed: 0 };
+
+  try {
+    // 1) Валидация переданных kb_task_id — один SELECT.
+    if (providedIdx.length > 0) {
+      const uniqueIds = Array.from(new Set(providedIdx.map((i) => tasks[i].kb_task_id as string)));
+      const { data: kbRows } = await db
+        .from("kb_tasks")
+        .select("id, owner_id, moderation_status")
+        .in("id", uniqueIds);
+      const readable = new Set(
+        (kbRows ?? [])
+          .filter((k) =>
+            k.owner_id === tutorUserId || (k.owner_id === null && k.moderation_status === "active")
+          )
+          .map((k) => k.id as string),
+      );
+      for (const i of providedIdx) {
+        const id = tasks[i].kb_task_id as string;
+        if (readable.has(id)) ids[i] = id;
+      }
+    }
+
+    // 2) Авто-зеркало новых.
+    if (newIdx.length > 0 && opts.mirrorFolderId) {
+      const folderId = opts.mirrorFolderId;
+      // Fingerprints — параллельно (RPC read-only).
+      const fps = await Promise.all(
+        newIdx.map((i) => {
+          const t = tasks[i];
+          const taskText = isNonEmptyString(t.task_text) ? (t.task_text as string).trim() : "[Задача на фото]";
+          const answer = isNonEmptyString(t.correct_answer) ? (t.correct_answer as string).trim() : "";
+          const attachment = isNonEmptyString(t.task_image_url) ? (t.task_image_url as string).trim() : "";
+          return computeKbFingerprint(db, taskText, answer, attachment);
+        }),
+      );
+      const idxByFp = new Map<string, number[]>();
+      newIdx.forEach((taskIdx, k) => {
+        const fp = fps[k];
+        if (!fp) return; // fingerprint-сбой → failed
+        const list = idxByFp.get(fp) ?? [];
+        list.push(taskIdx);
+        idxByFp.set(fp, list);
+      });
+      const uniqueFps = Array.from(idxByFp.keys());
+
+      if (uniqueFps.length > 0) {
+        // Один lookup существующих задач владельца (идемпотентный ретрай save).
+        const { data: existingRows } = await db
+          .from("kb_tasks")
+          .select("id, fingerprint")
+          .eq("owner_id", tutorUserId)
+          .in("fingerprint", uniqueFps);
+        const existingByFp = new Map(
+          (existingRows ?? []).map((r) => [r.fingerprint as string, r.id as string]),
+        );
+
+        // Batch-INSERT недостающих (по одному ряду на unique fingerprint —
+        // дубли внутри payload схлопываются на одну kb-задачу).
+        const missingFps = uniqueFps.filter((fp) => !existingByFp.has(fp));
+        if (missingFps.length > 0) {
+          const rows = missingFps.map((fp) => {
+            const firstIdx = (idxByFp.get(fp) as number[])[0];
+            const t = tasks[firstIdx];
+            return homeworkTaskFieldsToKbRow(t, {
+              ownerId: tutorUserId,
+              folderId,
+              fingerprint: fp,
+              exam: opts.examFor(t),
+              topicId: isUUID(t.topic_id) ? (t.topic_id as string) : null,
+              subtopicId: isUUID(t.subtopic_id) ? (t.subtopic_id as string) : null,
+              difficulty: typeof t.difficulty === "number" ? (t.difficulty as number) : null,
+              sourceLabel: isNonEmptyString(t.source_label) ? (t.source_label as string) : null,
+            });
+          });
+          const { data: inserted, error: insertErr } = await db
+            .from("kb_tasks")
+            .insert(rows)
+            .select("id, fingerprint");
+          if (insertErr) {
+            console.warn("homework_api_auto_mirror_failed", { error: insertErr.message, batch: rows.length });
+          }
+          for (const r of inserted ?? []) {
+            existingByFp.set(r.fingerprint as string, r.id as string);
+          }
+        }
+
+        for (const [fp, idxList] of idxByFp) {
+          const kbId = existingByFp.get(fp);
+          if (!kbId) continue;
+          for (const i of idxList) {
+            ids[i] = kbId;
+            mirror.succeeded += 1;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("homework_api_auto_mirror_failed", {
+      error: e instanceof Error ? e.message : String(e),
     });
   }
-  return await resolveProvidedKbTaskId(db, tutorUserId, t.kb_task_id);
+
+  mirror.failed = mirror.requested - mirror.succeeded;
+  return { ids, mirror };
 }
 
 const VALID_SUBJECTS_CREATE = [
@@ -1139,19 +1260,16 @@ async function handleCreateAssignment(
   const assignmentExam = (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string)
     ? (b.exam_type as string)
     : "ege";
-  const sourceKbIds: (string | null)[] = [];
-  for (const t of tasksPayloadForProvenance) {
+  // Батч (ревью-фикс P1): ~4-5 round-trips вместо ~3×N последовательных.
+  const provenanceBatch = await resolveTaskProvenanceBatch(db, tutorUserId, tasksPayloadForProvenance, {
+    mirrorFolderId,
     // Per-task Тип из каскада выигрывает; undefined + № КИМ → exam_type ДЗ.
-    const perTaskExam = t.exam === "ege" || t.exam === "oge"
-      ? (t.exam as string)
-      : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? assignmentExam : null);
-    sourceKbIds.push(
-      await resolveTaskProvenance(db, tutorUserId, t, {
-        mirrorFolderId,
-        exam: perTaskExam,
-      }),
-    );
-  }
+    examFor: (t) =>
+      t.exam === "ege" || t.exam === "oge"
+        ? (t.exam as string)
+        : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? assignmentExam : null),
+  });
+  const sourceKbIds = provenanceBatch.ids;
   const provenanceSyncedAt = new Date().toISOString();
 
   const taskRows = (b.tasks as Record<string, unknown>[]).map((t, i) => {
@@ -1263,7 +1381,10 @@ async function handleCreateAssignment(
   // Phase A: фоновая генерация AI-эталона (физика — фильтрует сама функция).
   enqueueReferenceGeneration(assignment.id as string);
 
-  return jsonOk(cors, { assignment_id: assignment.id }, 201);
+  // kb_mirror — additive telemetry авто-зеркала (ревью-фикс P1 2026-07-06):
+  // фронт показывает нейтральный toast при failed>0 (обещание «→ в Базу» не
+  // нарушается молча); старые клиенты поле игнорируют.
+  return jsonOk(cors, { assignment_id: assignment.id, kb_mirror: provenanceBatch.mirror }, 201);
 }
 
 // ─── Shared score helpers (used by handleListAssignments + handleGetResults) ──
@@ -1884,6 +2005,10 @@ async function handleUpdateAssignment(
   }
   const b = body as Record<string, unknown>;
 
+  // kb_mirror — additive telemetry авто-зеркала новых задач (ревью-фикс P1
+  // 2026-07-06); null когда tasks не менялись / вставок не было.
+  let updateKbMirror: KbMirrorStats | null = null;
+
   const patch: Record<string, unknown> = {};
   if (b.title !== undefined) {
     if (!isNonEmptyString(b.title)) return jsonError(cors, 400, "VALIDATION", "title must be a non-empty string");
@@ -2236,19 +2361,27 @@ async function handleUpdateAssignment(
           )
           ? ((assignmentOrErr as Record<string, unknown>).exam_type as string)
           : "ege");
+      // Батч-провенанс для новых задач (ревью-фикс P1, mirror create-path).
+      const updProvenance = await resolveTaskProvenanceBatch(
+        db,
+        tutorUserId,
+        toInsert.map((entry) => entry.task),
+        {
+          mirrorFolderId: updMirrorFolderId,
+          examFor: (t) =>
+            t.exam === "ege" || t.exam === "oge"
+              ? (t.exam as string)
+              : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? updAssignmentExam : null),
+        },
+      );
+      updateKbMirror = updProvenance.mirror;
       if (toInsert.length > 0) {
         for (let i = 0; i < toInsert.length; i++) {
           const t = toInsert[i].task;
           const normalizedCheckFormat = (VALID_CHECK_FORMATS as readonly string[]).includes(t.check_format as string)
             ? (t.check_format as string)
             : "short_answer";
-          const perTaskExam = t.exam === "ege" || t.exam === "oge"
-            ? (t.exam as string)
-            : (t.exam === undefined && normalizeKimNumber(t.kim_number) != null ? updAssignmentExam : null);
-          const sourceKbId = await resolveTaskProvenance(db, tutorUserId, t, {
-            mirrorFolderId: updMirrorFolderId,
-            exam: perTaskExam,
-          });
+          const sourceKbId = updProvenance.ids[i];
           const { data: insertedRow, error } = await db
             .from("homework_tutor_tasks")
             .insert({
@@ -2407,7 +2540,7 @@ async function handleUpdateAssignment(
   // Phase A: (ре)генерация AI-эталона для новых/failed задач (фильтрует функция).
   enqueueReferenceGeneration(assignmentId);
 
-  return jsonOk(cors, { ok: true });
+  return jsonOk(cors, { ok: true, kb_mirror: updateKbMirror });
 }
 
 // ─── Endpoint: POST /assignments/:id/assign ──────────────────────────────────
@@ -5081,27 +5214,27 @@ async function handleListTemplates(
   const { data, error } = await query;
   if (error) {
     console.error("homework_api_request_error", { route: "GET /templates", error: error.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to fetch templates");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить шаблоны");
   }
 
-  // task_count: ссылочные шаблоны (migrated) считаются по junction; legacy —
-  // по tasks_json (skew-совместимость: старый фронт видит те же цифры).
+  // task_count: ссылочные шаблоны (migrated) — SQL-агрегатом (ревью-фикс P1
+  // 2026-07-06: выборка всех junction-строк была O(шаблоны×задачи) и тихо
+  // резалась PostgREST-капом 1000 → неверный счётчик); legacy — по tasks_json
+  // (skew-совместимость: старый фронт видит те же цифры).
   const rows = data ?? [];
   const migratedIds = rows
     .filter((t) => t.tasks_migrated_at != null)
     .map((t) => t.id as string);
   const refCountByTemplate = new Map<string, number>();
   if (migratedIds.length > 0) {
-    const { data: refRows, error: refErr } = await db
-      .from("homework_template_tasks")
-      .select("template_id")
-      .in("template_id", migratedIds);
+    const { data: countRows, error: refErr } = await db.rpc("hw_template_task_counts", {
+      p_template_ids: migratedIds,
+    });
     if (refErr) {
       console.warn("homework_api_template_ref_count_failed", { error: refErr.message });
     }
-    for (const r of refRows ?? []) {
-      const key = r.template_id as string;
-      refCountByTemplate.set(key, (refCountByTemplate.get(key) ?? 0) + 1);
+    for (const r of (countRows ?? []) as Array<{ template_id: string; task_count: number }>) {
+      refCountByTemplate.set(r.template_id, Number(r.task_count) || 0);
     }
   }
 
@@ -5162,7 +5295,7 @@ async function handleCreateTemplate(
       .in("id", kbIds);
     if (kbErr) {
       console.error("homework_api_request_error", { route: "POST /templates", error: kbErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to validate template tasks");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить задачи шаблона — обновите страницу и попробуйте снова");
     }
     const readable = new Set(
       (kbRows ?? [])
@@ -5200,7 +5333,7 @@ async function handleCreateTemplate(
       .single();
     if (createErr || !created) {
       console.error("homework_api_request_error", { route: "POST /templates", error: createErr?.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон");
     }
     // Дедуп повторных kb_task_id (UNIQUE в junction) с сохранением порядка.
     const seenIds = new Set<string>();
@@ -5220,7 +5353,7 @@ async function handleCreateTemplate(
     if (junctionErr) {
       console.error("homework_api_request_error", { route: "POST /templates", error: junctionErr.message });
       await db.from("homework_tutor_templates").delete().eq("id", created.id);
-      return jsonError(cors, 500, "DB_ERROR", "Failed to create template tasks");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить задачи шаблона");
     }
     return jsonOk(cors, { template_id: created.id }, 201);
   }
@@ -5271,7 +5404,7 @@ async function handleCreateTemplate(
 
   if (error || !data) {
     console.error("homework_api_request_error", { route: "POST /templates", error: error?.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to create template");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон");
   }
 
   return jsonOk(cors, { template_id: data.id }, 201);
@@ -5319,7 +5452,7 @@ async function handleGetTemplate(
     .order("sort_order", { ascending: true });
   if (refsErr) {
     console.error("homework_api_request_error", { route: "GET /templates/:id", error: refsErr.message });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load template tasks");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить задачи шаблона");
   }
   const kbIds = (refs ?? []).map((r) => r.kb_task_id as string);
   const kbById = new Map<string, KbTaskLike>();
@@ -5330,7 +5463,7 @@ async function handleGetTemplate(
       .in("id", kbIds);
     if (kbRowsErr) {
       console.error("homework_api_request_error", { route: "GET /templates/:id", error: kbRowsErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to load template tasks");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить задачи шаблона");
     }
     for (const row of (kbRows ?? []) as unknown as KbTaskLike[]) {
       kbById.set(row.id, row);
@@ -5806,7 +5939,7 @@ async function handleUpdateTemplate(
         cors,
         400,
         "VALIDATION",
-        "Only title, tags, topic can be updated",
+        "Можно изменить только название, теги, тему и список задач шаблона",
       );
     }
   }
@@ -5823,7 +5956,7 @@ async function handleUpdateTemplate(
       route: "PATCH /templates/:id",
       error: existingErr.message,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load template");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить шаблон");
   }
   if (!existing) {
     return jsonError(cors, 404, "NOT_FOUND", "Template not found");
@@ -5882,7 +6015,7 @@ async function handleUpdateTemplate(
       .in("id", kbIds);
     if (kbErr) {
       console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: kbErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to validate template tasks");
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить задачи шаблона — обновите страницу и попробуйте снова");
     }
     const readable = new Set(
       (kbRows ?? [])
@@ -5899,14 +6032,9 @@ async function handleUpdateTemplate(
         "Некоторые задачи недоступны в Базе — обновите страницу и попробуйте снова",
       );
     }
-    const { error: delErr } = await db
-      .from("homework_template_tasks")
-      .delete()
-      .eq("template_id", templateId);
-    if (delErr) {
-      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: delErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to replace template tasks");
-    }
+    // Ревью-фикс P1 (2026-07-06): UPSERT-then-delete-stale вместо
+    // delete-then-insert — сбой между шагами оставляет шаблон НАДМНОЖЕСТВОМ
+    // (валиден, ретрай идемпотентен), а не пустым.
     const seenIds = new Set<string>();
     const junctionRows = refsIn
       .filter((r) => {
@@ -5920,10 +6048,22 @@ async function handleUpdateTemplate(
         kb_task_id: r.kb_task_id as string,
         sort_order: typeof r.sort_order === "number" ? r.sort_order : i,
       }));
-    const { error: insErr } = await db.from("homework_template_tasks").insert(junctionRows);
-    if (insErr) {
-      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: insErr.message });
-      return jsonError(cors, 500, "DB_ERROR", "Failed to replace template tasks");
+    const { error: upsertErr } = await db
+      .from("homework_template_tasks")
+      .upsert(junctionRows, { onConflict: "template_id,kb_task_id" });
+    if (upsertErr) {
+      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: upsertErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось обновить задачи шаблона");
+    }
+    const keepIds = junctionRows.map((r) => r.kb_task_id);
+    const { error: staleErr } = await db
+      .from("homework_template_tasks")
+      .delete()
+      .eq("template_id", templateId)
+      .not("kb_task_id", "in", `(${keepIds.join(",")})`);
+    if (staleErr) {
+      console.error("homework_api_request_error", { route: "PATCH /templates/:id", error: staleErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось обновить задачи шаблона");
     }
     patch.tasks_migrated_at = new Date().toISOString();
     patch.updated_at = new Date().toISOString();
