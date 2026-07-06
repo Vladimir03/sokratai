@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { ImagePlus, X } from 'lucide-react';
 import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import { cn } from '@/lib/utils';
+// Единый зум-UX с ДЗ-конструктором (HWTaskCard использует этот же carousel):
+// стрелки + счётчик + свайп + клавиатура; принимает blob/signed URL напрямую.
+import { FullscreenImageCarousel } from '@/components/homework/shared/FullscreenImageCarousel';
 import type { UseImageUploadReturn } from '@/hooks/useImageUpload';
 
 interface ImageUploadFieldProps {
@@ -51,6 +55,14 @@ export function ImageUploadField({
 
   const maxImages = imageUpload.maxImages ?? MAX_TASK_IMAGES;
   const isDocument = previewVariant === 'document';
+
+  // Клик по превью → полноэкранный просмотр (единый UX с загрузкой фото в ДЗ).
+  // Единый массив в ПОРЯДКЕ отображения: existing (signed) первыми, затем new (blob).
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
+  const zoomImages = [
+    ...existingRefs.map((ref) => existingSignedUrls[ref] ?? ''),
+    ...previewUrls,
+  ];
   // A4-портрет (~0.71) вместо квадрата; contain на белом — страница читается целиком.
   const thumbClass = isDocument
     ? 'h-28 w-20 rounded-lg border border-socrat-border bg-white object-contain'
@@ -102,11 +114,18 @@ export function ImageUploadField({
                 return (
                   <div key={ref} className="relative">
                     {signedUrl ? (
-                      <img loading="lazy"
-                        src={signedUrl}
-                        alt={`Фото ${idx + 1}`}
-                        className={thumbClass}
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setZoomIndex(idx)}
+                        aria-label={`Открыть фото ${idx + 1} во весь экран`}
+                        className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/50 [touch-action:manipulation]"
+                      >
+                        <img loading="lazy"
+                          src={signedUrl}
+                          alt={`Фото ${idx + 1}`}
+                          className={thumbClass}
+                        />
+                      </button>
                     ) : (
                       <div className={cn(
                         'flex items-center justify-center rounded-lg border border-socrat-border bg-socrat-surface',
@@ -130,11 +149,18 @@ export function ImageUploadField({
               {/* New images (blob URLs) */}
               {previewUrls.map((url, index) => (
                 <div key={`new-${index}`} className="relative">
-                  <img loading="lazy"
-                    src={url}
-                    alt={`Фото ${existingRefs.length + index + 1}`}
-                    className={thumbClass}
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setZoomIndex(existingRefs.length + index)}
+                    aria-label={`Открыть фото ${existingRefs.length + index + 1} во весь экран`}
+                    className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/50 [touch-action:manipulation]"
+                  >
+                    <img loading="lazy"
+                      src={url}
+                      alt={`Фото ${existingRefs.length + index + 1}`}
+                      className={thumbClass}
+                    />
+                  </button>
                   {isDocument ? (
                     <p className="mt-0.5 text-center text-[10px] font-medium text-slate-500">
                       {documentCaption(files[index]?.name, existingRefs.length + index)}
@@ -190,6 +216,17 @@ export function ImageUploadField({
           </>
         )}
       </div>
+
+      {/* Полноэкранный просмотр — тот же carousel, что в ДЗ-конструкторе
+          (стрелки/счётчик/свайп/клавиатура). Blob и signed URL — напрямую. */}
+      <FullscreenImageCarousel
+        images={zoomImages}
+        openIndex={zoomIndex}
+        onClose={() => setZoomIndex(null)}
+        onNavigate={setZoomIndex}
+        ariaTitle={label}
+        ariaDescription="Просмотр изображений во весь экран"
+      />
     </fieldset>
   );
 }
