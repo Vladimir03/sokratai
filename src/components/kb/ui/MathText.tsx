@@ -4,7 +4,7 @@
  * Job: A2 — верифицировать задачу (doc 16, принцип 16: "Физика — не plain text")
  */
 
-import { memo, useEffect, useMemo, type ElementType } from 'react';
+import { Fragment, memo, useEffect, useMemo, type ElementType } from 'react';
 import katex from 'katex';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
 
@@ -68,9 +68,25 @@ function renderMixedLatexToHtml(text: string): string {
 const MathTextInner = memo(function MathTextInner({ text, className, as: Tag = 'div' }: MathTextProps) {
   const hasMath = text.includes('$') || text.includes('\\(') || text.includes('\\[');
 
-  // Fast path: no math → plain text, zero KaTeX overhead
+  // Fast path: no math → plain text, zero KaTeX overhead.
+  // Preserve newlines as <br /> (mirror the math path) so multi-line text —
+  // e.g. numbered statements «1)… 2)… 3)…» (обществознание) — doesn't collapse
+  // into one paragraph. Single-line text keeps the zero-overhead path.
   if (!hasMath) {
-    return <Tag className={className}>{text}</Tag>;
+    if (!text.includes('\n') && !text.includes('\r')) {
+      return <Tag className={className}>{text}</Tag>;
+    }
+    const lines = text.split(/\r\n?|\n/);
+    return (
+      <Tag className={className}>
+        {lines.map((line, i) => (
+          <Fragment key={i}>
+            {i > 0 && <br />}
+            {line}
+          </Fragment>
+        ))}
+      </Tag>
+    );
   }
 
   return <MathRenderer text={text} className={className} Tag={Tag} />;

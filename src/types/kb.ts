@@ -17,6 +17,22 @@ export type TopicKind = 'exam' | 'olympiad';
  */
 export type CatalogFilter = 'ege' | 'oge' | 'olympiad';
 
+/**
+ * Предметы, активные в «Базе задач» (мультипредметный каталог, 2026-07-06).
+ * `kb_topics.subject`/`kb_sources.subject` — свободный TEXT (default 'physics');
+ * это список для переключателя предмета в UI. Новый предмет модератора →
+ * добавляй сюда (и заводи его темы self-serve). Порядок = порядок табов.
+ */
+export const KB_SUBJECTS = [
+  { id: 'physics', label: 'Физика' },
+  { id: 'social', label: 'Обществознание' },
+] as const;
+
+export type KBSubjectId = (typeof KB_SUBJECTS)[number]['id'];
+
+/** Предмет по умолчанию (обратная совместимость: весь существующий контент — физика). */
+export const DEFAULT_KB_SUBJECT: KBSubjectId = 'physics';
+
 export type MaterialType = 'file' | 'link' | 'media' | 'board';
 
 // =============================================

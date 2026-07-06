@@ -39,7 +39,7 @@ export interface ExtractedTask {
   answer_confidence: AnswerConfidence;
   solution: string | null;
   answer_format: ExtractedAnswerFormat | null;
-  /** Advisory only — NOT persisted to kb_tasks (CreateKBTaskInput has no check_format). */
+  /** Grading mode — persisted to kb_tasks.check_format on commit (P1-4, 2026-06-27). */
   check_format: ExtractedCheckFormat | null;
   kim_number: number | null;
   exam: ExtractedExam | null;
@@ -74,6 +74,12 @@ export interface ExtractResponse {
 export interface ExtractInput {
   /** UUID папки-назначения (ownership: kb_folders.owner_id === me). */
   folder_id: string;
+  /**
+   * Предмет материала (мультипредметный каталог, 2026-07-06). Выбирает системный
+   * промпт на edge: 'physics' (default) — формулы/КИМ; 'social' — обществознание
+   * (суждения/соответствия/текст/план, без формул). Edge fallback → 'physics'.
+   */
+  subject?: string;
   material: {
     type: 'text' | 'image';
     /** Сырой текст материала (для type='text'). */

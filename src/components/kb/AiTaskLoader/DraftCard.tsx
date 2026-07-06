@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ImagePlus, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { MathText } from '@/components/kb/ui/MathText';
+import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { ExtractedTask } from '@/lib/kbAiExtractApi';
@@ -10,6 +11,8 @@ interface DraftCardProps {
   index: number;
   draft: ExtractedTask;
   selected: boolean;
+  /** Предмет распознавания — бейдж формата проверки должен совпадать с commit (review P2). */
+  subject: string;
   onToggleSelect: (index: number) => void;
   onChange: (index: number, patch: Partial<ExtractedTask>) => void;
   /** Disable all editing (during commit). */
@@ -27,14 +30,6 @@ const CONFIDENCE_META: Record<
 
 const EXAM_LABELS: Record<string, string> = { ege: 'ЕГЭ', oge: 'ОГЭ' };
 
-const ANSWER_FORMAT_LABELS: Record<string, string> = {
-  number: 'Число',
-  text: 'Текст',
-  detailed: 'Развёрнутый',
-  matching: 'Соответствие',
-  choice: 'Выбор',
-};
-
 function Chip({ children }: { children: React.ReactNode }) {
   return (
     <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
@@ -43,7 +38,7 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, disabled }: DraftCardProps) {
+function DraftCardComponent({ index, draft, selected, subject, onToggleSelect, onChange, disabled }: DraftCardProps) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -66,6 +61,17 @@ function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, 
   const confidence = CONFIDENCE_META[draft.answer_confidence];
   const answerEmpty = !draft.answer || draft.answer.trim() === '';
   const answerNeedsReview = draft.needs_review_fields.includes('answer');
+  // P1-4: grading mode resolved exactly as the commit does (so the badge matches
+  // what's persisted to kb_tasks.check_format).
+  const checkFormatLabel =
+    resolveCheckFormatFromKb({
+      check_format: draft.check_format,
+      answer_format: draft.answer_format,
+      kim_number: draft.kim_number,
+      subject,
+    }) === 'detailed_solution'
+      ? 'Развёрнутое решение'
+      : 'Краткий ответ';
 
   const handleReplaceImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -110,7 +116,7 @@ function DraftCardComponent({ index, draft, selected, onToggleSelect, onChange, 
             <Chip>№ {index + 1}</Chip>
             {draft.exam ? <Chip>{EXAM_LABELS[draft.exam] ?? draft.exam}</Chip> : null}
             {draft.kim_number !== null ? <Chip>КИМ № {draft.kim_number}</Chip> : null}
-            {draft.answer_format ? <Chip>{ANSWER_FORMAT_LABELS[draft.answer_format] ?? draft.answer_format}</Chip> : null}
+            <Chip>{checkFormatLabel}</Chip>
             {draft.topic_suggestion ? <Chip>{draft.topic_suggestion}</Chip> : null}
           </span>
         </label>

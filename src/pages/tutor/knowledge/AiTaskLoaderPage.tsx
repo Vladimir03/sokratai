@@ -7,11 +7,13 @@ import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { InputStage } from '@/components/kb/AiTaskLoader/InputStage';
 import { DraftCard } from '@/components/kb/AiTaskLoader/DraftCard';
 import { useCreateTask, useTopics } from '@/hooks/useKnowledgeBase';
+import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
+import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { serializeAttachmentUrls } from '@/lib/kbApi';
 import { supabase } from '@/lib/supabaseClient';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import type { ExtractStats, ExtractedTask } from '@/lib/kbAiExtractApi';
-import type { CreateKBTaskInput, KBSubtopic } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type KBSubtopic } from '@/types/kb';
 import { cn } from '@/lib/utils';
 
 type Stage = 'input' | 'review';
@@ -22,26 +24,40 @@ function draftToCreateInput(
   folderId: string,
   topicId: string | null,
   subtopicId: string | null,
+  subject: string,
 ): CreateKBTaskInput {
   const answer = draft.answer?.trim();
   const sourceLabel = draft.source_label?.trim();
   const attachmentUrl = draft.attachment_ref
     ? serializeAttachmentUrls([draft.attachment_ref]) ?? undefined
     : undefined;
+  // P1-4: persist the grading mode so the task grades by the ФИПИ rubric on ДЗ
+  // import. AI usually returns check_format; fall back to answer_format / № КИМ.
+  // № КИМ-эвристика — только физика (номера Части 2 предметно-специфичны, review P2).
+  const checkFormat = resolveCheckFormatFromKb({
+    check_format: draft.check_format,
+    answer_format: draft.answer_format,
+    kim_number: draft.kim_number,
+    subject,
+  });
+  // P1-4: if AI didn't extract a score, fall back to the № КИМ score (ФИПИ) so a
+  // Часть-2 task (КИМ 21-26) imports to ДЗ with the right max_score, not 1.
+  // Only physics has ФИПИ maps → subject-aware (review P1); social → manual only.
+  const primaryScore = draft.primary_score ?? getKimPrimaryScoreForSubject(subject, draft.exam, draft.kim_number);
   return {
     folder_id: folderId,
     text: draft.text,
     ...(answer ? { answer } : {}),
     ...(draft.solution ? { solution: draft.solution } : {}),
     ...(draft.answer_format ? { answer_format: draft.answer_format } : {}),
+    check_format: checkFormat,
     ...(draft.kim_number !== null ? { kim_number: draft.kim_number } : {}),
     ...(draft.exam ? { exam: draft.exam } : {}),
-    ...(draft.primary_score !== null ? { primary_score: draft.primary_score } : {}),
+    ...(primaryScore !== null ? { primary_score: primaryScore } : {}),
     ...(draft.rubric_text ? { rubric_text: draft.rubric_text } : {}),
     ...(topicId ? { topic_id: topicId } : {}),
     ...(subtopicId ? { subtopic_id: subtopicId } : {}),
     ...(attachmentUrl ? { attachment_url: attachmentUrl } : {}),
-    // check_format is advisory-only (not in CreateKBTaskInput) — intentionally omitted.
     // source_label: omit → insertTask defaults to 'my'.
     ...(sourceLabel ? { source_label: sourceLabel } : {}),
   };
@@ -61,15 +77,22 @@ function AiTaskLoaderContent() {
   const [selected, setSelected] = useState<boolean[]>([]);
   const [stats, setStats] = useState<ExtractStats | null>(null);
   const [folderId, setFolderId] = useState(initialFolderId);
+  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
   const [isSaving, setIsSaving] = useState(false);
 
   const handleExtracted = useCallback(
-    (newDrafts: ExtractedTask[], newStats: ExtractStats, chosenFolderId: string) => {
+    (
+      newDrafts: ExtractedTask[],
+      newStats: ExtractStats,
+      chosenFolderId: string,
+      chosenSubject: string,
+    ) => {
       setDrafts(newDrafts);
       // Default-deselect drafts that look like duplicates (edge fingerprint_match).
       setSelected(newDrafts.map((d) => d.fingerprint_match === null));
       setStats(newStats);
       setFolderId(chosenFolderId);
+      setSubject(chosenSubject);
       setStage('review');
     },
     [],
@@ -85,18 +108,19 @@ function AiTaskLoaderContent() {
 
   const selectedCount = useMemo(() => selected.filter(Boolean).length, [selected]);
 
-  // Exact case-insensitive topic-name match within the physics taxonomy (locked
-  // decision: never auto-create catalog topics; no match → null).
+  // Exact case-insensitive topic-name match within the chosen subject's taxonomy
+  // (мультипредметный каталог; locked decision: never auto-create catalog topics;
+  // no match → null).
   const resolveTopicId = useCallback(
     (suggestion: string): string | null => {
       const s = suggestion.trim().toLowerCase();
       if (!s) return null;
       const match = topics.find(
-        (t) => t.subject === 'physics' && t.name.trim().toLowerCase() === s,
+        (t) => t.subject === subject && t.name.trim().toLowerCase() === s,
       );
       return match?.id ?? null;
     },
-    [topics],
+    [topics, subject],
   );
 
   const handleCommit = useCallback(async () => {
@@ -141,7 +165,7 @@ function AiTaskLoaderContent() {
         const topicId = topicIdByDraftIndex.get(index) ?? null;
         const subtopicId = resolveSubtopicId(topicId, draft.subtopic_suggestion);
         try {
-          await createTask.mutateAsync(draftToCreateInput(draft, folderId, topicId, subtopicId));
+          await createTask.mutateAsync(draftToCreateInput(draft, folderId, topicId, subtopicId, subject));
           saved += 1;
         } catch {
           failed += 1;
@@ -167,7 +191,7 @@ function AiTaskLoaderContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [drafts, selected, selectedCount, folderId, isSaving, resolveTopicId, createTask, navigate, queryClient]);
+  }, [drafts, selected, selectedCount, folderId, subject, isSaving, resolveTopicId, createTask, navigate, queryClient]);
 
   return (
     <KnowledgeBaseFrame>
@@ -223,6 +247,7 @@ function AiTaskLoaderContent() {
                   index={index}
                   draft={draft}
                   selected={selected[index] ?? false}
+                  subject={subject}
                   onToggleSelect={toggleSelect}
                   onChange={updateDraft}
                   disabled={isSaving}

@@ -10,7 +10,7 @@ import {
   serializeAttachmentUrls,
   uploadKBTaskImage,
 } from '@/lib/kbApi';
-import { getKimPrimaryScore } from '@/lib/kbKimScores';
+import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import {
   loadLastClassification,
   saveLastClassification,
@@ -26,7 +26,7 @@ import {
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
-import type { KBFolderTreeNode } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, type KBFolderTreeNode } from '@/types/kb';
 
 interface CreateTaskModalProps {
   /** Pre-selected folder id (e.g. current folder on FolderPage) */
@@ -78,6 +78,9 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   };
 
   // Classification (cascade) — prefilled from last task
+  // Мультипредметный каталог: предмет наследуется в серии (Милада грузит много
+  // обществоведческих задач подряд → не переключать «Обществознание» каждый раз).
+  const [subject, setSubject] = useState<string>(inherited.subject ?? DEFAULT_KB_SUBJECT);
   const [taskType, setTaskType] = useState<TaskClassType>(
     (inherited.taskType as TaskClassType) ?? '',
   );
@@ -97,6 +100,12 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const conditionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
   const solutionImages = useImageUpload({ maxImages: MAX_TASK_IMAGES, disabled: isBusy });
 
+  // Subject change → тема другого предмета → сбросить тему/подтему.
+  const handleSubjectChange = (v: string) => {
+    setSubject(v);
+    setTopicId('');
+    setSubtopicId('');
+  };
   // Type change → reset dependent fields (тема/подтема, балл, противоположное КИМ/сложность)
   const handleTaskTypeChange = (v: TaskClassType) => {
     setTaskType(v);
@@ -171,7 +180,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
         difficultyNum = difficulty.trim() ? parseInt(difficulty.trim(), 10) : undefined;
         scoreNum = difficultyNum;
       } else {
-        const autoScore = getKimPrimaryScore(exam ?? null, kimNum ?? null);
+        // Авто-балл по КИМ — только физика; обществознание → ручной (или пусто).
+        const autoScore = getKimPrimaryScoreForSubject(subject, exam ?? null, kimNum ?? null);
         const s = primaryScore.trim() || (autoScore != null ? String(autoScore) : '');
         scoreNum = s ? parseInt(s, 10) : undefined;
       }
@@ -200,6 +210,7 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
       });
 
       saveLastClassification({
+        subject,
         taskType,
         kimNumber,
         difficulty,
@@ -323,6 +334,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               Классификация
             </div>
             <TaskClassificationFields
+              subject={subject}
+              onSubjectChange={handleSubjectChange}
               taskType={taskType}
               kimNumber={kimNumber}
               difficulty={difficulty}

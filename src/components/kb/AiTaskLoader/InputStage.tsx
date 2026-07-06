@@ -13,7 +13,7 @@ import {
 } from '@/lib/kbAiExtractApi';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { cn } from '@/lib/utils';
-import type { KBFolderTreeNode } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, KB_SUBJECTS, type KBFolderTreeNode } from '@/types/kb';
 
 /** Max screenshots per session (mirror edge MAX_IMAGES). */
 const MAX_LOADER_IMAGES = 10;
@@ -35,12 +35,18 @@ function flattenTree(
 
 interface InputStageProps {
   initialFolderId: string;
-  onExtracted: (drafts: ExtractedTask[], stats: ExtractStats, folderId: string) => void;
+  onExtracted: (
+    drafts: ExtractedTask[],
+    stats: ExtractStats,
+    folderId: string,
+    subject: string,
+  ) => void;
 }
 
 export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const { tree, loading: treeLoading } = useFolderTree();
   const [folderId, setFolderId] = useState(initialFolderId);
+  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
   const [text, setText] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const imageUpload = useImageUpload({ maxImages: MAX_LOADER_IMAGES, disabled: isExtracting });
@@ -61,6 +67,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       const materialType = uploadedRefs.length > 0 ? 'image' : 'text';
       const { drafts, stats } = await extractTasks({
         folder_id: folderId,
+        subject,
         material: {
           type: materialType,
           text: text.trim() || undefined,
@@ -79,7 +86,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
         return;
       }
-      onExtracted(drafts, stats, folderId);
+      onExtracted(drafts, stats, folderId, subject);
     } catch (e) {
       // Uploaded refs won't be reused on retry — clean them up.
       for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
@@ -91,6 +98,21 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
 
   return (
     <div className="space-y-4">
+      {/* Предмет — выбирает системный промпт распознавания (физика / обществознание) */}
+      <fieldset>
+        <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
+        <select
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          disabled={isExtracting}
+          className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
+        >
+          {KB_SUBJECTS.map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+      </fieldset>
+
       {/* Folder select */}
       <fieldset>
         <legend className="mb-1.5 text-xs font-semibold text-slate-500">

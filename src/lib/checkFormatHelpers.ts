@@ -43,21 +43,25 @@ export function inferCheckFormatFromKim(
  * Resolve `check_format` from a KB task in priority:
  *   1. Explicit `check_format` field if valid
  *   2. Legacy `answer_format` mapping
- *   3. KIM-number heuristic
+ *   3. KIM-number heuristic — ТОЛЬКО физика (номера Части 2 предметно-специфичны;
+ *      физическая эвристика 21-26 неверна для обществознания — review P2 2026-07-06)
  *   4. Safe default `'short_answer'`
+ * `subject` null/undefined → физика (обратная совместимость: homework path B без предмета).
  */
 export function resolveCheckFormatFromKb(input: {
   check_format?: string | null;
   answer_format?: string | null;
   kim_number?: number | null;
+  subject?: string | null;
 }): CheckFormat {
   if (input.check_format === 'short_answer' || input.check_format === 'detailed_solution') {
     return input.check_format;
   }
-  return (
-    mapAnswerFormatToCheckFormat(input.answer_format) ??
-    inferCheckFormatFromKim(input.kim_number)
-  );
+  const fromAnswerFormat = mapAnswerFormatToCheckFormat(input.answer_format);
+  if (fromAnswerFormat) return fromAnswerFormat;
+  // № КИМ-эвристика физики применима только к физике; иначе безопасный дефолт.
+  if (input.subject != null && input.subject !== 'physics') return 'short_answer';
+  return inferCheckFormatFromKim(input.kim_number);
 }
 
 /**

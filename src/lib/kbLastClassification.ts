@@ -9,6 +9,7 @@
 const KEY = 'sokrat-kb-last-classification';
 
 export interface KbLastClassification {
+  subject: string;
   taskType: string;
   kimNumber: string;
   difficulty: string;

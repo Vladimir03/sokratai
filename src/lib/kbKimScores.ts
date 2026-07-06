@@ -39,6 +39,11 @@ export const PHYSICS_OGE_KIM_SCORES: Record<number, number> = {
 /**
  * Известный первичный балл по экзамену и № КИМ, либо `null` — тогда форма
  * НЕ авто-подставляет балл (тутор вводит вручную). v1 = физика.
+ *
+ * ⚠️ Карты — ФИЗИЧЕСКИЕ. Номера КИМ физики (1-26/1-22) пересекаются с другими
+ * предметами (обществознание ЕГЭ 1-25), поэтому для НЕ-физики авто-балл давать
+ * НЕЛЬЗЯ — используй `getKimPrimaryScoreForSubject`. Прямой вызов оставлен для
+ * физического homework-пути (HWTaskCard).
  */
 export function getKimPrimaryScore(
   exam: ExamType | null | undefined,
@@ -47,4 +52,20 @@ export function getKimPrimaryScore(
   if (!exam || kimNumber == null || !Number.isFinite(kimNumber)) return null;
   const map = exam === 'ege' ? PHYSICS_EGE_KIM_SCORES : PHYSICS_OGE_KIM_SCORES;
   return map[kimNumber] ?? null;
+}
+
+/**
+ * Subject-aware обёртка (мультипредметный каталог, 2026-07-06): авто-балл по КИМ —
+ * ТОЛЬКО физика (карты ФИПИ физики). Для остальных предметов (обществознание и т.д.)
+ * → `null`: балл вводится вручную (locked-решение владельца). `subject` null/undefined
+ * трактуется как физика (обратная совместимость — homework-контекст без предмета).
+ * Когда появятся карты обществознания — расширяй ЗДЕСЬ (single source of truth).
+ */
+export function getKimPrimaryScoreForSubject(
+  subject: string | null | undefined,
+  exam: ExamType | null | undefined,
+  kimNumber: number | null | undefined,
+): number | null {
+  if (subject != null && subject !== 'physics') return null;
+  return getKimPrimaryScore(exam, kimNumber);
 }

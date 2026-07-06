@@ -28,6 +28,7 @@ import type {
 
 async function fetchTopics(
   filter?: CatalogFilter,
+  subject?: string,
   searchQuery?: string,
 ): Promise<KBTopicWithCounts[]> {
   let query = supabase
@@ -35,8 +36,14 @@ async function fetchTopics(
     .select('*')
     .order('sort_order');
 
+  // Мультипредметный каталог (2026-07-06): скоуп по предмету, когда задан.
+  // undefined → все предметы (обратная совместимость).
+  if (subject) {
+    query = query.eq('subject', subject);
+  }
+
   if (filter === 'olympiad') {
-    // Олимпиадные темы (exam=NULL); по предмету пока не фильтруем (физика).
+    // Олимпиадные темы (exam=NULL).
     query = query.eq('kind', 'olympiad');
   } else if (filter) {
     // Экзаменационные темы: по экзамену + kind='exam' (олимпиадные не подмешиваем).
@@ -238,16 +245,20 @@ function useKBQuery<TData>({
   };
 }
 
-/** All topics with counts, optionally filtered by catalog filter (ege/oge/olympiad) and search */
-export function useTopics(filter?: CatalogFilter, searchQuery?: string) {
+/**
+ * All topics with counts, optionally filtered by catalog filter (ege/oge/olympiad),
+ * subject (physics/social/…) and search. `subject` в query-key обязателен — иначе
+ * кэш склеит темы разных предметов.
+ */
+export function useTopics(filter?: CatalogFilter, subject?: string, searchQuery?: string) {
   const queryKey = useMemo(
-    () => ['tutor', 'kb', 'topics', filter ?? 'all', searchQuery ?? ''] as const,
-    [filter, searchQuery],
+    () => ['tutor', 'kb', 'topics', filter ?? 'all', subject ?? 'all', searchQuery ?? ''] as const,
+    [filter, subject, searchQuery],
   );
 
   const result = useKBQuery<KBTopicWithCounts[]>({
     queryKey,
-    queryFn: () => fetchTopics(filter, searchQuery),
+    queryFn: () => fetchTopics(filter, subject, searchQuery),
     defaultValue: [],
     errorMessage: 'Не удалось загрузить темы',
     // Справочник (ревью-фикс P1 2026-07-06): без focus/interval-рефетчей —

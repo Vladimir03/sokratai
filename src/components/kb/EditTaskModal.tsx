@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useImageUpload } from '@/hooks/useImageUpload';
-import { useUpdateTask } from '@/hooks/useKnowledgeBase';
+import { useTopic, useUpdateTask } from '@/hooks/useKnowledgeBase';
 import { MAX_TASK_IMAGES } from '@/lib/attachmentRefs';
 import {
   deleteKBTaskImage,
@@ -10,7 +10,7 @@ import {
   serializeAttachmentUrls,
   uploadKBTaskImage,
 } from '@/lib/kbApi';
-import { getKimPrimaryScore } from '@/lib/kbKimScores';
+import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import {
@@ -21,7 +21,7 @@ import {
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
-import type { KBTask, UpdateKBTaskInput } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, type KBTask, type UpdateKBTaskInput } from '@/types/kb';
 
 interface EditTaskModalProps {
   task: KBTask;
@@ -74,17 +74,30 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   };
 
   // Classification (cascade)
+  // Мультипредметный каталог: предмет резолвим из темы задачи (у kb_tasks нет
+  // своей колонки subject — предмет живёт на теме). Пока не резолвился — темы
+  // не скоупим (все предметы), поэтому текущая тема задачи всегда видна и не
+  // теряется. Резолв — один раз (ref-guard, не клоббер правок пользователя).
+  const { topic: currentTopic } = useTopic(task.topic_id || undefined);
+  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
+  const subjectResolvedRef = useRef(false);
+  useEffect(() => {
+    if (subjectResolvedRef.current) return;
+    if (!task.topic_id) { subjectResolvedRef.current = true; return; }
+    if (currentTopic) {
+      setSubject(currentTopic.subject || DEFAULT_KB_SUBJECT);
+      subjectResolvedRef.current = true;
+    }
+  }, [currentTopic, task.topic_id]);
   const [taskType, setTaskType] = useState<TaskClassType>(() => deriveTaskType(task));
   const [kimNumber, setKimNumber] = useState(task.kim_number?.toString() ?? '');
   const [difficulty, setDifficulty] = useState(task.difficulty?.toString() ?? '');
-  // primaryScore — ручной override (пусто = авто по КИМ). Если сохранённый балл
-  // совпадает с авто-баллом ФИПИ (или NULL) — оставляем пусто (покажется чип).
-  const [primaryScore, setPrimaryScore] = useState(() => {
-    const auto = getKimPrimaryScore(task.exam ?? null, task.kim_number ?? null);
-    return task.primary_score != null && task.primary_score !== auto
-      ? String(task.primary_score)
-      : '';
-  });
+  // primaryScore — показываем сохранённый балл ВЕРБАТИМ (не сворачиваем в «авто»
+  // при совпадении с ФИПИ). Иначе для обществознания балл, совпавший с физическим
+  // авто-баллом того же № КИМ, маскировался бы в пустой «авто»-стейт (review P1).
+  const [primaryScore, setPrimaryScore] = useState(
+    task.primary_score != null ? String(task.primary_score) : '',
+  );
   const [topicId, setTopicId] = useState(task.topic_id ?? '');
   const [subtopicId, setSubtopicId] = useState(task.subtopic_id ?? '');
   // 'my'/'socrat' — служебные sentinel'ы провенанса, не реальный источник.
@@ -113,6 +126,12 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   });
 
   // Cascade resets (user-triggered only → safe on mount, no prefill clobber)
+  const handleSubjectChange = (v: string) => {
+    subjectResolvedRef.current = true; // ручной выбор → не даём эффекту перетереть
+    setSubject(v);
+    setTopicId('');
+    setSubtopicId('');
+  };
   const handleTaskTypeChange = (v: TaskClassType) => {
     setTaskType(v);
     setTopicId('');
@@ -191,7 +210,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         difficultyNum = difficulty.trim() ? parseInt(difficulty.trim(), 10) : null;
         scoreNum = difficultyNum;
       } else {
-        const autoScore = getKimPrimaryScore(exam, kimNum);
+        // Авто-балл по КИМ — только физика; обществознание → ручной (или пусто).
+        const autoScore = getKimPrimaryScoreForSubject(subject, exam, kimNum);
         const s = primaryScore.trim() || (autoScore != null ? String(autoScore) : '');
         scoreNum = s ? parseInt(s, 10) : null;
       }
@@ -282,6 +302,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
               Классификация
             </div>
             <TaskClassificationFields
+              subject={subject}
+              onSubjectChange={handleSubjectChange}
               taskType={taskType}
               kimNumber={kimNumber}
               difficulty={difficulty}
@@ -369,7 +391,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
                 taskMaxScore={(() => {
                   const s = parseInt(primaryScore.trim(), 10);
                   if (Number.isFinite(s) && s > 0) return s;
-                  const auto = getKimPrimaryScore(
+                  const auto = getKimPrimaryScoreForSubject(
+                    subject,
                     taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null,
                     kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null,
                   );

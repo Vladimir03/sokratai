@@ -20,7 +20,12 @@ import { useIsModerator } from '@/hooks/useIsModerator';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { cn } from '@/lib/utils';
-import type { CatalogFilter, KBTopicWithCounts } from '@/types/kb';
+import {
+  DEFAULT_KB_SUBJECT,
+  KB_SUBJECTS,
+  type CatalogFilter,
+  type KBTopicWithCounts,
+} from '@/types/kb';
 
 type MainTab = 'catalog' | 'mybase';
 
@@ -30,6 +35,7 @@ function KnowledgeBaseContent() {
   const initialTab = searchParams.get('tab') === 'mybase' ? 'mybase' : 'catalog';
   const [mainTab, setMainTab] = useState<MainTab>(initialTab);
   const [examFilter, setExamFilter] = useState<CatalogFilter>('ege');
+  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
   const [searchQuery, setSearchQuery] = useState('');
 
   return (
@@ -66,6 +72,8 @@ function KnowledgeBaseContent() {
               setSearchQuery={setSearchQuery}
               examFilter={examFilter}
               setExamFilter={setExamFilter}
+              subject={subject}
+              setSubject={setSubject}
               onOpenTopic={(topicId) => navigate(`/tutor/knowledge/topic/${topicId}`)}
             />
           ) : (
@@ -81,6 +89,8 @@ interface CatalogHomeProps {
   setSearchQuery: (query: string) => void;
   examFilter: CatalogFilter;
   setExamFilter: (value: CatalogFilter) => void;
+  subject: string;
+  setSubject: (value: string) => void;
   onOpenTopic: (topicId: string) => void;
 }
 
@@ -89,10 +99,12 @@ function CatalogHome({
   setSearchQuery,
   examFilter,
   setExamFilter,
+  subject,
+  setSubject,
   onOpenTopic,
 }: CatalogHomeProps) {
   const navigate = useNavigate();
-  const { topics, loading, error, refetch, isFetching } = useTopics(examFilter);
+  const { topics, loading, error, refetch, isFetching } = useTopics(examFilter, subject);
   const search = useKBSearch(searchQuery, examFilter);
   const { isModerator } = useIsModerator();
   const [showDropdown, setShowDropdown] = useState(true);
@@ -166,6 +178,25 @@ function CatalogHome({
         ) : null}
       </div>
 
+      {/* Предмет — верхнее измерение витрины (мультипредметный каталог, 2026-07-06) */}
+      <div className="mb-4 flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
+        {KB_SUBJECTS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => setSubject(s.id)}
+            className={cn(
+              'flex flex-1 items-center justify-center rounded-[14px] px-4 py-2.5 text-sm font-medium transition-all duration-200 [touch-action:manipulation]',
+              subject === s.id
+                ? 'bg-white font-semibold text-slate-950 shadow-[0_8px_24px_-18px_rgba(15,23,42,0.45)]'
+                : 'text-slate-500 hover:text-slate-800',
+            )}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       <div className="relative mb-4">
         <KBSearchInput
           value={searchQuery}
@@ -198,8 +229,8 @@ function CatalogHome({
         selected={examFilter}
         onChange={(key) => setExamFilter(key as CatalogFilter)}
         options={[
-          { key: 'ege', label: 'ЕГЭ Физика', activeClassName: 'text-socrat-ege' },
-          { key: 'oge', label: 'ОГЭ Физика', activeClassName: 'text-socrat-oge' },
+          { key: 'ege', label: 'ЕГЭ', activeClassName: 'text-socrat-ege' },
+          { key: 'oge', label: 'ОГЭ', activeClassName: 'text-socrat-oge' },
           { key: 'olympiad', label: 'Олимпиады', activeClassName: 'text-socrat-folder' },
         ]}
       />
@@ -247,6 +278,7 @@ function CatalogHome({
         <TopicEditorModal
           mode="create"
           kind={examFilter === 'olympiad' ? 'olympiad' : 'exam'}
+          subject={subject}
           onClose={() => setShowCreateTopic(false)}
         />
       ) : null}

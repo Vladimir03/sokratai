@@ -9,6 +9,12 @@ interface TopicEditorModalProps {
   mode: 'create' | 'edit';
   /** Тип создаваемой темы (для create) или существующей (для edit). */
   kind: TopicKind;
+  /**
+   * Предмет создаваемой темы (мультипредметный каталог, 2026-07-06). Тема создаётся
+   * в активном предмете витрины. Default 'physics' (обратная совместимость). При
+   * edit не используется — предмет темы не меняем.
+   */
+  subject?: string;
   initial?: KBTopicWithCounts;
   onClose: () => void;
   onSaved?: (topicId: string) => void;
@@ -25,7 +31,7 @@ function parseKimNumbers(raw: string): number[] {
   ).sort((a, b) => a - b);
 }
 
-export function TopicEditorModal({ mode, kind, initial, onClose, onSaved }: TopicEditorModalProps) {
+export function TopicEditorModal({ mode, kind, subject = 'physics', initial, onClose, onSaved }: TopicEditorModalProps) {
   const createTopic = useCreateTopic();
   const updateTopic = useUpdateTopic();
   const isExam = kind === 'exam';
@@ -66,7 +72,7 @@ export function TopicEditorModal({ mode, kind, initial, onClose, onSaved }: Topi
 
     if (mode === 'create') {
       createTopic.mutate(
-        { ...common, kind, subject: 'physics' },
+        { ...common, kind, subject },
         {
           onSuccess: (topicId) => {
             toast.success('Тема создана');

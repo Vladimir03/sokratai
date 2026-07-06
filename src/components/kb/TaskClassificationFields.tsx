@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { useKbSources, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
-import { getKimPrimaryScore } from '@/lib/kbKimScores';
+import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
-import type { CatalogFilter } from '@/types/kb';
+import { KB_SUBJECTS, type CatalogFilter } from '@/types/kb';
 
 /** Тип задания: задаёт фильтр тем + переключает «№ КИМ» ↔ «уровень сложности». */
 export type TaskClassType = '' | 'ege' | 'oge' | 'olympiad';
@@ -45,6 +45,14 @@ export interface TaskClassificationValue {
 }
 
 interface TaskClassificationFieldsProps extends TaskClassificationValue {
+  /**
+   * Мультипредметный каталог (2026-07-06): предмет скоупит выпадающий список тем
+   * (`useTopics(filter, subject)`). Опционален — когда не задан (undefined),
+   * селектор «Предмет» скрыт и темы не скоупятся (обратная совместимость: homework
+   * конструктор не передаёт → все темы, как раньше). КБ-модалки задают оба.
+   */
+  subject?: string;
+  onSubjectChange?: (v: string) => void;
   onTaskTypeChange: (v: TaskClassType) => void;
   onKimNumberChange: (v: string) => void;
   onDifficultyChange: (v: string) => void;
@@ -79,6 +87,8 @@ export function TaskClassificationFields({
   subtopicId,
   sourceLabel,
   answerFormat,
+  subject,
+  onSubjectChange,
   onTaskTypeChange,
   onKimNumberChange,
   onDifficultyChange,
@@ -91,8 +101,9 @@ export function TaskClassificationFields({
   hideAnswerFormat = false,
   hidePrimaryScore = false,
 }: TaskClassificationFieldsProps) {
+  const showSubject = subject !== undefined && onSubjectChange !== undefined;
   const topicFilter: CatalogFilter | undefined = taskType === '' ? undefined : taskType;
-  const { topics = [], loading: topicsLoading } = useTopics(topicFilter);
+  const { topics = [], loading: topicsLoading } = useTopics(topicFilter, subject);
   const { subtopics, loading: subtopicsLoading } = useSubtopics(topicId || undefined);
   const { sources = [], loading: sourcesLoading } = useKbSources();
 
@@ -103,7 +114,8 @@ export function TaskClassificationFields({
   // пусто = «использовать авто», непусто = ручное значение.
   const examForScore = taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null;
   const kimNum = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
-  const autoScore = getKimPrimaryScore(examForScore, kimNum);
+  // Авто-балл по КИМ — только физика; для обществознания null → ручной ввод.
+  const autoScore = getKimPrimaryScoreForSubject(subject, examForScore, kimNum);
   const overrideActive = primaryScore.trim() !== '';
 
   // Источник: select из kb_sources + «Другой» (свободный ввод).
@@ -117,6 +129,23 @@ export function TaskClassificationFields({
 
   return (
     <div className="space-y-4">
+      {/* Предмет — скоупит список тем (мультипредметный каталог) */}
+      {showSubject ? (
+        <fieldset>
+          <legend className={LEGEND_CLASS}>Предмет</legend>
+          <select
+            value={subject}
+            onChange={(e) => onSubjectChange!(e.target.value)}
+            disabled={disabled}
+            className={SELECT_CLASS}
+          >
+            {KB_SUBJECTS.map((s) => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
+          </select>
+        </fieldset>
+      ) : null}
+
       {/* Тип задания + (№ КИМ / уровень сложности) */}
       <div className="grid grid-cols-2 gap-3">
         <fieldset>
