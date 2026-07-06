@@ -10,10 +10,29 @@ interface ImageUploadFieldProps {
   imageUpload: UseImageUploadReturn;
   /** Disable all interactive controls (during save). */
   disabled?: boolean;
+  /**
+   * 'photo' (default) — квадратные превью с object-cover (фото/скриншоты).
+   * 'document' — портретные A4-превью с object-contain + подпись «стр. N»:
+   * страницы PDF нельзя кропать квадратом — репетитор не поймёт, какая где
+   * (UX review P1, 2026-07-06). Подпись берётся из имени файла (…-p{N}.jpg).
+   */
+  previewVariant?: 'photo' | 'document';
 }
 
-export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFieldProps) {
+/** «стр. N» из имени страницы PDF ({base}-p{N}.jpg); иначе порядковый номер. */
+function documentCaption(fileName: string | undefined, fallbackIndex: number): string {
+  const m = fileName?.match(/-p(\d+)\.[a-z]+$/i);
+  return m ? `стр. ${m[1]}` : `${fallbackIndex + 1}`;
+}
+
+export function ImageUploadField({
+  label,
+  imageUpload,
+  disabled,
+  previewVariant = 'photo',
+}: ImageUploadFieldProps) {
   const {
+    files,
     previewUrls,
     existingRefs,
     existingSignedUrls,
@@ -31,6 +50,11 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
   } = imageUpload;
 
   const maxImages = imageUpload.maxImages ?? MAX_TASK_IMAGES;
+  const isDocument = previewVariant === 'document';
+  // A4-портрет (~0.71) вместо квадрата; contain на белом — страница читается целиком.
+  const thumbClass = isDocument
+    ? 'h-28 w-20 rounded-lg border border-socrat-border bg-white object-contain'
+    : 'h-24 w-24 rounded-lg border border-socrat-border object-cover';
 
   return (
     <fieldset>
@@ -81,10 +105,13 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
                       <img loading="lazy"
                         src={signedUrl}
                         alt={`Фото ${idx + 1}`}
-                        className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
+                        className={thumbClass}
                       />
                     ) : (
-                      <div className="flex h-24 w-24 items-center justify-center rounded-lg border border-socrat-border bg-socrat-surface">
+                      <div className={cn(
+                        'flex items-center justify-center rounded-lg border border-socrat-border bg-socrat-surface',
+                        isDocument ? 'h-28 w-20' : 'h-24 w-24',
+                      )}>
                         <ImagePlus className="h-5 w-5 animate-pulse text-slate-300" />
                       </div>
                     )}
@@ -106,8 +133,13 @@ export function ImageUploadField({ label, imageUpload, disabled }: ImageUploadFi
                   <img loading="lazy"
                     src={url}
                     alt={`Фото ${existingRefs.length + index + 1}`}
-                    className="h-24 w-24 rounded-lg border border-socrat-border object-cover"
+                    className={thumbClass}
                   />
+                  {isDocument ? (
+                    <p className="mt-0.5 text-center text-[10px] font-medium text-slate-500">
+                      {documentCaption(files[index]?.name, existingRefs.length + index)}
+                    </p>
+                  ) : null}
                   <button
                     type="button"
                     aria-label={`Удалить фото ${existingRefs.length + index + 1}`}

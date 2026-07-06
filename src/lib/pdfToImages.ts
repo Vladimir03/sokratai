@@ -44,6 +44,22 @@ export interface PdfRenderResult {
   renderedPages: number;
 }
 
+export interface PdfRenderOptions {
+  maxPages: number;
+  /** Прогресс по страницам (UX review P1: «Страница N из M» вместо немого спиннера). */
+  onProgress?: (done: number, total: number) => void;
+}
+
+/**
+ * Yield главному потоку между страницами: page.render + toBlob блокируют main
+ * thread, без паузы спиннер/прогресс не перерисуется и вкладка «висит».
+ * setTimeout(0), НЕ requestAnimationFrame — rAF замерзает в фоновой вкладке,
+ * и рендер «застревал» бы, пока репетитор переключился на другую вкладку.
+ */
+function yieldToMain(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
   return new Promise((resolve) => {
     canvas.toBlob((blob) => resolve(blob), 'image/jpeg', quality);
@@ -88,7 +104,7 @@ async function renderPageToBlob(
  */
 export async function renderPdfPagesToFiles(
   file: File,
-  opts: { maxPages: number },
+  opts: PdfRenderOptions,
 ): Promise<PdfRenderResult> {
   const baseName = file.name.replace(/\.pdf$/i, '') || 'pdf';
 
@@ -112,6 +128,11 @@ export async function renderPdfPagesToFiles(
     const files: File[] = [];
 
     for (let n = 1; n <= pagesToRender; n++) {
+      opts.onProgress?.(n - 1, pagesToRender);
+      // Пауза между страницами: даём Safari отрисовать прогресс + отпустить
+      // canvas-память (iOS лимитирует суммарную площадь canvas).
+      await yieldToMain();
+
       const page = await doc.getPage(n);
       try {
         let blob = await renderPageToBlob(page, 1, JPEG_QUALITY);
@@ -127,6 +148,7 @@ export async function renderPdfPagesToFiles(
         page.cleanup();
       }
     }
+    opts.onProgress?.(pagesToRender, pagesToRender);
 
     if (files.length === 0) {
       throw new PdfRenderError('Не удалось отрисовать ни одной страницы PDF. Попробуйте другой файл.');

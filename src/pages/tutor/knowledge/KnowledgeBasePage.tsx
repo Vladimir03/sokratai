@@ -29,6 +29,12 @@ import {
 
 type MainTab = 'catalog' | 'mybase';
 
+/** Дательный падеж предмета для empty-state («По физике…»). Новый предмет → дописать. */
+const SUBJECT_DATIVE: Record<string, string> = {
+  physics: 'физике',
+  social: 'обществознанию',
+};
+
 function KnowledgeBaseContent() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -178,18 +184,21 @@ function CatalogHome({
         ) : null}
       </div>
 
-      {/* Предмет — верхнее измерение витрины (мультипредметный каталог, 2026-07-06) */}
-      <div className="mb-4 flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
+      {/* Предмет — компактные pills, НЕ второй сегмент-контрол (UX review P2:
+          три уровня навигации одинакового веса перед контентом перегружали
+          «где я»; предмет — фильтр витрины, визуально легче таба раздела). */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Предмет каталога">
         {KB_SUBJECTS.map((s) => (
           <button
             key={s.id}
             type="button"
             onClick={() => setSubject(s.id)}
+            aria-pressed={subject === s.id}
             className={cn(
-              'flex flex-1 items-center justify-center rounded-[14px] px-4 py-2.5 text-sm font-medium transition-all duration-200 [touch-action:manipulation]',
+              'inline-flex min-h-[36px] items-center rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-200 [touch-action:manipulation]',
               subject === s.id
-                ? 'bg-white font-semibold text-slate-950 shadow-[0_8px_24px_-18px_rgba(15,23,42,0.45)]'
-                : 'text-slate-500 hover:text-slate-800',
+                ? 'border-socrat-primary bg-socrat-primary text-white'
+                : 'border-socrat-border bg-white text-slate-600 hover:border-socrat-primary/40 hover:text-socrat-primary',
             )}
           >
             {s.label}
@@ -263,12 +272,18 @@ function CatalogHome({
 
       {!loading && topics.length === 0 && !searchQuery.trim() ? (
         <div className="rounded-[22px] border border-dashed border-socrat-border bg-white/70 px-5 py-12 text-center">
+          {/* Subject-aware (UX review P3): пустой предмет должен подтверждать,
+              ГДЕ пусто, а не звучать как общий пустой каталог. */}
           <p className="text-sm font-semibold text-slate-800">
-            {examFilter === 'olympiad' ? 'Олимпиадных тем пока нет' : 'Тем пока нет'}
+            {`По ${SUBJECT_DATIVE[subject] ?? 'этому предмету'} ${
+              examFilter === 'olympiad'
+                ? 'олимпиадных тем пока нет'
+                : `тем ${examFilter === 'oge' ? 'ОГЭ' : 'ЕГЭ'} пока нет`
+            }`}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {isModerator
-              ? 'Создайте тему кнопкой «Тема» выше и опубликуйте в неё задачи из своей папки.'
+              ? `Создайте первую тему по ${SUBJECT_DATIVE[subject] ?? 'предмету'} кнопкой «Тема» выше и опубликуйте в неё задачи из своей папки.`
               : 'Скоро здесь появятся задачи.'}
           </p>
         </div>

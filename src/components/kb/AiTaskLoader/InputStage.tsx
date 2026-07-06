@@ -50,6 +50,10 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const [text, setText] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
+  /** «Страница N из M» при рендере PDF (UX review P1 — не немой спиннер). */
+  const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null);
+  /** «Загружаем N/M» при аплоаде в storage (UX review P2 — фаза видна отдельно от OCR). */
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   // isRenderingPdf НЕ входит в disabled хука: addFiles сам гейтится на disabled,
   // а страницы добавляются как раз во время рендера PDF (гейт — на контролах).
@@ -78,6 +82,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       try {
         const { files, pageCount, renderedPages } = await renderPdfPagesToFiles(file, {
           maxPages: remainingSlots,
+          onProgress: (done, total) => setPdfProgress({ done, total }),
         });
         imageUpload.addFiles(files);
         trackKbAiLoaderEvent('kb_ai_pdf_rendered', { pageCount, renderedPages });
@@ -95,6 +100,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       toast.error('Не удалось загрузить модуль PDF. Проверьте соединение и попробуйте ещё раз.');
     } finally {
       setIsRenderingPdf(false);
+      setPdfProgress(null);
     }
   };
 
@@ -103,10 +109,13 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
     setIsExtracting(true);
     const uploadedRefs: string[] = [];
     try {
-      for (const file of imageUpload.getNewFiles()) {
+      const newFiles = imageUpload.getNewFiles();
+      for (const file of newFiles) {
+        setUploadProgress({ done: uploadedRefs.length, total: newFiles.length });
         const res = await uploadKBTaskImage(file);
         uploadedRefs.push(res.storageRef);
       }
+      setUploadProgress(null); // дальше — фаза распознавания
       const materialType = uploadedRefs.length > 0 ? 'image' : 'text';
       const { drafts, stats } = await extractTasks({
         folder_id: folderId,
@@ -136,6 +145,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       toast.error(e instanceof KbAiExtractApiError ? e.message : 'Не удалось распознать задачи. Попробуйте ещё раз.');
     } finally {
       setIsExtracting(false);
+      setUploadProgress(null);
     }
   };
 
@@ -202,11 +212,14 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         <p className="mt-1 text-[11px] text-slate-400">Excel — скоро.</p>
       </fieldset>
 
-      {/* Photo upload (drag / click / paste), up to 10 */}
+      {/* Photo upload (drag / click / paste), up to 10.
+          previewVariant="document": среди превью бывают страницы PDF — портретный
+          contain + «стр. N», чтобы было видно, какую страницу удаляешь (UX P1). */}
       <ImageUploadField
         label="Скриншоты задач"
         imageUpload={imageUpload}
         disabled={isExtracting}
+        previewVariant="document"
       />
 
       {/* PDF → страницы-картинки (P1 TASK-10; листы до 10 страниц) */}
@@ -230,7 +243,9 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           {isRenderingPdf ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Обрабатываем страницы PDF…
+              {pdfProgress && pdfProgress.total > 0
+                ? `Страница ${Math.min(pdfProgress.done + 1, pdfProgress.total)} из ${pdfProgress.total}…`
+                : 'Открываем PDF…'}
             </>
           ) : (
             <>
@@ -257,7 +272,9 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         {isExtracting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Распознаём задачи…
+            {uploadProgress && uploadProgress.total > 0
+              ? `Загружаем изображения ${Math.min(uploadProgress.done + 1, uploadProgress.total)}/${uploadProgress.total}…`
+              : 'Распознаём задачи…'}
           </>
         ) : (
           <>
