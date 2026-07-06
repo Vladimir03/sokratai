@@ -223,6 +223,33 @@
 
 **При расширении (P1+, tasks.md TASK-10..15):** PDF-задачник/Excel/пакетный режим/правка-репликой/вход в конструктор ДЗ/квота; новый AI-путь с картинками → `inlineImageUrlToBase64` + bucket whitelist (`kb-attachments` уже в `HOMEWORK_AI_BUCKETS`); новый write — через `insertTask`, не новый site; AI-перерисовка рисунка (vector-first) — P2, отдельная spec.
 
+## Мультипредметный каталог + PDF-загрузка (2026-07-06)
+
+Онбординг модератора обществознания (Milada, `milada.met@yandex.ru`) + PDF в AI-загрузчик. Коммиты `7d5a43f`/`6f67904`/`1fc2266`/`ce8278d`. Build-лог: memory `project_kb_multisubject_social_2026_07_06.md` + `project_kb_pdf_loader_2026_07_06.md`.
+
+**Предмет живёт на `kb_topics.subject`** (TEXT default 'physics', колонка с `20260611130000`; у `kb_tasks` СВОЕЙ subject-колонки НЕТ — задача получает предмет через тему). Активные предметы — `KB_SUBJECTS` (`src/types/kb.ts`: physics/social) + `DEFAULT_KB_SUBJECT`. Новый предмет модератора → допиши сюда + заведи темы self-serve.
+
+**Проводка subject (UI-only, схема уже готова):**
+- `useTopics(filter, subject?, searchQuery?)` — `subject` в query-key ОБЯЗАТЕЛЕН (иначе кэш склеит предметы); `fetchTopics` `.eq('subject', subject)` когда задан. Старые вызовы `useTopics(undefined, undefined)` (KBPickerSheet) / `useTopics()` (PublishFolderModal) = все предметы (backward-compat).
+- `TaskClassificationFields` — опц. `subject`/`onSubjectChange` (селектор «Предмет» первым полем, скоупит темы). undefined → homework-контекст, все темы (как раньше). **`HWTaskCard` НЕ передаёт → homework не тронут** (rule 40 risk-zone цел, smoke §8 пройден).
+- `KnowledgeBasePage` — предмет = компактные **pills** (НЕ второй сегмент-контрол — UX-ревью: три уровня навигации одного веса перегружали); над exam-фильтром; empty-state subject-aware (`SUBJECT_DATIVE`).
+- `Create/EditTaskModal` держат `subject` (Create: наследуется в серии `kbLastClassification`; Edit: резолвится из темы задачи через `useTopic` + ref-guard, показывает тему без потери).
+- `TopicEditorModal`/`kbModeratorApi.createCatalogTopic` — `subject` в create (RPC `kb_mod_create_topic` уже принимает `p_subject`). Sources (`kb_sources`) остаются **глобальными** (имена «ФИПИ»/«Решу ЕГЭ» предмет-агностичны).
+
+**Авто-балл/check_format — ТОЛЬКО физика (review fix P1/P2, КРИТИЧНО):** физ-карты КИМ (`kbKimScores.ts` 1-26/1-22) пересекаются с обществознанием (1-25) → без гейта физ-балл течёт в social (нарушает locked «ручной балл»). `getKimPrimaryScoreForSubject(subject, exam, kim)` (physics-only, single source of truth) во ВСЕХ KB-callsite; `HWTaskCard` — прямой `getKimPrimaryScore` (физика, не тронут). `resolveCheckFormatFromKb({..., subject})` — физ-КИМ-эвристика (21-26→detailed) только physics, иначе `short_answer` default. `EditTaskModal` показывает сохранённый балл ВЕРБАТИМ (не сворачивает в «авто» при совпадении с физ-баллом — иначе маскирует social).
+
+**`kb-ai-extract` subject-switch:** `VALID_SUBJECT`(physics/social), `resolveExtractPrompt(subject)` → системный промпт+few-shot по предмету (fallback physics). **Social-промпт: БЕЗ формул/LaTeX; типы (суждения/соответствие/текст/план); каждое суждение с новой строки `\n`; КИМ ЕГЭ 1-25/ОГЭ 1-24.** Клиент шлёт `subject` (`InputStage` селектор → `extractTasks` → `AiTaskLoaderPage.resolveTopicId` скоупит по subject). Физ-промпт байт-в-байт не тронут. `normalizeTask` KIM-clamp 1..30 покрывает обществознание. String.raw в few-shot: `\n` остаётся JSON-escape'ом.
+
+**MathText fast-path (`src/components/kb/ui/MathText.tsx`):** текст БЕЗ формул с `\n` рендерит `<br/>` (зеркало math-пути) — суждения «1)…2)…» читаемы. Однострочный текст — прежний zero-overhead путь.
+
+**Milada onboarding — миграция `20260706140000`** (зеркало Егора `20260318134400`): роль moderator + папки «Черновики для сократа»/«сократ». Идемпотентна; **нет аккаунта → no-op+NOTICE** (перезапустить после регистрации). Темы обществознания — self-serve.
+
+**PDF-загрузка (P1 TASK-10, frontend-only, edge/БД/контракты НЕ тронуты):** PDF → картинки страниц **на клиенте** → существующий image-пайплайн (`useImageUpload` → kb-attachments → `image_refs` → `kb-ai-extract`). `src/lib/pdfToImages.ts`: pdfjs-dist **legacy**-build (modern требует Promise.withResolvers = Safari 17.4+, rule 80); **строго lazy** `await import('@/lib/pdfToImages')` из `InputStage.handlePdfSelect` (532КБ вне initial-chunk); `onProgress`+yield `setTimeout(0)` (**НЕ rAF** — замерзает в фоновой вкладке); canvas белый фон под JPEG (нет альфы); **`destroy()` на loading task, не proxy** (v6); страница >4МБ → re-render quality 0.7/scale ×0.75. `useImageUpload.addFiles(files)` (реюз валидации/капа). `InputStage`: PDF-кнопка (accept=pdf, «Страница N из M», honest-toast «первые K из N» — no silent caps rule 40; фаза аплоада «Загружаем N/M» отдельно от «Распознаём»), кап = `MAX_LOADER_IMAGES`(10). Телеметрия `kb_ai_pdf_rendered`. `ImageUploadField.previewVariant='document'` (A4-contain + «стр. N» — страницы PDF нельзя кропать квадратом).
+
+**Клик-зум превью (единый UX с ДЗ):** `ImageUploadField` реюзает `FullscreenImageCarousel` (`homework/shared` — тот же, что `HWTaskCard`) на клик по превью; массив зума = existing signed + new blob (порядок отображения); placeholder без signed URL некликабелен.
+
+**Отложено (осознанно):** сборники/диапазон страниц/Excel(TASK-11)/вход из конструктора(TASK-14); `kb_search` subject-scoping (вернёт все предметы); homework-picker/`PublishFolderModal` темы всех предметов; авто-балл КИМ обществознания (нужна таблица ФИПИ от Милады); языковой промпт (Эмилия); текстовый слой цифровых PDF; единый блок «Материал» в загрузчике (IA). **Готча workflow:** dev-сервер без `@lovable.dev/mcp-js` потрошит `supabase/functions/mcp/index.ts` — перед коммитом `git checkout --` его.
+
 ## Спецификация
 - Tech spec: docs/delivery/features/kb/kb-tech-spec.md
 - Design ref: docs/discovery/product/kb/kb-design-ref.jsx
