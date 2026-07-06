@@ -70,6 +70,11 @@ const Login = () => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
+        const nextParam = searchParams.get("next");
+        if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
+          window.location.replace(nextParam);
+          return;
+        }
         const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
         if (isTutor) {
           navigate("/tutor/home");
@@ -79,7 +84,7 @@ const Login = () => {
       }
     };
     checkSession();
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   // Apply consent stashed before Google OAuth redirect (first-login case).
   useEffect(() => {
@@ -119,6 +124,12 @@ const Login = () => {
 
       // Check if user is a tutor and redirect accordingly
       if (data.user) {
+        const nextParam = searchParams.get("next");
+        if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
+          toast.success("Успешный вход!");
+          window.location.replace(nextParam);
+          return;
+        }
         const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
 
         if (isTutor) {
