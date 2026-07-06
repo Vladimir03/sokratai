@@ -53,6 +53,11 @@ const TutorLogin = () => {
 
       const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
       if (isTutor) {
+        const nextParam = searchParams.get("next");
+        if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
+          window.location.replace(nextParam);
+          return;
+        }
         navigate("/tutor/home");
       } else {
         await supabase.auth.signOut();
@@ -60,7 +65,7 @@ const TutorLogin = () => {
     };
 
     checkSession();
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   // Apply consent stashed before Google OAuth redirect (first-login case).
   useEffect(() => {
@@ -106,6 +111,11 @@ const TutorLogin = () => {
       }
 
       toast.success("Успешный вход!");
+      const nextParam = searchParams.get("next");
+      if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
+        window.location.replace(nextParam);
+        return;
+      }
       navigate("/tutor/home");
     } catch (error: any) {
       toast.error(getAuthErrorMessage(error, "Ошибка входа"));

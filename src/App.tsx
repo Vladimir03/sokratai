@@ -98,6 +98,7 @@ const InvitePage = lazy(() => import("./pages/InvitePage"));
 const StudentClaimPage = lazy(() => import("./pages/StudentClaimPage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 const InstallApp = lazy(() => import("./pages/InstallApp"));
+const OAuthConsent = lazy(() => import("./pages/OAuthConsent"));
 
 // Simple loading fallback
 const PageLoader = () => (
@@ -134,6 +135,14 @@ const App = () => (
                   </Suspense>
                 }
               />
+            <Route
+              path="/.lovable/oauth/consent"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <OAuthConsent />
+                </Suspense>
+              }
+            />
             <Route
               path="/students"
               element={

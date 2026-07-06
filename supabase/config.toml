@@ -35,6 +35,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.lesson-materials-api]
     verify_jwt = true
+  [functions.mcp]
+    verify_jwt = false
   [functions.mock-exam-grade]
     verify_jwt = false
   [functions.mock-exam-public]
