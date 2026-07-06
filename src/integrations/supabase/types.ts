@@ -936,6 +936,45 @@ export type Database = {
           },
         ]
       }
+      homework_template_tasks: {
+        Row: {
+          created_at: string
+          id: string
+          kb_task_id: string
+          sort_order: number
+          template_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kb_task_id: string
+          sort_order?: number
+          template_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kb_task_id?: string
+          sort_order?: number
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "homework_template_tasks_kb_task_id_fkey"
+            columns: ["kb_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_template_tasks_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       homework_tutor_assignments: {
         Row: {
           created_at: string
@@ -949,6 +988,7 @@ export type Database = {
           id: string
           max_attempts: number
           source_group_id: string | null
+          source_template_id: string | null
           status: string
           subject: string
           title: string
@@ -967,6 +1007,7 @@ export type Database = {
           id?: string
           max_attempts?: number
           source_group_id?: string | null
+          source_template_id?: string | null
           status?: string
           subject: string
           title: string
@@ -985,6 +1026,7 @@ export type Database = {
           id?: string
           max_attempts?: number
           source_group_id?: string | null
+          source_template_id?: string | null
           status?: string
           subject?: string
           title?: string
@@ -1011,6 +1053,13 @@ export type Database = {
             columns: ["source_group_id"]
             isOneToOne: false
             referencedRelation: "tutor_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "homework_tutor_assignments_source_template_id_fkey"
+            columns: ["source_template_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_templates"
             referencedColumns: ["id"]
           },
         ]
@@ -1267,6 +1316,8 @@ export type Database = {
           solution_image_urls: string | null
           solution_steps: string | null
           solution_text: string | null
+          source_kb_synced_at: string | null
+          source_kb_task_id: string | null
           task_image_url: string | null
           task_kind: string
           task_text: string
@@ -1291,6 +1342,8 @@ export type Database = {
           solution_image_urls?: string | null
           solution_steps?: string | null
           solution_text?: string | null
+          source_kb_synced_at?: string | null
+          source_kb_task_id?: string | null
           task_image_url?: string | null
           task_kind?: string
           task_text: string
@@ -1315,6 +1368,8 @@ export type Database = {
           solution_image_urls?: string | null
           solution_steps?: string | null
           solution_text?: string | null
+          source_kb_synced_at?: string | null
+          source_kb_task_id?: string | null
           task_image_url?: string | null
           task_kind?: string
           task_text?: string
@@ -1327,6 +1382,13 @@ export type Database = {
             referencedRelation: "homework_tutor_assignments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "homework_tutor_tasks_source_kb_task_id_fkey"
+            columns: ["source_kb_task_id"]
+            isOneToOne: false
+            referencedRelation: "kb_tasks"
+            referencedColumns: ["id"]
+          },
         ]
       }
       homework_tutor_templates: {
@@ -1335,41 +1397,70 @@ export type Database = {
           disable_ai_bootstrap: boolean
           exam_type: string | null
           feedback_language: string | null
+          forked_from_template_id: string | null
           id: string
+          published_at: string | null
+          published_by: string | null
           subject: string
           tags: string[]
           tasks_json: Json
+          tasks_migrated_at: string | null
           title: string
           topic: string | null
           tutor_id: string
+          updated_at: string
+          usage_count: number
+          visibility: string
         }
         Insert: {
           created_at?: string
           disable_ai_bootstrap?: boolean
           exam_type?: string | null
           feedback_language?: string | null
+          forked_from_template_id?: string | null
           id?: string
+          published_at?: string | null
+          published_by?: string | null
           subject: string
           tags?: string[]
           tasks_json?: Json
+          tasks_migrated_at?: string | null
           title: string
           topic?: string | null
           tutor_id: string
+          updated_at?: string
+          usage_count?: number
+          visibility?: string
         }
         Update: {
           created_at?: string
           disable_ai_bootstrap?: boolean
           exam_type?: string | null
           feedback_language?: string | null
+          forked_from_template_id?: string | null
           id?: string
+          published_at?: string | null
+          published_by?: string | null
           subject?: string
           tags?: string[]
           tasks_json?: Json
+          tasks_migrated_at?: string | null
           title?: string
           topic?: string | null
           tutor_id?: string
+          updated_at?: string
+          usage_count?: number
+          visibility?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "homework_tutor_templates_forked_from_template_id_fkey"
+            columns: ["forked_from_template_id"]
+            isOneToOne: false
+            referencedRelation: "homework_tutor_templates"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       homework_tutor_thread_messages: {
         Row: {
@@ -1820,11 +1911,14 @@ export type Database = {
           answer: string | null
           answer_format: string | null
           attachment_url: string | null
+          cefr_level: string | null
+          check_format: string | null
           created_at: string | null
           difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
+          grading_criteria_json: Json | null
           hidden_reason: string | null
           id: string
           kim_number: number | null
@@ -1841,6 +1935,7 @@ export type Database = {
           source_label: string | null
           source_task_id: string | null
           subtopic_id: string | null
+          task_kind: string | null
           text: string
           topic_id: string | null
           updated_at: string | null
@@ -1849,11 +1944,14 @@ export type Database = {
           answer?: string | null
           answer_format?: string | null
           attachment_url?: string | null
+          cefr_level?: string | null
+          check_format?: string | null
           created_at?: string | null
           difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
+          grading_criteria_json?: Json | null
           hidden_reason?: string | null
           id?: string
           kim_number?: number | null
@@ -1870,6 +1968,7 @@ export type Database = {
           source_label?: string | null
           source_task_id?: string | null
           subtopic_id?: string | null
+          task_kind?: string | null
           text: string
           topic_id?: string | null
           updated_at?: string | null
@@ -1878,11 +1977,14 @@ export type Database = {
           answer?: string | null
           answer_format?: string | null
           attachment_url?: string | null
+          cefr_level?: string | null
+          check_format?: string | null
           created_at?: string | null
           difficulty?: number | null
           exam?: Database["public"]["Enums"]["exam_type"] | null
           fingerprint?: string | null
           folder_id?: string | null
+          grading_criteria_json?: Json | null
           hidden_reason?: string | null
           id?: string
           kim_number?: number | null
@@ -1899,6 +2001,7 @@ export type Database = {
           source_label?: string | null
           source_task_id?: string | null
           subtopic_id?: string | null
+          task_kind?: string | null
           text?: string
           topic_id?: string | null
           updated_at?: string | null
@@ -4363,11 +4466,14 @@ export type Database = {
           answer: string | null
           answer_format: string | null
           attachment_url: string | null
+          cefr_level: string | null
+          check_format: string | null
           created_at: string | null
           difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
+          grading_criteria_json: Json | null
           hidden_reason: string | null
           id: string
           kim_number: number | null
@@ -4384,6 +4490,7 @@ export type Database = {
           source_label: string | null
           source_task_id: string | null
           subtopic_id: string | null
+          task_kind: string | null
           text: string
           topic_id: string | null
           updated_at: string | null
@@ -4401,11 +4508,14 @@ export type Database = {
           answer: string | null
           answer_format: string | null
           attachment_url: string | null
+          cefr_level: string | null
+          check_format: string | null
           created_at: string | null
           difficulty: number | null
           exam: Database["public"]["Enums"]["exam_type"] | null
           fingerprint: string | null
           folder_id: string | null
+          grading_criteria_json: Json | null
           hidden_reason: string | null
           id: string
           kim_number: number | null
@@ -4422,6 +4532,7 @@ export type Database = {
           source_label: string | null
           source_task_id: string | null
           subtopic_id: string | null
+          task_kind: string | null
           text: string
           topic_id: string | null
           updated_at: string | null
@@ -4540,9 +4651,32 @@ export type Database = {
         Args: { _folder_id: string; _tutor_id: string }
         Returns: boolean
       }
+      hw_materialize_legacy_templates: {
+        Args: never
+        Returns: {
+          tasks_created: number
+          tasks_reused: number
+          templates_migrated: number
+        }[]
+      }
+      hw_mod_publish_template: {
+        Args: { p_template_id: string }
+        Returns: string
+      }
+      hw_mod_unpublish_template: {
+        Args: { p_template_id: string }
+        Returns: undefined
+      }
       hw_reorder_tasks: {
         Args: { p_assignment_id: string; p_task_order: Json }
         Returns: undefined
+      }
+      hw_template_task_counts: {
+        Args: { p_template_ids: string[] }
+        Returns: {
+          task_count: number
+          template_id: string
+        }[]
       }
       hw_tutor_force_complete_all_tasks: {
         Args: {
@@ -4712,7 +4846,8 @@ export type Database = {
           }
         | { Args: { p_source_task_id: string }; Returns: string }
       kb_require_moderator: { Args: never; Returns: string }
-      kb_resync_task: { Args: { _source_task_id: string }; Returns: string }
+      kb_require_tutor_or_moderator: { Args: never; Returns: undefined }
+      kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
         Args: {
           exam_filter: Database["public"]["Enums"]["exam_type"]
@@ -4730,6 +4865,14 @@ export type Database = {
           snippet: string
           source: string
           title: string
+        }[]
+      }
+      kb_task_template_refs: {
+        Args: { p_task_ids: string[] }
+        Returns: {
+          kb_task_id: string
+          template_count: number
+          template_titles: string[]
         }[]
       }
       mark_payment_as_paid_by_telegram: {
