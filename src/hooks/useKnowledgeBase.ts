@@ -89,7 +89,7 @@ async function fetchCatalogTasks(topicId: string): Promise<KBTask[]> {
   const { data, error } = await supabase
     .rpc('fetch_catalog_tasks_v2', { p_topic_id: topicId });
   if (error) throw error;
-  return (data ?? []) as KBTask[];
+  return (data ?? []) as unknown as KBTask[];
 }
 
 async function fetchCatalogTasksAll(topicId: string): Promise<KBTask[]> {
@@ -97,7 +97,7 @@ async function fetchCatalogTasksAll(topicId: string): Promise<KBTask[]> {
   const { data, error } = await supabase
     .rpc('fetch_catalog_tasks_all', { p_topic_id: topicId });
   if (error) throw error;
-  return (data ?? []) as KBTask[];
+  return (data ?? []) as unknown as KBTask[];
 }
 
 async function fetchCatalogMaterials(topicId: string): Promise<KBMaterial[]> {
@@ -118,14 +118,14 @@ async function insertTask(input: CreateKBTaskInput): Promise<KBTask> {
   const { data, error } = await supabase
     .from('kb_tasks')
     .insert({
-      ...input,
+      ...(input as unknown as Record<string, unknown>),
       owner_id: session.user.id,
       source_label: input.source_label || 'my',
-    })
+    } as never)
     .select()
     .single();
   if (error) throw error;
-  return data as KBTask;
+  return data as unknown as KBTask;
 }
 
 async function updateTask(
@@ -134,12 +134,12 @@ async function updateTask(
 ): Promise<KBTask> {
   const { data, error } = await supabase
     .from('kb_tasks')
-    .update(input)
+    .update(input as never)
     .eq('id', taskId)
     .select()
     .single();
   if (error) throw error;
-  return data as KBTask;
+  return data as unknown as KBTask;
 }
 
 async function removeTask(taskId: string): Promise<void> {
