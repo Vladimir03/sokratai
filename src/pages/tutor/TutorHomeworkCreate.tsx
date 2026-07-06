@@ -99,11 +99,6 @@ function buildTaskSignature(tasks: Array<{
   cefr_level?: string | null;
   kim_number?: number | null;
   grading_criteria_json?: unknown;
-  exam?: string | null;
-  difficulty?: number | null;
-  topic_id?: string | null;
-  subtopic_id?: string | null;
-  source_label?: string | null;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -132,13 +127,12 @@ function buildTaskSignature(tasks: Array<{
       // Criteria-grading feature (2026-06): структурные критерии в подписи → правка
       // ТОЛЬКО критериев (без других полей) помечает tasksDirty (иначе не сохранится).
       grading_criteria_json: task.grading_criteria_json ?? null,
-      // unified-task-model F2 (2026-07-05): классификация каскада в подписи —
-      // правка ТОЛЬКО темы/типа/источника помечает tasksDirty (rule 40 field-parity).
-      exam: task.exam ?? null,
-      difficulty: task.difficulty ?? null,
-      topic_id: task.topic_id ?? null,
-      subtopic_id: task.subtopic_id ?? null,
-      source_label: task.source_label ?? null,
+      // Ревью-фикс P2 (2026-07-06): каскад-поля (exam/difficulty/topic/subtopic/
+      // source_label) НЕ входят в подпись — они не персистятся в
+      // homework_tutor_tasks (только KB-зеркало при создании + push-body),
+      // и включение давало phantom-dirty без реального сохранения. Их правка
+      // на существующей задаче уезжает через «Обновить в Базе» (divergence-
+      // fingerprint их несёт). kim_number персистится → остаётся в подписи.
     })),
   );
 }
@@ -447,6 +441,31 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
   };
 }
 
+/**
+ * Ревью-фикс P1 (2026-07-06): у ссылочного шаблона недоступные задачи (удалены
+ * из Базы / сняты с публикации) МОЛЧА отсутствуют в синтезированном tasks_json
+ * → без сверки тутор выдал бы усечённое ДЗ, не заметив. Возвращает false =
+ * блокировать загрузку (0 доступных задач).
+ */
+function checkTemplateTaskAvailability(tpl: HomeworkTemplate): boolean {
+  const refs = tpl.task_refs;
+  if (!Array.isArray(refs) || refs.length === 0) return true; // legacy-шаблон
+  if (tpl.tasks_json.length === 0) {
+    toast.error(
+      'Все задачи шаблона недоступны (удалены из Базы или сняты с публикации) — загружать нечего',
+    );
+    return false;
+  }
+  const unavailable = refs.filter((r) => r.unavailable).length;
+  if (unavailable > 0) {
+    toast.warning(
+      `Загружено ${tpl.tasks_json.length} из ${refs.length} задач шаблона — ${unavailable} недоступны (удалены из Базы или сняты с публикации)`,
+      { duration: 8000 },
+    );
+  }
+  return true;
+}
+
 // ─── Main Single-Page Constructor ───────────────────────────────────────────
 
 function TutorHomeworkCreateContent() {
@@ -526,6 +545,17 @@ function TutorHomeworkCreateContent() {
           cefr_level: task.cefr_level ?? null,
           kim_number: task.kim_number ?? null,
           grading_criteria_json: isCriteriaEligibleTask(task) ? (task.grading_criteria_json ?? null) : null,
+          // Ревью-фикс P1 (2026-07-06): каскад-поля едут в push, но ТОЛЬКО
+          // непустые — edit-prefill классификацию из Базы не грузит, и слепой
+          // `topic_id: null` затёр бы тему источника. Пустое поле = «не знаю»,
+          // а не «очисти» (backend мержит только присланные ключи).
+          ...(task.exam === 'ege' || task.exam === 'oge' || task.exam === 'olympiad'
+            ? { exam: task.exam }
+            : {}),
+          ...(task.difficulty != null ? { difficulty: task.difficulty } : {}),
+          ...(task.topic_id ? { topic_id: task.topic_id } : {}),
+          ...(task.subtopic_id ? { subtopic_id: task.subtopic_id } : {}),
+          ...(task.source_label?.trim() ? { source_label: task.source_label.trim() } : {}),
         });
         // Синхронизировали → сброс divergence-fingerprint на текущий контент;
         // при форке — relink на личную копию (бейдж «Каталог»→«Моя база»).
@@ -940,6 +970,8 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     getTutorHomeworkTemplate(templateId)
       .then((tpl) => {
+        // Ревью-фикс P1: сверка task_refs ↔ tasks_json (недоступные задачи).
+        if (!checkTemplateTaskAvailability(tpl)) return;
         const resolved = resolveTemplateLoad(tpl);
         setMeta((m) => ({ ...m, ...resolved.meta(m) }));
         setTasks(tpl.tasks_json.map((t) => resolved.task(t)));
@@ -1022,6 +1054,8 @@ function TutorHomeworkCreateContent() {
     setTemplateLoading(true);
     try {
       const full = await getTutorHomeworkTemplate(tpl.id);
+      // Ревью-фикс P1: сверка task_refs ↔ tasks_json (недоступные задачи).
+      if (!checkTemplateTaskAvailability(full)) return;
       // Field-parity fix (2026-06-03): единый резолвер с URL-param путём —
       // несёт check_format / task_kind / cefr_level + assignment-level настройки.
       const resolved = resolveTemplateLoad(full);

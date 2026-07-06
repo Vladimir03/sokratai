@@ -246,7 +246,15 @@ function FolderContent() {
                           if (window.confirm('Удалить задачу?')) {
                             deleteTask.mutate(task.id, {
                               onSuccess: () => toast.success('Задача удалена'),
-                              onError: () => toast.error('Не удалось удалить задачу'),
+                              // Ревью-фикс P1 (2026-07-06): delete-гард шаблонов кидает
+                              // русскую фразу («Задача используется в шаблонах: …») —
+                              // показываем её, а не generic (rule 97).
+                              onError: (e) =>
+                                toast.error(
+                                  e instanceof Error && /[а-яё]/i.test(e.message)
+                                    ? e.message
+                                    : 'Не удалось удалить задачу',
+                                ),
                             });
                           }
                         }}
@@ -326,7 +334,15 @@ function FolderContent() {
                     navigate(parentCrumb ? `/tutor/knowledge/folder/${parentCrumb.id}` : '/tutor/knowledge?tab=mybase');
                   }
                 },
-                onError: () => toast.error('Не удалось удалить папку'),
+                // Ревью-фикс P1 (2026-07-06): delete-гард шаблонов кидает русскую
+                // фразу («В папке есть задачи, используемые в шаблонах…») —
+                // показываем её, а не generic (rule 97).
+                onError: (e) =>
+                  toast.error(
+                    e instanceof Error && /[а-яё]/i.test(e.message)
+                      ? e.message
+                      : 'Не удалось удалить папку',
+                  ),
               });
             }}
             onClose={() => setDeletingFolder(null)}

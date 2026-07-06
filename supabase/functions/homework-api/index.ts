@@ -6482,12 +6482,17 @@ async function handleSaveTasksToKB(
 //     fingerprint-коллизия → 409 KB_DUPLICATE_BLOCKED).
 //   - Источник КАТАЛОЖНЫЙ → copy-on-write: форк в личную Базу («Из ДЗ»,
 //     fingerprint-дедуп) + relink провенанса. Ответ { forked: true }.
-// Классификацию (topic/subtopic/exam/difficulty) push НЕ трогает — снимок ДЗ
-// её не несёт, правится в Базе.
+// Каскад-классификация (exam/difficulty/topic_id/subtopic_id/source_label) —
+// presence-семантика (ревью-фикс P1 2026-07-06): конструктор F2 её редактирует,
+// клиент шлёт ТОЛЬКО непустые значения (edit-prefill Базу не грузит — слепой
+// null затёр бы тему источника); отсутствие ключа = «не трогай». Строка
+// homework_tutor_tasks этих колонок не имеет → в merged `task` они появляются
+// только из draft-body, что и даёт `key in t` в homeworkTaskFieldsToKbUpdate.
 const PUSH_TO_KB_DRAFT_FIELDS = [
   "task_text", "task_image_url", "correct_answer", "max_score",
   "rubric_text", "rubric_image_urls", "solution_text", "solution_image_urls",
   "check_format", "task_kind", "cefr_level", "kim_number", "grading_criteria_json",
+  "exam", "difficulty", "topic_id", "subtopic_id", "source_label",
 ] as const;
 
 async function handleTaskPushToKb(
@@ -6603,10 +6608,17 @@ async function handleTaskPushToKb(
       if (!folderId) {
         return jsonError(cors, 500, "DB_ERROR", "Не удалось создать папку в Базе");
       }
+      // Каскад-классификация из draft-body (если прислана) едет и в форк —
+      // строка homework_tutor_tasks её не несёт, поэтому берём из merged task.
       const row = homeworkTaskFieldsToKbRow(task as Record<string, unknown>, {
         ownerId: tutorUserId,
         folderId,
         fingerprint,
+        exam: typeof task.exam === "string" ? task.exam : null,
+        difficulty: typeof task.difficulty === "number" ? task.difficulty : null,
+        topicId: typeof task.topic_id === "string" && task.topic_id ? task.topic_id : null,
+        subtopicId: typeof task.subtopic_id === "string" && task.subtopic_id ? task.subtopic_id : null,
+        sourceLabel: typeof task.source_label === "string" ? task.source_label : null,
       });
       const { data: inserted, error: insErr } = await db
         .from("kb_tasks")

@@ -275,6 +275,11 @@ export function computeTaskContentFingerprint(t: {
   kim_number?: number | null;
   max_score?: number | null;
   grading_criteria_json?: GradingCriterion[] | null;
+  exam?: string | null;
+  difficulty?: number | null;
+  topic_id?: string | null;
+  subtopic_id?: string | null;
+  source_label?: string | null;
 }): string {
   return JSON.stringify([
     (t.task_text ?? '').trim(),
@@ -288,5 +293,14 @@ export function computeTaskContentFingerprint(t: {
     t.kim_number ?? null,
     t.max_score ?? null,
     t.grading_criteria_json ?? null,
+    // Ревью-фикс P1 (2026-07-06): каскад-поля участвуют в divergence — правка
+    // ТОЛЬКО классификации показывает «изменено» и уезжает с «Обновить в Базе».
+    // Пустые нормализуются к null: edit-prefill каскад не грузит, но и снимок
+    // fingerprint'а берётся с той же пустой проекции → false-diff нет.
+    t.exam || null,
+    t.difficulty ?? null,
+    t.topic_id || null,
+    t.subtopic_id || null,
+    (t.source_label ?? '').trim() || null,
   ]);
 }

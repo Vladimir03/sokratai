@@ -196,24 +196,33 @@ function useKBQuery<TData>({
   defaultValue,
   errorMessage,
   enabled = true,
+  quiet = false,
 }: {
   queryKey: KBQueryKey;
   queryFn: () => Promise<TData>;
   defaultValue: TData;
   errorMessage: string;
   enabled?: boolean;
+  /**
+   * unified-task-model ревью-фикс P1 (2026-07-06): справочные данные
+   * (темы/подтемы/источники) монтируются В КАЖДОЙ карточке конструктора ДЗ —
+   * focus-refetch + background-interval дёргали ре-рендер всех карточек.
+   * quiet=true → без focus/interval-рефетчей (обновление — через explicit
+   * invalidation ['tutor','kb'] в мутациях).
+   */
+  quiet?: boolean;
 }) {
   const query = useQuery<TData, unknown>({
     queryKey,
     queryFn: () => withTutorTimeout(queryKey, queryFn()),
     enabled,
-    staleTime: TUTOR_STALE_TIME_MS,
+    staleTime: quiet ? 10 * 60 * 1000 : TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: createTutorRetry(queryKey),
     retryDelay: tutorRetryDelay,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: !quiet,
     refetchOnReconnect: true,
-    refetchInterval: (currentQuery) => {
+    refetchInterval: quiet ? false : (currentQuery) => {
       const data = currentQuery.state.data as TData | undefined;
       const hasQueryData = data !== undefined && data !== null;
       return getTutorBackgroundRefetchInterval(hasQueryData, Boolean(currentQuery.state.error));
@@ -241,6 +250,9 @@ export function useTopics(filter?: CatalogFilter, searchQuery?: string) {
     queryFn: () => fetchTopics(filter, searchQuery),
     defaultValue: [],
     errorMessage: 'Не удалось загрузить темы',
+    // Справочник (ревью-фикс P1 2026-07-06): без focus/interval-рефетчей —
+    // хук монтируется в каждой карточке конструктора ДЗ.
+    quiet: true,
   });
 
   return { topics: result.data, ...result };
@@ -277,6 +289,7 @@ export function useSubtopics(topicId: string | undefined) {
     defaultValue: [],
     errorMessage: 'Не удалось загрузить подтемы',
     enabled: Boolean(topicId),
+    quiet: true,
   });
 
   return { subtopics: result.data, ...result };
@@ -291,6 +304,7 @@ export function useKbSources() {
     queryFn: fetchSources,
     defaultValue: [],
     errorMessage: 'Не удалось загрузить источники',
+    quiet: true,
   });
 
   return { sources: result.data, ...result };

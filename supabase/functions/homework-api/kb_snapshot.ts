@@ -115,6 +115,14 @@ export interface HomeworkTaskFieldsForKb {
   cefr_level?: unknown;
   kim_number?: unknown;
   grading_criteria_json?: unknown;
+  // Ревью-фикс P1 (2026-07-06): каскад-классификация в push-body (конструктор
+  // теперь её редактирует — F2). Присутствие ключа = «обнови», отсутствие =
+  // «не трогай» (клиент шлёт только непустые — edit-prefill Базу не грузит).
+  exam?: unknown;
+  difficulty?: unknown;
+  topic_id?: unknown;
+  subtopic_id?: unknown;
+  source_label?: unknown;
 }
 
 export interface KbMirrorOptions {
@@ -174,8 +182,11 @@ export function homeworkTaskFieldsToKbRow(
 
 /**
  * UPDATE-объект kb_tasks для «Обновить в Базе» (push-to-kb): контент + вся
- * AI-настройка + новый fingerprint. Классификацию (topic/subtopic/exam/
- * difficulty) push НЕ трогает — она правится в Базе; снимок ДЗ её не несёт.
+ * AI-настройка + новый fingerprint. Каскад-классификация (exam/difficulty/
+ * topic_id/subtopic_id/source_label) включается УСЛОВНО — только когда ключ
+ * ПРИСУТСТВУЕТ в body (ревью-фикс P1 2026-07-06): конструктор F2 её редактирует,
+ * но edit-prefill Базу не грузит, поэтому отсутствие ключа = «не трогай» (иначе
+ * слепой null затёр бы тему источника).
  */
 export function homeworkTaskFieldsToKbUpdate(
   t: HomeworkTaskFieldsForKb,
@@ -184,7 +195,7 @@ export function homeworkTaskFieldsToKbUpdate(
   const maxScore = typeof t.max_score === "number" && Number.isFinite(t.max_score) && t.max_score > 0
     ? t.max_score
     : null;
-  return {
+  const row: Record<string, unknown> = {
     text: nonEmpty(t.task_text) ?? "[Задача на фото]",
     answer: nonEmpty(t.correct_answer),
     solution: nonEmpty(t.solution_text),
@@ -203,4 +214,25 @@ export function homeworkTaskFieldsToKbUpdate(
     fingerprint,
     updated_at: new Date().toISOString(),
   };
+  // Каскад: presence-семантика (не значение) — валидируем и пишем только
+  // присланные ключи. exam принимает и 'olympiad' (kb_tasks.exam nullable,
+  // kind-классификация темы живёт на kb_topics — сам exam='olympiad' не пишем).
+  if ("exam" in t) {
+    row.exam = t.exam === "ege" || t.exam === "oge" ? t.exam : null;
+  }
+  if ("difficulty" in t) {
+    row.difficulty = typeof t.difficulty === "number" && t.difficulty >= 1 && t.difficulty <= 5
+      ? Math.round(t.difficulty)
+      : null;
+  }
+  if ("topic_id" in t) {
+    row.topic_id = typeof t.topic_id === "string" && t.topic_id.length > 0 ? t.topic_id : null;
+  }
+  if ("subtopic_id" in t) {
+    row.subtopic_id = typeof t.subtopic_id === "string" && t.subtopic_id.length > 0 ? t.subtopic_id : null;
+  }
+  if ("source_label" in t) {
+    row.source_label = nonEmpty(t.source_label);
+  }
+  return row;
 }

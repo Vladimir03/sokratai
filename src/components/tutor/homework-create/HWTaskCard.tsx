@@ -142,19 +142,44 @@ export function HWTaskCard({
   useEffect(() => {
     setScoreText(String(task.max_score));
   }, [task.max_score]);
+
+  // unified-task-model F2: авто-балл ФИПИ по классификации (объявлен ДО
+  // handleScoreBlur — тот читает его в deps).
+  const autoScore = useMemo(() => {
+    if (task.exam === 'olympiad') {
+      return task.difficulty != null && task.difficulty >= 1 ? task.difficulty : null;
+    }
+    const examForScore = task.exam === 'ege' ? 'ege' : task.exam === 'oge' ? 'oge' : null;
+    return getKimPrimaryScore(examForScore, task.kim_number ?? null);
+  }, [task.exam, task.kim_number, task.difficulty]);
+
+  // Ревью-фикс P1 (2026-07-06): «тутор трогал балл руками» — ЯВНЫЙ флаг вместо
+  // value-эвристики (`max===1` ломалась: ручной балл «1» затирался авто-баллом,
+  // а ручной балл, случайно равный авто, «прилипал»). Lazy-init по состоянию
+  // на mount: дефолт 1 или == текущему авто → считаем нетронутым.
+  const scoreTouchedRef = useRef<boolean | null>(null);
+  if (scoreTouchedRef.current === null) {
+    scoreTouchedRef.current = !(task.max_score === 1 || (autoScore != null && task.max_score === autoScore));
+  }
+
   const handleScoreBlur = useCallback(() => {
     const raw = scoreText.replace(',', '.').trim();
     const v = parseFloat(raw);
     if (!Number.isFinite(v) || v < 0.5) {
+      // Fallback к дефолту 1 = «не тронуто» (авто-балл снова может применяться).
+      scoreTouchedRef.current = false;
       onUpdate({ ...task, max_score: 1 });
       setScoreText('1');
       return;
     }
     // Snap к ближайшему 0.5 (12.7 → 12.5, 0.3 → 0.5, 100.4 → 100.5).
     const snapped = Math.round(v * 2) / 2;
+    // «Тронуто», если введённое значение — не текущий авто-балл (введённый
+    // руками ФИПИ-балл эквивалентен авто → считаем нетронутым).
+    scoreTouchedRef.current = autoScore == null ? snapped !== 1 : snapped !== autoScore;
     onUpdate({ ...task, max_score: snapped });
     setScoreText(String(snapped));
-  }, [scoreText, task, onUpdate]);
+  }, [scoreText, task, onUpdate, autoScore]);
 
   // Criteria-grading feature (2026-06): when the structured criteria change,
   // persist grading_criteria_json AND auto-reconcile max_score = Σ criteria max
@@ -173,6 +198,9 @@ export function HWTaskCard({
       // max_score == aiGradableMax (иначе ремап искажает баллы). Review fix P1.
       const total = sumAiGradableCriteriaMax(next);
       const snapped = total > 0 ? Math.round(total * 2) / 2 : task.max_score;
+      // Σ-балл — намеренный: авто-балл ФИПИ не должен молча затирать его
+      // после удаления критериев («Сбросить» вернёт при желании).
+      scoreTouchedRef.current = true;
       onUpdate({ ...task, grading_criteria_json: next, max_score: snapped });
     },
     [task, onUpdate],
@@ -182,18 +210,9 @@ export function HWTaskCard({
   // «как система поймёт, что это за КИМ?»); сворачивание — опция экономии места.
   const [classificationOpen, setClassificationOpen] = useState<boolean>(true);
 
-  const autoScore = useMemo(() => {
-    if (task.exam === 'olympiad') {
-      return task.difficulty != null && task.difficulty >= 1 ? task.difficulty : null;
-    }
-    const examForScore = task.exam === 'ege' ? 'ege' : task.exam === 'oge' ? 'oge' : null;
-    return getKimPrimaryScore(examForScore, task.kim_number ?? null);
-  }, [task.exam, task.kim_number, task.difficulty]);
-
   /**
-   * Применить авто-балл только если тутор его не переопределял: max_score ещё
-   * дефолт (1) ИЛИ равен авто-баллу ПРЕЖНЕЙ классификации. Критерии выигрывают
-   * (Σ критериев управляет max_score — не трогаем).
+   * Применить авто-балл только если тутор его не переопределял (scoreTouchedRef).
+   * Критерии выигрывают (Σ критериев управляет max_score — не трогаем).
    */
   const applyAutoScore = useCallback(
     (patch: Partial<DraftTask>): Partial<DraftTask> => {
@@ -208,10 +227,9 @@ export function HWTaskCard({
             next.kim_number ?? null,
           );
       if (nextAuto == null) return patch;
-      const untouched = task.max_score === 1 || (autoScore != null && task.max_score === autoScore);
-      return untouched ? { ...patch, max_score: nextAuto } : patch;
+      return scoreTouchedRef.current !== true ? { ...patch, max_score: nextAuto } : patch;
     },
-    [task, autoScore],
+    [task],
   );
 
   // Divergence «Обновить в Базе»: только при fingerprint-снимке импорта и
@@ -863,6 +881,7 @@ export function HWTaskCard({
                       className="font-medium text-accent hover:underline"
                       style={{ touchAction: 'manipulation' }}
                       onClick={() => {
+                        scoreTouchedRef.current = false;
                         onUpdate({ ...task, max_score: autoScore });
                         setScoreText(String(autoScore));
                       }}
@@ -899,7 +918,19 @@ export function HWTaskCard({
               ) : null}
             </button>
             {classificationOpen ? (
-              <TaskClassificationFields
+              <>
+                {/* Ревью-фикс P1 (2026-07-06): при редактировании выданного ДЗ
+                    тема/источник не подгружаются с сервера (живут в Базе; ДЗ
+                    round-trip'ит только № КИМ, Тип дерайвится из него) —
+                    предупреждаем, что пустые поля ≠ «в Базе пусто», а
+                    заполненные уедут через push. */}
+                {task.id && task.kb_task_id ? (
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    Тема и источник хранятся в Базе и здесь не подгружаются.
+                    Заполненные поля уедут в Базу по кнопке «Обновить в Базе».
+                  </p>
+                ) : null}
+                <TaskClassificationFields
                 taskType={(task.exam ?? '') as TaskClassType}
                 kimNumber={task.kim_number != null ? String(task.kim_number) : ''}
                 difficulty={task.difficulty != null ? String(task.difficulty) : ''}
@@ -938,7 +969,8 @@ export function HWTaskCard({
                 onSubtopicIdChange={(v) => onUpdate({ ...task, subtopic_id: v || null })}
                 onSourceLabelChange={(v) => onUpdate({ ...task, source_label: v || null })}
                 onAnswerFormatChange={() => undefined}
-              />
+                />
+              </>
             ) : null}
           </div>
 

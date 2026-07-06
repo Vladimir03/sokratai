@@ -234,6 +234,20 @@ export interface HomeworkTemplate {
   exam_type?: 'ege' | 'oge' | null;
   feedback_language?: 'auto' | 'russian' | 'target' | null;
   disable_ai_bootstrap?: boolean | null;
+  /**
+   * unified-task-model (2026-07-05): ссылки шаблона на живые kb-задачи.
+   * Присутствует только у мигрированных (ссылочных) шаблонов. `unavailable`
+   * = задача удалена из Базы / снята с публикации — она ОТСУТСТВУЕТ в
+   * синтезированном tasks_json (ревью-фикс P1 2026-07-06: load-пути сверяют
+   * task_refs.length с tasks_json.length и предупреждают о просадке, иначе
+   * тутор молча выдал бы усечённое ДЗ).
+   */
+  task_refs?: Array<{
+    kb_task_id: string;
+    sort_order: number;
+    unavailable: boolean;
+    task?: unknown;
+  }>;
 }
 
 export interface CreateTemplatePayload {

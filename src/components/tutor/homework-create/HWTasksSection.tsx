@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, lazy, Suspense } from 'react';
+import { type Dispatch, type SetStateAction, useState, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { Plus, Library } from 'lucide-react';
 import { toast } from 'sonner';
@@ -152,9 +152,76 @@ function isEmptyTask(t: DraftTask): boolean {
   return !t.task_text.trim() && !t.task_image_path && !t.correct_answer.trim() && !t.kb_task_id;
 }
 
+// ─── Memo-обёртка карточки (ревью-фикс P1, 2026-07-06) ───────────────────────
+// HWTaskCard (rule-40 high-risk) НЕ трогаем — memo живёт в обёртке: она
+// получает СТАБИЛЬНЫЕ per-index диспатчеры и собирает per-card замыкания
+// внутри. Ре-рендерится только карточка, чей `task` реально изменился
+// (раньше 15-30 карточек с каскадом перерисовывались на каждый keystroke).
+
+interface TaskCardRowProps {
+  task: DraftTask;
+  index: number;
+  count: number;
+  disableExistingTaskRemove?: boolean;
+  onDeferImageDelete?: (storagePath: string) => void;
+  onUpdateAt: (idx: number, t: DraftTask) => void;
+  onRemoveAt: (idx: number) => void;
+  onMoveAt: (fromIdx: number, toIdx: number) => void;
+  onRequestSaveToKB?: (task: DraftTask) => void;
+  onRequestPushToKB?: (task: DraftTask) => void;
+  voiceSpeakingEnabled: boolean;
+  cefrLevelEnabled: boolean;
+}
+
+const TaskCardRow = memo(function TaskCardRow({
+  task,
+  index,
+  count,
+  disableExistingTaskRemove,
+  onDeferImageDelete,
+  onUpdateAt,
+  onRemoveAt,
+  onMoveAt,
+  onRequestSaveToKB,
+  onRequestPushToKB,
+  voiceSpeakingEnabled,
+  cefrLevelEnabled,
+}: TaskCardRowProps) {
+  const handleUpdate = useCallback((t: DraftTask) => onUpdateAt(index, t), [onUpdateAt, index]);
+  const handleRemove = useCallback(() => onRemoveAt(index), [onRemoveAt, index]);
+  const handleMoveUp = useCallback(() => onMoveAt(index, index - 1), [onMoveAt, index]);
+  const handleMoveDown = useCallback(() => onMoveAt(index, index + 1), [onMoveAt, index]);
+
+  return (
+    <HWTaskCard
+      task={task}
+      index={index}
+      onUpdate={handleUpdate}
+      onRemove={handleRemove}
+      canRemove={count > 1 && !(disableExistingTaskRemove && task.id)}
+      onDeferImageDelete={onDeferImageDelete}
+      onMoveUp={handleMoveUp}
+      onMoveDown={handleMoveDown}
+      isFirst={index === 0}
+      isLast={index === count - 1}
+      onRequestSaveToKB={onRequestSaveToKB}
+      onRequestPushToKB={onRequestPushToKB}
+      voiceSpeakingEnabled={voiceSpeakingEnabled}
+      cefrLevelEnabled={cefrLevelEnabled}
+      criteriaEditorEnabled={isCriteriaEligibleTask(task)}
+    />
+  );
+});
+
 export interface HWTasksSectionProps {
   tasks: DraftTask[];
-  onChange: (t: DraftTask[]) => void;
+  /**
+   * Ревью-фикс P1 (2026-07-06): Dispatch-тип (принимает и массив, и updater) —
+   * functional-обновления дают СТАБИЛЬНЫЕ per-card колбэки → memo(TaskCardRow)
+   * реально работает (иначе 15-30 карточек ре-рендерились на каждый keystroke).
+   * Родитель (TutorHomeworkCreate) передаёт setTasks как есть.
+   */
+  onChange: Dispatch<SetStateAction<DraftTask[]>>;
   errors: Record<string, string>;
   topicHint?: string;
   /** Disable removing existing tasks (e.g. when submissions exist) */
@@ -216,8 +283,8 @@ export function HWTasksSection({
   );
 
   const handleAdd = useCallback(() => {
-    onChange([...tasks, createEmptyTask()]);
-  }, [tasks, onChange]);
+    onChange((prev) => [...prev, createEmptyTask()]);
+  }, [onChange]);
 
   const handleAddFromKB = useCallback(
     async (kbTasks: KBTask[]) => {
@@ -261,9 +328,16 @@ export function HWTasksSection({
         }),
       );
 
-      // Remove empty placeholder tasks
-      const kept = tasks.filter((t) => !isEmptyTask(t));
-      onChange([...kept, ...newDrafts]);
+      // Remove empty placeholder tasks. Functional updater (ревью-фикс P1
+      // 2026-07-06): выше был await (signed URL) — снимок tasks на момент
+      // вызова мог устареть (тутор правил карточки), array-форма затёрла бы
+      // его правки (тот же класс race, что Phase-10 P0). Дедуп по kb_task_id
+      // повторяем на живом prev (после await мог добавиться тот же id).
+      onChange((prev) => {
+        const kept = prev.filter((t) => !isEmptyTask(t));
+        const existingIds = new Set(kept.filter((t) => t.kb_task_id).map((t) => t.kb_task_id));
+        return [...kept, ...newDrafts.filter((d) => !d.kb_task_id || !existingIds.has(d.kb_task_id))];
+      });
       toast.success(
         newDrafts.length === 1
           ? 'Задача добавлена в ДЗ'
@@ -278,24 +352,31 @@ export function HWTasksSection({
     [tasks],
   );
 
+  // Ревью-фикс P1 (2026-07-06): СТАБИЛЬНЫЕ per-index хендлеры (functional
+  // updater, без deps на tasks) → memo(TaskCardRow) не инвалидируется на
+  // каждый keystroke. Side-effect-данные (cleanup при удалении) читаются из
+  // ref-зеркала, НЕ внутри updater'а (StrictMode double-invoke).
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
   const handleMove = useCallback(
     (fromIdx: number, toIdx: number) => {
-      if (toIdx < 0 || toIdx >= tasks.length) return;
-      const next = [...tasks];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
-      onChange(next);
+      onChange((prev) => {
+        if (toIdx < 0 || toIdx >= prev.length) return prev;
+        const next = [...prev];
+        const [moved] = next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, moved);
+        return next;
+      });
     },
-    [tasks, onChange],
+    [onChange],
   );
 
   const handleUpdate = useCallback(
     (idx: number, updated: DraftTask) => {
-      const next = [...tasks];
-      next[idx] = updated;
-      onChange(next);
+      onChange((prev) => prev.map((t, i) => (i === idx ? updated : t)));
     },
-    [tasks, onChange],
+    [onChange],
   );
 
   const handleRemove = useCallback(
@@ -303,18 +384,18 @@ export function HWTasksSection({
       if (confirmOnRemove && !window.confirm('Удалить задачу? Ученики могут потерять прогресс по ней.')) {
         return;
       }
-      const removed = tasks[idx];
-      if (removed.task_image_path) {
+      const removed = tasksRef.current[idx];
+      if (removed?.task_image_path) {
         if (onDeferImageDelete) {
           onDeferImageDelete(removed.task_image_path);
         } else {
           void deleteTutorHomeworkTaskImage(removed.task_image_path);
         }
       }
-      revokeObjectUrl(removed.task_image_preview_url);
-      onChange(tasks.filter((_, i) => i !== idx));
+      revokeObjectUrl(removed?.task_image_preview_url);
+      onChange((prev) => prev.filter((_, i) => i !== idx));
     },
-    [tasks, onChange, confirmOnRemove, onDeferImageDelete],
+    [onChange, confirmOnRemove, onDeferImageDelete],
   );
 
   return (
@@ -323,23 +404,20 @@ export function HWTasksSection({
         <p className="text-sm text-destructive">{errors._tasks}</p>
       )}
       {tasks.map((task, i) => (
-        <HWTaskCard
+        <TaskCardRow
           key={task.localId}
           task={task}
           index={i}
-          onUpdate={(t) => handleUpdate(i, t)}
-          onRemove={() => handleRemove(i)}
-          canRemove={tasks.length > 1 && !(disableExistingTaskRemove && task.id)}
+          count={tasks.length}
+          disableExistingTaskRemove={disableExistingTaskRemove}
           onDeferImageDelete={onDeferImageDelete}
-          onMoveUp={() => handleMove(i, i - 1)}
-          onMoveDown={() => handleMove(i, i + 1)}
-          isFirst={i === 0}
-          isLast={i === tasks.length - 1}
+          onUpdateAt={handleUpdate}
+          onRemoveAt={handleRemove}
+          onMoveAt={handleMove}
           onRequestSaveToKB={assignmentId ? handleRequestSaveToKB : undefined}
           onRequestPushToKB={onRequestPushToKB}
           voiceSpeakingEnabled={voiceSpeakingEnabled}
           cefrLevelEnabled={cefrLevelEnabled}
-          criteriaEditorEnabled={isCriteriaEligibleTask(task)}
         />
       ))}
       {/* unified-task-model F2: новые задачи авто-зеркалятся в Базу при
