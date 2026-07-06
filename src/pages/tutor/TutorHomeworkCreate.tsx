@@ -550,7 +550,7 @@ function TutorHomeworkCreateContent() {
           // `topic_id: null` затёр бы тему источника. Пустое поле = «не знаю»,
           // а не «очисти» (backend мержит только присланные ключи).
           ...(task.exam === 'ege' || task.exam === 'oge' || task.exam === 'olympiad'
-            ? { exam: task.exam }
+            ? { exam: task.exam as 'ege' | 'oge' }
             : {}),
           ...(task.difficulty != null ? { difficulty: task.difficulty } : {}),
           ...(task.topic_id ? { topic_id: task.topic_id } : {}),

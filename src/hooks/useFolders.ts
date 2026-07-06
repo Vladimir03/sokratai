@@ -162,7 +162,7 @@ async function fetchFolder(folderId: string): Promise<FolderDetail> {
   return {
     folder,
     children,
-    tasks: (tasksRes.data ?? []) as KBTask[],
+    tasks: (tasksRes.data ?? []) as unknown as KBTask[],
     breadcrumbs,
   };
 }
@@ -344,7 +344,7 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
     .select()
     .single();
   if (error) throw error;
-  return data as KBTask;
+  return data as unknown as KBTask;
 }
 
 // =============================================

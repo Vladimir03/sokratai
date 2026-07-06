@@ -318,7 +318,7 @@ export function HWDrawer({
 
       const { error: tasksError } = await supabase
         .from('homework_tutor_tasks')
-        .insert(tutorTasks);
+        .insert(tutorTasks as never);
 
       if (tasksError) {
         toast.error(`Ошибка создания задач: ${tasksError.message}`);
