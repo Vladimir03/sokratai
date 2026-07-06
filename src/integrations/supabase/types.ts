@@ -3034,41 +3034,32 @@ export type Database = {
       }
       token_usage_logs: {
         Row: {
-          assignment_id: string | null
-          audio_seconds: number | null
           chat_id: string | null
           completion_tokens: number | null
           created_at: string
           id: string
           model: string
           prompt_tokens: number | null
-          source: string | null
           total_tokens: number | null
           user_id: string
         }
         Insert: {
-          assignment_id?: string | null
-          audio_seconds?: number | null
           chat_id?: string | null
           completion_tokens?: number | null
           created_at?: string
           id?: string
           model: string
           prompt_tokens?: number | null
-          source?: string | null
           total_tokens?: number | null
           user_id: string
         }
         Update: {
-          assignment_id?: string | null
-          audio_seconds?: number | null
           chat_id?: string | null
           completion_tokens?: number | null
           created_at?: string
           id?: string
           model?: string
           prompt_tokens?: number | null
-          source?: string | null
           total_tokens?: number | null
           user_id?: string
         }
