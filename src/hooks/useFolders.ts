@@ -344,7 +344,7 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
     .select()
     .single();
   if (error) throw error;
-  return data as KBTask;
+  return data as unknown as KBTask;
 }
 
 // =============================================
