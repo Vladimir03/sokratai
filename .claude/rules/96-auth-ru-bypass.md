@@ -300,6 +300,39 @@ deploy-sokratai
 
 ---
 
+## Провайдеры авторизации — соответствие 406-ФЗ (2026-07-07)
+
+Закон о штрафах за авторизацию через иностранные сервисы (КоАП, Госдума 2026-06-09; базовый запрет 406-ФЗ с 01.12.2023):
+российские сайты авторизуют пользователей ТОЛЬКО через телефон РФ / Госуслуги (ЕСИА) / ЕБС / **российскую** ИС
+(VK ID, Yandex ID, Sber ID, Mail.ru). Иностранные (Google, Apple, **Telegram**) — запрещены. Ответственность на владельце сайта.
+
+**Действующая модель:**
+- **Email+пароль** — оставлен (серая зона, прямого запрета нет).
+- **Yandex ID + VK ID** — кастомный RU-bypass OAuth через `_shared/oauth-helpers.ts` (зеркало Google-флоу). Yandex: userinfo
+  `login.yandex.ru/info` (id_token нет). VK: OAuth 2.1 + **PKCE** (`code_verifier` в signed state), email-absent → синтетический
+  `vk_<id>@vk.sokratai.ru`.
+- **Google-вход** — убран из UI (5 страниц входа + `LoginProvidersSection`); `oauth-google-*`/`GoogleAuthButton` = **DORMANT**
+  (удалить после прод-verify Yandex/VK).
+- **Telegram-вход** — кнопки убраны; **бот (уведомления/pay/ДЗ/инвайты) НЕ тронут** (rule 60). `*TelegramLoginButton.tsx` = DORMANT
+  (smoke-guard держит компоненты).
+
+**Миграция Telegram-only (~30 акк., email `telegram_<id>@temp.sokratai.ru`):** бот **`/parol`** → `/set-password?t=` → edge
+**`student-set-password`** (verify_jwt=false, service_role) ставит email+пароль на **существующий** аккаунт
+(`admin.updateUserById(email_confirm:true)`, история цела; reuse `telegram_login_tokens.action_type='set_password'` — миграций
+нет, у колонки нет CHECK; зеркало `student-register` updateUserById+EMAIL_TAKEN + `student-claim` CAS single-use). Разовый пуш
+всем 30 — **`telegram-migrate-push`** (admin `x-admin-key`==`BROADCAST_SECRET`, парсит tgid из email, dry_run). **Бот НЕ минтит
+сессию** — только выдаёт токен → не «Telegram-авторизация».
+
+**Инвариант для нового OAuth-провайдера:** только российская ИС; зеркалить `_shared/oauth-helpers.ts` (signState/verifyState,
+deriveIntendedRole path-guard, findOrCreateUser, mintSession, assignTutorRoleIfNeeded); расширять `ConsentSource` +
+`TUTOR_SIGNUP_SOURCES`; кнопка → `api.sokratai.ru/functions/v1/oauth-<p>-init`; `config.toml verify_jwt=false` + deploy-workflow
+(rule 11). Ops: приложение провайдера (callback на `api.sokratai.ru`) + секреты `*_OAUTH_CLIENT_ID/SECRET`.
+
+**⚠️ Lovable-sync стирает незакоммиченное:** эта работа дважды пропадала (Lovable перезаписал working tree своим cloud-state,
+удалив uncommitted файлы Phase 1). **Коммить auth-изменения сразу** (первый landing — main `8bbb2a7`), не оставляй в working tree.
+
+---
+
 ## Канонические файлы (не дублировать логику)
 
 | Файл | Назначение |
@@ -308,12 +341,17 @@ deploy-sokratai
 | [src/lib/consent.ts](src/lib/consent.ts) | `ConsentSource` union, `recordConsent`, `applyPendingConsent`. Mirror `TUTOR_SIGNUP_SOURCES` если расширяешь |
 | [src/components/AuthGuard.tsx](src/components/AuthGuard.tsx) | Student routes guard. Waits for INITIAL_SESSION |
 | [src/components/TutorGuard.tsx](src/components/TutorGuard.tsx) | Tutor routes guard. Module-level cache + INITIAL_SESSION wait |
-| [src/components/GoogleAuthButton.tsx](src/components/GoogleAuthButton.tsx) | Common Google OAuth init. `intendedRole` prop default `student` |
-| [src/components/TutorTelegramLoginButton.tsx](src/components/TutorTelegramLoginButton.tsx) | Tutor Telegram flow + QR fallback |
-| [src/components/TelegramLoginButton.tsx](src/components/TelegramLoginButton.tsx) | Student Telegram flow + QR fallback |
+| [src/components/YandexAuthButton.tsx](src/components/YandexAuthButton.tsx) + [VkAuthButton.tsx](src/components/VkAuthButton.tsx) | Yandex ID / VK ID OAuth init (mirror GoogleAuthButton). RU-compliant |
+| [supabase/functions/_shared/oauth-helpers.ts](supabase/functions/_shared/oauth-helpers.ts) | Shared RU-bypass OAuth mechanics (HMAC state, session mint, role assign) — oauth-yandex/vk-* |
+| [oauth-yandex-init](supabase/functions/oauth-yandex-init/index.ts) + callback · [oauth-vk-init](supabase/functions/oauth-vk-init/index.ts) + callback | Yandex/VK OAuth (VK = OAuth 2.1 + PKCE, email-absent fallback) |
+| [student-set-password](supabase/functions/student-set-password/index.ts) + [SetPasswordPage.tsx](src/pages/SetPasswordPage.tsx) | Telegram-only миграция: `/parol` → email+пароль на существующий аккаунт (CAS token) |
+| [telegram-migrate-push](supabase/functions/telegram-migrate-push/index.ts) | Разовый пуш всем 30 Telegram-only (admin `x-admin-key`) |
+| [src/components/GoogleAuthButton.tsx](src/components/GoogleAuthButton.tsx) | **DORMANT** (Google убран, 406-ФЗ). `intendedRole` default `student` |
+| [src/components/TutorTelegramLoginButton.tsx](src/components/TutorTelegramLoginButton.tsx) | **DORMANT** login (бот не тронут). Tutor Telegram flow + QR |
+| [src/components/TelegramLoginButton.tsx](src/components/TelegramLoginButton.tsx) | **DORMANT** login (бот не тронут). Student Telegram flow + QR |
 | [supabase/functions/email-verify/index.ts](supabase/functions/email-verify/index.ts) | RU-bypass email confirmation. Exact `TUTOR_SIGNUP_SOURCES` allow-list |
-| [supabase/functions/oauth-google-init/index.ts](supabase/functions/oauth-google-init/index.ts) | Custom OAuth init. Path+query intent derivation |
-| [supabase/functions/oauth-google-callback/index.ts](supabase/functions/oauth-google-callback/index.ts) | Custom OAuth callback. isNewUser guard, role finalization fatal-on-fail |
+| [supabase/functions/oauth-google-init/index.ts](supabase/functions/oauth-google-init/index.ts) | **DORMANT**. Custom OAuth init |
+| [supabase/functions/oauth-google-callback/index.ts](supabase/functions/oauth-google-callback/index.ts) | **DORMANT**. isNewUser guard, role finalization fatal-on-fail |
 | [docs/delivery/engineering/runbooks/tutor-cant-signup-ru.md](docs/delivery/engineering/runbooks/tutor-cant-signup-ru.md) | Support runbook |
 
 ---
