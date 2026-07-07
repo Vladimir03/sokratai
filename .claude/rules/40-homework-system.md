@@ -154,7 +154,7 @@ Backward compat: legacy `sokratai.ru/invite/{code}` URLs продолжают р
 
 Миграция: `20260410153000_guided_thread_task_identity_foundation.sql` (добавила `task_id` в `homework_tutor_thread_messages`, `current_task_id` в `homework_tutor_threads`, backfill по `order_num`).
 
-**Дефолты конструктора (`TutorHomeworkCreate.tsx`):** `subject: 'physics'` (целевой сегмент). Смена предмета → открыть L1.
+**Дефолты конструктора (`TutorHomeworkCreate.tsx`, обновлено 2026-07-07):** `meta.subject` в create-mode = `resolveTutorDefaultSubject(кэш профиля, readHwLastSubject())` (`src/lib/tutorSubjects.ts`; last-used → профиль → physics), читается **СИНХРОННО** через `queryClient.getQueryData(TUTOR_PROFILE_CARD_KEY)` в lazy-init — НИКАКИХ эффектов-клобберов/новых useQuery (QA-класс багов этого файла); edit-prefill/template-load/URL `?subject=` пути не изменены. После успешного create — `saveHwLastSubject(meta.subject)`. **HWDrawer (path B) больше НЕ хардкодит `subject:'physics'`** — селектор «Предмет ДЗ» в футере корзины (полный SUBJECTS, prefill из resolve; раньше обществоведческая задача через «В ДЗ» грейдилась физической рубрикой). Смена предмета → открыть L1.
 
 ### Subject AI-промпты — все 3 пути
 
