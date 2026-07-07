@@ -358,5 +358,6 @@ deploy-sokratai
 | 2026-05-04 | Patch B+1: rewriteToProxy для signed URLs | dc39116 |
 | 2026-05-16 | RU auth critical fix — Rounds 1-3 (initial fix + reviewer feedback) | `~/.claude/plans/compressed-sparking-spindle.md` |
 | 2026-07-06 | Tab-switch form-loss: `TutorGuard` `SIGNED_IN` (session-recovery на visibilitychange) → `checkAccess`→`setLoading(true)` размонтировал `/tutor` кабинет → потеря стейта форм ДЗ/ученик/задача. Фикс: тихая ре-верификация + 3-way `SIGNED_IN` (rule 5a) | memory `project_tab_switch_form_loss_2026_07_06.md` |
+| 2026-07-07 | Login DPI-resilience: `TutorLogin` email-вход висел на «Вход...» бесконечно (РФ-DPI роняет `signInWithPassword`/`is_tutor` — одиночные критичные запросы без таймаута). Фикс: `src/lib/authRetry.ts` (`callAuthWithRetry` — таймаут 10с/попытка + 1 ретрай ТОЛЬКО на сетевой сбой; `{error}` вроде неверного пароля резолвится без ретрая → fast-fail) + честный тост «Сеть не отвечает… попробуйте с VPN». **Инвариант: happy-path и auth-ошибки НЕ задеты** — таймаут/ретрай активны лишь при обрыве. Milada-репорт (у неё обе роли были, блок = сеть). Repro нельзя headless (нужны креды) — хелпер юнит-проверен в preview | `src/lib/authRetry.ts` |
 
 При появлении новых regression'ов в auth flow в РФ — **сначала** проверь этот файл, потом runbook, потом plan-файл.
