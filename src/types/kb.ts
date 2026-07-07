@@ -286,6 +286,13 @@ export interface HWDraftTask {
   solutionSnapshot: string | null;
   attachmentSnapshot: string | null;
   /**
+   * Предмет задачи по теме источника (`kb_topics.subject`), review-фикс P1
+   * 2026-07-07: HWDrawer префиллит «Предмет ДЗ» из единого subjectSnapshot всех
+   * задач корзины (иначе прямой заход в тему обществознания при холодном кэше
+   * профиля давал physics). optional — legacy-черновики/личная база без темы.
+   */
+  subjectSnapshot?: string | null;
+  /**
    * Dual-format storage refs для фото эталонного решения (KB solution_attachment_url).
    * Переносится в `homework_tutor_tasks.solution_image_urls` при финализации ДЗ
    * через HWDrawer. См. plan wild-swinging-nova.md (2026-04-18).

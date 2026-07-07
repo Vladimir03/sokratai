@@ -130,7 +130,9 @@ function CatalogTopicContent() {
       return;
     }
     const subtopicName = subtopics.find((s) => s.id === task.subtopic_id)?.name;
-    addTask(task, subtopicName, topic?.name);
+    // subjectHint = предмет темы (review P1 2026-07-07): HWDrawer префиллит
+    // «Предмет ДЗ», check_format-эвристика становится subject-aware.
+    addTask(task, subtopicName, topic?.name, topic?.subject);
     const imageCount = parseAttachmentUrls(task.attachment_url).length;
     if (imageCount > 1) {
       toast.success(`Задача добавлена в ДЗ (в ДЗ уйдёт первое фото из ${imageCount})`);

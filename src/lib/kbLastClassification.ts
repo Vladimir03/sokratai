@@ -38,3 +38,18 @@ export function saveLastClassification(value: KbLastClassification): void {
     /* localStorage unavailable (private mode) — silently skip */
   }
 }
+
+/**
+ * Merge-сохранение ТОЛЬКО предмета (review P2 2026-07-07): AI-загрузчик после
+ * успешного распознавания персистит выбранный предмет (иначе химик каждый заход
+ * заново переключал «Химия», а холодный direct-load уходил physics-промптом).
+ * Остальная классификация серии не трогается.
+ */
+export function saveLastSubject(subject: string): void {
+  try {
+    const current = loadLastClassification();
+    localStorage.setItem(KEY, JSON.stringify({ ...current, subject }));
+  } catch {
+    /* localStorage unavailable — silently skip */
+  }
+}

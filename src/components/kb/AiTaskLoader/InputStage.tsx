@@ -12,7 +12,7 @@ import {
   type ExtractedTask,
 } from '@/lib/kbAiExtractApi';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
-import { loadLastClassification } from '@/lib/kbLastClassification';
+import { loadLastClassification, saveLastSubject } from '@/lib/kbLastClassification';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
@@ -147,6 +147,9 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         for (const ref of uploadedRefs) void deleteKBTaskImage(ref);
         return;
       }
+      // Персист предмета в last-used (review P2): следующий заход загрузчика/
+      // форм/корзины стартует с него — не переключать «Химия» каждый раз.
+      saveLastSubject(subject);
       onExtracted(drafts, stats, folderId, subject);
     } catch (e) {
       // Uploaded refs won't be reused on retry — clean them up.

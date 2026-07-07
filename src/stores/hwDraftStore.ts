@@ -6,7 +6,8 @@ import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 interface HWDraftStore {
   tasks: HWDraftTask[];
 
-  addTask: (task: KBTask, subtopicName?: string, topicName?: string) => void;
+  /** `subjectHint` — предмет темы источника (`kb_topics.subject`), review P1 2026-07-07. */
+  addTask: (task: KBTask, subtopicName?: string, topicName?: string, subjectHint?: string | null) => void;
   removeTask: (taskId: string) => void;
   reorderTasks: (fromIndex: number, toIndex: number) => void;
   updateSnapshot: (
@@ -23,7 +24,7 @@ export const useHWDraftStore = create<HWDraftStore>()(
     (set, get) => ({
       tasks: [],
 
-      addTask: (task, subtopicName, topicName) => {
+      addTask: (task, subtopicName, topicName, subjectHint) => {
         if (get().tasks.some((t) => t.taskId === task.id)) return;
 
         const draftTask: HWDraftTask = {
@@ -44,10 +45,14 @@ export const useHWDraftStore = create<HWDraftStore>()(
           // can write it + task_kind into homework_tutor_tasks. Без этого
           // HWDrawer-flow создавал задачи с DB-default `task_kind='extended'`
           // независимо от KB-задачи (student warn banner показывался неверно).
+          // Review P1 (2026-07-07): subject-гейт КИМ-эвристики — физическая
+          // «21-26 → detailed» не применяется к обществознанию/другим предметам.
+          // subjectHint undefined (личная база/legacy) → прежнее physics-поведение.
           checkFormatSnapshot: resolveCheckFormatFromKb({
             check_format: task.check_format,
             answer_format: task.answer_format,
             kim_number: task.kim_number,
+            subject: subjectHint,
           }),
           snapshotEdited: false,
           source: task.owner_id ? 'my' : 'socrat',
@@ -68,6 +73,9 @@ export const useHWDraftStore = create<HWDraftStore>()(
               : null,
           cefrLevelSnapshot: task.cefr_level ?? null,
           taskKindSnapshot: task.task_kind === 'speaking' ? 'speaking' : null,
+          // Review P1 (2026-07-07): предмет темы источника → HWDrawer префиллит
+          // «Предмет ДЗ» из единого snapshot'а всех задач корзины.
+          subjectSnapshot: subjectHint ?? null,
         };
 
         set((state) => ({ tasks: [...state.tasks, draftTask] }));

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, Pencil, Plus, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -221,6 +221,24 @@ export function HWDrawer({
   const [subject, setSubject] = useState<string>(() =>
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
   );
+  // Review P1 (2026-07-07): предмет ТЕМЫ добавленных задач сильнее эвристик —
+  // прямой заход в тему обществознания при холодном кэше профиля давал physics.
+  // Prefill из ЕДИНОГО subjectSnapshot всех задач корзины; ручной выбор
+  // (touched) не перетираем; смешанные snapshots → молчим (решает репетитор).
+  const subjectTouchedRef = useRef(false);
+  useEffect(() => {
+    if (!open || subjectTouchedRef.current || tasks.length === 0) return;
+    const snapshots = [
+      ...new Set(
+        tasks
+          .map((t) => t.subjectSnapshot)
+          .filter((s): s is string => typeof s === 'string' && s.length > 0),
+      ),
+    ];
+    if (snapshots.length === 1 && snapshots[0] !== subject) {
+      setSubject(snapshots[0]);
+    }
+  }, [open, tasks, subject]);
   const [submitting, setSubmitting] = useState(false);
 
   const startEdit = (taskId: string, text: string, answer: string | null) => {
@@ -465,7 +483,10 @@ export function HWDrawer({
             <select
               id="hwdrawer-subject"
               value={subject}
-              onChange={(e) => setSubject(e.target.value)}
+              onChange={(e) => {
+                subjectTouchedRef.current = true; // ручной выбор — prefill не перетирает
+                setSubject(e.target.value);
+              }}
               disabled={submitting}
               className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
             >

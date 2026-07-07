@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import QRCode from 'react-qr-code';
 import {
@@ -185,6 +185,18 @@ export function AddStudentDialog({
     // Phase 8.1 (2026-05-20) — Pol ucenika для AI grammar conjugation.
     gender: null,
   });
+
+  // Review P2 (2026-07-07): lazy-init захватывает singleTutorSubject на mount,
+  // когда useTutor() мог быть ещё не загружен (диалог монтируется вместе со
+  // страницей) → prefill терялся. One-shot при открытии: subject пуст +
+  // предмет однозначен → проставить; ручной выбор не перетираем (functional
+  // update смотрит на актуальный prev.subject).
+  const subjectPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!open || subjectPrefilledRef.current || !singleTutorSubject) return;
+    subjectPrefilledRef.current = true;
+    setFormData((prev) => (prev.subject ? prev : { ...prev, subject: singleTutorSubject }));
+  }, [open, singleTutorSubject]);
 
   const resetManualForm = () => {
     setFormData({

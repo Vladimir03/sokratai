@@ -28,7 +28,7 @@ const ANSWER_FORMAT_OPTIONS = [
 const DIFFICULTY_LEVELS = [1, 2, 3, 4, 5];
 
 const SELECT_CLASS =
-  'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none';
+  'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]';
 const INPUT_CLASS = SELECT_CLASS;
 const LEGEND_CLASS = 'mb-1.5 text-xs font-semibold text-slate-500';
 

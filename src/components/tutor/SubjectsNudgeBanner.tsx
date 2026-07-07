@@ -48,8 +48,13 @@ export function SubjectsNudgeBanner({ profile }: SubjectsNudgeBannerProps) {
     }
   };
 
+  // Review P2 (2026-07-07): «Другое» — не контент-предмет (resolveTutorDefaultSubject
+  // его игнорирует) → save только с ['other'] дал бы ЛОЖНУЮ персонализацию
+  // («кабинет настроен», а дефолты остались physics). Требуем ≥1 реальный предмет.
+  const hasContentSubject = selected.some((s) => s !== 'other');
+
   const handleSave = () => {
-    if (selected.length === 0 || upsert.isPending) return;
+    if (!hasContentSubject || upsert.isPending) return;
     // Меняем ТОЛЬКО subjects; name/gender передаём текущие (контракт upsert).
     upsert.mutate(
       { name: profile.name, gender: profile.gender, subjects: selected },
@@ -88,6 +93,12 @@ export function SubjectsNudgeBanner({ profile }: SubjectsNudgeBannerProps) {
 
       <SubjectsMultiSelect value={selected} onChange={setSelected} />
 
+      {selected.length > 0 && !hasContentSubject ? (
+        <p className="mt-2 text-xs text-amber-600">
+          Выберите хотя бы один конкретный предмет — «Другое» не настраивает кабинет.
+        </p>
+      ) : null}
+
       <div className="mt-3 flex items-center justify-end gap-2">
         <button
           type="button"
@@ -99,10 +110,10 @@ export function SubjectsNudgeBanner({ profile }: SubjectsNudgeBannerProps) {
         <button
           type="button"
           onClick={handleSave}
-          disabled={selected.length === 0 || upsert.isPending}
+          disabled={!hasContentSubject || upsert.isPending}
           className={cn(
             'rounded-lg px-4 py-2 text-[13px] font-semibold text-white [touch-action:manipulation]',
-            selected.length > 0 && !upsert.isPending
+            hasContentSubject && !upsert.isPending
               ? 'bg-socrat-primary'
               : 'cursor-default bg-socrat-border',
           )}

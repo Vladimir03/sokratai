@@ -81,12 +81,19 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   // теряется. Резолв — один раз (ref-guard, не клоббер правок пользователя).
   const { topic: currentTopic } = useTopic(task.topic_id || undefined);
   const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
+  // Review P2 (2026-07-07): «предмет ИЗВЕСТЕН» ≠ «дефолт стоит». Пока предмет не
+  // резолвлен из темы И не выбран вручную (задача без topic_id / медленный
+  // useTopic), physics в селекторе — ГИПОТЕЗА → авто-балл по физ-КИМ на save
+  // ЗАПРЕЩЁН (иначе физический primary_score утекал в обществоведческую задачу
+  // без темы). Ручной балл работает всегда.
+  const [subjectKnown, setSubjectKnown] = useState(false);
   const subjectResolvedRef = useRef(false);
   useEffect(() => {
     if (subjectResolvedRef.current) return;
-    if (!task.topic_id) { subjectResolvedRef.current = true; return; }
+    if (!task.topic_id) { subjectResolvedRef.current = true; return; } // предмет неизвестен
     if (currentTopic) {
       setSubject(currentTopic.subject || DEFAULT_KB_SUBJECT);
+      setSubjectKnown(true);
       subjectResolvedRef.current = true;
     }
   }, [currentTopic, task.topic_id]);
@@ -129,6 +136,7 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   // Cascade resets (user-triggered only → safe on mount, no prefill clobber)
   const handleSubjectChange = (v: string) => {
     subjectResolvedRef.current = true; // ручной выбор → не даём эффекту перетереть
+    setSubjectKnown(true); // явный выбор = предмет известен → авто-балл разрешён
     setSubject(v);
     setTopicId('');
     setSubtopicId('');
@@ -211,8 +219,13 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         difficultyNum = difficulty.trim() ? parseInt(difficulty.trim(), 10) : null;
         scoreNum = difficultyNum;
       } else {
-        // Авто-балл по КИМ — только физика; обществознание → ручной (или пусто).
-        const autoScore = getKimPrimaryScoreForSubject(subject, exam, kimNum);
+        // Авто-балл по КИМ — только физика И только при ИЗВЕСТНОМ предмете
+        // (резолвлен из темы / выбран вручную). Нерезолвленный physics-дефолт =
+        // гипотеза → авто-балл запрещён (review P2 2026-07-07: иначе физический
+        // балл утекал в задачу без темы). Ручной ввод работает всегда.
+        const autoScore = subjectKnown
+          ? getKimPrimaryScoreForSubject(subject, exam, kimNum)
+          : null;
         const s = primaryScore.trim() || (autoScore != null ? String(autoScore) : '');
         scoreNum = s ? parseInt(s, 10) : null;
       }
@@ -392,11 +405,14 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
                 taskMaxScore={(() => {
                   const s = parseInt(primaryScore.trim(), 10);
                   if (Number.isFinite(s) && s > 0) return s;
-                  const auto = getKimPrimaryScoreForSubject(
-                    subject,
-                    taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null,
-                    kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null,
-                  );
+                  // Тот же subjectKnown-гейт, что в handleSave (консистентность подсказки).
+                  const auto = subjectKnown
+                    ? getKimPrimaryScoreForSubject(
+                        subject,
+                        taskType === 'ege' ? 'ege' : taskType === 'oge' ? 'oge' : null,
+                        kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null,
+                      )
+                    : null;
                   return auto ?? (sumAiGradableCriteriaMax(criteria) || 1);
                 })()}
                 onChange={handleCriteriaChange}
