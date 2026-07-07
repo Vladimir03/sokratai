@@ -49,6 +49,14 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.oauth-google-init]
     verify_jwt = false
+  [functions.oauth-vk-callback]
+    verify_jwt = false
+  [functions.oauth-vk-init]
+    verify_jwt = false
+  [functions.oauth-yandex-callback]
+    verify_jwt = false
+  [functions.oauth-yandex-init]
+    verify_jwt = false
   [functions.payment-reminder]
     verify_jwt = false
   [functions.process-email-queue]
@@ -71,6 +79,10 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.student-register]
     verify_jwt = true
+  [functions.student-set-password]
+    verify_jwt = false
+  [functions.telegram-migrate-push]
+    verify_jwt = false
   [functions.telegram-auth]
     verify_jwt = false
   [functions.telegram-bot]

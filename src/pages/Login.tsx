@@ -8,8 +8,8 @@ import { callAuthWithRetry, isAuthNetworkFailure } from "@/lib/authRetry";
 import { readAuthRedirectError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
-import TelegramLoginButton from "@/components/TelegramLoginButton";
-import GoogleAuthButton from "@/components/GoogleAuthButton";
+import YandexAuthButton from "@/components/YandexAuthButton";
+import VkAuthButton from "@/components/VkAuthButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { applyPendingConsent } from "@/lib/consent";
 import { requestStudentOtp } from "@/lib/studentClaimApi";
@@ -314,37 +314,19 @@ const Login = () => {
             </div>
           </div>
 
-          {/* OAuth options — Google + Telegram */}
+          {/* OAuth options — Yandex ID + VK ID (российские сервисы, 406-ФЗ) */}
           <div className="flex flex-col items-stretch gap-3">
-            <GoogleAuthButton
+            <YandexAuthButton
               redirectPath="/student/schedule"
-              consentSource="google-oauth-student"
+              consentSource="yandex-oauth-student"
             />
-            <div
-              className="flex flex-col items-center"
-              onClick={() => {
-                // Reset on each click: clear previous timer + hide stale hint
-                if (telegramTimeoutRef.current) {
-                  clearTimeout(telegramTimeoutRef.current);
-                }
-                setShowTelegramHint(false);
-                telegramTimeoutRef.current = setTimeout(() => {
-                  setShowTelegramHint(true);
-                  telegramTimeoutRef.current = null;
-                }, 30_000);
-              }}
-            >
-              <TelegramLoginButton />
-              <p className="text-xs text-muted-foreground mt-2 text-center leading-relaxed">
-                Telegram и Google могут не работать в РФ без VPN. Если кнопки
-                «зависают» — войдите по email&nbsp;↑
-              </p>
-              {showTelegramHint && (
-                <p className="text-xs text-amber-600 mt-1 text-center">
-                  Telegram не отвечает — попробуйте email или VPN
-                </p>
-              )}
-            </div>
+            <VkAuthButton
+              redirectPath="/student/schedule"
+              consentSource="vk-oauth-student"
+            />
+            <p className="text-xs text-muted-foreground mt-1 text-center leading-relaxed">
+              Вход через Яндекс или VK. Можно также войти по email&nbsp;↑
+            </p>
           </div>
         </CardContent>
       </Card>

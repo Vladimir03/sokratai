@@ -218,7 +218,7 @@ export function LoginProvidersSection({ embedded = false }: { embedded?: boolean
         )}
       </div>
       <p className="mt-1 text-sm text-slate-500">
-        Привяжи Google или Telegram, чтобы заходить без email и пароля.
+        Управление способами входа в аккаунт.
       </p>
 
       {isLoading ? (
@@ -262,19 +262,20 @@ export function LoginProvidersSection({ embedded = false }: { embedded?: boolean
                   </Button>
                 );
               }
+              // Google removed as a login provider (law 406-ФЗ / rule 96): no
+              // new linking is offered. Existing linked accounts keep their
+              // «Отвязать» affordance above so they can migrate off Google.
               return (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={handleLinkGoogle}
-                  disabled={linkingGoogle}
-                  className="min-h-[44px] gap-2"
+                  disabled
+                  className="min-h-[44px]"
+                  title="Google больше не доступен для входа"
+                  aria-label="Привязать Google недоступно"
                 >
-                  {linkingGoogle && (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  )}
-                  Привязать
+                  Недоступно
                 </Button>
               );
             }}

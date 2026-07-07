@@ -5,8 +5,13 @@ export const CONSENT_VERSION = "v1-2026-05";
 export type ConsentSource =
   | "web-signup-tutor"
   | "web-signup-student"
+  // google-oauth-* kept for backward-compat (provider removed for 406-ФЗ).
   | "google-oauth-tutor"
   | "google-oauth-student"
+  | "yandex-oauth-tutor"
+  | "yandex-oauth-student"
+  | "vk-oauth-tutor"
+  | "vk-oauth-student"
   | "telegram-oauth-tutor"
   | "telegram-oauth-student";
 

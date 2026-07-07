@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import { getTutorInviteTelegramLink } from '@/utils/telegramLinks';
 import { claimInvite } from '@/lib/inviteApi';
 import { z } from 'zod';
 
@@ -53,9 +51,6 @@ export default function InvitePage() {
   const [claimedTutorName, setClaimedTutorName] = useState<string | null>(null);
   const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
 
-  // Telegram collapsed section
-  const [showTelegram, setShowTelegram] = useState(false);
-
   useEffect(() => {
     async function fetchTutor() {
       if (!inviteCode) {
@@ -87,8 +82,6 @@ export default function InvitePage() {
 
     fetchTutor();
   }, [inviteCode]);
-
-  const telegramLink = inviteCode ? getTutorInviteTelegramLink(inviteCode) : '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -411,61 +404,6 @@ export default function InvitePage() {
               </>
             )}
           </p>
-
-          {/* Divider */}
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-card px-2 text-muted-foreground">или</span>
-            </div>
-          </div>
-
-          {/* Telegram collapsed section */}
-          <div>
-            <button
-              type="button"
-              onClick={() => setShowTelegram(!showTelegram)}
-              className="w-full flex items-center justify-between text-sm text-muted-foreground hover:text-foreground transition-colors py-2"
-              style={{ touchAction: 'manipulation' }}
-            >
-              <span>
-                Подключиться через Telegram{' '}
-                <span className="text-xs text-amber-600">(нужен VPN)</span>
-              </span>
-              {showTelegram ? (
-                <ChevronUp className="h-4 w-4 shrink-0" />
-              ) : (
-                <ChevronDown className="h-4 w-4 shrink-0" />
-              )}
-            </button>
-
-            <div
-              className={`overflow-hidden transition-all duration-200 ${
-                showTelegram ? 'max-h-96 opacity-100 mt-3' : 'max-h-0 opacity-0'
-              }`}
-            >
-              <div className="space-y-4">
-                <p className="text-xs text-amber-600 text-center">
-                  Telegram может быть недоступен без VPN в России
-                </p>
-                <div className="flex justify-center">
-                  <div className="bg-white p-3 rounded-lg shadow-sm">
-                    <QRCode value={telegramLink} size={150} level="M" />
-                  </div>
-                </div>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => window.open(telegramLink, '_blank')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  Открыть Telegram
-                </Button>
-              </div>
-            </div>
-          </div>
 
           {/* Footer */}
           <p className="text-xs text-center text-muted-foreground">

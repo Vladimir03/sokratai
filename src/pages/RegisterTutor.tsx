@@ -7,8 +7,8 @@ import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { z } from "zod";
 import { GraduationCap } from "lucide-react";
-import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
-import GoogleAuthButton from "@/components/GoogleAuthButton";
+import YandexAuthButton from "@/components/YandexAuthButton";
+import VkAuthButton from "@/components/VkAuthButton";
 import {
   applyPendingConsent,
   recordConsent,
@@ -368,35 +368,24 @@ const RegisterTutor = () => {
 
           <div className="flex flex-col items-center space-y-3">
             <div className="w-full">
-              <GoogleAuthButton
+              <YandexAuthButton
                 redirectPath="/tutor/home"
-                consentSource="google-oauth-tutor"
+                consentSource="yandex-oauth-tutor"
                 intendedRole="tutor"
                 enabled={consent}
               />
             </div>
-            <div
-              className="w-full"
-              onClickCapture={(e) => {
-                if (!consent) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  toast.error("Сначала отметьте согласие с офертой и политикой");
-                  return;
-                }
-                stashPendingConsent("telegram-oauth-tutor");
-              }}
-              style={{
-                opacity: consent ? 1 : 0.5,
-                pointerEvents: consent ? "auto" : "none",
-              }}
-              aria-disabled={!consent}
-            >
-              <TutorTelegramLoginButton className="w-full" />
+            <div className="w-full">
+              <VkAuthButton
+                redirectPath="/tutor/home"
+                consentSource="vk-oauth-tutor"
+                intendedRole="tutor"
+                enabled={consent}
+              />
             </div>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
-              Telegram и Google могут не работать в РФ без VPN. Если кнопки выше
-              «зависают» — регистрируйтесь по email (форма наверху).
+              Вход через Яндекс или VK. Можно также зарегистрироваться по email
+              (форма наверху).
             </p>
           </div>
 

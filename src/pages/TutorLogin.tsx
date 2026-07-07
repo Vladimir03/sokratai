@@ -8,8 +8,8 @@ import { callAuthWithRetry, isAuthNetworkFailure } from "@/lib/authRetry";
 import { readAuthRedirectError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
-import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
-import GoogleAuthButton from "@/components/GoogleAuthButton";
+import YandexAuthButton from "@/components/YandexAuthButton";
+import VkAuthButton from "@/components/VkAuthButton";
 import { applyPendingConsent } from "@/lib/consent";
 
 const loginSchema = z.object({
@@ -216,21 +216,23 @@ const TutorLogin = () => {
           <div className="flex flex-col items-center gap-3">
             {/* Reviewer P1 (Round 2): NO `intendedRole="tutor"` here. This
                 is a LOGIN page (no offer/privacy consent gate). A brand-new
-                Google account clicking here would otherwise become a tutor
+                account clicking here would otherwise become a tutor
                 automatically, bypassing the consent checkbox required on
                 /register-tutor. Existing tutors pass through because their
                 role is already assigned (TutorGuard reads it cached);
-                default `intendedRole="student"` from GoogleAuthButton
+                default `intendedRole="student"` on the OAuth buttons
                 doesn't downgrade them. New users get a student account and
                 must explicitly go to /register-tutor for tutor signup. */}
-            <GoogleAuthButton
+            <YandexAuthButton
               redirectPath="/tutor/home"
-              consentSource="google-oauth-tutor"
+              consentSource="yandex-oauth-tutor"
             />
-            <TutorTelegramLoginButton className="w-full" />
+            <VkAuthButton
+              redirectPath="/tutor/home"
+              consentSource="vk-oauth-tutor"
+            />
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
-              Telegram и Google могут не работать в РФ без VPN. Если кнопки
-              «зависают» — войдите по email наверху.
+              Вход через Яндекс или VK. Можно также войти по email наверху.
             </p>
           </div>
 

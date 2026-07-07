@@ -7,8 +7,8 @@ import { CheckCircle2 } from "lucide-react";
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
-import TutorTelegramLoginButton from "@/components/TutorTelegramLoginButton";
-import GoogleAuthButton from "@/components/GoogleAuthButton";
+import YandexAuthButton from "@/components/YandexAuthButton";
+import VkAuthButton from "@/components/VkAuthButton";
 import {
   applyPendingConsent,
   recordConsent,
@@ -648,38 +648,23 @@ export default function TutorSignupTrial() {
             </span>
           )}
 
-          {/* OAuth — Telegram + Google, both gated by consent */}
+          {/* OAuth — Yandex ID + VK ID (российские сервисы, 406-ФЗ), gated by consent */}
           <div className="flex flex-col gap-3" style={{ marginBottom: 8 }}>
-            <div
-              onClickCapture={(e) => {
-                if (!handleTelegramGate()) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }
-              }}
-              style={{
-                width: "100%",
-                opacity: oauthEnabled ? 1 : 0.5,
-                pointerEvents: oauthEnabled ? "auto" : "none",
-              }}
-              aria-disabled={!oauthEnabled}
-            >
-              <TutorTelegramLoginButton className="w-full" />
-            </div>
-            <GoogleAuthButton
+            <YandexAuthButton
               redirectPath="/tutor/home"
-              consentSource="google-oauth-tutor"
+              consentSource="yandex-oauth-tutor"
+              intendedRole="tutor"
+              enabled={oauthEnabled}
+            />
+            <VkAuthButton
+              redirectPath="/tutor/home"
+              consentSource="vk-oauth-tutor"
               intendedRole="tutor"
               enabled={oauthEnabled}
             />
             {!oferta && (
               <p className="tst-tg-hint" style={{ color: "var(--sokrat-fg3)" }}>
-                Отметьте согласие выше, чтобы войти через Telegram или Google
-              </p>
-            )}
-            {oferta && (
-              <p className="tst-tg-hint">
-                Telegram: нужен VPN, если заблокирован
+                Отметьте согласие выше, чтобы войти через Яндекс или VK
               </p>
             )}
           </div>

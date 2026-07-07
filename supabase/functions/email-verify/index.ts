@@ -114,7 +114,9 @@ function redirectToError(reason: string, redirectTo?: string): Response {
 const TUTOR_SIGNUP_SOURCES = new Set([
   "tutor-register",         // RegisterTutor.tsx email flow
   "tutor-landing-trial",    // TutorSignupTrial.tsx trial flow
-  "google-oauth-tutor",     // oauth-google-callback (intendedRole=tutor)
+  "google-oauth-tutor",     // oauth-google-callback (legacy provider — removed for 406-ФЗ; kept for backward-compat)
+  "yandex-oauth-tutor",     // oauth-yandex-callback (intendedRole=tutor)
+  "vk-oauth-tutor",         // oauth-vk-callback (intendedRole=tutor)
   "telegram-oauth-tutor",   // telegram-bot handleWebLogin (intended_role=tutor)
 ]);
 

@@ -96,6 +96,7 @@ const FolderPage = lazy(() => import("./pages/tutor/knowledge/FolderPage"));
 const AiTaskLoaderPage = lazy(() => import("./pages/tutor/knowledge/AiTaskLoaderPage"));
 const InvitePage = lazy(() => import("./pages/InvitePage"));
 const StudentClaimPage = lazy(() => import("./pages/StudentClaimPage"));
+const SetPasswordPage = lazy(() => import("./pages/SetPasswordPage"));
 const BookLesson = lazy(() => import("./pages/BookLesson"));
 const InstallApp = lazy(() => import("./pages/InstallApp"));
 const OAuthConsent = lazy(() => import("./pages/OAuthConsent"));
@@ -475,6 +476,14 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <StudentClaimPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/set-password"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <SetPasswordPage />
                 </Suspense>
               }
             />

@@ -6868,6 +6868,78 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Handle /parol command — migration for existing Telegram-only users.
+    // «Войти через Telegram» was removed for 406-ФЗ compliance (rule 96); these
+    // accounts (telegram_<id>@temp.sokratai.ru) had no other login. The bot only
+    // issues a one-time set-password token (student-set-password edge) — it NEVER
+    // mints a session, so this is not «authorization through Telegram».
+    if (update.message?.text === "/parol") {
+      const telegramUserId = update.message.from.id;
+      const profile = await resolveCanonicalUserIdByTelegram(telegramUserId);
+
+      if (!profile) {
+        await sendTelegramMessage(
+          telegramUserId,
+          "У тебя пока нет аккаунта на Сократ AI. Зарегистрируйся на https://sokratai.ru — вход по email, Яндекс ID или VK ID.",
+          { disable_web_page_preview: true },
+        );
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: authData } = await supabase.auth.admin.getUserById(profile.id);
+      const email = authData?.user?.email ?? "";
+      const isTempEmail = email.toLowerCase().endsWith("@temp.sokratai.ru");
+
+      if (email && !isTempEmail) {
+        // Уже мигрирован — вход по email.
+        await sendTelegramMessage(
+          telegramUserId,
+          "У тебя уже настроен вход по email. Просто войди на https://sokratai.ru/login (забыл пароль — там есть «Забыли пароль»).",
+          { disable_web_page_preview: true },
+        );
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const token = crypto.randomUUID().replace(/-/g, "");
+      const { error: parolTokenErr } = await supabase.from("telegram_login_tokens").insert({
+        token,
+        status: "pending",
+        action_type: "set_password",
+        user_id: profile.id,
+        telegram_user_id: telegramUserId,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      });
+
+      if (parolTokenErr) {
+        console.error("/parol token insert failed:", parolTokenErr);
+        await sendTelegramMessage(
+          telegramUserId,
+          "Не удалось создать ссылку. Попробуй ещё раз через минуту.",
+        );
+      } else {
+        await sendTelegramMessage(
+          telegramUserId,
+          "🔐 Вход через Telegram отключён по требованию закона РФ.\n\nЗадай пароль по кнопке ниже — и дальше входи по email на сайте. Ссылка действует 24 часа.",
+          {
+            disable_web_page_preview: true,
+            reply_markup: {
+              inline_keyboard: [[
+                { text: "🔐 Задать пароль", url: `https://sokratai.ru/set-password?t=${token}` },
+              ]],
+            },
+          },
+        );
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle /stats command (admin group only)
     if (update.message?.text === "/stats" || update.message?.text?.startsWith("/stats@")) {
       const chatId = update.message.chat.id;
