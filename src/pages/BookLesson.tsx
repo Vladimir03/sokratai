@@ -17,6 +17,7 @@ import {
 } from '@/lib/tutorSchedule';
 import { format, parseISO, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, addMonths, subMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { getSubjectLabel } from '@/types/homework';
 import type { TutorPublicInfo, BookingSlot } from '@/types/tutor';
 
 export default function BookLesson() {
@@ -251,7 +252,8 @@ export default function BookLesson() {
             {tutor.subjects && tutor.subjects.length > 0 && (
               <div className="flex flex-wrap gap-1 justify-center mt-2">
                 {tutor.subjects.map((subject, i) => (
-                  <Badge key={i} variant="secondary">{subject}</Badge>
+                  // tutors.subjects хранит id ('physics') — ученику показываем лейбл.
+                  <Badge key={i} variant="secondary">{getSubjectLabel(subject)}</Badge>
                 ))}
               </div>
             )}

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil, X, CheckCircle2, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getSubjectLabel } from "@/types/homework";
 
 export interface TutorRow {
   tutorId: string;
@@ -149,7 +150,7 @@ export const AllTutorsTable = ({ tutors, filter, onClearFilter, onEdit }: Props)
                   <tr key={t.tutorId} className="border-t hover:bg-muted/20">
                     <td className="px-4 py-2 font-medium">{t.username ?? t.tutorId.slice(0, 8)}</td>
                     <td className="px-3 py-2 text-muted-foreground text-xs">
-                      {t.subjects.length > 0 ? t.subjects.slice(0, 2).join(", ") : "—"}
+                      {t.subjects.length > 0 ? t.subjects.slice(0, 2).map(getSubjectLabel).join(", ") : "—"}
                     </td>
                     <td className="px-2 py-2 text-center tabular-nums">{t.activeDays7d}</td>
                     <td className="px-2 py-2 text-center tabular-nums">{t.startedThreads7d}</td>

@@ -26,7 +26,9 @@ import {
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
-import { DEFAULT_KB_SUBJECT, type KBFolderTreeNode } from '@/types/kb';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import type { KBFolderTreeNode } from '@/types/kb';
 
 interface CreateTaskModalProps {
   /** Pre-selected folder id (e.g. current folder on FolderPage) */
@@ -52,6 +54,10 @@ function flattenTree(
 export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalProps) {
   const { tree, loading: treesLoading } = useFolderTree();
   const createTask = useCreateTask();
+  // Профиль для дефолта предмета. Кэш card-ключа почти всегда тёплый (SideNav/
+  // MobileTopBar монтируют хук глобально) → data доступна синхронно в первый
+  // рендер. Холодный кэш → physics; выбор пользователя эффектом НЕ клоббим.
+  const { data: tutorProfile } = useTutorProfile();
 
   // Inherited classification from the last added task (запрос Егора — серия задач)
   const [inherited] = useState(() => loadLastClassification());
@@ -78,9 +84,10 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   };
 
   // Classification (cascade) — prefilled from last task
-  // Мультипредметный каталог: предмет наследуется в серии (Милада грузит много
-  // обществоведческих задач подряд → не переключать «Обществознание» каждый раз).
-  const [subject, setSubject] = useState<string>(inherited.subject ?? DEFAULT_KB_SUBJECT);
+  // Предмет: серия (last-used из kbLastClassification) → профиль → physics.
+  const [subject, setSubject] = useState<string>(() =>
+    resolveTutorDefaultSubject(tutorProfile?.subjects, inherited.subject ?? null),
+  );
   const [taskType, setTaskType] = useState<TaskClassType>(
     (inherited.taskType as TaskClassType) ?? '',
   );

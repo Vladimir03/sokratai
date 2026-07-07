@@ -21,7 +21,11 @@ import {
 } from '@/lib/attachmentRefs';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { loadLastClassification } from '@/lib/kbLastClassification';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { supabase } from '@/lib/supabaseClient';
+import { SUBJECTS } from '@/types/homework';
 import type { HWDraftTask } from '@/types/kb';
 import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
 
@@ -206,9 +210,17 @@ export function HWDrawer({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { tasks, removeTask, updateSnapshot, clearDraft } = useHWDraftStore();
+  // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
+  const { data: tutorProfile } = useTutorProfile();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
   const [editAnswer, setEditAnswer] = useState('');
+  // Предмет создаваемого ДЗ (2026-07-07, review-фикс «В ДЗ» хардкодил physics —
+  // обществоведческая задача грейдилась бы как физика). Дефолт: last-used (KB) →
+  // профиль → physics; репетитор видит и может сменить перед созданием.
+  const [subject, setSubject] = useState<string>(() =>
+    resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const startEdit = (taskId: string, text: string, answer: string | null) => {
@@ -244,7 +256,9 @@ export function HWDrawer({
         .insert({
           tutor_id: session.user.id,
           title: `ДЗ из Базы знаний`,
-          subject: 'physics',
+          // Предмет из селектора корзины (был хардкод 'physics' — задачи других
+          // предметов молча грейдились физической рубрикой).
+          subject,
           status: 'draft',
         })
         .select('id')
@@ -443,6 +457,23 @@ export function HWDrawer({
 
         {/* Footer */}
         <div className="flex flex-col gap-2.5 border-t border-socrat-border px-5 py-4">
+          {/* Предмет ДЗ — определяет AI-рубрику проверки (не хардкод physics). */}
+          <div className="flex items-center gap-2.5">
+            <label htmlFor="hwdrawer-subject" className="shrink-0 text-xs font-semibold text-slate-500">
+              Предмет ДЗ
+            </label>
+            <select
+              id="hwdrawer-subject"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              disabled={submitting}
+              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
+            >
+              {SUBJECTS.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
             onClick={handleAddMore}

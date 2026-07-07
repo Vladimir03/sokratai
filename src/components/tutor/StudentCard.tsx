@@ -19,6 +19,7 @@ import {
   Tag,
   Link2,
 } from 'lucide-react';
+import { getSubjectLabel } from '@/types/homework';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import {
   formatRelativeTime,
@@ -66,7 +67,9 @@ export const StudentCard = memo(function StudentCard({
   const displayName = student.profiles?.username || 'Без имени';
   const grade = student.profiles?.grade;
   const examType = formatExamType(student.exam_type);
-  const subject = student.subject;
+  // tutor_students.subject: новые записи — канонический id ('maths' → «Математика»),
+  // legacy — свободный русский текст (getSubjectLabel вернёт его как есть).
+  const subject = student.subject ? getSubjectLabel(student.subject) : student.subject;
   const isAiConnected = Boolean(student.profiles?.telegram_user_id);
 
   // Phase 8.1 (2026-05-26): AI настройки (имя + пол) для visibility chip.

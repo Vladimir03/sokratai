@@ -21,7 +21,8 @@ import {
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
-import { DEFAULT_KB_SUBJECT, type KBTask, type UpdateKBTaskInput } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT } from '@/types/kb';
+import type { KBTask, UpdateKBTaskInput } from '@/types/kb';
 
 interface EditTaskModalProps {
   task: KBTask;

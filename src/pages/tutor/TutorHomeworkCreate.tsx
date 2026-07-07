@@ -3,6 +3,13 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { parseISO } from 'date-fns';
+import { TUTOR_PROFILE_CARD_KEY } from '@/hooks/useTutorProfile';
+import type { TutorProfile } from '@/lib/tutorProfileApi';
+import {
+  readHwLastSubject,
+  resolveTutorDefaultSubject,
+  saveHwLastSubject,
+} from '@/lib/tutorSubjects';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -497,13 +504,25 @@ function TutorHomeworkCreateContent() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   // ── Meta ──
-  const [meta, setMeta] = useState<MetaState>({
+  // Дефолт предмета (2026-07-07): last-used → профиль репетитора → physics.
+  // СИНХРОННО из кэша react-query (queryClient уже объявлен выше) — БЕЗ новой
+  // подписки/useQuery (rule 40: конструктор чувствителен к focus-refetch) и БЕЗ
+  // эффектов-клобберов (edit-prefill / template-load / URL ?subject= пути не
+  // задеты — они перезаписывают meta позже своими значениями, как раньше).
+  // Хелпер возвращает ТОЛЬКО канонические id из SUBJECTS (валидация через
+  // SUBJECT_NAME_MAP внутри) → сужение до MetaState['subject'] безопасно.
+  const resolveCreateDefaultSubject = () =>
+    resolveTutorDefaultSubject(
+      queryClient.getQueryData<TutorProfile | null>(TUTOR_PROFILE_CARD_KEY)?.subjects,
+      readHwLastSubject(),
+    ) as MetaState['subject'];
+  const [meta, setMeta] = useState<MetaState>(() => ({
     title: '',
-    subject: 'physics',
+    subject: resolveCreateDefaultSubject(),
     deadline: '',
     disable_ai_bootstrap: true,
     exam_type: 'ege',
-  });
+  }));
 
   // ── Tasks ──
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
@@ -1297,6 +1316,9 @@ function TutorHomeworkCreateContent() {
         });
         assignmentId = result.assignment_id;
         createdAssignmentIdRef.current = assignmentId;
+        // last-used предмет конструктора (дефолт следующего create; иерархия
+        // last-used → профиль → physics в resolveTutorDefaultSubject).
+        saveHwLastSubject(meta.subject);
         // Ревью-фикс P1 (2026-07-06): авто-зеркало degrade-not-block — но не
         // молча. failed > 0 → нейтральный info (ДЗ выдано успешно; recovery =
         // «Сохранить в мою базу» на карточке задачи в режиме правки).
@@ -1801,7 +1823,7 @@ function TutorHomeworkCreateContent() {
       assignTabInitializedRef.current = true;
     }
 
-    setMeta({ title: '', subject: 'physics', deadline: '', disable_ai_bootstrap: true, exam_type: 'ege', cefr_level: null, feedback_language: 'auto' });
+    setMeta({ title: '', subject: resolveCreateDefaultSubject(), deadline: '', disable_ai_bootstrap: true, exam_type: 'ege', cefr_level: null, feedback_language: 'auto' });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);

@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Pencil } from "lucide-react";
+import { getSubjectLabel } from "@/types/homework";
 
 export interface AtRiskTutor {
   tutorId: string;
@@ -73,7 +74,7 @@ export const AtRiskTutorsTable = ({ tutors, onEdit }: Props) => {
                   <tr key={t.tutorId} className="border-t hover:bg-muted/20">
                     <td className="px-4 py-2 font-medium">{t.username ?? t.tutorId.slice(0, 8)}</td>
                     <td className="px-3 py-2 text-muted-foreground">
-                      {t.subjects.length > 0 ? t.subjects.slice(0, 2).join(", ") : "—"}
+                      {t.subjects.length > 0 ? t.subjects.slice(0, 2).map(getSubjectLabel).join(", ") : "—"}
                     </td>
                     <td className="px-3 py-2 text-center tabular-nums">{t.activeDays7d}</td>
                     <td className="px-3 py-2 text-center tabular-nums">{t.meaningfulThreads7d}</td>

@@ -30,6 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
 import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2, Users, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { getSubjectLabel, SUBJECTS } from '@/types/homework';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import {
   manualAddTutorStudent,
@@ -157,6 +158,16 @@ export function AddStudentDialog({
   const [bulkNames, setBulkNames] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
 
+  // Prefill предмета ученика ТОЛЬКО при однозначности: ровно один контент-предмет
+  // в профиле репетитора (Егор-физик). Мульти-предметнику молча подставлять нечего
+  // (поле в скрытом аккордеоне — тихая запись неверного предмета хуже пустого).
+  const singleTutorSubject = (() => {
+    const ids = (tutor?.subjects ?? []).filter(
+      (s) => s !== 'other' && SUBJECTS.some((cs) => cs.id === s),
+    );
+    return ids.length === 1 ? ids[0] : undefined;
+  })();
+
   // Form state for manual add
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
     name: '',
@@ -165,7 +176,7 @@ export function AddStudentDialog({
     learning_goal: '',
     grade: undefined,
     exam_type: undefined,
-    subject: undefined,
+    subject: singleTutorSubject,
     start_score: undefined,
     target_score: undefined,
     notes: '',
@@ -183,7 +194,7 @@ export function AddStudentDialog({
       learning_goal: '',
       grade: undefined,
       exam_type: undefined,
-      subject: undefined,
+      subject: singleTutorSubject,
       start_score: undefined,
       target_score: undefined,
       notes: '',
@@ -945,17 +956,35 @@ export function AddStudentDialog({
 
                         <div className="space-y-2">
                           <Label htmlFor="subject">Предмет</Label>
-                          <Input
-                            id="subject"
-                            value={formData.subject || ''}
-                            onChange={(e) =>
+                          {/* Канонический словарь SUBJECTS (id в tutor_students.subject)
+                              вместо free-text — сравнимо с остальным приложением.
+                              Legacy free-text значение (edit) — отдельной опцией,
+                              чтобы не терять сохранённое. */}
+                          <Select
+                            value={formData.subject || undefined}
+                            onValueChange={(value) =>
                               handleFormChange(
                                 'subject',
-                                e.target.value || undefined
+                                value === '__none__' ? undefined : value
                               )
                             }
-                            placeholder="Математика"
-                          />
+                          >
+                            <SelectTrigger id="subject" className="text-base">
+                              <SelectValue placeholder="Не указан" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Не указан</SelectItem>
+                              {SUBJECTS.map((s) => (
+                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                              ))}
+                              {formData.subject &&
+                              !SUBJECTS.some((s) => s.id === formData.subject) ? (
+                                <SelectItem value={formData.subject}>
+                                  {getSubjectLabel(formData.subject)}
+                                </SelectItem>
+                              ) : null}
+                            </SelectContent>
+                          </Select>
                         </div>
 
                         <div className="space-y-2">

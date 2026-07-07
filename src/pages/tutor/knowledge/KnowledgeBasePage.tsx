@@ -19,9 +19,13 @@ import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
+import { loadLastClassification } from '@/lib/kbLastClassification';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { SubjectsNudgeBanner } from '@/components/tutor/SubjectsNudgeBanner';
+import { getSubjectLabel, SUBJECTS } from '@/types/homework';
 import { cn } from '@/lib/utils';
 import {
-  DEFAULT_KB_SUBJECT,
   KB_SUBJECTS,
   type CatalogFilter,
   type KBTopicWithCounts,
@@ -29,24 +33,46 @@ import {
 
 type MainTab = 'catalog' | 'mybase';
 
-/** Дательный падеж предмета для empty-state («По физике…»). Новый предмет → дописать. */
+/** Дательный падеж предмета для empty-state («По физике…»). Полный словарь SUBJECTS. */
 const SUBJECT_DATIVE: Record<string, string> = {
+  maths: 'математике',
   physics: 'физике',
+  informatics: 'информатике',
+  russian: 'русскому языку',
+  literature: 'литературе',
+  history: 'истории',
   social: 'обществознанию',
+  english: 'английскому языку',
+  french: 'французскому языку',
+  spanish: 'испанскому языку',
+  chemistry: 'химии',
+  biology: 'биологии',
+  geography: 'географии',
+  other: 'этому предмету',
 };
 
 function KnowledgeBaseContent() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') === 'mybase' ? 'mybase' : 'catalog';
+  // Профиль — для дефолта предмета и онбординг-нуджа (кэш card-ключа тёплый).
+  const { data: tutorProfile, isLoading: profileLoading } = useTutorProfile();
   const [mainTab, setMainTab] = useState<MainTab>(initialTab);
   const [examFilter, setExamFilter] = useState<CatalogFilter>('ege');
-  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
+  // Дефолт-предмет: last-used (KB-серия) → профиль репетитора → physics.
+  const [subject, setSubject] = useState<string>(() =>
+    resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
+  );
   const [searchQuery, setSearchQuery] = useState('');
 
   return (
       <KnowledgeBaseFrame>
         <div className="space-y-8">
+          {/* Онбординг-нудж: профиль без предметов → предложить заполнить здесь,
+              где боль (персонализация кабинета начинается с этого). */}
+          {!profileLoading && tutorProfile && tutorProfile.subjects.length === 0 ? (
+            <SubjectsNudgeBanner profile={tutorProfile} />
+          ) : null}
           <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
             {([
               { key: 'catalog' as MainTab, label: 'Каталог Сократ AI', Icon: LayoutGrid },
@@ -111,8 +137,29 @@ function CatalogHome({
 }: CatalogHomeProps) {
   const navigate = useNavigate();
   const { topics, loading, error, refetch, isFetching } = useTopics(examFilter, subject);
+  // Все темы (без фильтров) — для дерайва «предметы с каталожным контентом».
+  // Тот же кэш-ключ, что у KBPickerSheet (справочник, quiet).
+  const { topics: allTopics } = useTopics(undefined, undefined);
+  const { data: tutorProfile } = useTutorProfile();
   const search = useKBSearch(searchQuery, examFilter);
   const { isModerator } = useIsModerator();
+
+  // Pills = union(якорные каталожные, предметы существующих тем, предметы
+  // репетитора, активный) в каноническом порядке SUBJECTS; неизвестные id
+  // (нестандартный subject темы) — в конец. Персонализация: у репетитора-химика
+  // появляется pill «Химия» с честным empty-state, у остальных — без шума.
+  const subjectPills = useMemo(() => {
+    const ids = new Set<string>(KB_SUBJECTS.map((s) => s.id));
+    for (const t of allTopics) if (t.subject) ids.add(t.subject);
+    for (const s of tutorProfile?.subjects ?? []) {
+      if (s !== 'other' && SUBJECTS.some((cs) => cs.id === s)) ids.add(s);
+    }
+    ids.add(subject);
+    const order = new Map(SUBJECTS.map((s, i) => [s.id, i]));
+    return [...ids].sort(
+      (a, b) => (order.get(a) ?? 99) - (order.get(b) ?? 99) || a.localeCompare(b),
+    );
+  }, [allTopics, tutorProfile?.subjects, subject]);
   const [showDropdown, setShowDropdown] = useState(true);
   const [showCreateTopic, setShowCreateTopic] = useState(false);
   const [showSources, setShowSources] = useState(false);
@@ -188,20 +235,20 @@ function CatalogHome({
           три уровня навигации одинакового веса перед контентом перегружали
           «где я»; предмет — фильтр витрины, визуально легче таба раздела). */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Предмет каталога">
-        {KB_SUBJECTS.map((s) => (
+        {subjectPills.map((id) => (
           <button
-            key={s.id}
+            key={id}
             type="button"
-            onClick={() => setSubject(s.id)}
-            aria-pressed={subject === s.id}
+            onClick={() => setSubject(id)}
+            aria-pressed={subject === id}
             className={cn(
               'inline-flex min-h-[36px] items-center rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-200 [touch-action:manipulation]',
-              subject === s.id
+              subject === id
                 ? 'border-socrat-primary bg-socrat-primary text-white'
                 : 'border-socrat-border bg-white text-slate-600 hover:border-socrat-primary/40 hover:text-socrat-primary',
             )}
           >
-            {s.label}
+            {getSubjectLabel(id)}
           </button>
         ))}
       </div>

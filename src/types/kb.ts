@@ -18,10 +18,15 @@ export type TopicKind = 'exam' | 'olympiad';
 export type CatalogFilter = 'ege' | 'oge' | 'olympiad';
 
 /**
- * Предметы, активные в «Базе задач» (мультипредметный каталог, 2026-07-06).
- * `kb_topics.subject`/`kb_sources.subject` — свободный TEXT (default 'physics');
- * это список для переключателя предмета в UI. Новый предмет модератора →
- * добавляй сюда (и заводи его темы self-serve). Порядок = порядок табов.
+ * Предметы с АНОНСИРОВАННЫМ каталожным контентом (мультипредметный каталог, 2026-07-07).
+ *
+ * ⚠️ Семантика сузилась: это больше НЕ словарь форм. Личные формы задач
+ * (Create/EditTaskModal, AI-загрузчик, каскад классификации) рендерят ПОЛНЫЙ
+ * `SUBJECTS` (14, `@/types/homework`) — школьный репетитор любого предмета
+ * грузит задачи в свою базу. Этот список — только «якорные» предметы витрины
+ * Каталога (pills всегда показывают их, даже до появления тем; новый
+ * модератор-предметник → добавляй сюда + онбординг-миграция с ОБЕИМИ ролями,
+ * rule 50). `kb_topics.subject`/`kb_sources.subject` — свободный TEXT.
  */
 export const KB_SUBJECTS = [
   { id: 'physics', label: 'Физика' },
@@ -30,7 +35,11 @@ export const KB_SUBJECTS = [
 
 export type KBSubjectId = (typeof KB_SUBJECTS)[number]['id'];
 
-/** Предмет по умолчанию (обратная совместимость: весь существующий контент — физика). */
+/**
+ * Исторический fallback-предмет KB (весь старый контент — физика).
+ * Для ДЕФОЛТА поверхностей используй `resolveTutorDefaultSubject`
+ * (`@/lib/tutorSubjects`) — last-used → профиль → physics.
+ */
 export const DEFAULT_KB_SUBJECT: KBSubjectId = 'physics';
 
 export type MaterialType = 'file' | 'link' | 'media' | 'board';

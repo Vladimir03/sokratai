@@ -23,6 +23,7 @@
 import { useId, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { getSubjectLabel } from '@/types/homework';
 import {
   AlertCircle,
   Clock3,
@@ -216,9 +217,10 @@ function ConfirmStartDialog({
 function TutorCard({ tutor }: { tutor: PublicMockInviteData['tutor'] }) {
   if (!tutor) return null;
 
+  // tutors.subjects хранит id ('physics') — ученику/родителю показываем лейблы.
   const subjectsLine =
     tutor.subjects && tutor.subjects.length > 0
-      ? tutor.subjects.join(', ')
+      ? tutor.subjects.map(getSubjectLabel).join(', ')
       : null;
 
   return (

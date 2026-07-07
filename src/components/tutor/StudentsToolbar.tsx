@@ -1,6 +1,7 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { ArrowUpDown, RotateCcw, Search, Tag } from 'lucide-react';
+import { getSubjectLabel } from '@/types/homework';
 import type { TutorGroup } from '@/types/tutor';
 
 export type SortField = 'activity' | 'name' | 'progress';
@@ -189,7 +190,8 @@ export function StudentsToolbar({
             <SelectContent>
               <SelectItem value="all">Все предметы</SelectItem>
               {subjects.map(subject => (
-                <SelectItem key={subject} value={subject}>{subject}</SelectItem>
+                // Новые записи — id ('maths'), legacy — русский текст (fallback raw).
+                <SelectItem key={subject} value={subject}>{getSubjectLabel(subject)}</SelectItem>
               ))}
             </SelectContent>
           </Select>

@@ -12,8 +12,12 @@ import {
   type ExtractedTask,
 } from '@/lib/kbAiExtractApi';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
+import { loadLastClassification } from '@/lib/kbLastClassification';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
-import { DEFAULT_KB_SUBJECT, KB_SUBJECTS, type KBFolderTreeNode } from '@/types/kb';
+import { SUBJECTS } from '@/types/homework';
+import type { KBFolderTreeNode } from '@/types/kb';
 
 /** Max screenshots per session (mirror edge MAX_IMAGES). */
 const MAX_LOADER_IMAGES = 10;
@@ -45,8 +49,13 @@ interface InputStageProps {
 
 export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const { tree, loading: treeLoading } = useFolderTree();
+  // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
+  const { data: tutorProfile } = useTutorProfile();
   const [folderId, setFolderId] = useState(initialFolderId);
-  const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
+  // Дефолт: last-used (серия KB) → профиль репетитора → physics.
+  const [subject, setSubject] = useState<string>(() =>
+    resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
+  );
   const [text, setText] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
@@ -151,7 +160,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
 
   return (
     <div className="space-y-4">
-      {/* Предмет — выбирает системный промпт распознавания (физика / обществознание) */}
+      {/* Предмет — выбирает системный промпт распознавания (физика / обществознание /
+          generic для остальных школьных). Полный словарь SUBJECTS. */}
       <fieldset>
         <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
         <select
@@ -160,8 +170,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           disabled={isExtracting}
           className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
         >
-          {KB_SUBJECTS.map((s) => (
-            <option key={s.id} value={s.id}>{s.label}</option>
+          {SUBJECTS.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
           ))}
         </select>
       </fieldset>

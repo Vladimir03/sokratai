@@ -33,8 +33,12 @@ import type { Tutor } from '@/types/tutor';
  * tutorStudentCacheSync их видят.
  */
 
-/** Ключ этого хука: профиль-карточка (имя/аватар/предметы/пол/mini_groups). */
-const TUTOR_PROFILE_CARD_KEY = ['tutor', 'profile', 'card'] as const;
+/**
+ * Ключ этого хука: профиль-карточка (имя/аватар/предметы/пол/mini_groups).
+ * Экспортирован для СИНХРОННОГО чтения кэша (`queryClient.getQueryData`) в
+ * lazy-init'ах форм (дефолт предмета в конструкторе ДЗ) — без новой подписки.
+ */
+export const TUTOR_PROFILE_CARD_KEY = ['tutor', 'profile', 'card'] as const;
 /** Ключ `useTutor()`/`getCurrentTutor()` — полная строка `tutors` (app-wide). */
 const FULL_TUTOR_QUERY_KEY = ['tutor', 'profile'] as const;
 const TUTOR_PROFILE_STALE_TIME_MS = 5 * 60_000; // 5 minutes per spec.

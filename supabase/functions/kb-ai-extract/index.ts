@@ -226,15 +226,132 @@ const KB_EXTRACT_SCHEMA_BLOCK_SOCIAL = String.raw`СХЕМА ВЫХОДА — в
 Выход:
 {"tasks":[{"text":"Выберите верные суждения об обществе и запишите цифры, под которыми они указаны.\n1) Общество — часть материального мира.\n2) Общество создаёт условия для самореализации личности.\n3) Развитие общества может иметь прогрессивный характер.\n4) Изменения в обществе происходят только под влиянием внешних факторов.\n5) Обществом называют устойчивую систему социальных связей.","answer":"235","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":2,"exam":"ege","primary_score":2,"rubric_text":null,"topic_suggestion":"Человек и общество","subtopic_suggestion":"Общество как система","source_label":"","image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
 
-/** Известные предметы AI-загрузчика (мультипредметный каталог). Default 'physics'. */
-const VALID_SUBJECT = new Set(["physics", "social"]);
+// ─── Generic-промпт для остальных школьных предметов (2026-07-07) ─────────────
+// Полный словарь SUBJECTS (mirror-copy `src/types/homework.ts` — Deno не может
+// импортировать фронтовые типы, конвенция rule 40). physics/social имеют
+// выделенные калиброванные промпты; остальные — параметризованный generic:
+// формульная LaTeX-инструкция только для формульных предметов (математика/
+// информатика/химия/биология), гуманитарные/языки — чистый текст. КИМ-диапазоны
+// per-предмет не хардкодим (карт ФИПИ нет) — «только если явно указан».
 
-/** Системный промпт + схема под предмет. Неизвестный предмет → физика (безопасный fallback). */
+const SUBJECT_META_DENO: Record<string, { genitive: string; usesFormulas: boolean }> = {
+  maths: { genitive: "математики", usesFormulas: true },
+  physics: { genitive: "физики", usesFormulas: true },
+  informatics: { genitive: "информатики", usesFormulas: true },
+  russian: { genitive: "русского языка", usesFormulas: false },
+  literature: { genitive: "литературы", usesFormulas: false },
+  history: { genitive: "истории", usesFormulas: false },
+  social: { genitive: "обществознания", usesFormulas: false },
+  english: { genitive: "английского языка", usesFormulas: false },
+  french: { genitive: "французского языка", usesFormulas: false },
+  spanish: { genitive: "испанского языка", usesFormulas: false },
+  chemistry: { genitive: "химии", usesFormulas: true },
+  biology: { genitive: "биологии", usesFormulas: true },
+  geography: { genitive: "географии", usesFormulas: false },
+  other: { genitive: "школьного предмета", usesFormulas: false },
+};
+
+/** Известные предметы AI-загрузчика. Неизвестное значение → 'physics' (fallback). */
+const VALID_SUBJECT = new Set(Object.keys(SUBJECT_META_DENO));
+
+const GENERIC_FORMULA_RULE = String.raw`Все формулы, уравнения и специальные
+   обозначения оформи inline-LaTeX в долларах: $x^2$, $\frac{a}{b}$, $\sqrt{}$,
+   химические уравнения вида $2H_2 + O_2 \rightarrow 2H_2O$. Пиши ЧИСТЫЙ LaTeX,
+   не оставляй битых конструкций.`;
+
+const GENERIC_NO_FORMULA_RULE = String.raw`НЕ используй LaTeX и формулы — это
+   предмет с обычным текстом.`;
+
+function buildGenericExtractPrompt(subjectId: string): string {
+  const meta = SUBJECT_META_DENO[subjectId] ?? SUBJECT_META_DENO.other;
+  const formulaRule = meta.usesFormulas ? GENERIC_FORMULA_RULE : GENERIC_NO_FORMULA_RULE;
+  return String.raw`Ты — ассистент репетитора ${meta.genitive} в сервисе «Сократ». Тебе дают сырой
+материал (текст, фото страницы сборника, PDF-задачник) и ты извлекаешь из него
+ОТДЕЛЬНЫЕ задания в структурированном виде для базы задач репетитора.
+
+ТВОЯ ЗАДАЧА — РАСПОЗНАТЬ И СТРУКТУРИРОВАТЬ, НЕ ПРИДУМЫВАТЬ.
+
+Правила:
+1. Раздели материал на отдельные задания. Не склеивай разные задания и не дроби
+   одно на части. Если на странице 8 заданий — верни 8 объектов.
+2. Текст условия (поле text): перепиши дословно, исправляя только явные опечатки
+   распознавания. ${formulaRule}
+   ВАЖНО ПО ФОРМАТИРОВАНИЮ: каждый перечисляемый вариант / пункт / суждение пиши
+   С НОВОЙ СТРОКИ (реальный перенос строки — символ \n в JSON), а не сплошным
+   абзацем. Для заданий на установление соответствия сохрани оба столбца читаемо.
+3. Ответ (поле answer): впиши ТОЛЬКО если он явно есть в материале или однозначно
+   следует из условия и ты уверен. Если ответа нет или есть сомнение —
+   answer = null, answer_confidence = "low". НИКОГДА не выдумывай ответ.
+4. Решение/пояснение (поле solution): впиши, ТОЛЬКО если оно есть в материале.
+   Иначе null.
+5. Критерии (поле rubric_text): впиши схему оценивания, ТОЛЬКО если она есть в
+   материале. Иначе null.
+6. Классификация: exam ("ege"/"oge"/null — только если формат экзамена явно ясен
+   из материала); kim_number — ТОЛЬКО если номер задания ЕГЭ/ОГЭ явно указан в
+   материале, иначе null (НЕ угадывай); primary_score — только если указан;
+   answer_format; предложи тему/подтему (topic_suggestion/subtopic_suggestion)
+   по содержанию. Это подсказки — репетитор подтвердит.
+7. check_format: краткий ответ (число / слово / последовательность / выбор) →
+   "short_answer"; задание с развёрнутым ответом (сочинение, доказательство,
+   развёрнутое решение, аргументация) → "detailed_solution".
+8. Рисунки: укажи image_index (0-based по порядку приложенных файлов) ТОЛЬКО если
+   выполнены ОБА условия: (а) изображение содержит РОВНО ОДНУ задачу, и (б) в
+   задаче есть существенный рисунок (график, схема, карта, диаграмма), без
+   которого её не решить. Если изображение содержит НЕСКОЛЬКО заданий — НЕ
+   прикрепляй его ни к одному (image_index = null, только распознанный текст).
+   Если сомневаешься — image_index = null и добавь "image" в needs_review_fields.
+   НЕ перерисовывай рисунок; image_action = "attach_original". НИКОГДА не считай
+   рисунком бланк ответов, номер задания или рамку.
+9. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
+10. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
+
+Контекст от репетитора (если передан): exam_hint, topic_hint — учитывай как приоритет.`;
+}
+
+const KB_EXTRACT_SCHEMA_BLOCK_GENERIC = String.raw`СХЕМА ВЫХОДА — верни РОВНО такой JSON-объект (без markdown, без текста вне JSON):
+{
+  "tasks": [
+    {
+      "text": "string (каждый вариант/пункт с новой строки — \n)",
+      "answer": "string | null",
+      "answer_confidence": "high | medium | low",
+      "solution": "string | null",
+      "answer_format": "number | text | detailed | matching | choice | null",
+      "check_format": "short_answer | detailed_solution | null",
+      "kim_number": "integer | null (только если явно указан в материале)",
+      "exam": "ege | oge | null",
+      "primary_score": "integer | null",
+      "rubric_text": "string | null",
+      "topic_suggestion": "string",
+      "subtopic_suggestion": "string",
+      "source_label": "string",
+      "image_index": "integer (0-based) | null",
+      "image_action": "attach_original",
+      "needs_review_fields": ["string"],
+      "notes": "string | null"
+    }
+  ],
+  "stats": { "found": 0, "low_confidence_answers": 0, "unreadable_images": 0 }
+}
+
+ПРИМЕР. Вход: «4. Расположите в хронологической последовательности исторические события.
+1) Крещение Руси 2) Куликовская битва 3) призвание варягов. Ответ: 312.»
+Выход:
+{"tasks":[{"text":"Расположите в хронологической последовательности исторические события. Запишите цифры, которыми обозначены события, в правильной последовательности.\n1) Крещение Руси\n2) Куликовская битва\n3) призвание варягов","answer":"312","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":null,"exam":null,"primary_score":null,"rubric_text":null,"topic_suggestion":"Древняя Русь","subtopic_suggestion":"","source_label":"","image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
+
+/**
+ * Системный промпт + схема под предмет: physics/social — выделенные калиброванные;
+ * остальные школьные — generic (параметризован предметом). Неизвестный id сюда не
+ * доходит (VALID_SUBJECT-гейт → 'physics').
+ */
 function resolveExtractPrompt(subject: string): { systemPrompt: string; schemaBlock: string } {
   if (subject === "social") {
     return { systemPrompt: KB_EXTRACT_SYSTEM_PROMPT_SOCIAL, schemaBlock: KB_EXTRACT_SCHEMA_BLOCK_SOCIAL };
   }
-  return { systemPrompt: KB_EXTRACT_SYSTEM_PROMPT, schemaBlock: KB_EXTRACT_SCHEMA_BLOCK };
+  if (subject === "physics") {
+    return { systemPrompt: KB_EXTRACT_SYSTEM_PROMPT, schemaBlock: KB_EXTRACT_SCHEMA_BLOCK };
+  }
+  return { systemPrompt: buildGenericExtractPrompt(subject), schemaBlock: KB_EXTRACT_SCHEMA_BLOCK_GENERIC };
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
