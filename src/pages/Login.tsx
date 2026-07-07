@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
+import { callAuthWithRetry, isAuthNetworkFailure } from "@/lib/authRetry";
 import { readAuthRedirectError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -24,6 +25,9 @@ const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  // Под РФ-DPI первый запрос логина может «упасть» → авто-ретрай (authRetry),
+  // флаг показывает «сеть медленная, ещё раз» на кнопке (зеркало TutorLogin).
+  const [retrying, setRetrying] = useState(false);
   const [showTelegramHint, setShowTelegramHint] = useState(false);
   const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const redirectErrorShown = useRef(false);
@@ -99,6 +103,7 @@ const Login = () => {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setRetrying(false);
 
     try {
       const validation = loginSchema.safeParse({ email, password });
@@ -108,18 +113,25 @@ const Login = () => {
         return;
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: validation.data.email,
-        password: validation.data.password,
-      });
+      // Таймаут+ретрай ТОЛЬКО на сетевой сбой/таймаут (РФ-DPI роняет запрос).
+      // Неверный пароль резолвится в `{ error }` → сразу, без ретрая.
+      const { data, error } = await callAuthWithRetry(
+        () => supabase.auth.signInWithPassword({
+          email: validation.data.email,
+          password: validation.data.password,
+        }),
+        { onRetry: () => setRetrying(true) },
+      );
 
       if (error) throw error;
 
-      // Non-blocking: claim pending invite if exists in localStorage
+      // Non-blocking: claim pending invite if exists in localStorage. Забаундено
+      // тем же таймаутом (claim идемпотентен, rule 60) — чтобы обрыв не завесил
+      // вход после успешной авторизации; ошибка/таймаут проглатывается.
       try {
-        await claimPendingInvite();
+        await callAuthWithRetry(() => claimPendingInvite());
       } catch {
-        // Claim error does not block login
+        // Claim error/timeout does not block login
       }
 
       // Check if user is a tutor and redirect accordingly
@@ -130,7 +142,20 @@ const Login = () => {
           window.location.replace(nextParam);
           return;
         }
-        const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: data.user.id });
+        const userId = data.user.id;
+        // is_tutor здесь НЕ критичен (лишь выбор редиректа tutor↔student). Сбой
+        // сети НЕ должен блокировать вход — бунтуем таймаутом и по-умолчанию ведём
+        // как ученика (сохраняет прежнее поведение «isTutor undefined → student»).
+        let isTutor = false;
+        try {
+          const roleRes = await callAuthWithRetry(
+            () => Promise.resolve(supabase.rpc("is_tutor", { _user_id: userId })) as Promise<any>,
+            { onRetry: () => setRetrying(true) },
+          );
+          isTutor = !!roleRes.data;
+        } catch {
+          isTutor = false;
+        }
 
         if (isTutor) {
           toast.success("Успешный вход!");
@@ -142,9 +167,19 @@ const Login = () => {
       toast.success("Успешный вход!");
       navigate("/student/schedule");
     } catch (error: any) {
-      toast.error(getAuthErrorMessage(error, "Ошибка входа"));
+      // Сетевой сбой/таймаут под DPI — честное сообщение + подсказка про VPN,
+      // а не вечный спиннер и не generic «Ошибка входа».
+      if (isAuthNetworkFailure(error)) {
+        toast.error(
+          "Сеть не отвечает — запрос не дошёл. Попробуйте ещё раз; в РФ часто помогает вход с VPN.",
+          { duration: 8000 },
+        );
+      } else {
+        toast.error(getAuthErrorMessage(error, "Ошибка входа"));
+      }
     } finally {
       setLoading(false);
+      setRetrying(false);
     }
   };
 
@@ -209,7 +244,7 @@ const Login = () => {
               className="w-full"
               disabled={loading}
             >
-              {loading ? "Вход..." : "Войти по email"}
+              {loading ? (retrying ? "Сеть медленная, ещё раз…" : "Вход...") : "Войти по email"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               Нет аккаунта?{" "}
