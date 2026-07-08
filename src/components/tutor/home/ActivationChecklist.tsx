@@ -13,12 +13,25 @@
  * P14: НЕ блокирует, dismissible, не 5-шаговый визард. Один primary-CTA (первый
  * незакрытый шаг). Lucide без эмодзи (rule 90).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 import { useTutorHomeworkAssignments } from "@/hooks/useTutorHomework";
 import { DemoCheckCard } from "@/components/tutor/home/DemoCheckCard";
+import { supabase } from "@/lib/supabaseClient";
 
 const DISMISS_KEY = "sokrat-activation-checklist-dismissed";
+
+// ВРЕМЕННЫЙ тест-allowlist: для этих email чеклист+демо показываются ВСЕГДА
+// (в обход dismiss/allDone), чтобы уже-активированные репетиторы/модераторы могли
+// протестировать онбординг. Удалить после теста. (Запрос Vladimir 2026-07-08.)
+const DEMO_TEST_EMAILS = new Set(
+  [
+    "volodyakamchatkin@gmail.com",
+    "kamchatkinvova@gmail.com",
+    "egor.o.blinov@gmail.com",
+    "milada.met@yandex.ru",
+  ].map((e) => e.toLowerCase()),
+);
 
 interface ActivationChecklistProps {
   hasStudents: boolean;
@@ -49,6 +62,19 @@ export function ActivationChecklist({
       return false;
     }
   });
+
+  // Тест-allowlist (временно): показываем онбординг даже активированным.
+  const [forceShow, setForceShow] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      const email = data.session?.user?.email?.toLowerCase();
+      if (active && email && DEMO_TEST_EMAILS.has(email)) setForceShow(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Шаги 2–3 деривятся из списка ДЗ (общий кэш с /tutor/homework — дёшево).
   // ВНИМАНИЕ: хук возвращает { assignments, loading }, НЕ { data, isLoading }
@@ -87,7 +113,8 @@ export function ActivationChecklist({
   // Не мигать онбордингом у состоявшегося репетитора, пока грузится список ДЗ.
   const holdForData = hasStudents && isLoading;
 
-  if (dismissed || allDone || holdForData) return null;
+  // Тест-allowlist в обход всех гейтов; иначе обычная логика.
+  if (!forceShow && (dismissed || allDone || holdForData)) return null;
 
   const handleDismiss = () => {
     try {
