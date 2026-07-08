@@ -28,6 +28,9 @@ import type {
 } from "@/types/homework";
 import { getDemoCheckSample } from "@/lib/demoCheck/samples";
 import { runDemoCheck, DemoCheckError } from "@/lib/demoCheckApi";
+import { useImageUpload } from "@/hooks/useImageUpload";
+import { ImageUploadField } from "@/components/kb/ui/ImageUploadField";
+import { uploadKBTaskImage } from "@/lib/kbApi";
 
 const MathText = lazy(() =>
   import("@/components/kb/ui/MathText").then((m) => ({ default: m.MathText })),
@@ -125,8 +128,14 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
   const [capReached, setCapReached] = useState(false);
   const [ownResult, setOwnResult] = useState<Awaited<ReturnType<typeof runDemoCheck>> | null>(null);
 
+  // Фото задачи/ответа (как в ДЗ). Загружаются в kb-attachments на «Проверить».
+  const taskImages = useImageUpload({ maxImages: 3 });
+  const answerImages = useImageUpload({ maxImages: 3 });
+
   const isPhysics = ownSubject === "physics";
-  const canRun = taskText.trim().length > 0 && answerText.trim().length > 0 && !running;
+  const hasTask = taskText.trim().length > 0 || taskImages.totalImages > 0;
+  const hasAnswer = answerText.trim().length > 0 || answerImages.totalImages > 0;
+  const canRun = hasTask && hasAnswer && !running;
 
   const handleRun = async () => {
     if (!canRun) return;
@@ -157,6 +166,20 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
     setCapReached(false);
     setOwnResult(null);
     try {
+      // Загружаем фото (если есть) → storage-рефы (как в ДЗ, kb-attachments).
+      let taskRefs: string[] = [];
+      let answerRefs: string[] = [];
+      try {
+        taskRefs = await Promise.all(
+          taskImages.getNewFiles().map((f) => uploadKBTaskImage(f).then((r) => r.storageRef)),
+        );
+        answerRefs = await Promise.all(
+          answerImages.getNewFiles().map((f) => uploadKBTaskImage(f).then((r) => r.storageRef)),
+        );
+      } catch {
+        setOwnError("Не удалось загрузить фото. Попробуйте ещё раз.");
+        return; // finally сбросит running
+      }
       const res = await runDemoCheck({
         subject: ownSubject,
         exam_type: examType,
@@ -165,6 +188,8 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
         kim_number: kimNum,
         max_score: maxNum,
         check_format: checkFormat,
+        task_image_refs: taskRefs,
+        answer_image_refs: answerRefs,
       });
       setOwnResult(res);
     } catch (e) {
@@ -320,6 +345,11 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
                 className="w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-base leading-relaxed"
               />
             </label>
+            <ImageUploadField
+              label="Фото задачи (необязательно)"
+              imageUpload={taskImages}
+              disabled={running}
+            />
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-600">Ответ ученика</span>
               <textarea
@@ -330,6 +360,11 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
                 className="w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-base leading-relaxed"
               />
             </label>
+            <ImageUploadField
+              label="Фото ответа ученика (необязательно)"
+              imageUpload={answerImages}
+              disabled={running}
+            />
 
             {/* Опц. № КИМ (физика Часть 2 № 21-26 → блок-схема ФИПИ) + Макс. балл
                 шкалы предмета (общество № 25 = 4 и т.п.; дефолт 3). */}

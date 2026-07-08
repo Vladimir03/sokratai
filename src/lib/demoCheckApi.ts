@@ -25,6 +25,10 @@ export interface DemoCheckInput {
   max_score?: number | null;
   /** Формат: 'short_answer' = лайт-проверка; 'detailed_solution' = ФИПИ-критерии. */
   check_format?: "short_answer" | "detailed_solution";
+  /** storage://kb-attachments/{userId}/... рефы фото условия (как в ДЗ). */
+  task_image_refs?: string[];
+  /** storage://kb-attachments/{userId}/... рефы фото ответа ученика. */
+  answer_image_refs?: string[];
 }
 
 export interface DemoCheckResult {

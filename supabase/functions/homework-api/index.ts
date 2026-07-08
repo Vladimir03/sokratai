@@ -11478,6 +11478,25 @@ async function handleMarkThreadViewed(
 // cap (счётчик = прошедшие `tutor_demo_check_ran` за сегодня, без новой таблицы).
 const DEMO_CHECK_DAILY_CAP = 10;
 const DEMO_CHECK_DEFAULT_MAX_SCORE = 3;
+const DEMO_CHECK_MAX_IMAGES = 3;
+
+/**
+ * Валидирует демо-рефы фото: принимаем ТОЛЬКО kb-attachments в namespace
+ * вызывающего тутора (`storage://kb-attachments/{userId}/...`) — чтобы через
+ * демо нельзя было прочитать чужую картинку (ownership поверх SSRF/bucket-гардов
+ * resolveTaskImageUrlForAI). Cap 3. Чужое/битое молча дропаем.
+ */
+function validateDemoImageRefs(refs: unknown, userId: string): string[] {
+  if (!Array.isArray(refs)) return [];
+  const out: string[] = [];
+  for (const r of refs) {
+    if (typeof r !== "string") continue;
+    const m = r.match(/^storage:\/\/kb-attachments\/([^/]+)\//);
+    if (m && m[1] === userId) out.push(r);
+    if (out.length >= DEMO_CHECK_MAX_IMAGES) break;
+  }
+  return out;
+}
 
 async function handleTutorDemoCheck(
   db: SupabaseClient,
@@ -11540,7 +11559,7 @@ async function handleTutorDemoCheck(
     );
   }
 
-  // 3. Валидация входа (text-only V1).
+  // 3. Валидация входа (текст и/или фото — как в ДЗ).
   const b = bodyObj;
   const subject =
     isNonEmptyString(b.subject) &&
@@ -11552,8 +11571,15 @@ async function handleTutorDemoCheck(
   }
   const taskText = isNonEmptyString(b.task_text) ? b.task_text.trim() : "";
   const answerText = isNonEmptyString(b.answer_text) ? b.answer_text.trim() : "";
-  if (!taskText) return jsonError(cors, 400, "VALIDATION", "Добавьте условие задачи.");
-  if (!answerText) return jsonError(cors, 400, "VALIDATION", "Добавьте ответ ученика.");
+  // Фото задачи/ответа (как в ДЗ) — только свой namespace kb-attachments, cap 3.
+  const taskImageRefs = validateDemoImageRefs(b.task_image_refs, userId);
+  const answerImageRefs = validateDemoImageRefs(b.answer_image_refs, userId);
+  if (!taskText && taskImageRefs.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Добавьте условие задачи (текст или фото).");
+  }
+  if (!answerText && answerImageRefs.length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Добавьте ответ ученика (текст или фото).");
+  }
   const examType =
     isNonEmptyString(b.exam_type) &&
     (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type)
@@ -11578,17 +11604,27 @@ async function handleTutorDemoCheck(
     maxScore = m;
   }
 
-  // 4. Грейдинг — reuse evaluateStudentAnswer. Ad-hoc: нет solution/rubric/фото.
+  // Резолвим фото → inline base64/signed для AI (reuse resolveTaskImageUrlsForAI:
+  // те же SSRF/bucket/size-гарды, что в реальной проверке). Пусто → [].
+  // Placeholder-текст при photo-only (как в ДЗ) — картинку AI получает отдельно.
+  const [taskImageUrls, studentImageUrls] = await Promise.all([
+    resolveTaskImageUrlsForAI(db, taskImageRefs.length > 0 ? JSON.stringify(taskImageRefs) : null),
+    resolveTaskImageUrlsForAI(db, answerImageRefs.length > 0 ? JSON.stringify(answerImageRefs) : null),
+  ]);
+  const taskTextForAi = taskText || "[Задача на фото]";
+  const studentAnswerForAi = answerText || "(решение на фото)";
+
+  // 4. Грейдинг — reuse evaluateStudentAnswer. Ad-hoc: нет solution/rubric.
   //    task_kind='extended' + detailed_solution → развёрнутый разбор (демо-цель).
   //    Физика + kim_number № 21-26 → flowchart-трасса; языки → criteria_breakdown.
   //    Токены логируются в token_usage_logs под source='demo_check' (observability).
   let result;
   try {
     result = await evaluateStudentAnswer({
-      studentAnswer: answerText,
-      taskText,
-      taskImageUrls: [],
-      studentImageUrls: [],
+      studentAnswer: studentAnswerForAi,
+      taskText: taskTextForAi,
+      taskImageUrls,
+      studentImageUrls,
       correctAnswer: null,
       rubricText: null,
       solutionText: null,
