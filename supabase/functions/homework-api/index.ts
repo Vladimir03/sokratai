@@ -9962,6 +9962,48 @@ async function handleCheckAnswer(
     feedbackKind: "ai_reply",
   });
 
+  // Воронка (v2.1 W4): первая сдача ученика на numeric-inline answer-пути.
+  // logAnalyticsEventOnce со scope student_id дедупит с handleStudentSubmission
+  // (SubmitSheet). Раньше numeric-путь НЕ считался → активация ученика
+  // недосчитывалась (частый первый тип — ЕГЭ/ОГЭ numeric). Mirror блока в
+  // handleStudentSubmission.
+  {
+    const hwId = studentAssignment.assignment_id;
+    let tId: string | null = null;
+    let tStudentId: string | null = null;
+    try {
+      const { data: aRow } = await db
+        .from("homework_tutor_assignments")
+        .select("tutor_id")
+        .eq("id", hwId)
+        .maybeSingle();
+      tId = (aRow?.tutor_id as string | null) ?? null;
+      const { data: tsRow } = await db
+        .from("tutor_students")
+        .select("id")
+        .eq("student_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      tStudentId = (tsRow?.id as string | null) ?? null;
+    } catch {
+      // best-effort
+    }
+    await logAnalyticsEventOnce(
+      db,
+      {
+        event_name: "student_first_submission",
+        actor_user_id: userId,
+        student_id: userId,
+        tutor_id: tId,
+        tutor_student_id: tStudentId,
+        assignment_id: hwId,
+        source: "numeric_inline",
+      },
+      { student_id: userId },
+    );
+  }
+
   // Return updated thread (student-facing: filter hidden notes)
   const updatedThread = await fetchStudentThread(db, threadId);
   if (
@@ -11425,6 +11467,173 @@ async function handleMarkThreadViewed(
   return jsonOk(cors, { ok: true, viewed_at: nowIso });
 }
 
+// ─── Endpoint: POST /tutor/demo-check (tutor demo — «проверить свою задачу») ──
+//
+// v2.1 W1-B: live-разбор ad-hoc задачи+ответа репетитора БЕЗ assignment/student/
+// DB-строк — сдвиг aha влево (увидеть проверку Сократа на своём контенте до
+// подключения учеников). Reuse `evaluateStudentAnswer` (ядро грейдинга) в ЭТОЙ
+// же функции → ноль cross-function import. Text-only V1 (фото — follow-up).
+//
+// Квота (rule 99): НЕ трогает ученическую дневную квоту; свой per-tutor дневной
+// cap (счётчик = прошедшие `tutor_demo_check_ran` за сегодня, без новой таблицы).
+const DEMO_CHECK_DAILY_CAP = 10;
+const DEMO_CHECK_DEFAULT_MAX_SCORE = 3;
+
+async function handleTutorDemoCheck(
+  db: SupabaseClient,
+  userId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  // 1. Только репетитор (ученик не должен юзать демо как бесплатный грейдер).
+  const { data: isTutor, error: roleErr } = await db.rpc("is_tutor", {
+    _user_id: userId,
+  });
+  if (roleErr) {
+    return jsonError(cors, 500, "ROLE_CHECK_FAILED", "Не удалось проверить роль. Попробуйте ещё раз.");
+  }
+  if (!isTutor) {
+    return jsonError(cors, 403, "NOT_A_TUTOR", "Демо-разбор доступен только репетитору.");
+  }
+
+  // tutors.id для аналитики — воронка репетитора джойнится по tutors.id
+  // (tutor_first_student_added / tutor_first_homework_created пишут tutor.id),
+  // НЕ auth.uid (FK-дрейф rule 40). Fallback userId, чтобы не терять событие.
+  let tutorPkId = userId;
+  {
+    const { data: tRow } = await db
+      .from("tutors")
+      .select("id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (tRow?.id) tutorPkId = tRow.id as string;
+  }
+
+  const bodyObj = (body && typeof body === "object") ? body as Record<string, unknown> : {};
+
+  // 1b. action='view' — лёгкий beacon «открыл готовый пример» (без AI/cap).
+  //     Once-per-tutor (funnel-сигнал «дошёл до демо»).
+  if (bodyObj.action === "view") {
+    await logAnalyticsEventOnce(
+      db,
+      { event_name: "tutor_demo_check_viewed", actor_user_id: userId, tutor_id: tutorPkId },
+      { tutor_id: tutorPkId },
+    );
+    return jsonOk(cors, { ok: true });
+  }
+
+  // 2. Дневной cap — считаем прошедшие демо-разборы за сегодня (UTC-midnight).
+  const midnight = new Date();
+  midnight.setUTCHours(0, 0, 0, 0);
+  const { count: ranToday } = await db
+    .from("analytics_events")
+    .select("id", { count: "exact", head: true })
+    .eq("event_name", "tutor_demo_check_ran")
+    .eq("tutor_id", tutorPkId)
+    .gte("occurred_at", midnight.toISOString());
+  if ((ranToday ?? 0) >= DEMO_CHECK_DAILY_CAP) {
+    return jsonError(
+      cors,
+      429,
+      "DEMO_LIMIT_REACHED",
+      `Сегодня уже ${DEMO_CHECK_DAILY_CAP} демо-разборов. Попробуйте завтра или отправьте задачу реальному ученику.`,
+    );
+  }
+
+  // 3. Валидация входа (text-only V1).
+  const b = bodyObj;
+  const subject =
+    isNonEmptyString(b.subject) &&
+    (VALID_SUBJECTS_UPDATE as readonly string[]).includes(b.subject)
+      ? b.subject
+      : null;
+  if (!subject) {
+    return jsonError(cors, 400, "VALIDATION", "Укажите предмет.");
+  }
+  const taskText = isNonEmptyString(b.task_text) ? b.task_text.trim() : "";
+  const answerText = isNonEmptyString(b.answer_text) ? b.answer_text.trim() : "";
+  if (!taskText) return jsonError(cors, 400, "VALIDATION", "Добавьте условие задачи.");
+  if (!answerText) return jsonError(cors, 400, "VALIDATION", "Добавьте ответ ученика.");
+  const examType =
+    isNonEmptyString(b.exam_type) &&
+    (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type)
+      ? (b.exam_type as "ege" | "oge")
+      : "ege";
+  const kimNumber = normalizeKimNumber(b.kim_number);
+  // Макс. балл — опц. от репетитора (шкала предмета: физика № 24 = 3, общество
+  // № 25 = 4 и т.п.). Физика № 21-26 → walker ставит свой max (см. ответ), иначе
+  // holistic по этой шкале. Если задан и НЕвалиден → 400 (не тихая подмена на 3
+  // — иначе демо показало бы другую шкалу, review P2). Пусто/нет → дефолт 3.
+  let maxScore = DEMO_CHECK_DEFAULT_MAX_SCORE;
+  if (b.max_score !== undefined && b.max_score !== null && b.max_score !== "") {
+    const m = typeof b.max_score === "number" ? b.max_score : Number(b.max_score);
+    if (!Number.isInteger(m) || m < 1 || m > 100) {
+      return jsonError(cors, 400, "VALIDATION", "Макс. балл — целое число от 1 до 100.");
+    }
+    maxScore = m;
+  }
+
+  // 4. Грейдинг — reuse evaluateStudentAnswer. Ad-hoc: нет solution/rubric/фото.
+  //    task_kind='extended' + detailed_solution → развёрнутый разбор (демо-цель).
+  //    Физика + kim_number № 21-26 → flowchart-трасса; языки → criteria_breakdown.
+  //    Токены логируются в token_usage_logs под source='demo_check' (observability).
+  let result;
+  try {
+    result = await evaluateStudentAnswer({
+      studentAnswer: answerText,
+      taskText,
+      taskImageUrls: [],
+      studentImageUrls: [],
+      correctAnswer: null,
+      rubricText: null,
+      solutionText: null,
+      subject,
+      examType,
+      kimNumber,
+      taskKind: "extended",
+      checkFormat: "detailed_solution",
+      conversationHistory: [],
+      wrongAnswerCount: 0,
+      hintCount: 0,
+      availableScore: maxScore,
+      maxScore,
+      studentName: null,
+      studentGender: null,
+      logDb: db,
+      logUserId: userId,
+      logSource: "demo_check",
+    });
+  } catch (e) {
+    console.error("demo_check_grading_failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return jsonError(cors, 502, "GRADING_FAILED", "Не удалось разобрать работу. Попробуйте ещё раз.");
+  }
+
+  // 5. Телеметрия (PII-free): демо-разбор прогнан (= инкремент cap-счётчика).
+  await logAnalyticsEvent(db, {
+    event_name: "tutor_demo_check_ran",
+    actor_user_id: userId,
+    tutor_id: tutorPkId,
+    source: subject,
+    meta: {
+      verdict: result.verdict,
+      has_flowchart: Boolean(result.flowchart_trace),
+      has_criteria: Boolean(result.criteria_breakdown),
+    },
+  });
+
+  // 6. Ответ — только результат разбора (ai_score_comment tutor-only → не шлём).
+  return jsonOk(cors, {
+    verdict: result.verdict,
+    feedback: result.feedback,
+    ai_score: result.ai_score,
+    max_score: result.flowchart_trace?.max_score ?? maxScore,
+    criteria_breakdown: result.criteria_breakdown ?? null,
+    flowchart_trace: result.flowchart_trace ?? null,
+  });
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -11485,6 +11694,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "hint" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleRequestHint(db, userId, seg[1], body, cors);
+    }
+
+    // POST /tutor/demo-check (tutor endpoint — демо-разбор своей задачи, v2.1 W1-B)
+    if (seg.length === 2 && seg[0] === "tutor" && seg[1] === "demo-check" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleTutorDemoCheck(db, userId, body, cors);
     }
 
     // POST /threads/:id/viewed-by-tutor (tutor endpoint — TASK-7 follow-up)

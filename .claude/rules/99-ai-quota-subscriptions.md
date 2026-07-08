@@ -59,6 +59,15 @@ UI: `/admin → вкладка «Тарифы»` (`src/components/admin/AdminTut
 
 Не обещать пользователю «50 в каждом ДЗ» — счётчик общий (50/день суммарно). Канон формулировки: «50 сообщений в день». Tutor-facing Pricing («50 AI-сообщений в день для каждого ученика в ДЗ» = per-student, в homework-контексте) корректен. Студенческая подсказка живёт в `src/lib/apiErrorMessage.ts` (ветка `tutor_can_upgrade`).
 
+## Демо-разбор репетитора — отдельный AI-путь и cap (2026-07-08)
+
+Демо «проверить свою задачу» (сдвиг aha влево, memory `project_activation_aha_left_shift_2026_07_08`) — route `POST /tutor/demo-check` в `homework-api` (reuse `evaluateStudentAnswer`). **Инварианты квоты:**
+- **НЕ трогает ученическую дневную квоту** (`checkAiQuota` НЕ зовётся) — это tutor-путь, ученики не страдают.
+- **Свой per-tutor дневной cap** = COUNT событий `tutor_demo_check_ran` за сегодня (`analytics_events`, ключ `tutor_id = tutors.id`), дефолт `DEMO_CHECK_DAILY_CAP=10`. Исчерпан → 429 `DEMO_LIMIT_REACHED` → фронт предлагает реальный флоу (собрать ДЗ) / тариф.
+- Гейт `is_tutor` (ученик не может использовать как бесплатный грейдер).
+- Токены логируются в `token_usage_logs` под `source='demo_check'` (`EvaluateStudentAnswerParams.logSource`; добавлен в `TokenUsageSource`) — не смешивать со стоимостью `homework_check`.
+- **Новый tutor-AI-путь** → повторять паттерн: свой cap (не ученическая квота) + `is_tutor`-гейт + отдельный `logSource`. НЕ вешать на `FREE_DAILY_LIMIT`.
+
 ## Ключевые файлы
 - RPC квоты: `supabase/migrations/20260512134831_*.sql` (+ база `20251208123000`, homework-boost `20260512120000`).
 - Shared gate: `supabase/functions/_shared/subscription-limits.ts` (`checkAiQuota`, `buildLimitReachedResponse`, `FREE_DAILY_LIMIT=10`).

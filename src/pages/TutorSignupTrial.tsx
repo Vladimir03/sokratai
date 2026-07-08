@@ -9,6 +9,7 @@ import { claimPendingInvite } from "@/lib/inviteApi";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
+import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
 import {
   applyPendingConsent,
   recordConsent,
@@ -72,6 +73,8 @@ export default function TutorSignupTrial() {
   const [subject, setSubject] = useState<SubjectValue>("physics");
   const [oferta, setOferta] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Экран «подтвердите почту» вместо выброса (тупик #2). null → показываем форму.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Record<keyof FieldErrors, boolean>>({
     email: false,
@@ -243,7 +246,8 @@ export default function TutorSignupTrial() {
       if (authError) throw authError;
 
       if (!data.session || !data.user) {
-        toast.info("Подтвердите email — мы отправили письмо.");
+        // Экран ожидания вместо выброса из приложения (тупик #2).
+        setPendingEmail(email);
         return;
       }
 
@@ -315,6 +319,17 @@ export default function TutorSignupTrial() {
     fontSize: 16,
     touchAction: "manipulation",
   } as const;
+
+  if (pendingEmail) {
+    return (
+      <EmailConfirmWaiting
+        email={pendingEmail}
+        emailRedirectTo={`${window.location.origin}/tutor/home`}
+        onBack={() => setPendingEmail(null)}
+        onSignedIn={() => navigate("/tutor/home", { replace: true })}
+      />
+    );
+  }
 
   return (
     <div

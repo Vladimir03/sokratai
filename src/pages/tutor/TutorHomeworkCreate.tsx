@@ -41,7 +41,7 @@ import {
   type TutorHomeworkAssignmentDetails,
   HomeworkApiError,
 } from '@/lib/tutorHomeworkApi';
-import { getTutorInviteWebLink } from '@/utils/telegramLinks';
+import { getTutorInviteTelegramLink, getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
 // `SUBJECTS` уже импортируется из homework-create/types ({value,label}[] для L0
 // селектора). Канонический массив (@/types/homework, {id,...}) нужен только для
@@ -74,6 +74,7 @@ import { useTutorVoiceSpeakingFeatureFlag } from '@/hooks/useTutorVoiceSpeakingF
 import { useHomeworkFolders } from '@/hooks/useHomeworkFolders';
 import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
+import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
 import { HWActionBar } from '@/components/tutor/homework-create/HWActionBar';
 import { HWSubmitSuccess } from '@/components/tutor/homework-create/HWSubmitSuccess';
 import { ConnectStudentSheet, type ConnectStudentTarget } from '@/components/tutor/ConnectStudentSheet';
@@ -497,6 +498,15 @@ function TutorHomeworkCreateContent() {
   } = useTutorGroups(miniGroupsEnabled);
   // Phase 9 (2026-05-25): canonical claim URL sokratai.ru/invite/{code}.
   const inviteWebLink = tutor?.invite_code ? getTutorInviteWebLink(tutor.invite_code) : '';
+  const inviteTelegramLink = tutor?.invite_code ? getTutorInviteTelegramLink(tutor.invite_code) : '';
+  // v2.1 W3: инлайн-добавление ученика из конструктора (тупик #4 — не уводим
+  // из наполовину собранной формы). После add — инвалидация ['tutor','students']
+  // → HWAssignSection (свой useTutorStudents) подхватывает нового ученика.
+  const [addStudentOpen, setAddStudentOpen] = useState(false);
+  const handleInlineStudentAdded = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
+    setAddStudentOpen(false);
+  }, [queryClient]);
   const appOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://sokratai.ru';
   const studentLoginLink = `${appOrigin}/login`;
   const studentSignupLink = `${appOrigin}/signup`;
@@ -2137,6 +2147,7 @@ function TutorHomeworkCreateContent() {
             studentSignupLink={studentSignupLink}
             existingStudentIds={isEditMode ? editExistingStudentIds : undefined}
             hideNotify={isEditMode}
+            onAddStudent={() => setAddStudentOpen(true)}
           />
         </section>
 
@@ -2248,6 +2259,16 @@ function TutorHomeworkCreateContent() {
           onOpenChange={handleConnectOpenChange}
           assignmentId={connectAssignmentId}
           students={connectTargets}
+        />
+
+        {/* v2.1 W3: инлайн-добавление ученика из конструктора (тупик #4). */}
+        <AddStudentDialog
+          open={addStudentOpen}
+          onOpenChange={setAddStudentOpen}
+          inviteCode={tutor?.invite_code ?? undefined}
+          inviteWebLink={inviteWebLink}
+          inviteTelegramLink={inviteTelegramLink}
+          onManualAdded={handleInlineStudentAdded}
         />
       </div>
   );

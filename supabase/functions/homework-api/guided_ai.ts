@@ -338,6 +338,12 @@ export interface EvaluateStudentAnswerParams {
    */
   logDb?: TokenUsageAdminClient | null;
   logUserId?: string | null;
+  /**
+   * Observability source override для token_usage_logs (ai-usage-logging).
+   * По умолчанию 'homework_check'. Демо-разбор («проверить свою задачу»)
+   * передаёт 'demo_check', чтобы не смешивать со стоимостью реальных проверок.
+   */
+  logSource?: string | null;
 }
 
 export interface GenerateHintParams {
@@ -2236,7 +2242,7 @@ async function evaluatePhysicsPart2(
   // ai-usage-logging: physics flowchart node-judgement call is a homework check.
   const physicsUsageLogger = makeUsageLogger(params.logDb, {
     userId: params.logUserId,
-    source: "homework_check",
+    source: params.logSource ?? "homework_check",
     assignmentId: params.assignmentId ?? null,
   });
   let parsed: Record<string, unknown>;
@@ -2447,7 +2453,7 @@ export async function evaluateStudentAnswer(
     // ai-usage-logging: covers the main check + leak-retry (both billable).
     const checkUsageLogger = makeUsageLogger(params.logDb, {
       userId: params.logUserId,
-      source: "homework_check",
+      source: params.logSource ?? "homework_check",
       assignmentId: params.assignmentId ?? null,
     });
     const parsed = await callLovableJson(messages, "guided_check", checkUsageLogger);

@@ -134,6 +134,13 @@ export interface HWAssignSectionProps {
   studentSignupLink: string;
   existingStudentIds?: Set<string>;
   hideNotify?: boolean;
+  /**
+   * v2.1 W3: открыть добавление ученика ИНЛАЙН (модалкой), не уводя из
+   * наполовину собранной формы. Когда передан — empty-state показывает кнопку
+   * вместо ссылки на /tutor/students (тупик #4 конструктора). Fallback (нет
+   * колбэка) — прежняя ссылка.
+   */
+  onAddStudent?: () => void;
 }
 
 export function HWAssignSection({
@@ -166,6 +173,7 @@ export function HWAssignSection({
   studentSignupLink,
   existingStudentIds,
   hideNotify,
+  onAddStudent,
 }: HWAssignSectionProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -735,12 +743,23 @@ export function HWAssignSection({
         ) : students.length === 0 ? (
           <Card className="bg-muted/30">
             <CardContent className="py-8 text-center">
-              <p className="text-sm text-muted-foreground">
-                У вас пока нет учеников.{' '}
-                <Link to="/tutor/students" className="text-primary underline">
+              <p className="mb-3 text-sm text-muted-foreground">
+                У вас пока нет учеников — добавьте, чтобы отправить домашку.
+              </p>
+              {onAddStudent ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onAddStudent}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  Добавить ученика
+                </Button>
+              ) : (
+                <Link to="/tutor/students" className="text-sm text-primary underline">
                   Добавить ученика
                 </Link>
-              </p>
+              )}
             </CardContent>
           </Card>
         ) : filteredStudents.length === 0 ? (

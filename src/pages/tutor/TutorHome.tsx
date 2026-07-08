@@ -15,6 +15,8 @@ import {
 } from '@/components/tutor/home';
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import { TariffNudgeBanner } from '@/components/tutor/home/TariffNudgeBanner';
+import { ActivationChecklist } from '@/components/tutor/home/ActivationChecklist';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 
 // Lazy: модал оплаты YooKassa — грузим только по клику «Подключить» в плашке.
 const TutorPaymentModal = lazy(() => import('@/components/tutor/TutorPaymentModal'));
@@ -229,6 +231,16 @@ function TutorHomeContent() {
               }}
               onNewLesson={handleNewLesson}
               onAddStudent={handleAddStudent}
+            />
+
+            {/* Гид первого запуска «3 шага» + демо-хук разбора (v2.1 W1/W2).
+                Сам скрывается, когда репетитор собрал и отправил первое ДЗ,
+                либо по «Скрыть». Не блокирует (P14). */}
+            <ActivationChecklist
+              hasStudents={hasStudents}
+              subject={resolveTutorDefaultSubject(tutor?.subjects, null)}
+              onAddStudent={handleAddStudent}
+              onAssignHomework={handleAssignHomework}
             />
 
             <HomeCTAs

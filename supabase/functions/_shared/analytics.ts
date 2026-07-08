@@ -25,7 +25,11 @@ export type AnalyticsEventName =
   // воронка оплаты тарифа репетитора (round 3, 2026-07-02; CHECK-whitelist
   // расширен миграцией 20260702130000)
   | "tutor_payment_created"
-  | "tutor_payment_succeeded";
+  | "tutor_payment_succeeded"
+  // демо-разбор «как Сократ проверяет» — сдвиг aha влево (v2.1 W1;
+  // CHECK-whitelist расширен миграцией 20260708130000)
+  | "tutor_demo_check_viewed" // открыл готовый пример разбора (A)
+  | "tutor_demo_check_ran"; // прогнал разбор своей задачи (B)
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;

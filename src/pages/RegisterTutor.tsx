@@ -9,6 +9,7 @@ import { z } from "zod";
 import { GraduationCap } from "lucide-react";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
+import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
 import {
   applyPendingConsent,
   recordConsent,
@@ -44,6 +45,8 @@ const RegisterTutor = () => {
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Экран «подтвердите почту» вместо выброса (тупик #2). null → показываем форму.
+  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
   // Redirect only if user is already a tutor
   useEffect(() => {
@@ -155,10 +158,8 @@ const RegisterTutor = () => {
             timestamp: new Date().toISOString(),
           }),
         );
-        toast.info(
-          "Мы отправили письмо для подтверждения email. Откройте его и нажмите ссылку, чтобы завершить регистрацию.",
-          { duration: 10000 },
-        );
+        // Экран ожидания вместо выброса из приложения (тупик #2).
+        setPendingEmail(email);
         return;
       }
 
@@ -199,6 +200,17 @@ const RegisterTutor = () => {
       setLoading(false);
     }
   };
+
+  if (pendingEmail) {
+    return (
+      <EmailConfirmWaiting
+        email={pendingEmail}
+        emailRedirectTo={`${window.location.origin}/tutor/home`}
+        onBack={() => setPendingEmail(null)}
+        onSignedIn={() => navigate("/tutor/home")}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-hero p-4">
