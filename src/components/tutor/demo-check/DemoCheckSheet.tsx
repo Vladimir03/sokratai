@@ -340,6 +340,7 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
               <textarea
                 value={taskText}
                 onChange={(e) => setTaskText(e.target.value)}
+                onPaste={taskImages.handlePaste}
                 rows={3}
                 placeholder="Вставьте условие задачи…"
                 className="w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-base leading-relaxed"
@@ -355,6 +356,7 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
               <textarea
                 value={answerText}
                 onChange={(e) => setAnswerText(e.target.value)}
+                onPaste={answerImages.handlePaste}
                 rows={4}
                 placeholder="Вставьте решение/ответ ученика…"
                 className="w-full resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-base leading-relaxed"
