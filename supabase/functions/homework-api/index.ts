@@ -11560,6 +11560,11 @@ async function handleTutorDemoCheck(
       ? (b.exam_type as "ege" | "oge")
       : "ege";
   const kimNumber = normalizeKimNumber(b.kim_number);
+  // Формат проверки — как в ДЗ: 'short_answer' = лайт-проверка краткого ответа;
+  // 'detailed_solution' = развёрнутое (критерии ФИПИ, физ-Часть-2 flowchart).
+  // Дефолт — развёрнутое (демо продаёт именно покритериальный разбор).
+  const checkFormat: "short_answer" | "detailed_solution" =
+    b.check_format === "short_answer" ? "short_answer" : "detailed_solution";
   // Макс. балл — опц. от репетитора (шкала предмета: физика № 24 = 3, общество
   // № 25 = 4 и т.п.). Физика № 21-26 → walker ставит свой max (см. ответ), иначе
   // holistic по этой шкале. Если задан и НЕвалиден → 400 (не тихая подмена на 3
@@ -11590,8 +11595,8 @@ async function handleTutorDemoCheck(
       subject,
       examType,
       kimNumber,
-      taskKind: "extended",
-      checkFormat: "detailed_solution",
+      taskKind: checkFormat === "short_answer" ? "numeric" : "extended",
+      checkFormat,
       conversationHistory: [],
       wrongAnswerCount: 0,
       hintCount: 0,

@@ -23,6 +23,8 @@ export interface DemoCheckInput {
   kim_number?: number | null;
   /** Макс. балл шкалы предмета (общество № 25 = 4 и т.п.). Дефолт 3. */
   max_score?: number | null;
+  /** Формат: 'short_answer' = лайт-проверка; 'detailed_solution' = ФИПИ-критерии. */
+  check_format?: "short_answer" | "detailed_solution";
 }
 
 export interface DemoCheckResult {

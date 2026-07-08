@@ -85,7 +85,7 @@ function GradedResult({
       {feedback ? (
         <section className="rounded-lg border border-accent/30 bg-accent/5 p-3">
           <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-accent">
-            Разбор Сократа
+            Разбор от Сократ AI
           </h3>
           <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
             {feedback}
@@ -113,6 +113,9 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
     subject && SUBJECTS.some((s) => s.id === subject) ? subject : sample.subject,
   );
   const [examType, setExamType] = useState<"ege" | "oge">("ege");
+  const [checkFormat, setCheckFormat] = useState<"short_answer" | "detailed_solution">(
+    "detailed_solution",
+  );
   const [taskText, setTaskText] = useState("");
   const [answerText, setAnswerText] = useState("");
   const [kimText, setKimText] = useState("");
@@ -161,6 +164,7 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
         answer_text: answerText.trim(),
         kim_number: kimNum,
         max_score: maxNum,
+        check_format: checkFormat,
       });
       setOwnResult(res);
     } catch (e) {
@@ -196,7 +200,7 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Как Сократ разбирает работу</DialogTitle>
+          <DialogTitle>Как Сократ AI разбирает работу</DialogTitle>
           <DialogDescription>
             Реальный разбор ответа ученика — ровно то, что увидите вы и ученик после сдачи.
           </DialogDescription>
@@ -290,6 +294,22 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
                 </select>
               </label>
             </div>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-slate-600">Формат проверки</span>
+              <select
+                value={checkFormat}
+                onChange={(e) =>
+                  setCheckFormat(
+                    e.target.value === "short_answer" ? "short_answer" : "detailed_solution",
+                  )
+                }
+                className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-base"
+                style={{ touchAction: "manipulation" }}
+              >
+                <option value="detailed_solution">Развёрнутое решение (по критериям)</option>
+                <option value="short_answer">Краткий ответ (лайт-проверка)</option>
+              </select>
+            </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-slate-600">Условие задачи</span>
               <textarea

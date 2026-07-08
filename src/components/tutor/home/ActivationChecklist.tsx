@@ -113,8 +113,10 @@ export function ActivationChecklist({
   // Не мигать онбордингом у состоявшегося репетитора, пока грузится список ДЗ.
   const holdForData = hasStudents && isLoading;
 
-  // Тест-allowlist в обход всех гейтов; иначе обычная логика.
-  if (!forceShow && (dismissed || allDone || holdForData)) return null;
+  // «Скрыть» (X) закрывает ВСЕГДА — даже для тест-allowlist (фикс «крестик не
+  // кликается»). forceShow обходит только activation-гейты (allDone/holdForData).
+  if (dismissed) return null;
+  if (!forceShow && (allDone || holdForData)) return null;
 
   const handleDismiss = () => {
     try {
@@ -136,7 +138,7 @@ export function ActivationChecklist({
               Соберите первую домашку — 3 шага
             </h2>
             <p className="text-sm text-slate-500">
-              Ученик решает с подсказками, Сократ проверяет — вы экономите вечер.
+              Ученик решает с подсказками, Сократ AI проверяет — вы экономите вечер.
             </p>
           </div>
           <button
@@ -166,7 +168,14 @@ export function ActivationChecklist({
                 >
                   {step.done ? <Check className="h-3.5 w-3.5" /> : i + 1}
                 </span>
-                <span className="min-w-0 flex-1">
+                {/* Каждый шаг кликабелен → своё действие (даже выполненный:
+                    «Заведите ученика» откроет добавление и т.д.). */}
+                <button
+                  type="button"
+                  onClick={step.action}
+                  style={{ touchAction: "manipulation" }}
+                  className="-mx-1 min-w-0 flex-1 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+                >
                   <span
                     className={`block text-sm font-medium ${
                       step.done ? "text-slate-400 line-through" : "text-slate-900"
@@ -177,7 +186,7 @@ export function ActivationChecklist({
                   {!step.done ? (
                     <span className="block text-xs text-slate-500">{step.sub}</span>
                   ) : null}
-                </span>
+                </button>
                 {isPrimary ? (
                   <button
                     type="button"

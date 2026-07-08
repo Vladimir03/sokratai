@@ -42,7 +42,7 @@ export function DemoCheckCard({ subject }: DemoCheckCardProps) {
           </span>
           <span className="min-w-0">
             <span className="block text-sm font-semibold text-slate-900">
-              Посмотрите, как Сократ разбирает работу
+              Посмотрите, как Сократ AI разбирает работу
             </span>
             <span className="block text-sm text-slate-600">
               Реальный разбор за 30 секунд — ещё до подключения учеников
