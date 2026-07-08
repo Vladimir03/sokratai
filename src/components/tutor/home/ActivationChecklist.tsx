@@ -69,7 +69,18 @@ export function ActivationChecklist({
     let active = true;
     void supabase.auth.getSession().then(({ data }) => {
       const email = data.session?.user?.email?.toLowerCase();
-      if (active && email && DEMO_TEST_EMAILS.has(email)) setForceShow(true);
+      if (active && email && DEMO_TEST_EMAILS.has(email)) {
+        setForceShow(true);
+        // Тестерам блок всегда виден: снимаем ЗАЛИПШИЙ «Скрыть»-флаг (иначе после
+        // клика по X — или его старой неработавшей версии — он оставался скрыт
+        // навсегда). X по-прежнему прячет в рамках сессии; на reload — снова виден.
+        try {
+          localStorage.removeItem(DISMISS_KEY);
+        } catch {
+          // ignore
+        }
+        setDismissed(false);
+      }
     });
     return () => {
       active = false;
