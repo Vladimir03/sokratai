@@ -44,6 +44,8 @@ interface InputStageProps {
     stats: ExtractStats,
     folderId: string,
     subject: string,
+    /** Волна 2: загруженные refs исходников — контекст refine + orphan-cleanup. */
+    uploadedRefs: string[],
   ) => void;
 }
 
@@ -153,7 +155,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       // Персист предмета в last-used (review P2): следующий заход загрузчика/
       // форм/корзины стартует с него — не переключать «Химия» каждый раз.
       saveLastSubject(subject);
-      onExtracted(drafts, stats, folderId, subject);
+      onExtracted(drafts, stats, folderId, subject, uploadedRefs);
     } catch (e) {
       // Uploaded refs won't be reused on retry — clean them up.
       for (const ref of uploadedRefs) void deleteKBTaskImage(ref);

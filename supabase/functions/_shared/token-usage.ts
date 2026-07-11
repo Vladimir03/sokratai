@@ -61,6 +61,7 @@ export type TokenUsageSource =
   | "mock_ocr" //        mock-exam-grade Часть 1 OCR (gemini-pro)
   | "reference_gen" //   homework-generate-reference (physics эталон)
   | "kb_extract" //      kb-ai-extract task extraction
+  | "kb_extract_refine" // kb-ai-extract mode:'refine' — перегонка одного черновика (волна 2, 2026-07-11)
   | "demo_check" //      homework-api /tutor/demo-check («проверить свою задачу»)
   | "voice"; //          Groq Whisper transcription (tokens 0, audio_seconds set)
 

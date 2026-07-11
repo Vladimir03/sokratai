@@ -28,6 +28,17 @@ export interface FingerprintMatch {
 }
 
 /**
+ * Рамка рисунка внутри изображения — доли 0..1 (edge конвертирует из
+ * Gemini-конвенции [ymin,xmin,ymax,xmax] 0..1000; клиент про неё не знает).
+ */
+export interface ImageBbox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
  * One AI-extracted draft task. Mirror of prompts.md §3 + edge additions
  * (`attachment_ref`, `fingerprint_match`). The edge normalizes everything:
  * `answer` is forced to null when `answer_confidence === 'low'`,
@@ -51,6 +62,10 @@ export interface ExtractedTask {
   source_label: string;
   /** 0-based index into the успешно приложенных изображений; null = нет рисунка. */
   image_index: number | null;
+  /** Волна 2 (2026-07-11): рамка рисунка внутри image_index-изображения (доли 0..1); null = кропа нет. */
+  image_bbox: ImageBbox | null;
+  /** Волна 2: с какого изображения распознана задача (контекст refine); в БД не персистится. */
+  source_image_index: number | null;
   image_action: 'attach_original';
   needs_review_fields: string[];
   notes: string | null;
@@ -133,4 +148,42 @@ export async function extractTasks(input: ExtractInput): Promise<ExtractResponse
     drafts: Array.isArray(res?.drafts) ? res!.drafts : [],
     stats: res?.stats ?? { found: 0, low_confidence_answers: 0, unreadable_images: 0 },
   };
+}
+
+// ─── Refine (волна 2, 2026-07-11): «Переспросить AI» на одном черновике ───────
+
+export interface RefineInput {
+  folder_id: string;
+  subject?: string;
+  /** Комментарий репетитора «что поправить» (≤2000, edge обрежет). */
+  comment: string;
+  /** Текущий черновик — edge берёт whitelist-проекцию контент-полей. */
+  draft: ExtractedTask;
+  /** Исходные изображения материала как контекст (≤2 refs). */
+  image_refs?: string[];
+}
+
+/**
+ * Перегнать ОДИН черновик с комментарием репетитора (#45а, полная часть).
+ * Возвращает обновлённый черновик; клиент мержит ТОЛЬКО контент-поля
+ * (text/answer/solution/rubric_text) — классификацию тутора не затирает.
+ */
+export async function refineDraft(input: RefineInput): Promise<ExtractedTask> {
+  const { data, error } = await supabase.functions.invoke(FN, {
+    method: 'POST',
+    body: { mode: 'refine', ...input },
+  });
+  if (error) {
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      'Не удалось перегенерировать задачу. Попробуйте ещё раз.',
+    );
+    throw new KbAiExtractApiError(message, code);
+  }
+  const res = data as { draft?: ExtractedTask } | null;
+  if (!res?.draft) {
+    throw new KbAiExtractApiError('AI вернул пустой результат. Попробуйте переформулировать комментарий.', 'REFINE_FAILED');
+  }
+  return res.draft;
 }

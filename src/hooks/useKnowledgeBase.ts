@@ -396,6 +396,46 @@ export function useCreateTask() {
   });
 }
 
+/**
+ * Bulk-создание задач (AI-загрузчик, волна 2 2026-07-11): цикл по ТОМУ ЖЕ
+ * `insertTask` (rule 40/50 — НЕ новый write-site, НЕ батч-RPC: fingerprint-триггер
+ * и RLS остаются на строке), ограниченная параллельность, per-item результат,
+ * ОДНА инвалидация `['tutor','kb']` в конце (N × useCreateTask.onSuccess дали бы
+ * рефетч-шторм из 4 ключей на каждую строку).
+ */
+export function useCreateTasksBulk() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (
+      items: Array<{ key: number; input: CreateKBTaskInput }>,
+    ): Promise<Array<{ key: number; ok: boolean }>> => {
+      const results: Array<{ key: number; ok: boolean }> = [];
+      const CONCURRENCY = 3;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < items.length) {
+          const item = items[cursor];
+          cursor += 1;
+          try {
+            await insertTask(item.input);
+            results.push({ key: item.key, ok: true });
+          } catch {
+            results.push({ key: item.key, ok: false });
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, items.length) }, () => worker()),
+      );
+      return results;
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
+    },
+  });
+}
+
 /** Update a personal task */
 export function useUpdateTask() {
   const queryClient = useQueryClient();

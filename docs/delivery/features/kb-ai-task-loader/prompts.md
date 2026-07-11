@@ -10,7 +10,7 @@
 
 1. **Ингест, не генерация.** Извлекаем то, что есть в материале. Ничего не выдумываем.
 2. **Ответ не угадываем.** Если ответа в материале нет или AI не уверен → `answer: null` + `answer_confidence: "low"`. Неверный ответ в базе отравляет авто-проверку ДЗ — пустое поле лучше догадки.
-3. **Рисунки не перерисовываем.** Для каждой задачи указываем, какой из приложенных файлов к ней относится (`image_index`); система прикрепляет **оригинал**. `image_action` всегда `"attach_original"`.
+3. **Рисунки не перерисовываем.** Для каждой задачи указываем, какой из приложенных файлов к ней относится (`image_index`); система прикрепляет **оригинал**. `image_action` всегда `"attach_original"`. Волна 2 (2026-07-11): дополнительно модель возвращает `image_bbox` — рамку рисунка внутри изображения (Gemini-конвенция `[ymin, xmin, ymax, xmax]` 0..1000); кроп из мультизадачного скрина делает **клиент** (canvas) после подтверждения/правки рамки тутором — оригинальные пиксели, не генерация.
 4. **LaTeX `$…$`.** Все формулы и физвеличины — inline-LaTeX в `$…$`, как Сократ хранит задачи сейчас. Чистый LaTeX (`S_x`, не `Sx`).
 5. **Только валидный JSON** по схеме §3. Никакого текста вне JSON. Бэкслеши LaTeX экранируются по правилам JSON (один `\` → `\\` в строке).
 
@@ -48,16 +48,19 @@
    primary_score (если указан), answer_format, и предложи тему/подтему
    (topic_suggestion/subtopic_suggestion) по содержанию. Это подсказки — репетитор
    подтвердит.
-7. Рисунки: укажи image_index (0-based по порядку приложенных файлов) ТОЛЬКО если
-   выполнены ОБА условия: (а) это изображение содержит РОВНО ОДНУ задачу, и (б) в
-   задаче есть существенный рисунок (график, схема, чертёж, электрическая цепь,
-   иллюстрация), без которого её не решить. Если изображение содержит НЕСКОЛЬКО
-   задач — НЕ прикрепляй его ни к одной (image_index = null, только распознанный текст).
-   Если в задаче нет рисунка (чисто текстовая задача) — image_index = null. Если
-   сомневаешься, нужен ли рисунок — image_index = null и добавь "image" в
-   needs_review_fields. НЕ описывай рисунок текстом вместо самого рисунка и НЕ
-   перерисовывай его; image_action = "attach_original". НИКОГДА не считай рисунком
-   бланк ответов, номер задания, рамку или служебные пометки.
+7. Рисунки: для КАЖДОЙ задачи укажи source_image_index — 0-based номер приложенного
+   изображения, с которого она распознана (null, если задача из текстового материала).
+   Если в задаче есть существенный рисунок (график, схема, чертёж, электрическая
+   цепь, иллюстрация), без которого её не решить — укажи image_index (номер
+   изображения, где находится рисунок) И image_bbox — рамку ИМЕННО РИСУНКА (не всей
+   задачи, без текста условия) в формате [ymin, xmin, ymax, xmax]: целые 0..1000
+   относительно высоты и ширины изображения. Рамка работает и когда на изображении
+   НЕСКОЛЬКО задач — система вырежет нужный фрагмент. Если в задаче нет рисунка
+   (чисто текстовая задача) — image_index = null, image_bbox = null. Если
+   сомневаешься, нужен ли рисунок — оба null и добавь "image" в needs_review_fields.
+   НЕ описывай рисунок текстом вместо самого рисунка и НЕ перерисовывай его;
+   image_action = "attach_original". НИКОГДА не считай рисунком бланк ответов,
+   номер задания, рамку или служебные пометки.
 8. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
 9. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
 
@@ -88,6 +91,8 @@
       "subtopic_suggestion": "Уравнения движения",
       "source_label": "Демидова ЕГЭ-2026",
       "image_index": null,
+      "image_bbox": null,
+      "source_image_index": null,
       "image_action": "attach_original",
       "needs_review_fields": [],
       "notes": null
@@ -113,8 +118,12 @@
 | `topic_suggestion`/`subtopic_suggestion` | `topic_id`/`subtopic_id` | клиент резолвит название→id (подсказка) |
 | `source_label` | `source_label` | default `my` |
 | `image_index` | → `attachment_url` | сервер берёт оригинал приложенного файла |
+| `image_bbox` | → кроп на клиенте | волна 2 (2026-07-11): `[ymin, xmin, ymax, xmax]` целые 0..1000 (нативная конвенция детекции Gemini). Edge валидирует (clamp, min-площадь ~3% по каждой оси, ymin<ymax, xmin<xmax) и отдаёт клиенту как `{x, y, w, h}` в долях 0..1. Клиент показывает превью кропа, тутор правит рамку; сам кроп — canvas на клиенте при commit |
+| `source_image_index` | — | волна 2: с какого изображения распознана задача (контекст для режима `refine`); в БД не персистится |
 
 **Перечисления:** `answer_confidence ∈ {high, medium, low}`; `answer_format ∈ {number, text, detailed, matching, choice, null}`; `check_format ∈ {short_answer, detailed_solution, null}`; `exam ∈ {ege, oge, null}`; `image_action = "attach_original"` (P0 — единственное значение; `"redraw"` зарезервировано под P2 opt-in, в P0 не эмитить).
+
+**Режим `refine` (волна 2, 2026-07-11):** body `{ mode: "refine", folder_id, subject, comment ≤2000, draft, image_refs? ≤2 }` → тот же subject-промпт + схема; user-контент = JSON текущего черновика + «Комментарий репетитора: …» (+ контекст-изображения). Ответ — ровно одна задача в `tasks[]` → нормализация `normalizeTask` → `{ draft }`. Usage-source `kb_extract_refine`.
 
 ---
 
@@ -166,7 +175,8 @@
       "answer_format": "number", "check_format": "short_answer",
       "kim_number": 1, "exam": "ege", "primary_score": 1, "rubric_text": null,
       "topic_suggestion": "Кинематика", "subtopic_suggestion": "Равноускоренное движение",
-      "source_label": "ЕГЭ-2026", "image_index": null, "image_action": "attach_original",
+      "source_label": "ЕГЭ-2026", "image_index": null, "image_bbox": null,
+      "source_image_index": null, "image_action": "attach_original",
       "needs_review_fields": [], "notes": null
     },
     {
@@ -175,7 +185,8 @@
       "answer_format": "number", "check_format": "short_answer",
       "kim_number": 1, "exam": "ege", "primary_score": 1, "rubric_text": null,
       "topic_suggestion": "Кинематика", "subtopic_suggestion": "Свободное падение",
-      "source_label": "ЕГЭ-2026", "image_index": null, "image_action": "attach_original",
+      "source_label": "ЕГЭ-2026", "image_index": null, "image_bbox": null,
+      "source_image_index": null, "image_action": "attach_original",
       "needs_review_fields": ["answer"], "notes": "Ответ в материале не указан — оставлено пустым"
     }
   ],
