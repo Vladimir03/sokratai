@@ -271,7 +271,11 @@ export function DraftTable({
   renderExpanded,
 }: DraftTableProps) {
   return (
-    <div className="touch-pan-x overflow-x-auto rounded-xl border border-socrat-border bg-white">
+    // Свой вертикальный вьюпорт (ревью P2): `overflow-x-auto` делал контейнер
+    // вертикальным scroll-блоком нулевой прокрутки → sticky-заголовок уезжал со
+    // страницей. `max-h` + `overflow-auto` дают заголовку к чему прилипнуть.
+    // touch-action по умолчанию (auto) — 2D-скролл + тап-по-строке (rule 80).
+    <div className="max-h-[70vh] overflow-auto rounded-xl border border-socrat-border bg-white">
       <table
         className="border-separate border-spacing-0"
         style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}

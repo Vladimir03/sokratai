@@ -569,7 +569,9 @@ function DraftCardComponent({
         <div className="mt-3">
           {refineOpen ? (
             <div className="space-y-2 rounded-lg border border-socrat-border/60 bg-socrat-surface/60 p-3">
-              <label className={LEGEND_CLASS}>Что поправить? AI перегенерирует этот черновик</label>
+              <label className={LEGEND_CLASS}>
+                Что поправить в этой задаче? AI перегенерирует её (правит одну задачу)
+              </label>
               <textarea
                 value={refineComment}
                 onChange={(e) => setRefineComment(e.target.value)}
@@ -577,7 +579,7 @@ function DraftCardComponent({
                 rows={2}
                 maxLength={2000}
                 className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2 text-[16px] leading-relaxed transition-colors focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
-                placeholder="Например: «раздели на две задачи», «ответ должен быть 5 м/с», «поправь LaTeX в формуле»"
+                placeholder="Например: «ответ должен быть 5 м/с», «поправь LaTeX в формуле», «убери лишнее из условия»"
               />
               <div className="flex flex-wrap gap-2">
                 <button

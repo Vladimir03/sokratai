@@ -8,10 +8,15 @@
  * `pdfToImages.ts`: белая заливка под JPEG (альфа → чёрный), кап размера с
  * перерендером в пониженном качестве, освобождение canvas (iOS-лимит площади).
  *
- * Анти-taint: signed URL с `api.sokratai.ru` кросс-доменный → рисовать
- * `<img src=signedUrl>` в canvas = tainted → `toBlob` бросит SecurityError.
- * Поэтому fetch(signedUrl) → Blob → objectURL: blob-URL same-origin, taint
- * исключён независимо от CORS-заголовков storage.
+ * Анти-taint: рисовать `<img src=signedUrl>` (кросс-домен `api.sokratai.ru`) в
+ * canvas → tainted → `toBlob` бросит SecurityError. Поэтому fetch(signedUrl) →
+ * Blob → objectURL → `<img>`: blob-URL same-origin, canvas НЕ tainted.
+ *
+ * ⚠️ CORS: сам `fetch` идёт в cors-режиме и ТРЕБУЕТ `Access-Control-Allow-Origin`
+ * от signed-URL хоста (`api.sokratai.ru` сейчас отдаёт `*` — подтверждено на
+ * проде). Если nginx/storage перестанут слать CORS-заголовки на GET signed URL —
+ * fetch отклонится, кроп молча деградирует (задача сохранится БЕЗ картинки).
+ * При правке nginx/CORS — проверить этот путь, иначе фича кропа умрёт незаметно.
  */
 
 import type { ImageBbox } from '@/lib/kbAiExtractApi';

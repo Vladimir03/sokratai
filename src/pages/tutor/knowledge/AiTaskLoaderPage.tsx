@@ -16,9 +16,33 @@ import { deleteKBTaskImage, getKBImageSignedUrl, serializeAttachmentUrls, upload
 import { supabase } from '@/lib/supabaseClient';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { refineDraft, type ExtractStats, type ExtractedTask } from '@/lib/kbAiExtractApi';
-import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type KBSubtopic } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type ExamType, type KBSubtopic } from '@/types/kb';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 import { cn } from '@/lib/utils';
+
+/**
+ * Применить патч к override с реконсиляцией при СМЕНЕ ЭКЗАМЕНА (ревью
+ * ChatGPT-5.6 P1): ЕГЭ/ОГЭ-темы дублируются по именам, поэтому при exam-change
+ * (а) сбрасываем балл (пере-выведется по авто-КИМ нового экзамена, если тутор
+ * не задал явный), (б) сбрасываем тему/подтему, если тема принадлежит ДРУГОМУ
+ * экзамену. Единая точка для карточки/строки/bulk — консистентно.
+ */
+function applyOverridePatch(
+  o: ReviewOverrides,
+  patch: Partial<ReviewOverrides>,
+  topicExamById: Map<string, ExamType | null>,
+): ReviewOverrides {
+  const next = { ...o, ...patch };
+  if (patch.exam !== undefined) {
+    if (patch.primaryScore === undefined) next.primaryScore = '';
+    const topicExam = next.topicId ? topicExamById.get(next.topicId) ?? null : null;
+    if (topicExam && topicExam !== (next.exam || null)) {
+      next.topicId = null;
+      next.subtopicId = null;
+    }
+  }
+  return next;
+}
 
 type Stage = 'input' | 'review';
 type ReviewView = 'table' | 'cards';
@@ -62,10 +86,14 @@ function draftToCreateInput(
     kim_number: kimNum,
     subject,
   });
-  // Балл: явный override тутора → извлечённый AI → авто по КИМ (только физика).
+  // Балл (порядок — ревью ChatGPT-5.6 P1): явный override тутора → авто по
+  // ТЕКУЩЕМУ № КИМ → извлечённый AI (последний фолбэк). Авто-балл ДОЛЖЕН
+  // побеждать draft.primary_score, иначе после смены КИМ сохранялся старый балл
+  // (визуально 3, в БД 1). AI-балл уже сидируется в override → нетронутые задачи
+  // берут его через manualScore; draft.primary_score нужен лишь не-физике без карты.
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
   const primaryScore =
-    manualScore ?? draft.primary_score ?? getKimPrimaryScoreForSubject(subject, exam, kimNum);
+    manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   return {
     folder_id: folderId,
     text: draft.text,
@@ -110,11 +138,21 @@ function AiTaskLoaderContent() {
   // Кэш кроп-аплоадов между ретраями commit'а: index → загруженный ref (или null
   // при сбое кропа). Инвалидируется при смене рамки/картинки и на новом extract.
   const cropUploadCacheRef = useRef(new Map<number, string | null>());
+  // Аккумулятор attachment сохранённых строк по ВСЕЙ пачке (между ретраями):
+  // orphan-cleanup после ретрая не должен удалять оригинал строки, сохранённой
+  // в 1-й попытке (ревью ChatGPT-5.6 P2). Очищается на новом extract.
+  const savedAttachmentRefsRef = useRef(new Set<string>());
 
   const subjectTopics = useMemo(
     () => topics.filter((t) => t.subject === subject),
     [topics, subject],
   );
+  // topicId → exam (для реконсиляции темы при смене экзамена, P1).
+  const topicExamById = useMemo(() => {
+    const m = new Map<string, ExamType | null>();
+    for (const t of topics) m.set(t.id, t.exam);
+    return m;
+  }, [topics]);
 
   const setViewPersist = useCallback((next: ReviewView) => {
     setView(next);
@@ -134,17 +172,25 @@ function AiTaskLoaderContent() {
       newUploadedRefs: string[],
     ) => {
       // Ф0 (волна 2): пре-резолв темы ПРИ ВХОДЕ в ревью — тутор сразу видит,
-      // сматчилась ли тема (раньше — невидимый сюрприз на коммите).
-      const resolveTopicId = (suggestion: string): string | null => {
+      // сматчилась ли тема (раньше — невидимый сюрприз на коммите). ЕГЭ/ОГЭ-темы
+      // дублируются по именам → матчим с учётом exam черновика; неоднозначность
+      // (несколько одноимённых, exam не различает) → null (ревью P1).
+      const resolveTopicId = (suggestion: string, exam: ExamType | null): string | null => {
         const s = suggestion.trim().toLowerCase();
         if (!s) return null;
-        const match = topics.find(
+        const named = topics.filter(
           (t) => t.subject === chosenSubject && t.name.trim().toLowerCase() === s,
         );
-        return match?.id ?? null;
+        if (named.length === 0) return null;
+        if (exam) {
+          const byExam = named.filter((t) => t.exam === exam);
+          if (byExam.length === 1) return byExam[0].id;
+          if (byExam.length > 1) return null;
+        }
+        return named.length === 1 ? named[0].id : null;
       };
       const initialOverrides: ReviewOverrides[] = newDrafts.map((d) => ({
-        topicId: resolveTopicId(d.topic_suggestion),
+        topicId: resolveTopicId(d.topic_suggestion, d.exam),
         subtopicId: null,
         sourceLabel: d.source_label.trim(),
         exam: d.exam ?? '',
@@ -168,6 +214,7 @@ function AiTaskLoaderContent() {
       setSubject(chosenSubject);
       setExpandedIndex(null);
       cropUploadCacheRef.current.clear();
+      savedAttachmentRefsRef.current.clear();
       setStage('review');
 
       // Подтемы сматченных тем — один bulk-запрос, дорезолв exact-name match.
@@ -203,9 +250,14 @@ function AiTaskLoaderContent() {
     setDrafts((prev) => prev.map((d, i) => (i === index ? { ...d, ...patch } : d)));
   }, []);
 
-  const updateOverride = useCallback((index: number, patch: Partial<ReviewOverrides>) => {
-    setOverrides((prev) => prev.map((o, i) => (i === index ? { ...o, ...patch } : o)));
-  }, []);
+  const updateOverride = useCallback(
+    (index: number, patch: Partial<ReviewOverrides>) => {
+      setOverrides((prev) =>
+        prev.map((o, i) => (i === index ? applyOverridePatch(o, patch, topicExamById) : o)),
+      );
+    },
+    [topicExamById],
+  );
 
   const updateCrop = useCallback((index: number, crop: CropState | null) => {
     setCrops((prev) => prev.map((c, i) => (i === index ? crop : c)));
@@ -240,10 +292,14 @@ function AiTaskLoaderContent() {
   const applyBulk = useCallback(
     (patch: Partial<ReviewOverrides>) => {
       setOverrides((prev) =>
-        prev.map((ov, i) => (selected[i] && rowStatus[i] !== 'saved' ? { ...ov, ...patch } : ov)),
+        prev.map((ov, i) =>
+          selected[i] && rowStatus[i] !== 'saved'
+            ? applyOverridePatch(ov, patch, topicExamById)
+            : ov,
+        ),
       );
     },
-    [selected, rowStatus],
+    [selected, rowStatus, topicExamById],
   );
   const selectAll = useCallback(
     () => setSelected((prev) => prev.map((_, i) => rowStatus[i] !== 'saved')),
@@ -360,6 +416,15 @@ function AiTaskLoaderContent() {
       const saved = okKeys.size;
       const failed = results.length - saved;
 
+      // Аккумулируем attachment УСПЕШНО сохранённых строк по всей пачке (между
+      // ретраями) — иначе orphan-cleanup после ретрая удалил бы оригинал строки,
+      // сохранённой в 1-й попытке (ревью P2; сейчас спасал только DB-триггер).
+      for (const it of items) {
+        if (okKeys.has(it.key) && typeof it.input.attachment_url === 'string') {
+          savedAttachmentRefsRef.current.add(it.input.attachment_url);
+        }
+      }
+
       setRowStatus((prev) =>
         prev.map((s, i) => {
           if (okKeys.has(i)) return 'saved';
@@ -386,15 +451,13 @@ function AiTaskLoaderContent() {
 
       if (saved > 0) {
         // Orphan-cleanup: исходники, не попавшие ни в один сохранённый attachment
-        // (кропнутые копии заменили оригиналы мультизадачных скринов).
-        const usedRefs = new Set(
-          items
-            .map((it) => it.input.attachment_url)
-            .filter((u): u is string => typeof u === 'string'),
-        );
+        // по ВСЕЙ пачке (аккумулятор, не только текущий ретрай) — кропнутые копии
+        // заменили оригиналы мультизадачных скринов.
         for (const ref of uploadedRefs) {
           const serialized = serializeAttachmentUrls([ref]);
-          if (serialized && !usedRefs.has(serialized)) void deleteKBTaskImage(ref);
+          if (serialized && !savedAttachmentRefsRef.current.has(serialized)) {
+            void deleteKBTaskImage(ref);
+          }
         }
 
         const parts = [`Добавлено ${saved}`];
