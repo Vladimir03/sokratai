@@ -57,6 +57,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
   );
   const [text, setText] = useState('');
+  // Свободная подсказка для AI (#45а): «ответы в конце страницы», «все задачи — КИМ 17»…
+  const [tutorHint, setTutorHint] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
   /** «Страница N из M» при рендере PDF (UX review P1 — не немой спиннер). */
@@ -134,6 +136,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           text: text.trim() || undefined,
           image_refs: uploadedRefs.length > 0 ? uploadedRefs : undefined,
         },
+        tutor_hint: tutorHint.trim() || undefined,
       });
       trackKbAiLoaderEvent('kb_ai_extract_run', {
         folderId,
@@ -234,6 +237,23 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         disabled={isExtracting}
         previewVariant="document"
       />
+
+      {/* Свободная подсказка для AI (#45а, Егор/Елена): контекст распознавания —
+          где ответы, какой КИМ, что не прикреплять. Edge инжектит в промпт. */}
+      <fieldset>
+        <legend className="mb-1.5 text-xs font-semibold text-slate-500">
+          Подсказка для AI <span className="font-normal text-slate-400">(необязательно)</span>
+        </legend>
+        <input
+          type="text"
+          value={tutorHint}
+          onChange={(e) => setTutorHint(e.target.value)}
+          disabled={isExtracting}
+          maxLength={500}
+          placeholder="Например: «ответы в конце страницы», «все задачи — КИМ 17»"
+          className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
+        />
+      </fieldset>
 
       {/* PDF → страницы-картинки (P1 TASK-10; листы до 10 страниц) */}
       <div>

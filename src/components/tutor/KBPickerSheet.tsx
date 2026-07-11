@@ -25,7 +25,8 @@ import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
 import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
-import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
+import { parseAttachmentUrls } from '@/lib/kbApi';
+import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import type { KBTask, KBTopicWithCounts, KBFolderWithCounts } from '@/types/kb';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,23 +61,24 @@ function PickerTaskCard({
 }) {
   const source = task.owner_id ? 'my' : 'socrat';
 
-  // Resolve attachment thumbnail
+  // Resolve attachment thumbnail — через кэшированный batch-хук (дедуп между
+  // карточками, staleTime 55 мин) вместо прямого createSignedUrl per-card.
   const attachmentRefs = useMemo(
     () => parseAttachmentUrls(task.attachment_url),
     [task.attachment_url],
   );
-  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!attachmentRefs.length) return;
-    let cancelled = false;
-    getKBImageSignedUrl(attachmentRefs[0]).then((url) => {
-      if (!cancelled) setThumbUrl(url);
-    });
-    return () => { cancelled = true; };
-  }, [attachmentRefs]);
+  const thumbRef = attachmentRefs[0] ?? null;
+  const thumbRefs = useMemo(() => (thumbRef ? [thumbRef] : []), [thumbRef]);
+  const { urls: thumbUrlMap } = useKBImagesSignedUrls(thumbRefs);
+  const thumbUrl = thumbRef ? thumbUrlMap[thumbRef] ?? null : null;
 
   const isImageOnly = !task.text || task.text === '[Задача на фото]';
+
+  // Источник задачи («ФИПИ», …) — запрос Егора #3; sentinel 'my'/'socrat' скрываем.
+  const sourceLabel =
+    task.source_label && task.source_label !== 'my' && task.source_label !== 'socrat'
+      ? task.source_label
+      : null;
 
   return (
     <div
@@ -105,6 +107,14 @@ function PickerTaskCard({
           </button>
         )}
         <SourceBadge source={source} />
+        {sourceLabel && (
+          <span
+            className="max-w-[140px] truncate text-[11px] text-muted-foreground"
+            title={`Источник: ${sourceLabel}`}
+          >
+            {sourceLabel}
+          </span>
+        )}
         {task.kim_number != null && (
           <span className="text-[11px] text-muted-foreground">
             КИМ №{task.kim_number}

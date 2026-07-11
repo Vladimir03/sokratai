@@ -660,5 +660,27 @@ if (physicsNodeResult.status !== 0) {
 }
 ok("physics node-prompt sanitizer pass (judgments coercion + node→walker)");
 
+// ─── 14. Answer alternatives / range parser (#61, 2026-07-11) ────────────────
+// Несколько допустимых верных ответов («1248 ; 1250») + числовой диапазон
+// («2,1–2,3») в текстовом поле ответа. Guards: (а) зеркала frontend↔Deno
+// идентичны на общих векторах; (б) даты «1941-1945» и «-5» НЕ трактуются как
+// диапазон (false-positive class). Subprocess (async + esbuild).
+console.log("");
+console.log("14. Answer alternatives / range parser (#61)...");
+const answerAltTestPath = path.join(rootDir, "scripts", "test-answer-alternatives.mjs");
+if (!fs.existsSync(answerAltTestPath)) {
+  fail("scripts/test-answer-alternatives.mjs missing — answer alternatives parser unguarded");
+}
+const answerAltResult = spawnSync(process.execPath, [answerAltTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (answerAltResult.status !== 0) {
+  console.error(answerAltResult.stdout ?? "");
+  console.error(answerAltResult.stderr ?? "");
+  fail("answer alternatives parser FAILED — see node:test output above");
+}
+ok("answer alternatives parser pass (mirror parity + range semantics)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

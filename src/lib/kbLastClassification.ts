@@ -16,7 +16,8 @@ export interface KbLastClassification {
   topicId: string;
   subtopicId: string;
   sourceLabel: string;
-  answerFormat: string;
+  /** @deprecated #60 (2026-07-11): «Формат ответа» удалён из UI — поле больше не пишется, старые значения игнорируются. */
+  answerFormat?: string;
   folderId: string;
 }
 

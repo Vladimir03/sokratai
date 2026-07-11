@@ -91,6 +91,12 @@ export interface ExtractInput {
   exam_hint?: ExtractedExam;
   /** Подсказка темы для модели. */
   topic_hint?: string;
+  /**
+   * Свободный комментарий репетитора к распознаванию (#45а, 2026-07-11):
+   * «ответы в конце страницы», «все задачи — КИМ 17». Edge инжектит в промпт
+   * (≤500 симв.). Старый edge поле игнорирует — деградация безопасна.
+   */
+  tutor_hint?: string;
 }
 
 /** rule 97 flat-shape error carrier — exposes `code` for branching (e.g. INVALID_FOLDER). */

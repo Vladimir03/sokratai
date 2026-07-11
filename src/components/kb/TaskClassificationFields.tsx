@@ -16,15 +16,6 @@ const TASK_TYPE_OPTIONS: { value: TaskClassType; label: string }[] = [
   { value: 'olympiad', label: 'Олимпиада' },
 ];
 
-const ANSWER_FORMAT_OPTIONS = [
-  { value: '', label: 'Не указан' },
-  { value: 'number', label: 'Число' },
-  { value: 'text', label: 'Текст' },
-  { value: 'detailed', label: 'Развернутое решение' },
-  { value: 'matching', label: 'Соответствие' },
-  { value: 'choice', label: 'Выбор ответа' },
-];
-
 const DIFFICULTY_LEVELS = [1, 2, 3, 4, 5];
 
 const SELECT_CLASS =
@@ -42,7 +33,13 @@ export interface TaskClassificationValue {
   topicId: string;
   subtopicId: string;
   sourceLabel: string;
-  answerFormat: string;
+  /**
+   * @deprecated Запрос Егора #60 (2026-07-11): селект «Формат ответа» удалён из UI
+   * (дублировал «Формат проверки»; грейдинг его не читает, колонка legacy живёт).
+   * Проп принимается и игнорируется — чтобы не трогать callsite в HWTaskCard
+   * (high-risk rule 40). Убрать вместе с пропами ниже при следующем касании HWTaskCard.
+   */
+  answerFormat?: string;
 }
 
 interface TaskClassificationFieldsProps extends TaskClassificationValue {
@@ -61,15 +58,15 @@ interface TaskClassificationFieldsProps extends TaskClassificationValue {
   onTopicIdChange: (v: string) => void;
   onSubtopicIdChange: (v: string) => void;
   onSourceLabelChange: (v: string) => void;
-  onAnswerFormatChange: (v: string) => void;
+  /** @deprecated см. answerFormat — принимается и игнорируется. */
+  onAnswerFormatChange?: (v: string) => void;
   disabled?: boolean;
-  /**
-   * unified-task-model F2 (2026-07-05): вариант для конструктора ДЗ — там
-   * «Формат ответа» конфликтует с check_format (два формата рядом), а балл
-   * ведёт «Макс. баллов» карточки (авто-балл по КИМ подсказывается там).
-   * КБ-модалки не передают эти флаги (поведение без изменений).
-   */
+  /** @deprecated см. answerFormat — «Формат ответа» удалён из UI совсем (#60). */
   hideAnswerFormat?: boolean;
+  /**
+   * unified-task-model F2 (2026-07-05): вариант для конструктора ДЗ — балл
+   * ведёт «Макс. баллов» карточки (авто-балл по КИМ подсказывается там).
+   */
   hidePrimaryScore?: boolean;
 }
 
@@ -87,7 +84,6 @@ export function TaskClassificationFields({
   topicId,
   subtopicId,
   sourceLabel,
-  answerFormat,
   subject,
   onSubjectChange,
   onTaskTypeChange,
@@ -97,9 +93,7 @@ export function TaskClassificationFields({
   onTopicIdChange,
   onSubtopicIdChange,
   onSourceLabelChange,
-  onAnswerFormatChange,
   disabled = false,
-  hideAnswerFormat = false,
   hidePrimaryScore = false,
 }: TaskClassificationFieldsProps) {
   const showSubject = subject !== undefined && onSubjectChange !== undefined;
@@ -332,22 +326,10 @@ export function TaskClassificationFields({
         ) : null}
       </fieldset>
 
-      {/* Формат ответа */}
-      {hideAnswerFormat ? null : (
-        <fieldset>
-          <legend className={LEGEND_CLASS}>Формат ответа</legend>
-          <select
-            value={answerFormat}
-            onChange={(e) => onAnswerFormatChange(e.target.value)}
-            disabled={disabled}
-            className={SELECT_CLASS}
-          >
-            {ANSWER_FORMAT_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </fieldset>
-      )}
+      {/* «Формат ответа» удалён (#60, Егор 2026-07-11): дублировал «Формат
+          проверки» в секции «Ответ и решение»; грейдинг answer_format не читает.
+          Колонка kb_tasks.answer_format — legacy, старые значения продолжают
+          работать через фолбэк resolveCheckFormatFromKb при импорте в ДЗ. */}
     </div>
   );
 }

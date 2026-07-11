@@ -1,10 +1,11 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { Check, ChevronDown, Download, EyeOff, FolderInput, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
-import { getKBImageSignedUrl, parseAttachmentUrls } from '@/lib/kbApi';
+import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
+import { parseAttachmentUrls } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
@@ -91,96 +92,44 @@ export const TaskCard = memo(function TaskCard({
   const isImageOnly = !task.text?.trim()
     || IMAGE_ONLY_MARKERS.includes(task.text.trim());
 
-  // Collapsed preview: load up to 3 images for horizontal strip
-  const collapsedImageCount = Math.min(attachmentRefs.length, 3);
-  const [collapsedUrls, setCollapsedUrls] = useState<string[]>([]);
-  const [collapsedLoading, setCollapsedLoading] = useState(false);
+  // Источник задачи («ФИПИ», «Демидова 2025», …) — запрос Егора #3.
+  // 'my'/'socrat' — служебные sentinel владения (rule 50), не показываем.
+  const sourceLabel =
+    task.source_label && task.source_label !== 'my' && task.source_label !== 'socrat'
+      ? task.source_label
+      : null;
 
-  useEffect(() => {
-    if (attachmentRefs.length === 0) {
-      setCollapsedUrls([]);
-      return;
-    }
+  // Collapsed preview: only the FIRST image (hero) — запрос Егора #2:
+  // в списке показываем одну картинку, остальные видны при раскрытии.
+  // Signed URLs — через кэшированный batch-хук (55 мин staleTime, дедуп
+  // между карточками и повторными заходами) вместо прямых createSignedUrl.
+  const heroRef = attachmentRefs[0] ?? null;
+  const heroRefs = useMemo(() => (heroRef ? [heroRef] : []), [heroRef]);
+  const { urls: heroUrlMap, isLoading: collapsedLoading } = useKBImagesSignedUrls(heroRefs);
+  const heroUrl = heroRef ? heroUrlMap[heroRef] ?? null : null;
 
-    let cancelled = false;
-    setCollapsedLoading(true);
-
-    const refsToLoad = attachmentRefs.slice(0, collapsedImageCount);
-    void Promise.all(refsToLoad.map((ref) => getKBImageSignedUrl(ref))).then((urls) => {
-      if (!cancelled) {
-        setCollapsedUrls(urls.filter((u): u is string => u !== null));
-        setCollapsedLoading(false);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [attachmentRefs, collapsedImageCount]);
-
-  // Full image set: load remaining images when expanded
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
-  const [imageLoading, setImageLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isExpanded || attachmentRefs.length === 0) {
-      setImageUrls([]);
-      return;
-    }
-
-    // Reuse collapsed URLs if all images already loaded
-    if (attachmentRefs.length <= collapsedImageCount && collapsedUrls.length > 0) {
-      setImageUrls(collapsedUrls);
-      return;
-    }
-
-    let cancelled = false;
-    setImageLoading(true);
-
-    void Promise.all(attachmentRefs.map((ref) => getKBImageSignedUrl(ref))).then(
-      (urls) => {
-        if (!cancelled) {
-          setImageUrls(urls.filter((u): u is string => u !== null));
-          setImageLoading(false);
-        }
-      },
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isExpanded, attachmentRefs, collapsedImageCount, collapsedUrls]);
+  // Full image set: load remaining images when expanded (hero query reused from cache)
+  const { urls: allUrlMap, isLoading: imageLoading } = useKBImagesSignedUrls(attachmentRefs, {
+    enabled: isExpanded && attachmentRefs.length > 1,
+  });
+  const imageUrls = useMemo(
+    () => attachmentRefs.map((ref) => allUrlMap[ref]).filter((u): u is string => Boolean(u)),
+    [attachmentRefs, allUrlMap],
+  );
 
   // Resolve solution images
   const solutionRefs = useMemo(
     () => parseAttachmentUrls(task.solution_attachment_url),
     [task.solution_attachment_url],
   );
-  const [solutionImageUrls, setSolutionImageUrls] = useState<string[]>([]);
-  const [solutionImageLoading, setSolutionImageLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isExpanded || solutionRefs.length === 0) {
-      setSolutionImageUrls([]);
-      return;
-    }
-
-    let cancelled = false;
-    setSolutionImageLoading(true);
-
-    void Promise.all(solutionRefs.map((ref) => getKBImageSignedUrl(ref))).then(
-      (urls) => {
-        if (!cancelled) {
-          setSolutionImageUrls(urls.filter((u): u is string => u !== null));
-          setSolutionImageLoading(false);
-        }
-      },
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isExpanded, solutionRefs]);
+  const { urls: solutionUrlMap, isLoading: solutionImageLoading } = useKBImagesSignedUrls(
+    solutionRefs,
+    { enabled: isExpanded && solutionRefs.length > 0 },
+  );
+  const solutionImageUrls = useMemo(
+    () => solutionRefs.map((ref) => solutionUrlMap[ref]).filter((u): u is string => Boolean(u)),
+    [solutionRefs, solutionUrlMap],
+  );
 
   // Phase 3: Click on content toggles only if no text selection
   const handleContentClick = useCallback(() => {
@@ -214,6 +163,14 @@ export const TaskCard = memo(function TaskCard({
       >
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <SourceBadge source={isOwn ? 'my' : 'socrat'} />
+          {sourceLabel ? (
+            <span
+              className="max-w-[180px] truncate text-[11px] text-slate-400"
+              title={`Источник: ${sourceLabel}`}
+            >
+              {sourceLabel}
+            </span>
+          ) : null}
           {subtopicName ? (
             <span className="text-[11px] font-medium text-slate-500">{subtopicName}</span>
           ) : null}
@@ -276,63 +233,39 @@ export const TaskCard = memo(function TaskCard({
         onClick={handleContentClick}
         className="cursor-pointer select-text px-4 pb-2 pt-2 md:px-5"
       >
-        {/* Hero image / image strip — at the top of content zone.
-            Single image: hero shown in BOTH states (clickable, opens full-size).
-            Multi-image: hero+strip in collapsed; the expanded gallery below
-            renders all images once. Avoids showing the same photo twice on expand. */}
+        {/* Hero image — at the top of content zone. Строго ОДНА картинка
+            в свёрнутом виде (запрос Егора #2); остальные — чипом «+N фото»,
+            раскрываются вместе с карточкой. Single image: hero shown in BOTH
+            states; multi-image expanded → только полная галерея ниже
+            (без дубля hero). */}
         {attachmentRefs.length > 0 && (attachmentRefs.length === 1 || !isExpanded) ? (
           <div className={cn(!isExpanded && 'mb-3')}>
             {collapsedLoading ? (
               <div className="h-48 w-full animate-pulse rounded-xl bg-socrat-surface md:h-64" />
-            ) : collapsedUrls.length > 0 ? (
-              attachmentRefs.length === 1 ? (
-                // Single attachment — hero image, full width, click to open full-size.
+            ) : heroUrl ? (
+              <div className="flex flex-col gap-2">
                 <a
-                  href={collapsedUrls[0]}
+                  href={heroUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
                   className="block"
                 >
                   <img
-                    src={collapsedUrls[0]}
+                    src={heroUrl}
                     alt="Фото условия"
                     loading="lazy"
                     decoding="async"
                     className="max-h-48 w-full rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-90 md:max-h-64"
                   />
                 </a>
-              ) : (
-                // Multiple attachments — first one as hero, rest as strip below.
-                <div className="flex flex-col gap-2">
-                  <img
-                    src={collapsedUrls[0]}
-                    alt="Фото условия"
-                    loading="lazy"
-                    decoding="async"
-                    className="max-h-48 w-full rounded-xl border border-socrat-border object-contain md:max-h-64"
-                  />
-                  {!isExpanded ? (
-                    <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto">
-                      {collapsedUrls.slice(1).map((url, i) => (
-                        <img
-                          key={i + 1}
-                          src={url}
-                          alt={`Фото ${i + 2}`}
-                          loading="lazy"
-                          decoding="async"
-                          className="h-20 flex-shrink-0 snap-start rounded-lg border border-socrat-border object-contain"
-                        />
-                      ))}
-                      {attachmentRefs.length > collapsedImageCount ? (
-                        <div className="flex h-20 w-16 flex-shrink-0 items-center justify-center rounded-lg bg-socrat-surface text-xs text-slate-400">
-                          +{attachmentRefs.length - collapsedImageCount}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              )
+                {!isExpanded && attachmentRefs.length > 1 ? (
+                  <span className="inline-flex w-fit items-center gap-1 rounded-md bg-socrat-surface px-2 py-1 text-[11px] font-medium text-slate-500">
+                    <Image className="h-3.5 w-3.5 text-slate-400" />
+                    Ещё {attachmentRefs.length - 1} фото — раскрыть
+                  </span>
+                ) : null}
+              </div>
             ) : (
               // Refs exist but signed URL failed — storage object likely missing.
               // Without this fallback image-only задачи рендерились как пустая карточка

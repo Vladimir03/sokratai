@@ -523,6 +523,17 @@ Spec: `docs/delivery/features/homework-multi-photo/spec.md`.
 
 Spec: `docs/delivery/features/check-format/spec.md`.
 
+### Несколько допустимых ответов + числовой диапазон (#61, Егор, 2026-07-11)
+
+Краткий ответ может нести НЕСКОЛЬКО допустимых значений («показания прибора так или так») и/или числовой диапазон («координата с графика ≈ считывается»). Хранение — существующее ТЕКСТОВОЕ поле `homework_tutor_tasks.correct_answer` / `kb_tasks.answer`, **ноль миграций** (значение round-trip'ит по всем write-path как текст). Build-лог: memory `project_subject_leaders_ux_2026_07_11.md`.
+
+- **Канонический парсер — `supabase/functions/_shared/answer-alternatives.ts` + фронт-зеркало `src/lib/answerAlternatives.ts`** (конвенция «mirror locally», как `checkFormatHelpers`/`attachment-refs`). Правь ОБА + векторы `scripts/test-answer-alternatives.mjs` (smoke §14 гоняет оба зеркала через esbuild → ловит дрейф).
+- **Разделитель альтернатив — слово « или », НЕ «;» (КРИТИЧНО, ревью ChatGPT-5.6 P1):** составной ответ «нужны ОБА» (`x=1; y=2`) пишется через «;»/«и»/«,» → не коллидирует; « или » = «любой из» = ровно альтернативы (легаси `1248 или 1250` уже это значило). Любая legacy-строка без « или » и без range-маркера → ОДИН exact-ответ (byte-identical прежнему грейдингу). Marker/JSON отклонены — протекли бы в raw-display (`TaskCard`, поле «Правильный ответ» в `HWTaskCard`).
+- **Диапазон:** en-dash/em-dash/«..» без пробелов ИЛИ дефис СТРОГО с пробелами (`2,1–2,3` / `2,1 - 2,3`); число с обеих сторон + min<max. Компактный дефис («1941-1945», «-5», «-5-3») = ЛИТЕРАЛ (даты/отриц.), НЕ диапазон. Единица измерения ученика в диапазоне ИГНОРИРУЕТСЯ намеренно (диапазон = про величину числа; сверка единиц осталась в exact-ветке).
+- **Грейдинг (`homework-api/guided_ai.ts`):** `tryDeterministicShortAnswerMatch` парсит `correctAnswer` → цикл по альтернативам (`matchShortAnswerCandidate`, одиночный ответ byte-identical) / диапазон = numeric ∈ [min,max] вкл. `buildCheckPrompt` инжектит строку «Допустимые варианты…» в system prompt (иначе AI строго сверяет с одним значением). **Mock-exams и тренажёр — СВОИ чекеры, НЕ трогать.**
+- **UI:** `AnswerAlternativesField` (`src/components/kb/ui/`, чипы «+ Добавить вариант ответа» + тумблер «от–до») в `Create/EditTaskModal`, гейт: скрыт при effective `check_format='detailed_solution'`. Владеет только представлением; сериализация — `serializeAnswerParts` (join « или »).
+- **При расширении:** новая семантика в поле ответа → правь оба зеркала + тест §14; разделитель альтернатив — « или » (не переизобретать); mock/тренажёр не трогать.
+
 ### Ключевые файлы
 - `src/lib/studentHomeworkApi.ts` — API-клиент студентов.
 - `src/hooks/useStudentHomework.ts` — React hooks студенческого ДЗ.

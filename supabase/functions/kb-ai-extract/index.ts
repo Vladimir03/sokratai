@@ -751,6 +751,9 @@ async function handleExtract(
     ? body.exam_hint.toLowerCase()
     : null;
   const topicHint = typeof body.topic_hint === "string" ? body.topic_hint.trim().slice(0, 120) : "";
+  // Свободный комментарий репетитора к распознаванию (#45а, 2026-07-11):
+  // «ответы в конце страницы», «КИМ у всех задач — 17», «графики не прикреплять»…
+  const tutorHint = typeof body.tutor_hint === "string" ? body.tutor_hint.trim().slice(0, 500) : "";
   // Мультипредметный каталог (2026-07-06): выбирает системный промпт распознавания.
   const subject = typeof body.subject === "string" && VALID_SUBJECT.has(body.subject)
     ? body.subject
@@ -796,6 +799,7 @@ async function handleExtract(
   const hintLines: string[] = [];
   if (examHint) hintLines.push(`exam_hint: ${examHint}`);
   if (topicHint) hintLines.push(`topic_hint: ${topicHint}`);
+  if (tutorHint) hintLines.push(`Комментарий репетитора (учитывай при распознавании): ${tutorHint}`);
   const system = [
     systemPrompt,
     schemaBlock,

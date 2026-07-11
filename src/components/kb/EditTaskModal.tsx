@@ -11,8 +11,10 @@ import {
   uploadKBTaskImage,
 } from '@/lib/kbApi';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
+import { inferCheckFormatFromKim } from '@/lib/checkFormatHelpers';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
+import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
 import {
   TaskClassificationFields,
   type TaskClassType,
@@ -27,19 +29,6 @@ import type { KBTask, UpdateKBTaskInput } from '@/types/kb';
 interface EditTaskModalProps {
   task: KBTask;
   onClose: () => void;
-}
-
-/** Normalize legacy Russian answer_format literals to English codes */
-function normalizeAnswerFormat(value: string | null): string {
-  if (!value) return '';
-  const map: Record<string, string> = {
-    'число': 'number',
-    'выражение': 'text',
-    'выбор': 'choice',
-    'соответствие': 'matching',
-    'развернутое решение': 'detailed',
-  };
-  return map[value] ?? value;
 }
 
 /** Тип задания из существующей задачи: exam → ege/oge; difficulty → olympiad; иначе ''. */
@@ -114,10 +103,11 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
       ? task.source_label
       : '',
   );
-  const [answerFormat, setAnswerFormat] = useState(normalizeAnswerFormat(task.answer_format));
-
   const [uploading, setUploading] = useState(false);
-  const [showAnswerSection, setShowAnswerSection] = useState(false);
+  // Запрос Елены #13 (2026-07-11): «Ответ и решение» — раскрыто по умолчанию
+  // и стоит ВЫШЕ классификации. «Формат ответа» удалён из UI (#60): при
+  // сохранении ключ answer_format не шлём → сохранённое значение не зануляется.
+  const [showAnswerSection, setShowAnswerSection] = useState(true);
 
   const isBusy = uploading || updateTask.isPending;
 
@@ -175,6 +165,21 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const hasContent = text.trim().length > 0 || hasImage;
   const olympiadNeedsDifficulty = taskType === 'olympiad' && !difficulty.trim();
   const canSave = hasContent && !olympiadNeedsDifficulty;
+
+  // Авто-формат проверки по № КИМ (запрос Елены #13) — только при ИЗВЕСТНОМ
+  // предмете (тот же subjectKnown-гейт, что у авто-балла: physics-дефолт без
+  // темы = гипотеза). Зеркало эвристики импорта (inferCheckFormatFromKim).
+  const kimNumParsed = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
+  const isExamType = taskType === 'ege' || taskType === 'oge';
+  const autoCheckFormat =
+    subjectKnown && subject === 'physics' && isExamType && kimNumParsed
+      ? inferCheckFormatFromKim(kimNumParsed)
+      : null;
+  const fipsCriteriaKim =
+    subjectKnown && subject === 'physics' && taskType === 'ege'
+      && kimNumParsed && kimNumParsed >= 21 && kimNumParsed <= 26
+      ? kimNumParsed
+      : null;
 
   const handleSave = async () => {
     if (!canSave || isBusy) return;
@@ -236,7 +241,6 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         solution: solution.trim() || null,
         rubric_text: rubricText.trim() || null,
         exam: exam,
-        answer_format: answerFormat || null,
         kim_number: kimNum != null && !isNaN(kimNum) ? kimNum : null,
         primary_score: scoreNum != null && !isNaN(scoreNum) ? scoreNum : null,
         difficulty: difficultyNum != null && !isNaN(difficultyNum) ? difficultyNum : null,
@@ -310,35 +314,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
           {/* Condition images */}
           <ImageUploadField label="Фото задачи" imageUpload={conditionImages} disabled={isBusy} />
 
-          {/* ── Классификация (видна всегда) ── */}
-          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Классификация
-            </div>
-            <TaskClassificationFields
-              subject={subject}
-              onSubjectChange={handleSubjectChange}
-              taskType={taskType}
-              kimNumber={kimNumber}
-              difficulty={difficulty}
-              primaryScore={primaryScore}
-              topicId={topicId}
-              subtopicId={subtopicId}
-              sourceLabel={sourceLabel}
-              answerFormat={answerFormat}
-              onTaskTypeChange={handleTaskTypeChange}
-              onKimNumberChange={handleKimChange}
-              onDifficultyChange={setDifficulty}
-              onPrimaryScoreChange={setPrimaryScore}
-              onTopicIdChange={handleTopicChange}
-              onSubtopicIdChange={setSubtopicId}
-              onSourceLabelChange={setSourceLabel}
-              onAnswerFormatChange={setAnswerFormat}
-              disabled={isBusy}
-            />
-          </div>
-
-          {/* ── Ответ и решение (сворачиваемо) ── */}
+          {/* ── Ответ и решение — ВЫШЕ классификации, раскрыто по умолчанию
+              (запрос Елены #13). ── */}
           <button
             type="button"
             onClick={() => setShowAnswerSection((v) => !v)}
@@ -354,16 +331,22 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
 
           {showAnswerSection && (
             <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-              {/* Answer */}
+              {/* Answer — с вариантами и диапазоном (#61); для развёрнутого
+                  решения альтернативы не нужны → обычное поле. */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
-                <input
-                  type="text"
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="Правильный ответ"
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                />
+                {(checkFormat || autoCheckFormat) === 'detailed_solution' ? (
+                  <input
+                    type="text"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="Правильный ответ"
+                    disabled={isBusy}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                ) : (
+                  <AnswerAlternativesField value={answer} onChange={setAnswer} disabled={isBusy} />
+                )}
               </fieldset>
 
               {/* Solution */}
@@ -382,8 +365,8 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
               {/* Solution images */}
               <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
 
-              {/* unified-task-model F1 (2026-07-05): формат проверки — паритет
-                  с конструктором ДЗ («Не указан» = derive при импорте). */}
+              {/* Формат проверки: '' = авто. Авто-значение по КИМ показываем
+                  прямо в опции (запрос Елены #13); в БД при '' — NULL. */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат проверки</legend>
                 <select
@@ -392,10 +375,20 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
                   disabled={isBusy}
                   className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
                 >
-                  <option value="">Не указан (определится по № КИМ)</option>
+                  <option value="">
+                    {autoCheckFormat
+                      ? `Авто по № КИМ: ${autoCheckFormat === 'detailed_solution' ? 'Развёрнутое решение' : 'Краткий ответ'}`
+                      : 'Не указан (определится по № КИМ)'}
+                  </option>
                   <option value="short_answer">Краткий ответ</option>
                   <option value="detailed_solution">Развёрнутое решение</option>
                 </select>
+                {fipsCriteriaKim ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Задание №{fipsCriteriaKim} — проверка развёрнутого решения пойдёт по критериям
+                    ФИПИ автоматически, отдельные критерии вписывать не нужно.
+                  </p>
+                ) : null}
               </fieldset>
 
               {/* unified-task-model F1: структурные критерии (тот же редактор,
@@ -433,6 +426,32 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
               </fieldset>
             </div>
           )}
+
+          {/* ── Классификация (видна всегда; ниже ответа/решения — запрос Елены #13) ── */}
+          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Классификация
+            </div>
+            <TaskClassificationFields
+              subject={subject}
+              onSubjectChange={handleSubjectChange}
+              taskType={taskType}
+              kimNumber={kimNumber}
+              difficulty={difficulty}
+              primaryScore={primaryScore}
+              topicId={topicId}
+              subtopicId={subtopicId}
+              sourceLabel={sourceLabel}
+              onTaskTypeChange={handleTaskTypeChange}
+              onKimNumberChange={handleKimChange}
+              onDifficultyChange={setDifficulty}
+              onPrimaryScoreChange={setPrimaryScore}
+              onTopicIdChange={handleTopicChange}
+              onSubtopicIdChange={setSubtopicId}
+              onSourceLabelChange={setSourceLabel}
+              disabled={isBusy}
+            />
+          </div>
         </div>
 
         {/* Footer */}

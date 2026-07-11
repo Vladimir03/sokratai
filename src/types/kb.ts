@@ -30,7 +30,11 @@ export type CatalogFilter = 'ege' | 'oge' | 'olympiad';
  */
 export const KB_SUBJECTS = [
   { id: 'physics', label: 'Физика' },
+  // Лидеры предметов 2026-07-11: Светлана (математика), Эмилия (французский) —
+  // онбординг модераторами; якорные pills видны до появления первых тем.
+  { id: 'maths', label: 'Математика' },
   { id: 'social', label: 'Обществознание' },
+  { id: 'french', label: 'Французский язык' },
 ] as const;
 
 export type KBSubjectId = (typeof KB_SUBJECTS)[number]['id'];

@@ -28,6 +28,8 @@ import {
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
+// #61 (2026-07-11): несколько допустимых верных ответов + числовой диапазон.
+import { describeAnswerSpecForPrompt, parseAnswerSpec } from "../_shared/answer-alternatives.ts";
 import { type FlowchartTraceStep, physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
 import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_shared/physics-node-prompt.ts";
 // ai-usage-logging (2026-07-06): per-call token-usage attribution. Observability
@@ -1334,17 +1336,15 @@ function shouldUseDeterministicFastPath(studentAnswer: string, correctAnswer: st
   return student.length <= 48 && correct.length <= 48;
 }
 
-function tryDeterministicShortAnswerMatch(
-  studentAnswer: string,
-  correctAnswer: string | null,
+/** Сверка сигнатуры ученика с ОДНИМ кандидатом верного ответа (вынесено из
+ * tryDeterministicShortAnswerMatch для #61 — цикл по альтернативам). Поведение
+ * для одиночного ответа byte-identical прежнему. */
+function matchShortAnswerCandidate(
+  student: { exact: string; numeric: string | null; unit: string | null },
+  candidateRaw: string,
   maxScore: number,
 ): GuidedCheckResult | null {
-  if (!shouldUseDeterministicFastPath(studentAnswer, correctAnswer)) {
-    return null;
-  }
-
-  const student = extractShortAnswerSignature(studentAnswer);
-  const correct = extractShortAnswerSignature(correctAnswer ?? "");
+  const correct = extractShortAnswerSignature(candidateRaw);
 
   if (student.exact && student.exact === correct.exact) {
     return {
@@ -1377,6 +1377,59 @@ function tryDeterministicShortAnswerMatch(
     ai_score: maxScore,
     ai_score_comment: null,
   };
+}
+
+function tryDeterministicShortAnswerMatch(
+  studentAnswer: string,
+  correctAnswer: string | null,
+  maxScore: number,
+): GuidedCheckResult | null {
+  // #61 (2026-07-11): correct_answer может нести несколько допустимых вариантов
+  // («1248 ; 1250») и/или числовой диапазон («2,1–2,3»). Одиночный ответ без
+  // маркеров идёт прежним путём byte-identical.
+  const spec = parseAnswerSpec(correctAnswer);
+
+  if (spec?.isMulti) {
+    // Гейт длины — на ученика и КАЖДЫЙ кандидат отдельно (не на весь список:
+    // «1248 ; 1250 ; 1252» длиннее 48, но каждый вариант короткий).
+    const studentNorm = normalizeShortAnswerText(studentAnswer);
+    if (!studentNorm || studentNorm.includes("\n") || studentNorm.length > 48) {
+      return null;
+    }
+    const student = extractShortAnswerSignature(studentAnswer);
+    for (const alt of spec.alternatives) {
+      if (alt.type === "exact") {
+        if (!shouldUseDeterministicFastPath(studentAnswer, alt.value)) continue;
+        const res = matchShortAnswerCandidate(student, alt.value, maxScore);
+        if (res) return res;
+      } else {
+        // Диапазон: ответ ученика — число внутри [min, max] включительно
+        // (координата с графика «примерно считывается» — кейс Егора).
+        // Единица измерения ученика в диапазоне ИГНОРИРУЕТСЯ намеренно
+        // (продуктовое решение, ревью ChatGPT-5.6): диапазон — про величину
+        // числа, а не про размерность; сверка единиц осталась в exact-ветке.
+        const numeric = student.numeric != null ? Number(student.numeric) : NaN;
+        if (Number.isFinite(numeric) && numeric >= alt.min && numeric <= alt.max) {
+          return {
+            verdict: "CORRECT",
+            feedback: "Верно — твой ответ в допустимых пределах.",
+            confidence: 0.98,
+            error_type: "correct",
+            ai_score: maxScore,
+            ai_score_comment: null,
+          };
+        }
+      }
+    }
+    return null; // ни один вариант не совпал → обычный AI-путь
+  }
+
+  if (!shouldUseDeterministicFastPath(studentAnswer, correctAnswer)) {
+    return null;
+  }
+
+  const student = extractShortAnswerSignature(studentAnswer);
+  return matchShortAnswerCandidate(student, correctAnswer ?? "", maxScore);
 }
 
 function buildGraphGroundingGuidance(taskOcrText: string | null | undefined, hasTaskImage: boolean): string[] {
@@ -1733,6 +1786,9 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
   const studentImageCount = studentImageUrls.length;
   const hasStudentImage = studentImageCount > 0;
   const answerTypeGuidance = buildAnswerTypeGuidance(params.correctAnswer, params.taskText);
+  // #61: несколько допустимых ответов / диапазон — без этой строки AI строго
+  // сверяет с одним значением и не зачтёт легитимный второй вариант.
+  const answerAlternativesGuidance = describeAnswerSpecForPrompt(parseAnswerSpec(params.correctAnswer));
   const wantsImageDescription = hasStudentImage && isImageDescriptionRequest(params.studentAnswer);
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
   const checkFormatGuidance = buildCheckFormatGuidance(params.checkFormat, params.studentAnswer);
@@ -1812,6 +1868,7 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       ? "Пользователь явно спрашивает про своё изображение. В начале feedback сначала коротко опиши, что видно именно на изображении ученика, а затем мягко поясни, что это не финальный ответ по задаче, если ответ не завершён."
       : "",
     `Эталонный ответ: ${correctAnswerValue}`,
+    answerAlternativesGuidance ?? "",
     rubricLine,
     rubricGuidance,
     hasRubricImages ? "К задаче также приложены изображения с критериями проверки от репетитора — учитывай их при оценке." : "",

@@ -11,12 +11,14 @@ import {
   uploadKBTaskImage,
 } from '@/lib/kbApi';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
+import { inferCheckFormatFromKim } from '@/lib/checkFormatHelpers';
 import {
   loadLastClassification,
   saveLastClassification,
 } from '@/lib/kbLastClassification';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
+import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
 import {
   TaskClassificationFields,
   type TaskClassType,
@@ -97,9 +99,10 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const [topicId, setTopicId] = useState(inherited.topicId ?? '');
   const [subtopicId, setSubtopicId] = useState(inherited.subtopicId ?? '');
   const [sourceLabel, setSourceLabel] = useState(inherited.sourceLabel ?? '');
-  const [answerFormat, setAnswerFormat] = useState(inherited.answerFormat ?? '');
 
-  const [showAnswerSection, setShowAnswerSection] = useState(false);
+  // Запрос Елены #13 (2026-07-11): «Ответ и решение» — раскрыто по умолчанию
+  // и стоит ВЫШЕ классификации (естественный порядок ввода).
+  const [showAnswerSection, setShowAnswerSection] = useState(true);
   const [uploading, setUploading] = useState(false);
 
   const isBusy = uploading || createTask.isPending;
@@ -156,6 +159,22 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   const olympiadNeedsDifficulty = taskType === 'olympiad' && !difficulty.trim();
   const canSave = hasContent && folderId !== '' && !olympiadNeedsDifficulty;
 
+  // Авто-формат проверки по № КИМ (запрос Елены #13) — зеркало эвристики импорта
+  // в ДЗ (resolveCheckFormatFromKb → inferCheckFormatFromKim, только физика).
+  // checkFormat === '' = «авто»: в БД пишем NULL, дерайв на импорте не меняем.
+  const kimNumParsed = kimNumber.trim() ? parseInt(kimNumber.trim(), 10) : null;
+  const isExamType = taskType === 'ege' || taskType === 'oge';
+  const autoCheckFormat =
+    subject === 'physics' && isExamType && kimNumParsed
+      ? inferCheckFormatFromKim(kimNumParsed)
+      : null;
+  // Физика ЕГЭ №21–26 грейдится по блок-схемам ФИПИ автоматически (rule 40) —
+  // показываем это репетитору, чтобы не искал «куда вписать критерии».
+  const fipsCriteriaKim =
+    subject === 'physics' && taskType === 'ege' && kimNumParsed && kimNumParsed >= 21 && kimNumParsed <= 26
+      ? kimNumParsed
+      : null;
+
   const handleSave = async (keepOpen: boolean) => {
     if (!canSave || !folderId || isBusy) return;
 
@@ -202,7 +221,6 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
         solution: solution.trim() || undefined,
         rubric_text: rubricText.trim() || undefined,
         exam: exam || undefined,
-        answer_format: answerFormat || undefined,
         attachment_url: attachmentUrl,
         solution_attachment_url: solutionAttachmentUrl,
         kim_number: kimNum && !isNaN(kimNum) ? kimNum : undefined,
@@ -224,7 +242,6 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
         topicId,
         subtopicId,
         sourceLabel,
-        answerFormat,
         folderId,
       });
       if (keepOpen) {
@@ -335,35 +352,8 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
             </p>
           )}
 
-          {/* ── Классификация (видна всегда) ── */}
-          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Классификация
-            </div>
-            <TaskClassificationFields
-              subject={subject}
-              onSubjectChange={handleSubjectChange}
-              taskType={taskType}
-              kimNumber={kimNumber}
-              difficulty={difficulty}
-              primaryScore={primaryScore}
-              topicId={topicId}
-              subtopicId={subtopicId}
-              sourceLabel={sourceLabel}
-              answerFormat={answerFormat}
-              onTaskTypeChange={handleTaskTypeChange}
-              onKimNumberChange={handleKimChange}
-              onDifficultyChange={setDifficulty}
-              onPrimaryScoreChange={setPrimaryScore}
-              onTopicIdChange={handleTopicChange}
-              onSubtopicIdChange={setSubtopicId}
-              onSourceLabelChange={setSourceLabel}
-              onAnswerFormatChange={setAnswerFormat}
-              disabled={isBusy}
-            />
-          </div>
-
-          {/* ── Ответ и решение (сворачиваемо) ── */}
+          {/* ── Ответ и решение — ВЫШЕ классификации, раскрыто по умолчанию
+              (запрос Елены #13: естественный порядок ввода условие → ответ). ── */}
           <button
             type="button"
             onClick={() => setShowAnswerSection((v) => !v)}
@@ -379,16 +369,22 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
           {showAnswerSection && (
             <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
-              {/* Answer */}
+              {/* Answer — с вариантами и диапазоном (#61); для развёрнутого
+                  решения альтернативы не нужны → обычное поле. */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Ответ</legend>
-                <input
-                  type="text"
-                  value={answer}
-                  onChange={(e) => setAnswer(e.target.value)}
-                  placeholder="Правильный ответ"
-                  className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
-                />
+                {(checkFormat || autoCheckFormat) === 'detailed_solution' ? (
+                  <input
+                    type="text"
+                    value={answer}
+                    onChange={(e) => setAnswer(e.target.value)}
+                    placeholder="Правильный ответ"
+                    disabled={isBusy}
+                    className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
+                  />
+                ) : (
+                  <AnswerAlternativesField value={answer} onChange={setAnswer} disabled={isBusy} />
+                )}
               </fieldset>
 
               {/* Solution */}
@@ -407,8 +403,9 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               {/* Solution images */}
               <ImageUploadField label="Фото решения" imageUpload={solutionImages} disabled={isBusy} />
 
-              {/* unified-task-model F1 (2026-07-05): формат проверки — паритет с
-                  конструктором ДЗ (nullable: «Не указан» = derive при импорте). */}
+              {/* Формат проверки: '' = авто. Когда авто-значение вычислимо
+                  (физика + КИМ), показываем его прямо в опции (запрос Елены #13);
+                  в БД при '' по-прежнему NULL — дерайв на импорте не меняем. */}
               <fieldset>
                 <legend className="mb-1.5 text-xs font-semibold text-slate-500">Формат проверки</legend>
                 <select
@@ -417,10 +414,20 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
                   disabled={isBusy}
                   className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
                 >
-                  <option value="">Не указан (определится по № КИМ)</option>
+                  <option value="">
+                    {autoCheckFormat
+                      ? `Авто по № КИМ: ${autoCheckFormat === 'detailed_solution' ? 'Развёрнутое решение' : 'Краткий ответ'}`
+                      : 'Не указан (определится по № КИМ)'}
+                  </option>
                   <option value="short_answer">Краткий ответ</option>
                   <option value="detailed_solution">Развёрнутое решение</option>
                 </select>
+                {fipsCriteriaKim ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Задание №{fipsCriteriaKim} — проверка развёрнутого решения пойдёт по критериям
+                    ФИПИ автоматически, отдельные критерии вписывать не нужно.
+                  </p>
+                ) : null}
               </fieldset>
 
               {/* unified-task-model F1: структурные критерии (тот же редактор,
@@ -449,6 +456,32 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
               </fieldset>
             </div>
           )}
+
+          {/* ── Классификация (видна всегда; ниже ответа/решения — запрос Елены #13) ── */}
+          <div className="space-y-4 rounded-lg border border-socrat-border/50 bg-slate-50/50 p-4">
+            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              Классификация
+            </div>
+            <TaskClassificationFields
+              subject={subject}
+              onSubjectChange={handleSubjectChange}
+              taskType={taskType}
+              kimNumber={kimNumber}
+              difficulty={difficulty}
+              primaryScore={primaryScore}
+              topicId={topicId}
+              subtopicId={subtopicId}
+              sourceLabel={sourceLabel}
+              onTaskTypeChange={handleTaskTypeChange}
+              onKimNumberChange={handleKimChange}
+              onDifficultyChange={setDifficulty}
+              onPrimaryScoreChange={setPrimaryScore}
+              onTopicIdChange={handleTopicChange}
+              onSubtopicIdChange={setSubtopicId}
+              onSourceLabelChange={setSourceLabel}
+              disabled={isBusy}
+            />
+          </div>
         </div>
 
         {/* Footer */}
