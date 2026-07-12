@@ -171,7 +171,7 @@ systemctl reload nginx
 
 - **GitHub Actions auto-deploy** — после push на main, GitHub runner билдит и rsync-ит на VPS, deploy-sokratai становится не нужен. Когда это случится — это правило перепишется на «push в main = автодеплой».
 - **Version manifest для emergency force-update** — `dist/version.json` + client-side `versionCheck.ts` + force-reload banner при mismatch с `minSupportedVersion`. Spec: `docs/delivery/features/service-worker-prod/spec.md` §5 + TASK-6/7 (P1, deferred). Пока что emergency recovery через `?sw=off` kill-switch (P0, live с 2026-05-04, см. `src/lib/swKillSwitch.ts`).
-- **Tutor-side push opt-in UI** — `<PushOptInBanner>` смонтирован только на student'ах (`src/pages/StudentHomework.tsx`). Для tutor'ов push subscription пока возможен только вручную через DevTools console. Когда добавится tutor opt-in surface — push на ДЗ от ученика начнёт реально работать end-to-end (R1-3 в Job Graph).
+- ~~**Tutor-side push opt-in UI**~~ — **ЗАКРЫТО 2026-07-12**: `PushOptInBanner` удалён, заменён `NotificationsNudge` (push + установка PWA) у ОБЕИХ ролей + постоянный вход в профилях. `isPushSupported` починен на `PROD_HOSTS` (был мёртв на проде `sokratai.ru`). Детали — rule 100. Осталось (P1): iOS-онбординг «Установи на экран Домой» (без установки iOS 16.4+ push не работает — telegram-fallback покрывает).
 
 ## Edge-функции деплоит Lovable, GitHub-CI deploy СЛОМАН (2026-06-08)
 

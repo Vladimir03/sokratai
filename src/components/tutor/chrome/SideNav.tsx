@@ -9,6 +9,7 @@ import {
   Library,
   CreditCard,
   LogOut,
+  MessagesSquare,
   LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,6 +30,8 @@ interface NavItemDef {
   icon: LucideIcon;
   label: string;
   counter?: CounterKey;
+  /** Бейдж-счётчик скрывается при 0 (Telegram-семантика непрочитанных). */
+  hideZeroCounter?: boolean;
 }
 
 interface NavGroupDef {
@@ -53,6 +56,13 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
   {
     label: 'Ученики',
     items: [
+      {
+        href: '/tutor/chat',
+        icon: MessagesSquare,
+        label: 'Чаты',
+        counter: 'unreadChats',
+        hideZeroCounter: true,
+      },
       {
         href: '/tutor/students',
         icon: Users,
@@ -86,6 +96,7 @@ const MOCK_EXAMS_NAV_ITEM: NavItemDef = {
 // same chunk is a no-op, so repeat hovers don't re-download.
 const PREFETCH_MAP: Record<string, () => Promise<unknown>> = {
   '/tutor/home': () => import('@/pages/tutor/TutorHome'),
+  '/tutor/chat': () => import('@/pages/tutor/TutorChat'),
   '/tutor/schedule': () => import('@/pages/tutor/TutorSchedule'),
   '/tutor/homework': () => import('@/pages/tutor/TutorHomework'),
   '/tutor/mock-exams': () => import('@/pages/tutor/mock-exams/TutorMockExams'),
@@ -167,7 +178,7 @@ const NavItem = memo(function NavItem({
     >
       <Icon aria-hidden="true" />
       <span className="t-nav__label">{item.label}</span>
-      {item.counter && (
+      {item.counter && !(item.hideZeroCounter && !counterValue) && (
         <span className="t-nav__count">{formatCounter(counterValue)}</span>
       )}
     </Link>

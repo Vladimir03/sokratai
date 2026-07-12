@@ -1,11 +1,7 @@
 import { supabase } from '@/lib/supabaseClient';
+import { isProductionHost } from '@/registerServiceWorker';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
-const PROD_HOSTNAME = 'sokratai.lovable.app';
-
-function isProductionHost(): boolean {
-  return window.location.hostname === PROD_HOSTNAME;
-}
 
 /** Convert URL-safe base64 string to Uint8Array (for applicationServerKey). */
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -21,7 +17,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 /**
  * Check if Web Push is available.
- * Returns false on non-prod hosts (SW is not registered outside sokratai.lovable.app).
+ * Returns false on non-prod hosts (SW registers only on PROD_HOSTS — see registerServiceWorker.ts).
  */
 export function isPushSupported(): boolean {
   return (

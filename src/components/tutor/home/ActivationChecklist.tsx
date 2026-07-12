@@ -15,8 +15,11 @@
  */
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
+import { toast } from "sonner";
 import { useTutorHomeworkAssignments } from "@/hooks/useTutorHomework";
 import { DemoCheckCard } from "@/components/tutor/home/DemoCheckCard";
+import { InstallSheet } from "@/components/pwa/InstallSheet";
+import { useNotificationsSetup } from "@/hooks/useNotificationsSetup";
 import { supabase } from "@/lib/supabaseClient";
 
 const DISMISS_KEY = "sokrat-activation-checklist-dismissed";
@@ -95,6 +98,18 @@ export function ActivationChecklist({
   const hasHomework = assignments.length > 0;
   const hasSent = assignments.some((a) => (a.assigned_count ?? 0) > 0);
 
+  // Шаг «на телефон» — только на мобильном устройстве (PWA-надж, 2026-07-12).
+  const pwaSetup = useNotificationsSetup();
+  const [installSheetOpen, setInstallSheetOpen] = useState(false);
+  const handleInstallStep = async () => {
+    if (pwaSetup.capability === "native-prompt") {
+      const outcome = await pwaSetup.runNativeInstall();
+      if (outcome === "accepted") toast.success("Сократ добавлен на экран телефона!");
+    } else {
+      setInstallSheetOpen(true);
+    }
+  };
+
   const steps: Step[] = [
     {
       done: hasStudents,
@@ -118,6 +133,16 @@ export function ActivationChecklist({
       action: onAssignHomework,
     },
   ];
+
+  if (pwaSetup.isMobile) {
+    steps.push({
+      done: pwaSetup.isInstalled,
+      title: "Установите Сократ на телефон",
+      sub: "Уведомления о сдачах и сообщениях — как в мессенджере",
+      cta: "Установить",
+      action: () => void handleInstallStep(),
+    });
+  }
 
   const allDone = steps.every((s) => s.done);
   const firstIncomplete = steps.findIndex((s) => !s.done);
@@ -146,7 +171,7 @@ export function ActivationChecklist({
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-900">
-              Соберите первую домашку — 3 шага
+              Соберите первую домашку — {steps.length} шага
             </h2>
             <p className="text-sm text-slate-500">
               Ученик решает с подсказками, Сократ AI проверяет — вы экономите вечер.
@@ -213,6 +238,12 @@ export function ActivationChecklist({
           })}
         </ol>
       </div>
+
+      <InstallSheet
+        open={installSheetOpen}
+        onOpenChange={setInstallSheetOpen}
+        subtitle="Уведомления о сдачах и сообщениях учеников"
+      />
     </>
   );
 }

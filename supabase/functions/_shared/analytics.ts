@@ -29,7 +29,11 @@ export type AnalyticsEventName =
   // демо-разбор «как Сократ проверяет» — сдвиг aha влево (v2.1 W1;
   // CHECK-whitelist расширен миграцией 20260708130000)
   | "tutor_demo_check_viewed" // открыл готовый пример разбора (A)
-  | "tutor_demo_check_ran"; // прогнал разбор своей задачи (B)
+  | "tutor_demo_check_ran" // прогнал разбор своей задачи (B)
+  // чат репетитор↔ученик (CHECK-whitelist расширен миграцией 20260712150300)
+  | "chat_first_message_sent" // в беседе появилось первое сообщение
+  | "tutor_chat_ai_ran" // @СократAI вызван репетитором (COUNT за сутки = cap)
+  | "student_chat_ai_ran"; // @СократAI вызван учеником
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;

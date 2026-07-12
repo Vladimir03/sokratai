@@ -16,6 +16,8 @@ import {
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import { TariffNudgeBanner } from '@/components/tutor/home/TariffNudgeBanner';
 import { ActivationChecklist } from '@/components/tutor/home/ActivationChecklist';
+import NotificationsNudge from '@/components/pwa/NotificationsNudge';
+import { isMobileDevice } from '@/lib/pwaInstall';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 
 // Lazy: модал оплаты YooKassa — грузим только по клику «Подключить» в плашке.
@@ -242,6 +244,16 @@ function TutorHomeContent() {
               onAddStudent={handleAddStudent}
               onAssignHomework={handleAssignHomework}
             />
+
+            {/* PWA/push-надж — только на мобильном (решение Vladimir 2026-07-12:
+                с desktop телефонную установку не предложишь). */}
+            {isMobileDevice() && (
+              <NotificationsNudge
+                context="tutor-home"
+                variant="card"
+                message="Сократ на телефоне: уведомления о сообщениях и сдачах учеников"
+              />
+            )}
 
             <HomeCTAs
               onAssignHomework={handleAssignHomework}

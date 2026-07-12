@@ -25,6 +25,7 @@ import {
 } from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
 import { SubmitNudgeBanner } from '@/components/student/homework-problem/SubmitNudgeBanner';
+import { PostSubmissionNudge } from '@/components/pwa/PostSubmissionNudge';
 import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
 import { SubmitCtaBar } from '@/components/student/homework-problem/SubmitCtaBar';
 import { MathQuickPicker } from '@/components/student/homework-problem/MathQuickPicker';
@@ -255,6 +256,9 @@ export default function HomeworkProblem() {
     text?: string;
     photoRefs?: string[];
   } | null>(null);
+  // Одноразовый PWA/push-надж после первой успешной сдачи (PostSubmissionNudge
+  // сам гейтится localStorage + eligibility) — инкремент на каждый success.
+  const [pwaNudgeTick, setPwaNudgeTick] = useState(0);
   // «Просто обсудить» / ✕ для конкретного текста — не показывать nudge на
   // тот же текст повторно (иначе send блокируется навсегда).
   const dismissedNudgeTextRef = useRef<string | null>(null);
@@ -1009,6 +1013,9 @@ export default function HomeworkProblem() {
         if (response.verdict === 'CORRECT') {
           clearSubmitSheetDraft(taskId ?? data.task.id);
         }
+
+        // Первая успешная сдача → мягкий надж «включи уведомления / установи»
+        setPwaNudgeTick((t) => t + 1);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Не удалось отправить решение';
         toast.error(msg);
@@ -2077,6 +2084,7 @@ export default function HomeworkProblem() {
         subject={data.assignment.subject}
         onSubmit={handleSubmissionSubmit}
       />
+      <PostSubmissionNudge tick={pwaNudgeTick} />
     </div>
   );
 }

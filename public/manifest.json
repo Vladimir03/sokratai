@@ -1,16 +1,21 @@
 {
-  "name": "Сократ — ИИ-репетитор по математике",
+  "name": "Сократ AI — платформа репетитора и ученика",
   "short_name": "Сократ",
-  "description": "Персональный ИИ-репетитор для подготовки к ЕГЭ по математике",
+  "description": "AI-проверка ДЗ, чат с репетитором и сократовский AI-чат для подготовки к ЕГЭ и ОГЭ",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#8B5CF6",
+  "theme_color": "#1B6B4A",
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "64x64",
-      "type": "image/x-icon"
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
     }
   ]
 }

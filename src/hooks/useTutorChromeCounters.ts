@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTutorStudents } from '@/hooks/useTutor';
+import { useChatUnreadChatsCount } from '@/hooks/chat/useChatConversations';
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
 
@@ -8,6 +9,8 @@ export interface TutorChromeCounters {
   totalStudents: number | null;
   activeHomework: number | null;
   totalHomework: number | null;
+  /** Чатов с непрочитанными (Telegram-семантика: чаты, не сообщения). */
+  unreadChats: number | null;
 }
 
 async function fetchActiveHomeworkCount(): Promise<number> {
@@ -41,6 +44,9 @@ async function fetchTotalHomeworkCount(): Promise<number> {
 
 export function useTutorChromeCounters(): TutorChromeCounters {
   const { students, loading: studentsLoading } = useTutorStudents();
+  // Живой бейдж «Чаты»: список бесед + list-realtime уже нужны вкладке — здесь
+  // тот же query-кэш, лишних запросов нет.
+  const unreadChats = useChatUnreadChatsCount('tutor');
 
   const { data: activeHomework, isLoading: activeHwLoading } = useQuery({
     queryKey: ['tutor', 'chrome', 'active-hw-count'] as const,
@@ -66,5 +72,6 @@ export function useTutorChromeCounters(): TutorChromeCounters {
     totalStudents,
     activeHomework: activeHwLoading ? null : activeHomework ?? 0,
     totalHomework: totalHwLoading ? null : totalHomework ?? 0,
+    unreadChats,
   };
 }

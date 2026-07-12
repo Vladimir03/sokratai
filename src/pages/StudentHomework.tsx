@@ -9,7 +9,7 @@ import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
 import { MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import PushOptInBanner from '@/components/PushOptInBanner';
+import NotificationsNudge from '@/components/pwa/NotificationsNudge';
 
 function formatStatus(status: string | null, deadline: string | null) {
   if (deadline && parseISO(deadline).getTime() <= Date.now()) return 'deadline_missed';
@@ -41,7 +41,10 @@ const StudentHomework = () => {
         <Navigation />
         <PageContent>
           <main className="container mx-auto px-4 pb-8">
-            <PushOptInBanner />
+            <NotificationsNudge
+              context="student-homework"
+              message="Включи уведомления, чтобы не пропустить ДЗ и проверку репетитора"
+            />
             <div className="max-w-5xl mx-auto space-y-4">
               <h1 className="text-2xl font-bold">Домашние задания</h1>
 

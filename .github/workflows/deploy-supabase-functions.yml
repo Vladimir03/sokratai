@@ -64,6 +64,7 @@ jobs:
           supabase functions deploy tutor-manual-add-student --project-ref "$REF"
           supabase functions deploy tutor-update-student --project-ref "$REF"
           supabase functions deploy tutor-progress-api --project-ref "$REF"
+          supabase functions deploy tutor-student-chat-api --project-ref "$REF"
           supabase functions deploy lesson-materials-api --project-ref "$REF"
           supabase functions deploy kb-ai-extract --project-ref "$REF"
           supabase functions deploy student-lessons-api --project-ref "$REF"

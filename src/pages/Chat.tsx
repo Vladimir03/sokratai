@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabaseClient";
 import ChatMessage from "@/components/ChatMessage";
@@ -24,6 +24,12 @@ import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
 import { SubscriptionBanner, MessageLimitWarning, TrialExpiryReminder } from "@/components/SubscriptionBanner";
 import DateSeparator, { formatDateLabel, isDifferentDay } from "@/components/DateSeparator";
+
+// Чат с репетитором (закреп) — лениво: не тянем realtime/чат-код в AI-чанк,
+// пока ученик не открыл диалог с репетитором.
+const TutorConversationView = lazy(() =>
+  import("@/components/chat/ConversationView").then((m) => ({ default: m.ConversationView })),
+);
 
 type MessageStatus = 'sending' | 'sent' | 'ai_thinking' | 'delivered' | 'failed';
 
@@ -95,6 +101,12 @@ export default function Chat() {
   const navigate = useNavigate();
   const location = useLocation();
   const chatIdFromUrl = searchParams.get('id');
+  // Закреп-диалог с репетитором: ?id=tutor:<conversationId> (префикс не
+  // коллидирует с UUID AI-чатов). В этом режиме все AI-запросы отключаются
+  // через существующие guard'ы (currentChatId = undefined ниже).
+  const tutorConversationId = chatIdFromUrl?.startsWith('tutor:')
+    ? chatIdFromUrl.slice('tutor:'.length)
+    : null;
   const isMobile = useIsMobile();
   const deviceType = useDeviceType();
   
@@ -117,14 +129,17 @@ export default function Chat() {
     }
   }, [initialMessageFromPractice]);
 
-  // Предзагрузка Pyodide для быстрого рендеринга графиков
+  // Предзагрузка Pyodide для быстрого рендеринга графиков.
+  // В режиме диалога с репетитором НЕ грузим (ревью 5.6: скрытый AI-монолит
+  // не должен тянуть Pyodide, пока ученик общается с репетитором).
   useEffect(() => {
+    if (tutorConversationId) return;
     // Загружаем Pyodide в фоне через 3 секунды после открытия чата
     const timer = setTimeout(() => {
       preloadPyodide();
     }, 3000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [tutorConversationId]);
 
   // Функция для оценки размера сообщения на основе его контента
   const estimateMessageSize = useCallback((index: number) => {
@@ -254,7 +269,7 @@ export default function Chat() {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes to prevent duplicate queries
   });
 
-  const currentChatId = chatIdFromUrl || generalChat?.id;
+  const currentChatId = tutorConversationId ? undefined : (chatIdFromUrl || generalChat?.id);
 
   // Redirect to general chat if no chat ID in URL and general chat is loaded
   useEffect(() => {
@@ -1750,7 +1765,10 @@ export default function Chat() {
     }
   }, [loadingHistory, isLoading, currentChatId, user?.id, handleSend]);
 
-  if (!currentChatId) {
+  // tutorConversationId: в режиме диалога с репетитором currentChatId НАМЕРЕННО
+  // undefined (AI-запросы отключены) — скелетон только когда нет НИ того, НИ
+  // другого (ревью ChatGPT-5.6 P0: ветка репетитора была недостижима).
+  if (!currentChatId && !tutorConversationId) {
     return (
       <AuthGuard>
         <div className="min-h-screen bg-background">
@@ -1801,6 +1819,7 @@ export default function Chat() {
             `}>
               <ChatSidebar
                 currentChatId={currentChatId}
+                activeTutorConversationId={tutorConversationId}
                 onChatSelect={handleChatSelect}
                 onClose={() => setIsSidebarOpen(false)}
                 isMobile={isMobile}
@@ -1808,6 +1827,41 @@ export default function Chat() {
             </div>
 
             <div className="relative flex-1 flex flex-col overflow-hidden min-w-0">
+              {/* Диалог с репетитором — оверлей поверх AI-зоны (минимальная
+                  инвазия в монолит: AI-запросы уже отключены через
+                  currentChatId=undefined). z-30 < сайдбара (z-50) и его
+                  бэкдропа (z-40). */}
+              {tutorConversationId && (
+                <div className="absolute inset-0 z-30 flex flex-col bg-background">
+                  <Suspense
+                    fallback={
+                      <div className="flex flex-1 items-center justify-center">
+                        <LoadingIndicator />
+                      </div>
+                    }
+                  >
+                    <TutorConversationView
+                      key={tutorConversationId}
+                      conversationId={tutorConversationId}
+                      perspective="student"
+                      className="flex-1 min-h-0"
+                      leadingSlot={
+                        isMobile ? (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsSidebarOpen(true)}
+                            className="shrink-0"
+                            aria-label="Открыть список чатов"
+                          >
+                            <Menu className="h-5 w-5" />
+                          </Button>
+                        ) : undefined
+                      }
+                    />
+                  </Suspense>
+                </div>
+              )}
               <div className="flex-shrink-0 border-b p-2 md:p-3 flex items-center gap-2 md:gap-3 bg-background">
                 <Button
                   variant="ghost"

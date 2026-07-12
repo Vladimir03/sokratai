@@ -107,6 +107,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.tutor-progress-api]
     verify_jwt = true
+  [functions.tutor-student-chat-api]
+    verify_jwt = true
   [functions.tutor-update-student]
     verify_jwt = true
   [functions.yookassa-create-payment]

@@ -5,14 +5,14 @@ import { checkSwKillSwitch } from '@/lib/swKillSwitch';
 // Both prod and preview register SW; non-prod hosts (localhost / branch-deploy) unregister.
 // www.sokratai.ru kept defensively in case apex redirect is missing on nginx.
 // See CLAUDE.md "# Network & Infrastructure" for full architecture.
-const PROD_HOSTS = [
+export const PROD_HOSTS = [
   'sokratai.ru',
   'www.sokratai.ru',
   'sokratai.lovable.app',
   'preview--sokratai.lovable.app',
 ];
 
-function isProductionHost(): boolean {
+export function isProductionHost(): boolean {
   return PROD_HOSTS.includes(window.location.hostname);
 }
 

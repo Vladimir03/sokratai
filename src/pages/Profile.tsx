@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { getAuthErrorMessage, getFunctionsErrorMessage, supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
+import AppNotificationsCard from "@/components/pwa/AppNotificationsCard";
 import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard, Mail, KeyRound, ShieldCheck } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
@@ -477,6 +478,10 @@ const Profile = () => {
         </div>
 
         <div className="space-y-6">
+          {/* Приложение и уведомления — постоянный вход (кто закрыл баннер,
+              возвращается сюда). Smart-CTA: push / установка PWA. */}
+          <AppNotificationsCard />
+
           {/* Main Profile Card */}
           <Card className="bg-slate-800 text-primary-foreground shadow-elegant">
             <CardHeader>

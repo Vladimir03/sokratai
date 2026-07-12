@@ -58,6 +58,7 @@ const TrainerPage = lazy(() => import("./pages/TrainerPage"));
 const RegisterTutor = lazy(() => import("./pages/RegisterTutor"));
 const EgorLanding = lazy(() => import("./pages/EgorLanding"));
 const TutorHome = lazy(() => import("./pages/tutor/TutorHome"));
+const TutorChat = lazy(() => import("./pages/tutor/TutorChat"));
 const TutorSchedule = lazy(() => import("./pages/tutor/TutorSchedule"));
 const TutorStudents = lazy(() => import("./pages/tutor/TutorStudents"));
 const TutorStudentProfile = lazy(() => import("./pages/tutor/TutorStudentProfile"));
@@ -431,6 +432,8 @@ const App = () => (
               <Route path="home" element={<TutorHome />} />
               <Route path="dashboard" element={<Navigate to="/tutor/home" replace />} />
               <Route path="schedule" element={<TutorSchedule />} />
+              <Route path="chat/:conversationId" element={<TutorChat />} />
+              <Route path="chat" element={<TutorChat />} />
               <Route path="students" element={<TutorStudents />} />
               <Route path="students/:tutorStudentId/progress" element={<RedirectStudentProgressToCard />} />
               <Route path="students/:tutorStudentId" element={<TutorStudentProfile />} />

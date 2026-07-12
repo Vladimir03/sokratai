@@ -15,7 +15,7 @@
 - **Таблица**: `push_subscriptions` (user_id, endpoint, p256dh, auth, user_agent, expires_at) — UNIQUE(user_id, endpoint), RLS, FK CASCADE
 - **Edge function**: `supabase/functions/push-subscribe/index.ts` — POST (upsert) + DELETE (unsubscribe), JWT auth
 - **Frontend API**: `src/lib/pushApi.ts` — `isPushSupported()` (prod-only!), `subscribeToPush()`, `unsubscribeFromPush()`
-- **Opt-in баннер**: `src/components/PushOptInBanner.tsx` — flow-block в `StudentHomework.tsx`, 7-day re-show
+- **Opt-in надж**: `src/components/pwa/NotificationsNudge.tsx` (заменил удалённый `PushOptInBanner`) — умная кнопка push+установка PWA, смонтирована у ОБЕИХ ролей (чат/ДЗ/профиль/Главная тьютора), dismiss 14 дней. `isPushSupported` теперь на общем `PROD_HOSTS` (был мёртв на `sokratai.ru`). Детали — rule 100.
 - **Push sender**: `supabase/functions/_shared/push-sender.ts` — raw `crypto.subtle` (RFC 8291 + RFC 8292), zero npm deps
 - **Env vars**: `VITE_VAPID_PUBLIC_KEY` (frontend), `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` (edge function secrets)
 - **КРИТИЧНО**: `isPushSupported()` возвращает `false` на non-prod hosts

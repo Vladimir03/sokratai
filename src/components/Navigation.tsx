@@ -4,10 +4,13 @@ import { MessageSquare, TrendingUp, User, LogOut, Backpack, Target, ClipboardChe
 import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import sokratLogo from "@/assets/sokrat-logo.png";
+import { useChatUnreadChatsCount } from "@/hooks/chat/useChatConversations";
 
 const Navigation = () => {
   const location = useLocation();
   const navigate = useNavigate();
+  // Живой бейдж непрочитанных диалогов с репетитором на вкладке «Чат».
+  const unreadChats = useChatUnreadChatsCount('student');
 
   const navItems = [
     { path: "/student/schedule", icon: Calendar, label: "Занятия" },
@@ -62,6 +65,16 @@ const Navigation = () => {
                 >
                   <Icon className="w-4 h-4" />
                   <span className="hidden md:inline">{item.label}</span>
+                  {item.path === "/chat" && unreadChats > 0 && (
+                    <span
+                      className={`flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none ${
+                        active ? "bg-white text-accent" : "bg-accent text-white"
+                      }`}
+                      aria-label={`Непрочитанных чатов: ${unreadChats}`}
+                    >
+                      {unreadChats > 9 ? "9+" : unreadChats}
+                    </span>
+                  )}
                 </Link>
               );
             })}

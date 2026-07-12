@@ -1,14 +1,23 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
-import { Plus, X, Loader2 } from "lucide-react";
+import { Plus, X, Loader2, Pin } from "lucide-react";
 import { useState, useRef } from "react";
+import { toast } from "sonner";
 import { CreateChatDialog } from "./CreateChatDialog";
 import { CustomChatItem } from "./CustomChatItem";
 import { useNavigate } from "react-router-dom";
+import { ConversationRow } from "@/components/chat/ConversationRow";
+import NotificationsNudge from "@/components/pwa/NotificationsNudge";
+import { useChatConversations } from "@/hooks/chat/useChatConversations";
+import { chatConversationsKey } from "@/hooks/chat/chatQueryKeys";
+import { ensureChatConversation } from "@/lib/tutorStudentChatApi";
+import type { ChatConversationListItem } from "@/types/tutorStudentChat";
 
 interface ChatSidebarProps {
   currentChatId?: string;
+  /** conversationId открытого диалога с репетитором (?id=tutor:<id>). */
+  activeTutorConversationId?: string | null;
   onChatSelect: (chatId: string) => void;
   onClose?: () => void;
   isMobile?: boolean;
@@ -30,10 +39,35 @@ interface Chat {
   message_count?: Array<{ count: number }>;
 }
 
-export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: ChatSidebarProps) {
+export function ChatSidebar({ currentChatId, activeTutorConversationId, onChatSelect, onClose, isMobile }: ChatSidebarProps) {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [optimisticChats, setOptimisticChats] = useState<Array<{id: string, title: string, icon: string}>>([]);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  // Закреплённые диалоги с репетиторами (Telegram-закреп) — над AI-чатами.
+  const { data: tutorDialogs = [] } = useChatConversations('student');
+
+  const handleTutorDialogSelect = async (item: ChatConversationListItem) => {
+    if (item.conversation_id) {
+      onChatSelect(`tutor:${item.conversation_id}`);
+      return;
+    }
+    try {
+      const res = await ensureChatConversation(item.tutor_student_id);
+      queryClient.setQueryData<ChatConversationListItem[]>(
+        chatConversationsKey('student'),
+        (prev) =>
+          prev?.map((i) =>
+            i.tutor_student_id === item.tutor_student_id
+              ? { ...i, conversation_id: res.conversation_id }
+              : i,
+          ),
+      );
+      onChatSelect(`tutor:${res.conversation_id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Не удалось открыть чат с репетитором');
+    }
+  };
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -185,6 +219,33 @@ export function ChatSidebar({ currentChatId, onChatSelect, onClose, isMobile }: 
         </div>
 
         <div className="flex-1 overflow-y-auto">
+          {tutorDialogs.length > 0 && (
+            <>
+              <div className="px-3 pt-2">
+                <NotificationsNudge
+                  context="student-chat"
+                  message="Получай сообщения репетитора как в мессенджере"
+                />
+              </div>
+              <div className="px-4 py-2 text-sm text-muted-foreground font-medium flex items-center gap-1.5">
+                <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+                РЕПЕТИТОР
+              </div>
+              {tutorDialogs.map((item) => (
+                <ConversationRow
+                  key={item.tutor_student_id}
+                  item={item}
+                  myRole="student"
+                  active={
+                    Boolean(activeTutorConversationId) &&
+                    item.conversation_id === activeTutorConversationId
+                  }
+                  onClick={() => void handleTutorDialogSelect(item)}
+                />
+              ))}
+              <div className="mx-4 my-2 border-b" />
+            </>
+          )}
           {generalChat && <ChatItem chat={generalChat} />}
 
           {taskChats.length > 0 && (
