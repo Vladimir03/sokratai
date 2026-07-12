@@ -13,9 +13,19 @@
  * Promise.withResolvers = Safari 17.4+); canvas.toBlob (НЕ OffscreenCanvas).
  */
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
-import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
+// Воркер через Vite `?worker`, а НЕ `?url` (хотфикс 2026-07-12, репорт Светланы):
+// `?url` сохранял исходный `pdf.worker.min.mjs`, а прод-nginx на VPS отдаёт `.mjs`
+// с `Content-Type: application/octet-stream` (подтверждено curl'ом: `.js` →
+// `application/javascript`, `.mjs` → `octet-stream`). Браузер по strict-MIME
+// отвергает module-worker из octet-stream → `getDocument().promise` реджектится
+// «не удалось открыть файл» у ВСЕХ на проде (в node/Vite-dev MIME иной — там
+// работало). `?worker` бандлит воркер в обычный `.js`-чанк (application/javascript)
+// → грузится. Внешний `workerPort` pdfjs НЕ терминейтит на `destroy()`
+// (`_webWorker` null) → одна инстанция переиспользуется между PDF-файлами.
+// Класс проблемы — тот же octet-stream, что в rule 95 (SW/DPI).
+import PdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
 
 /** Целевая ширина страницы в px — читаемо для Gemini-OCR, укладывается в капы. */
 const TARGET_PAGE_WIDTH_PX = 1600;
@@ -102,59 +112,26 @@ async function renderPageToBlob(
  * Страница > 4 МБ → перерендер с пониженным качеством/масштабом (кап edge-inlining).
  * Битый/зашифрованный PDF → PdfRenderError с русской фразой.
  */
-/**
- * Открыть PDF. Сначала с web-worker (быстро), при сбое — retry на ГЛАВНОМ потоке
- * (`disableWorker`). Причина (репорт Светланы 2026-07-12): worker-чанк
- * `pdf.worker.min.mjs` может не загрузиться под РФ-DPI / из-за неверного MIME на
- * прод-nginx (тот же класс, что octet-stream в rule 95) → `getDocument().promise`
- * реджектится «Не удалось открыть файл», хотя сам PDF валиден (в node с
- * `disableWorker:true` открывается). Свежий `arrayBuffer` на каждую попытку —
- * worker мог detach'нуть буфер первой попытки.
- */
-async function openPdfDocument(
-  file: File,
-): Promise<{ doc: pdfjsLib.PDFDocumentProxy; loadingTask: pdfjsLib.PDFDocumentLoadingTask }> {
-  const attempt = async (disableWorker: boolean) => {
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(await file.arrayBuffer()),
-      disableWorker,
-    });
-    try {
-      const doc = await loadingTask.promise;
-      return { doc, loadingTask };
-    } catch (e) {
-      void loadingTask.destroy();
-      throw e;
-    }
-  };
-
-  try {
-    return await attempt(false); // быстрый путь: worker
-  } catch (e) {
-    const name = e instanceof Error ? e.name : '';
-    if (name === 'PasswordException') throw e; // пароль — retry не поможет
-    // PII-free: только имя ошибки, никакого содержимого файла.
-    console.warn('pdf_open_worker_failed_retry_main_thread', { error: name || 'unknown' });
-    return await attempt(true); // устойчивый путь: главный поток
-  }
-}
-
 export async function renderPdfPagesToFiles(
   file: File,
   opts: PdfRenderOptions,
 ): Promise<PdfRenderResult> {
   const baseName = file.name.replace(/\.pdf$/i, '') || 'pdf';
 
-  // v6: destroy() живёт на loading task (чистит и worker, и document).
+  // v6: destroy() живёт на loading task (чистит document; workerPort — внешний,
+  // pdfjs его не терминейтит, переиспользуется между файлами).
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
   let doc: pdfjsLib.PDFDocumentProxy;
-  let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
   try {
-    ({ doc, loadingTask } = await openPdfDocument(file));
+    doc = await loadingTask.promise;
   } catch (e) {
+    void loadingTask.destroy();
     const name = e instanceof Error ? e.name : '';
     if (name === 'PasswordException') {
       throw new PdfRenderError('PDF защищён паролем — снимите защиту и загрузите снова.');
     }
+    // PII-free: только имя ошибки, никакого содержимого файла.
+    console.warn('pdf_open_failed', { error: name || 'unknown' });
     throw new PdfRenderError('Не удалось открыть файл. Убедитесь, что это корректный PDF.');
   }
 
