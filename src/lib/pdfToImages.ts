@@ -102,6 +102,43 @@ async function renderPageToBlob(
  * Страница > 4 МБ → перерендер с пониженным качеством/масштабом (кап edge-inlining).
  * Битый/зашифрованный PDF → PdfRenderError с русской фразой.
  */
+/**
+ * Открыть PDF. Сначала с web-worker (быстро), при сбое — retry на ГЛАВНОМ потоке
+ * (`disableWorker`). Причина (репорт Светланы 2026-07-12): worker-чанк
+ * `pdf.worker.min.mjs` может не загрузиться под РФ-DPI / из-за неверного MIME на
+ * прод-nginx (тот же класс, что octet-stream в rule 95) → `getDocument().promise`
+ * реджектится «Не удалось открыть файл», хотя сам PDF валиден (в node с
+ * `disableWorker:true` открывается). Свежий `arrayBuffer` на каждую попытку —
+ * worker мог detach'нуть буфер первой попытки.
+ */
+async function openPdfDocument(
+  file: File,
+): Promise<{ doc: pdfjsLib.PDFDocumentProxy; loadingTask: pdfjsLib.PDFDocumentLoadingTask }> {
+  const attempt = async (disableWorker: boolean) => {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(await file.arrayBuffer()),
+      disableWorker,
+    });
+    try {
+      const doc = await loadingTask.promise;
+      return { doc, loadingTask };
+    } catch (e) {
+      void loadingTask.destroy();
+      throw e;
+    }
+  };
+
+  try {
+    return await attempt(false); // быстрый путь: worker
+  } catch (e) {
+    const name = e instanceof Error ? e.name : '';
+    if (name === 'PasswordException') throw e; // пароль — retry не поможет
+    // PII-free: только имя ошибки, никакого содержимого файла.
+    console.warn('pdf_open_worker_failed_retry_main_thread', { error: name || 'unknown' });
+    return await attempt(true); // устойчивый путь: главный поток
+  }
+}
+
 export async function renderPdfPagesToFiles(
   file: File,
   opts: PdfRenderOptions,
@@ -109,12 +146,11 @@ export async function renderPdfPagesToFiles(
   const baseName = file.name.replace(/\.pdf$/i, '') || 'pdf';
 
   // v6: destroy() живёт на loading task (чистит и worker, и document).
-  const loadingTask = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
   let doc: pdfjsLib.PDFDocumentProxy;
+  let loadingTask: pdfjsLib.PDFDocumentLoadingTask;
   try {
-    doc = await loadingTask.promise;
+    ({ doc, loadingTask } = await openPdfDocument(file));
   } catch (e) {
-    void loadingTask.destroy();
     const name = e instanceof Error ? e.name : '';
     if (name === 'PasswordException') {
       throw new PdfRenderError('PDF защищён паролем — снимите защиту и загрузите снова.');
