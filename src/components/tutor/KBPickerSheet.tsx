@@ -1,5 +1,5 @@
 // Job: Быстро добавить задачу из базы в черновик ДЗ (P0.1 wedge)
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { memo, useState, useMemo, useCallback, useEffect } from 'react';
 import {
   ArrowLeft,
   Check,
@@ -44,7 +44,7 @@ type Tab = 'catalog' | 'my';
 
 // ─── Picker task card ────────────────────────────────────────────────────────
 
-function PickerTaskCard({
+const PickerTaskCard = memo(function PickerTaskCard({
   task,
   added,
   selected,
@@ -56,8 +56,9 @@ function PickerTaskCard({
   added: boolean;
   selected: boolean;
   showCheckbox: boolean;
-  onAdd: () => void;
-  onToggleSelect: () => void;
+  /** Стабильные колбэки с параметром (W3.4, ревью P2) — иначе memo был бы no-op. */
+  onAdd: (task: KBTask) => void;
+  onToggleSelect: (taskId: string) => void;
 }) {
   const source = task.owner_id ? 'my' : 'socrat';
 
@@ -94,7 +95,7 @@ function PickerTaskCard({
         {showCheckbox && !added && (
           <button
             type="button"
-            onClick={onToggleSelect}
+            onClick={() => onToggleSelect(task.id)}
             className={cn(
               'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors',
               selected
@@ -133,7 +134,7 @@ function PickerTaskCard({
             'shrink-0 gap-1 text-xs',
             added && 'pointer-events-none text-socrat-primary',
           )}
-          onClick={onAdd}
+          onClick={() => onAdd(task)}
           disabled={added}
         >
           {added ? (
@@ -175,7 +176,7 @@ function PickerTaskCard({
       ) : null}
     </div>
   );
-}
+});
 
 // ─── Catalog browser ─────────────────────────────────────────────────────────
 
@@ -249,6 +250,9 @@ function CatalogBrowser({
       return next;
     });
   }, []);
+
+  // W3.4: стабильный per-task хендлер — memo(PickerTaskCard) работает.
+  const handleAddOne = useCallback((task: KBTask) => onAddTasks([task]), [onAddTasks]);
 
   const handleBatchAdd = useCallback(() => {
     const toAdd = visibleTasks.filter(
@@ -369,8 +373,8 @@ function CatalogBrowser({
                 added={addedIds.has(task.id)}
                 selected={selectedIds.has(task.id)}
                 showCheckbox={showBatch}
-                onAdd={() => onAddTasks([task])}
-                onToggleSelect={() => toggleSelect(task.id)}
+                onAdd={handleAddOne}
+                onToggleSelect={toggleSelect}
               />
             )}
           />
@@ -452,6 +456,9 @@ function FolderBrowser({
       return next;
     });
   }, []);
+
+  // W3.4: стабильный per-task хендлер — memo(PickerTaskCard) работает.
+  const handleAddOne = useCallback((task: KBTask) => onAddTasks([task]), [onAddTasks]);
 
   const handleBatchAdd = useCallback(() => {
     const toAdd = tasks.filter(
@@ -597,8 +604,8 @@ function FolderBrowser({
             added={addedIds.has(task.id)}
             selected={selectedIds.has(task.id)}
             showCheckbox={showBatch}
-            onAdd={() => onAddTasks([task])}
-            onToggleSelect={() => toggleSelect(task.id)}
+            onAdd={handleAddOne}
+            onToggleSelect={toggleSelect}
           />
         ))}
       </div>

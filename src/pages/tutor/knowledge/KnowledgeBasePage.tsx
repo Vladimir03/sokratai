@@ -20,6 +20,7 @@ import { useIsModerator } from '@/hooks/useIsModerator';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { loadLastClassification } from '@/lib/kbLastClassification';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { SubjectsNudgeBanner } from '@/components/tutor/SubjectsNudgeBanner';
@@ -164,6 +165,18 @@ function CatalogHome({
   const [showCreateTopic, setShowCreateTopic] = useState(false);
   const [showSources, setShowSources] = useState(false);
 
+  // W3.3 (2026-07-12): счётчик Банка по активному предмету — сумма task_count
+  // всех тем предмета (оба экзамена + олимпиады, независимо от exam-фильтра).
+  // Из уже загруженного allTopics — ноль новых запросов. Мотивация лидеров +
+  // цифра для маркетинга («в Банке N задач по физике»).
+  const subjectTaskTotal = useMemo(
+    () =>
+      allTopics
+        .filter((t) => (t.subject ?? 'physics') === subject)
+        .reduce((acc, t) => acc + (t.task_count ?? 0), 0),
+    [allTopics, subject],
+  );
+
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     setShowDropdown(true);
@@ -207,7 +220,13 @@ function CatalogHome({
           <h2 className="text-2xl font-bold text-foreground">
             Каталог задач
           </h2>
-          <p className="mt-2 text-sm text-muted-foreground">Общая база · Копируйте нужные задачи к себе</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Общая база
+            {subjectTaskTotal > 0
+              ? ` · ${getSubjectLabel(subject)}: ${subjectTaskTotal} ${pluralizeRu(subjectTaskTotal, ['задача', 'задачи', 'задач'])}`
+              : ''}
+            {' · Копируйте нужные задачи к себе'}
+          </p>
         </div>
         {isModerator ? (
           <div className="flex shrink-0 items-center gap-2">
@@ -359,6 +378,12 @@ interface MyBaseHomeProps {
 function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
   const navigate = useNavigate();
   const { folders, loading, error, refetch, isFetching } = useRootFolders();
+  // W3.3: вклад лидера — сумма РЕКУРСИВНЫХ счётчиков root-папок (RPC
+  // kb_folder_recursive_counts уже считает всё дерево, rule 50).
+  const myTaskTotal = useMemo(
+    () => folders.reduce((acc, f) => acc + (f.task_count ?? 0), 0),
+    [folders],
+  );
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
@@ -374,7 +399,12 @@ function MyBaseHome({ onOpenFolder }: MyBaseHomeProps) {
           <h2 className="text-2xl font-bold text-foreground">
             Моя база
           </h2>
-          <p className="mt-2 text-sm text-slate-500">Ваши папки, задачи и материалы</p>
+          <p className="mt-2 text-sm text-slate-500">
+            Ваши папки, задачи и материалы
+            {myTaskTotal > 0
+              ? ` · вы загрузили ${myTaskTotal} ${pluralizeRu(myTaskTotal, ['задачу', 'задачи', 'задач'])}`
+              : ''}
+          </p>
         </div>
         <button
           type="button"

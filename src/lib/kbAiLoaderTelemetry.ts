@@ -30,6 +30,8 @@ interface KbAiExtractRunPayload
   materialType: 'text' | 'image';
   found: number;
   lowConfAnswers: number;
+  /** W3.1: сколько прогонов-чанков выполнено (большой PDF → авто-прогоны по 10). */
+  chunks?: number;
 }
 
 interface KbAiTasksSavedPayload

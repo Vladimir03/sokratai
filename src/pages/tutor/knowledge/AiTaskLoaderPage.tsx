@@ -320,11 +320,11 @@ function AiTaskLoaderContent() {
         const d = drafts[index];
         const ctxRefs: string[] = [];
         if (d.attachment_ref) ctxRefs.push(d.attachment_ref);
-        // source_image_index надёжен только когда все изображения дошли до AI
-        // (при сбоях инлайна индексы смещаются относительно uploadedRefs).
+        // source_image_index уже нормализован InputStage в глобальную систему
+        // координат uploadedRefs (W3.1 чанкинг): ненадёжные индексы (сбои инлайна
+        // внутри чанка) обнулены там же — здесь просто резолвим.
         if (
           d.source_image_index !== null &&
-          (stats?.unreadable_images ?? 0) === 0 &&
           uploadedRefs[d.source_image_index] &&
           !ctxRefs.includes(uploadedRefs[d.source_image_index])
         ) {
@@ -356,7 +356,7 @@ function AiTaskLoaderContent() {
         setRefiningIndex(null);
       }
     },
-    [drafts, folderId, subject, uploadedRefs, stats, refiningIndex, updateDraft],
+    [drafts, folderId, subject, uploadedRefs, refiningIndex, updateDraft],
   );
 
   // ── Commit: кроп (лениво) → bulk insertTask → per-row статусы ──
