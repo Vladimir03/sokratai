@@ -143,6 +143,45 @@ export async function subscribeToPush(): Promise<PushSubscribeResult> {
 }
 
 /**
+ * Self-heal (2026-07-13): досохранить на бэкенд подписку, которая уже живёт в
+ * браузере. Кейс: браузер подписался, но сохранение упало (push-subscribe была
+ * не задеплоена → 404) — permission granted + подписка есть, а в
+ * push_subscriptions пусто → сервер не шлёт push и уходит в telegram-fallback.
+ * Вызывается один раз при старте приложения (main.tsx); upsert идемпотентен
+ * (UNIQUE user_id+endpoint), fire-and-forget.
+ */
+export async function ensurePushSubscriptionSaved(): Promise<void> {
+  try {
+    if (!isPushSupported()) return; // не-prod: SW unregistered, .ready бы завис
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) return;
+
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    const subJson = subscription.toJSON();
+    if (!subJson.endpoint || !subJson.keys?.p256dh || !subJson.keys?.auth) return;
+
+    const expiresAt = subscription.expirationTime
+      ? new Date(subscription.expirationTime).toISOString()
+      : undefined;
+    const { error } = await supabase.functions.invoke('push-subscribe', {
+      method: 'POST',
+      body: {
+        endpoint: subJson.endpoint,
+        keys: { p256dh: subJson.keys.p256dh, auth: subJson.keys.auth },
+        user_agent: navigator.userAgent,
+        ...(expiresAt && { expires_at: expiresAt }),
+      },
+    });
+    if (error) console.warn('ensurePushSubscriptionSaved failed:', error);
+  } catch (err) {
+    console.warn('ensurePushSubscriptionSaved error:', err);
+  }
+}
+
+/**
  * Persist a renewed push subscription sent from the service worker
  * via postMessage after a pushsubscriptionchange event.
  */
