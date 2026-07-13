@@ -1367,7 +1367,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       if (vapidPrivImport === "not-run") {
         try {
-          await importVapidPrivateKey(VAPID_PRIVATE_KEY);
+          await importVapidPrivateKey(VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY);
           vapidPrivImport = "ok";
         } catch (e) {
           vapidPrivImport = "import-error: " + (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
@@ -1382,7 +1382,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       let subpubStep = "not-run";
       if (firstSub) {
         try {
-          await createVapidJwt(new URL(firstSub.endpoint).origin, VAPID_SUBJECT, VAPID_PRIVATE_KEY);
+          await createVapidJwt(new URL(firstSub.endpoint).origin, VAPID_SUBJECT, VAPID_PRIVATE_KEY, VAPID_PUBLIC_KEY);
           jwtStep = "ok";
         } catch (e) {
           jwtStep = e instanceof Error ? `${e.name}: ${e.message}` : String(e);

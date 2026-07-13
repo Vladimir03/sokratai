@@ -53,26 +53,33 @@ export function base64UrlDecode(str: string): Uint8Array {
 
 // ─── VAPID JWT (RFC 8292) ────────────────────────────────────
 
-export async function importVapidPrivateKey(base64Url: string): Promise<CryptoKey> {
-  const rawBytes = base64UrlDecode(base64Url);
-
-  // VAPID private key is 32 bytes raw — wrap in PKCS8 for P-256
-  // PKCS8 prefix for EC P-256 private key
-  const pkcs8Prefix = new Uint8Array([
-    0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06,
-    0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-    0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03,
-    0x01, 0x07, 0x04, 0x27, 0x30, 0x25, 0x02, 0x01,
-    0x01, 0x04, 0x20,
-  ]);
-
-  const pkcs8 = new Uint8Array(pkcs8Prefix.length + rawBytes.length);
-  pkcs8.set(pkcs8Prefix);
-  pkcs8.set(rawBytes, pkcs8Prefix.length);
-
+/**
+ * Импорт приватного VAPID-ключа через JWK (d + x/y из публичного).
+ *
+ * НЕ PKCS8: Deno (ring) принимает минимальный PKCS8 без вшитого публичного
+ * ключа на importKey, но БРОСАЕТ «Error: InvalidEncoding» на sign — латентный
+ * баг, всплывший при первом реальном прогоне push (2026-07-13). JWK-путь
+ * работает и в Deno, и в Node.
+ */
+export async function importVapidPrivateKey(
+  privateKeyBase64Url: string,
+  publicKeyBase64Url: string,
+): Promise<CryptoKey> {
+  const pub = base64UrlDecode(publicKeyBase64Url); // 65 байт: 0x04 || x(32) || y(32)
+  if (pub.length !== 65 || pub[0] !== 0x04) {
+    throw new Error(`VAPID public key: ожидается 65 байт uncompressed, получено ${pub.length}`);
+  }
+  const jwk: JsonWebKey = {
+    kty: 'EC',
+    crv: 'P-256',
+    d: privateKeyBase64Url,
+    x: base64UrlEncode(pub.slice(1, 33)),
+    y: base64UrlEncode(pub.slice(33, 65)),
+    ext: true,
+  };
   return crypto.subtle.importKey(
-    'pkcs8',
-    pkcs8.buffer,
+    'jwk',
+    jwk,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['sign'],
@@ -83,6 +90,7 @@ export async function createVapidJwt(
   audience: string,
   subject: string,
   privateKeyBase64: string,
+  publicKeyBase64: string,
 ): Promise<string> {
   const header = { typ: 'JWT', alg: 'ES256' };
   const payload = {
@@ -95,15 +103,19 @@ export async function createVapidJwt(
   const payloadB64 = base64UrlEncode(new TextEncoder().encode(JSON.stringify(payload)));
   const unsignedToken = `${headerB64}.${payloadB64}`;
 
-  const key = await importVapidPrivateKey(privateKeyBase64);
+  const key = await importVapidPrivateKey(privateKeyBase64, publicKeyBase64);
   const signatureBuffer = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
     key,
     new TextEncoder().encode(unsignedToken),
   );
 
-  // WebCrypto returns DER-encoded signature; VAPID needs raw r||s (64 bytes)
-  const signature = derToRaw(new Uint8Array(signatureBuffer));
+  // WebCrypto возвращает ECDSA-подпись в raw r||s (IEEE P1363, 64 байта) —
+  // ES256 JWT нужен именно этот формат. derToRaw — только защитный fallback
+  // на случай DER-выдачи (0x30-маркер); на raw-данных он бы ПОРТИЛ подпись
+  // (второй латентный баг никогда не работавшего кода, 2026-07-13).
+  const sigBytes = new Uint8Array(signatureBuffer);
+  const signature = sigBytes.length === 64 && sigBytes[0] !== 0x30 ? sigBytes : derToRaw(sigBytes);
   const signatureB64 = base64UrlEncode(signature.buffer.slice(signature.byteOffset, signature.byteOffset + signature.byteLength) as ArrayBuffer);
 
   return `${unsignedToken}.${signatureB64}`;
@@ -305,7 +317,7 @@ export async function sendPushNotification(
     const audience = new URL(sub.endpoint).origin;
 
     // VAPID auth
-    const jwt = await createVapidJwt(audience, vapidSubject, vapidPrivateKey);
+    const jwt = await createVapidJwt(audience, vapidSubject, vapidPrivateKey, vapidPublicKey);
     const vapidHeader = `vapid t=${jwt},k=${vapidPublicKey}`;
 
     // Encrypt payload
