@@ -3937,6 +3937,103 @@ export type Database = {
           },
         ]
       }
+      tutor_student_chat_messages: {
+        Row: {
+          attachment_url: string | null
+          author_user_id: string | null
+          client_msg_id: string | null
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          sender_role: string
+        }
+        Insert: {
+          attachment_url?: string | null
+          author_user_id?: string | null
+          client_msg_id?: string | null
+          content?: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          sender_role: string
+        }
+        Update: {
+          attachment_url?: string | null
+          author_user_id?: string | null
+          client_msg_id?: string | null
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          sender_role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_student_chat_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_student_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tutor_student_conversations: {
+        Row: {
+          created_at: string
+          id: string
+          last_message_at: string | null
+          last_message_preview: string | null
+          last_message_sender: string | null
+          student_last_notified_at: string | null
+          student_last_read_at: string | null
+          student_unread_count: number
+          tutor_last_notified_at: string | null
+          tutor_last_read_at: string | null
+          tutor_student_id: string
+          tutor_unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          student_last_notified_at?: string | null
+          student_last_read_at?: string | null
+          student_unread_count?: number
+          tutor_last_notified_at?: string | null
+          tutor_last_read_at?: string | null
+          tutor_student_id: string
+          tutor_unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          student_last_notified_at?: string | null
+          student_last_read_at?: string | null
+          student_unread_count?: number
+          tutor_last_notified_at?: string | null
+          tutor_last_read_at?: string | null
+          tutor_student_id?: string
+          tutor_unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_student_conversations_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: true
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_student_mock_exams: {
         Row: {
           created_at: string | null
@@ -4748,6 +4845,10 @@ export type Database = {
         Args: { _assignment_id: string }
         Returns: boolean
       }
+      is_chat_conversation_member: {
+        Args: { _conversation_id: string }
+        Returns: boolean
+      }
       is_homework_thread_visible_to_tutor: {
         Args: { _thread_id: string }
         Returns: boolean
@@ -4940,6 +5041,18 @@ export type Database = {
         Returns: boolean
       }
       student_can_see_lesson: { Args: { _lesson_id: string }; Returns: boolean }
+      tsc_post_message: {
+        Args: {
+          _attachment_url: string
+          _author_user_id: string
+          _client_msg_id: string
+          _content: string
+          _conversation_id: string
+          _preview: string
+          _sender_role: string
+        }
+        Returns: Json
+      }
       tutor_add_lesson_participant: {
         Args: { _lesson_id: string; _tutor_student_id: string }
         Returns: undefined
