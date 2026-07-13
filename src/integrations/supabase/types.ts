@@ -5041,6 +5041,10 @@ export type Database = {
         Returns: boolean
       }
       student_can_see_lesson: { Args: { _lesson_id: string }; Returns: boolean }
+      tsc_chat_upload_count: {
+        Args: { _conversation_folder: string }
+        Returns: number
+      }
       tsc_post_message: {
         Args: {
           _attachment_url: string
