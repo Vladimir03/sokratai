@@ -1313,6 +1313,50 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
     }
 
+    // Диагностика push (2026-07-13): шлёт тестовый push ВЫЗЫВАЮЩЕМУ на его же
+    // сохранённые подписки и возвращает точный статус от пуш-сервиса + префикс
+    // серверного VAPID-ключа — снимает неоднозначность «подписка есть, а push
+    // в telegram» (мисматч VAPID vs stale-подписка vs фокус/markRead).
+    // Безопасно: только свои подписки, ничего не пишет.
+    if (segments.length === 1 && segments[0] === "push-test" && method === "POST") {
+      const { data: subs } = await db
+        .from("push_subscriptions")
+        .select("endpoint, p256dh, auth")
+        .eq("user_id", userId);
+      const list = (subs ?? []) as PushSubscriptionData[];
+      const results: Array<Record<string, unknown>> = [];
+      for (const sub of list) {
+        try {
+          const r = await sendPushNotification(
+            sub,
+            {
+              title: "Сократ: тест уведомлений",
+              body: "Если ты это видишь — push работает 🎉",
+              url: getAppUrl(),
+            },
+            VAPID_PUBLIC_KEY,
+            VAPID_PRIVATE_KEY,
+            VAPID_SUBJECT,
+          );
+          results.push({
+            endpoint_host: new URL(sub.endpoint).host,
+            status: r.status,
+            success: r.success,
+            gone: r.gone,
+          });
+        } catch (e) {
+          results.push({ error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      return jsonOk(cors, {
+        subscriptions_found: list.length,
+        vapid_configured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
+        // первые 16 символов публичного ключа — не секрет, для сверки с фронтом
+        vapid_public_prefix: VAPID_PUBLIC_KEY.slice(0, 16),
+        results,
+      });
+    }
+
     return jsonError(cors, 404, "NOT_FOUND", "Маршрут не найден.");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
