@@ -48,31 +48,68 @@ export function getPushPermissionState(): NotificationPermission | null {
 }
 
 /**
- * Request notification permission, subscribe to push, and save to backend.
- * Returns true if subscription was successful, false if permission denied or error.
+ * Типизированный исход подписки — тосты различают причины (баг превью
+ * 2026-07-13: generic «не удалось» не даёт понять, сеть это, браузер или бэк).
+ *  - permission     — пользователь не разрешил (или browser auto-deny);
+ *  - push-service   — браузер не достучался до пуш-сервиса (Chrome = Google FCM,
+ *                     в РФ бывает заблокирован DPI без VPN; AbortError);
+ *  - save-failed    — подписка создана, но бэкенд не сохранил (edge недоступна);
+ *  - unsupported    — нет ключа/API/prod-хоста.
  */
-export async function subscribeToPush(): Promise<boolean> {
+export type PushSubscribeReason = 'permission' | 'push-service' | 'save-failed' | 'unsupported';
+export interface PushSubscribeResult {
+  ok: boolean;
+  reason?: PushSubscribeReason;
+}
+
+/**
+ * Request notification permission, subscribe to push, and save to backend.
+ */
+export async function subscribeToPush(): Promise<PushSubscribeResult> {
   if (!isPushSupported() || !VAPID_PUBLIC_KEY) {
     console.warn('Push not supported or VAPID key missing');
-    return false;
+    return { ok: false, reason: 'unsupported' };
   }
 
   try {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      return false;
+      return { ok: false, reason: 'permission' };
     }
 
     const registration = await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
-    });
+    let subscription: PushSubscription;
+    try {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
+      });
+    } catch (err) {
+      // InvalidStateError = существующая подписка с ДРУГИМ applicationServerKey
+      // (после ротации VAPID-пары) — отписываем и пробуем один раз заново.
+      if (err instanceof DOMException && err.name === 'InvalidStateError') {
+        try {
+          const existing = await registration.pushManager.getSubscription();
+          await existing?.unsubscribe();
+          subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
+          });
+        } catch (retryErr) {
+          console.error('subscribeToPush resubscribe error:', retryErr);
+          return { ok: false, reason: 'push-service' };
+        }
+      } else {
+        // AbortError «push service error» — FCM недоступен (типично для РФ без VPN)
+        console.error('subscribeToPush subscribe error:', err);
+        return { ok: false, reason: 'push-service' };
+      }
+    }
 
     const subJson = subscription.toJSON();
     if (!subJson.endpoint || !subJson.keys?.p256dh || !subJson.keys?.auth) {
       console.error('Push subscription missing required fields');
-      return false;
+      return { ok: false, reason: 'push-service' };
     }
 
     // Pass expirationTime if the browser provides it
@@ -95,13 +132,13 @@ export async function subscribeToPush(): Promise<boolean> {
 
     if (error) {
       console.error('Failed to save push subscription:', error);
-      return false;
+      return { ok: false, reason: 'save-failed' };
     }
 
-    return true;
+    return { ok: true };
   } catch (err) {
     console.error('subscribeToPush error:', err);
-    return false;
+    return { ok: false, reason: 'push-service' };
   }
 }
 

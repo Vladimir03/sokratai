@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePwaInstall } from '@/hooks/usePwaInstall';
-import { hasVapidKey, isPushSupported, subscribeToPush } from '@/lib/pushApi';
+import {
+  hasVapidKey,
+  isPushSupported,
+  subscribeToPush,
+  type PushSubscribeResult,
+} from '@/lib/pushApi';
 import { isMobileDevice, promptNativeInstall } from '@/lib/pwaInstall';
 
 export type PushState = 'granted' | 'default' | 'denied' | 'unsupported';
@@ -86,11 +91,11 @@ export function useNotificationsSetup() {
     return null;
   }, [capability, installed, mobile, pushState, subscriptionMissing]);
 
-  /** true = подписка создана (permission granted + сохранено на бэке). */
-  const runPush = useCallback(async (): Promise<boolean> => {
-    const ok = await subscribeToPush();
+  /** Типизированный исход (permission / push-service / save-failed) для тостов. */
+  const runPush = useCallback(async (): Promise<PushSubscribeResult> => {
+    const res = await subscribeToPush();
     setPermissionTick((t) => t + 1);
-    return ok;
+    return res;
   }, []);
 
   const runNativeInstall = useCallback(() => promptNativeInstall(), []);

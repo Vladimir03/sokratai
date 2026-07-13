@@ -62,9 +62,16 @@ export function PostSubmissionNudge({ tick }: { tick: number }) {
     console.info('[pwa-nudge] clicked', { context: 'post-submission', kind: action.kind });
     try {
       if (action.kind === 'push') {
-        const ok = await setup.runPush();
-        if (ok) toast.success('Уведомления включены!');
-        else toast.error('Не удалось включить уведомления — можно повторить из Профиля.');
+        const res = await setup.runPush();
+        if (res.ok) toast.success('Уведомления включены!');
+        else if (res.reason === 'push-service') {
+          toast.error(
+            'Браузер не смог подключиться к сервису уведомлений (в России бывает без VPN). Уведомления будут приходить в Telegram.',
+            { duration: 8000 },
+          );
+        } else if (res.reason !== 'permission') {
+          toast.error('Не удалось включить уведомления — можно повторить из Профиля.');
+        }
         setOpen(false);
         return;
       }

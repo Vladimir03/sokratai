@@ -81,8 +81,8 @@ export function NotificationsNudge({
     console.info('[pwa-nudge] clicked', { context, kind: action.kind });
     try {
       if (action.kind === 'push') {
-        const ok = await setup.runPush();
-        if (ok) {
+        const res = await setup.runPush();
+        if (res.ok) {
           if (setup.isMobile && !setup.isInstalled) {
             // Android: уведомления включены → добиваем иконку на экране.
             setStage('post-push-install');
@@ -91,13 +91,19 @@ export function NotificationsNudge({
             toast.success('Уведомления включены!');
             setDismissed(true);
           }
-        } else if ('Notification' in window && Notification.permission === 'denied') {
-          toast.info('Уведомления заблокированы в настройках браузера');
-          setDismissed(true); // браузер заблокировал повторный запрос
+        } else if (res.reason === 'permission') {
+          if ('Notification' in window && Notification.permission === 'denied') {
+            toast.info('Уведомления заблокированы в настройках браузера');
+            setDismissed(true); // браузер заблокировал повторный запрос
+          }
+          // просто закрыл системный промпт — не ругаемся
+        } else if (res.reason === 'push-service') {
+          toast.error(
+            'Браузер не смог подключиться к сервису уведомлений — в России Google-пуши бывают недоступны без VPN. Уведомления будут приходить в Telegram.',
+            { duration: 8000 },
+          );
         } else {
-          // Любой другой сбой (подписка/бэкенд) — НЕ молчим («мёртвая кнопка»,
-          // баг превью 2026-07-13).
-          toast.error('Не удалось включить уведомления. Попробуйте ещё раз.');
+          toast.error('Не удалось сохранить подписку на сервере. Попробуйте ещё раз.');
         }
         return;
       }

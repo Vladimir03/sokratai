@@ -47,12 +47,19 @@ export function AppNotificationsCard() {
     if (busy) return;
     setBusy(true);
     try {
-      const ok = await setup.runPush();
-      if (ok) toast.success('Уведомления включены!');
-      else if ('Notification' in window && Notification.permission === 'denied') {
-        toast.info('Уведомления заблокированы в настройках браузера');
+      const res = await setup.runPush();
+      if (res.ok) toast.success('Уведомления включены!');
+      else if (res.reason === 'permission') {
+        if ('Notification' in window && Notification.permission === 'denied') {
+          toast.info('Уведомления заблокированы в настройках браузера');
+        }
+      } else if (res.reason === 'push-service') {
+        toast.error(
+          'Браузер не смог подключиться к сервису уведомлений — в России Google-пуши бывают недоступны без VPN. Уведомления будут приходить в Telegram.',
+          { duration: 8000 },
+        );
       } else {
-        toast.error('Не удалось включить уведомления. Попробуйте ещё раз.');
+        toast.error('Не удалось сохранить подписку на сервере. Попробуйте ещё раз.');
       }
     } finally {
       setBusy(false);
