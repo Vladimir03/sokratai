@@ -543,7 +543,14 @@ function TutorHomeworkCreateContent() {
   // Отдельный стейт (НЕ в meta) — чтобы не трогать чувствительную edit-snapshot/dirty
   // логику. В edit-режиме селектор скрыт и folder_id не отправляется (папкой управляет
   // меню «···» на карточке ДЗ). Дефолт — «Без папки».
-  const [createFolderId, setCreateFolderId] = useState<string | null>(null);
+  // Папка из URL (?folder=<id>): ДЗ, создаваемое со страницы папки, должно сразу
+  // привязаться к ней (баг Елены 2026-07-13: уходило в «Без папки»). Lazy-init
+  // синхронно — НЕ эффект (без клоббера edit-prefill; createFolderId вне meta).
+  // Backend валидирует владение (validateOwnedFolderId), поэтому чужой/битый id
+  // безопасен. В edit-режиме URL не несёт ?folder → null (селектор всё равно скрыт).
+  const [createFolderId, setCreateFolderId] = useState<string | null>(
+    () => searchParams.get('folder') || null,
+  );
   const { folders: homeworkFolders } = useHomeworkFolders();
 
   // ── Deferred image deletes (edit mode: only delete after successful save) ──
@@ -1571,6 +1578,9 @@ function TutorHomeworkCreateContent() {
     studentLoginLink,
     isEditMode,
     searchParams,
+    // Иначе выбор папки последним действием перед «Создать» захватывается
+    // устаревшим (папка не сохранится). Баг Елены 2026-07-13.
+    createFolderId,
   ]);
 
   // ── Edit submit (PUT) ──
@@ -2114,6 +2124,31 @@ function TutorHomeworkCreateContent() {
           />
         </section>
 
+        {/* Папка (L0, create-only). Вынесено из «Расширенных» на L0 (2026-07-13,
+            решение владельца) — чтобы привязка к папке была видна: при создании
+            со страницы папки она пред-выбрана. В edit-режиме скрыто (папкой
+            управляет меню «···» на карточке ДЗ). */}
+        {!isEditMode && (
+          <section className="space-y-2">
+            <Label htmlFor="hw-folder-select">Папка (необязательно)</Label>
+            <select
+              id="hw-folder-select"
+              value={createFolderId ?? ''}
+              onChange={(e) => setCreateFolderId(e.target.value || null)}
+              className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 sm:w-[280px]"
+              style={{ fontSize: '16px', touchAction: 'manipulation' }}
+            >
+              <option value="">Без папки</option>
+              {homeworkFolders.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Для порядка в списке ДЗ. Папку можно создать на странице «Домашние задания».
+            </p>
+          </section>
+        )}
+
         {/* Recipients (L0) */}
         <section id="hw-recipients-section">
           <h2 className="text-lg font-semibold mb-3">Кому назначить</h2>
@@ -2186,7 +2221,7 @@ function TutorHomeworkCreateContent() {
               the dot. Default for disable_ai_bootstrap is true (toggle OFF);
               the dot lights when the tutor has flipped it ON (=== false).
             */}
-            {!showAdvanced && (materials.length > 0 || meta.disable_ai_bootstrap === false || (!isEditMode && createFolderId !== null)) && (
+            {!showAdvanced && (materials.length > 0 || meta.disable_ai_bootstrap === false) && (
               <span className="inline-block w-2 h-2 rounded-full bg-primary" />
             )}
           </button>
@@ -2201,34 +2236,6 @@ function TutorHomeworkCreateContent() {
                   meta={meta}
                   onChange={setMeta}
                 />
-
-                {/* Папка (create-only, запрос Елены 2026-06-17). В edit-режиме
-                    скрыто — папкой управляет меню «···» на карточке ДЗ. */}
-                {!isEditMode && (
-                  <div>
-                    <label
-                      htmlFor="hw-folder-select"
-                      className="block text-sm font-medium text-slate-700 mb-1.5"
-                    >
-                      Папка
-                    </label>
-                    <select
-                      id="hw-folder-select"
-                      value={createFolderId ?? ''}
-                      onChange={(e) => setCreateFolderId(e.target.value || null)}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-                      style={{ touchAction: 'manipulation' }}
-                    >
-                      <option value="">Без папки</option>
-                      {homeworkFolders.map((f) => (
-                        <option key={f.id} value={f.id}>{f.name}</option>
-                      ))}
-                    </select>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Для порядка в списке ДЗ. Папку можно создать на странице «Домашние задания».
-                    </p>
-                  </div>
-                )}
 
                 <HWMaterialsSection
                   materials={materials}

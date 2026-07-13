@@ -120,7 +120,9 @@ export default function HomeworkFolderPage() {
                 <span className="hidden sm:inline">Удалить</span>
               </Button>
               <Button asChild size="sm">
-                <Link to="/tutor/homework/create">
+                {/* Передаём id папки → конструктор привяжет новое ДЗ к ней
+                    (баг Елены 2026-07-13: раньше уходило в «Без папки»). */}
+                <Link to={`/tutor/homework/create?folder=${folder.id}`}>
                   <Plus className="h-4 w-4 sm:mr-1.5" aria-hidden="true" />
                   <span className="hidden sm:inline">Создать ДЗ</span>
                 </Link>

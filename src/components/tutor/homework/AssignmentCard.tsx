@@ -86,9 +86,13 @@ export const AssignmentCard = memo(function AssignmentCard({ item, onMoveToFolde
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
                     <DropdownMenuItem
-                      onSelect={(e) => {
-                        e.preventDefault();
-                        onMoveToFolder(item);
+                      onSelect={() => {
+                        // НЕ preventDefault: пусть Radix-меню закроется штатно.
+                        // Иначе меню (modal) держит pointer-events:none на body,
+                        // и первый тап по модалке переноса съедается закрытием
+                        // меню → «выбор папки только со 2-го клика» (баг Елены
+                        // 2026-07-13). rAF: открыть модалку после закрытия меню.
+                        requestAnimationFrame(() => onMoveToFolder(item));
                       }}
                     >
                       <FolderInput className="mr-2 h-4 w-4" />
