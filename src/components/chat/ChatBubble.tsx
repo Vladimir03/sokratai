@@ -15,6 +15,26 @@ import type {
 
 const AI_DISPLAY_NAME = 'СократAI';
 
+// Палитра имён авторов в группе (Telegram-модель: стабильный цвет по uid).
+// Оттенки 700 — 12px-текст на белом пузыре обязан давать контраст ≥4.5:1
+// (ревью 5.6 р.2 #10: *-500/600 не дотягивали до AA).
+const AUTHOR_COLORS = [
+  'text-rose-700',
+  'text-orange-700',
+  'text-amber-700',
+  'text-emerald-700',
+  'text-cyan-700',
+  'text-blue-700',
+  'text-violet-700',
+];
+
+function authorColorClass(uid: string | null): string {
+  if (!uid) return 'text-slate-600';
+  let h = 0;
+  for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) | 0;
+  return AUTHOR_COLORS[Math.abs(h) % AUTHOR_COLORS.length];
+}
+
 // Подсветка токена упоминания в человеческих сообщениях (string-split с capture,
 // без lookbehind — rule 80).
 const MENTION_SPLIT_RE = /(@\s?(?:сократ\s?ai|sokrat\s?ai))/iu;
@@ -39,10 +59,14 @@ function HumanContent({ content }: { content: string }) {
 export interface ChatBubbleProps {
   message: TutorStudentChatMessage;
   isOwn: boolean;
-  /** Identity левой стороны-человека (партнёр по беседе). */
+  /** Identity левой стороны-человека (партнёр по беседе; в группе — fallback). */
   partner: ChatPartnerIdentity | null;
   status: MessageSendStatus;
   onRetry?: (message: TutorStudentChatMessage) => void;
+  /** Группа: identity автора ЭТОГО сообщения (аватар + цветное имя). */
+  author?: ChatPartnerIdentity | null;
+  /** Группа: показывать имя автора над чужим человеческим сообщением. */
+  showAuthor?: boolean;
 }
 
 /**
@@ -57,10 +81,13 @@ export const ChatBubble = memo(function ChatBubble({
   partner,
   status,
   onRetry,
+  author = null,
+  showAuthor = false,
 }: ChatBubbleProps) {
   const isAssistant = message.sender_role === 'assistant';
   const time = format(parseISO(message.created_at), 'HH:mm');
   const failed = message._localStatus === 'failed';
+  const leftIdentity = showAuthor && author ? author : partner;
 
   return (
     <div className={cn('flex w-full gap-2 px-3 py-0.5', isOwn ? 'justify-end' : 'justify-start')}>
@@ -75,9 +102,9 @@ export const ChatBubble = memo(function ChatBubble({
             />
           ) : (
             <UserAvatar
-              name={partner?.name}
-              avatarUrl={partner?.avatar_url}
-              gender={(partner?.gender as 'male' | 'female' | null) ?? null}
+              name={leftIdentity?.name}
+              avatarUrl={leftIdentity?.avatar_url}
+              gender={(leftIdentity?.gender as 'male' | 'female' | null) ?? null}
               size="sm"
             />
           )}
@@ -95,6 +122,16 @@ export const ChatBubble = memo(function ChatBubble({
         {isAssistant && (
           <p className="mb-0.5 text-xs font-semibold text-accent">{AI_DISPLAY_NAME}</p>
         )}
+        {!isAssistant && !isOwn && showAuthor && leftIdentity && (
+          <p
+            className={cn(
+              'mb-0.5 text-xs font-semibold',
+              authorColorClass(message.author_user_id),
+            )}
+          >
+            {leftIdentity.name}
+          </p>
+        )}
 
         <ChatImageAttachments attachmentUrl={message.attachment_url} />
 
@@ -102,6 +139,7 @@ export const ChatBubble = memo(function ChatBubble({
           (isAssistant ? (
             <MathText
               text={message.content}
+              markdownLite
               className="text-[15px] leading-relaxed text-slate-900"
             />
           ) : (

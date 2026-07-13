@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabaseClient';
-import { fetchChatMessages, mergeChatMessage } from '@/lib/tutorStudentChatApi';
+import { fetchChatMessages, getMyUserId, mergeChatMessage } from '@/lib/tutorStudentChatApi';
 import { chatMessagesKey } from '@/hooks/chat/chatQueryKeys';
 import type { ConversationMessagesCache } from '@/hooks/chat/useConversationMessages';
 import type {
   ChatConversationRealtimeRow,
+  ChatMemberStateRealtimeRow,
   TutorStudentChatMessage,
 } from '@/types/tutorStudentChat';
 
@@ -31,6 +32,11 @@ export function useChatRealtime(conversationId: string | null, enabled: boolean)
     const key = chatMessagesKey(conversationId);
     let wasDisconnected = false;
     let disposed = false;
+    // uid для группового member-binding (свой watermark vs чужие ✓✓).
+    const myUserIdRef: { uid: string | null } = { uid: null };
+    void getMyUserId().then((uid) => {
+      myUserIdRef.uid = uid;
+    });
 
     const gapFill = async () => {
       try {
@@ -78,6 +84,9 @@ export function useChatRealtime(conversationId: string | null, enabled: boolean)
           if (!row?.id) return;
           queryClient.setQueryData<ConversationMessagesCache>(key, (prev) => {
             if (!prev?.conversation) return prev;
+            // Группа: watermark'и живут в tutor_chat_members (binding ниже) —
+            // двухпартийные колонки строки беседы не про членов группы.
+            if (prev.conversation.kind === 'group') return prev;
             const myRole = prev.conversation.my_role;
             return {
               ...prev,
@@ -90,6 +99,45 @@ export function useChatRealtime(conversationId: string | null, enabled: boolean)
                 peer_last_read_at:
                   myRole === 'tutor' ? row.student_last_read_at : row.tutor_last_read_at,
               },
+            };
+          });
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tutor_chat_members',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          // Групповые ✓✓ «прочитал хотя бы один»: peer_last_read_at = MAX по
+          // остальным членам (монотонно — max с текущим значением).
+          const row = payload.new as unknown as ChatMemberStateRealtimeRow;
+          if (!row?.user_id) return;
+          // До резолва uid свой/чужой не различить — скип (ревью 5.6 р.2 #2:
+          // собственная member-строка ушла бы в peer-ветку и НАВСЕГДА завысила
+          // peer_last_read_at → ложные ✓✓). Gap-fill/refetch добьёт пропущенное.
+          if (!myUserIdRef.uid) return;
+          queryClient.setQueryData<ConversationMessagesCache>(key, (prev) => {
+            if (!prev?.conversation || prev.conversation.kind !== 'group') return prev;
+            if (!row.last_read_at) return prev;
+            if (myUserIdRef.uid && row.user_id === myUserIdRef.uid) {
+              const currentMine = prev.conversation.my_last_read_at;
+              if (currentMine && Date.parse(currentMine) >= Date.parse(row.last_read_at)) {
+                return prev;
+              }
+              return {
+                ...prev,
+                conversation: { ...prev.conversation, my_last_read_at: row.last_read_at },
+              };
+            }
+            const current = prev.conversation.peer_last_read_at;
+            if (current && Date.parse(current) >= Date.parse(row.last_read_at)) return prev;
+            return {
+              ...prev,
+              conversation: { ...prev.conversation, peer_last_read_at: row.last_read_at },
             };
           });
         },

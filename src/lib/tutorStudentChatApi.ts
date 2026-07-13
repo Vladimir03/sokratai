@@ -82,8 +82,11 @@ async function requestChatApi<T>(path: string, options: RequestInit = {}): Promi
 export async function listChatConversations(
   role: ChatPerspective,
 ): Promise<ChatConversationListItem[]> {
+  // groups=1 — capability opt-in: edge отдаёт групповые строки только клиенту,
+  // который их понимает (deploy-skew: старый бандл/stale PWA ломался на
+  // tutor_student_id=null). Убрать флаг после стабилизации PWA-кэшей.
   const res = await requestChatApi<{ items: ChatConversationListItem[] }>(
-    `/conversations?role=${role}`,
+    `/conversations?role=${role}&groups=1`,
     { method: 'GET' },
   );
   return res.items ?? [];
@@ -96,6 +99,22 @@ export async function ensureChatConversation(
     method: 'POST',
     body: JSON.stringify({ tutor_student_id: tutorStudentId }),
   });
+}
+
+/** Get-or-create беседы учебной группы (lazy — строка списка синтезируется до неё). */
+export async function ensureGroupChatConversation(
+  tutorGroupId: string,
+): Promise<{ conversation_id: string; role: ChatPerspective }> {
+  return requestChatApi(`/conversations`, {
+    method: 'POST',
+    body: JSON.stringify({ tutor_group_id: tutorGroupId }),
+  });
+}
+
+/** uid текущего пользователя (own-детект в группах). getSession — локальный кэш. */
+export async function getMyUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user?.id ?? null;
 }
 
 export interface FetchChatMessagesResult {

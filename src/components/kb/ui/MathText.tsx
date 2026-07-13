@@ -12,6 +12,11 @@ interface MathTextProps {
   text: string;
   className?: string;
   as?: 'p' | 'div' | 'span';
+  /**
+   * Opt-in markdown-lite для AI-ответов чата: `**жирный**` → <strong>,
+   * `` `код` `` → <code>. Default false — KB-карточки не затронуты.
+   */
+  markdownLite?: boolean;
 }
 
 const LINEBREAK_PLACEHOLDER = '___LINEBREAK___';
@@ -43,7 +48,24 @@ function renderMathSegment(segment: string): string {
   }
 }
 
-function renderMixedLatexToHtml(text: string): string {
+/**
+ * Markdown-lite поверх УЖЕ escapeHtml-нутого текста (безопасно: пользовательский
+ * HTML экранирован до подстановки тегов). Только inline bold/code — без
+ * заголовков/списков (AI-промпт просит их не использовать; это подстраховка).
+ */
+function applyMarkdownLite(escapedText: string): string {
+  // Не матчим через границу строки (к этому моменту \n уже заменён плейсхолдером).
+  const withinLine = (inner: string) => !inner.includes(LINEBREAK_PLACEHOLDER);
+  return escapedText
+    .replace(/\*\*([^*\n]+)\*\*/g, (m, inner: string) =>
+      withinLine(inner) ? `<strong>${inner}</strong>` : m,
+    )
+    .replace(/`([^`\n]+)`/g, (m, inner: string) =>
+      withinLine(inner) ? `<code>${inner}</code>` : m,
+    );
+}
+
+function renderMixedLatexToHtml(text: string, markdownLite = false): string {
   const normalizedText = preprocessLatex(text).replace(/\r\n?/g, '\n');
   const textWithPlaceholders = normalizedText.replace(/\n/g, LINEBREAK_PLACEHOLDER);
   const segments = textWithPlaceholders.split(MATH_SEGMENT_REGEX);
@@ -58,21 +80,30 @@ function renderMixedLatexToHtml(text: string): string {
         return renderMathSegment(segment);
       }
 
-      return escapeHtml(segment);
+      const escaped = escapeHtml(segment);
+      return markdownLite ? applyMarkdownLite(escaped) : escaped;
     })
     .join('');
 
   return renderedHtml.split(LINEBREAK_PLACEHOLDER).join('<br />');
 }
 
-const MathTextInner = memo(function MathTextInner({ text, className, as: Tag = 'div' }: MathTextProps) {
+const MathTextInner = memo(function MathTextInner({
+  text,
+  className,
+  as: Tag = 'div',
+  markdownLite = false,
+}: MathTextProps) {
   const hasMath = text.includes('$') || text.includes('\\(') || text.includes('\\[');
+  // markdownLite с реальной разметкой → HTML-рендерер даже без math (чат-сообщения
+  // короткие, оверхед незаметен); без разметки — прежний zero-overhead путь.
+  const hasLiteMarkdown = markdownLite && (text.includes('**') || text.includes('`'));
 
   // Fast path: no math → plain text, zero KaTeX overhead.
   // Preserve newlines as <br /> (mirror the math path) so multi-line text —
   // e.g. numbered statements «1)… 2)… 3)…» (обществознание) — doesn't collapse
   // into one paragraph. Single-line text keeps the zero-overhead path.
-  if (!hasMath) {
+  if (!hasMath && !hasLiteMarkdown) {
     if (!text.includes('\n') && !text.includes('\r')) {
       return <Tag className={className}>{text}</Tag>;
     }
@@ -89,18 +120,31 @@ const MathTextInner = memo(function MathTextInner({ text, className, as: Tag = '
     );
   }
 
-  return <MathRenderer text={text} className={className} Tag={Tag} />;
+  return <MathRenderer text={text} className={className} Tag={Tag} markdownLite={markdownLite} />;
 });
 
 MathTextInner.displayName = 'MathText';
 
 /** Internal renderer — only mounted when hasMath is true */
-function MathRenderer({ text, className, Tag }: { text: string; className?: string; Tag: ElementType }) {
+function MathRenderer({
+  text,
+  className,
+  Tag,
+  markdownLite = false,
+}: {
+  text: string;
+  className?: string;
+  Tag: ElementType;
+  markdownLite?: boolean;
+}) {
   useEffect(() => {
     void import('katex/dist/katex.min.css');
   }, []);
 
-  const renderedHtml = useMemo(() => renderMixedLatexToHtml(text), [text]);
+  const renderedHtml = useMemo(
+    () => renderMixedLatexToHtml(text, markdownLite),
+    [text, markdownLite],
+  );
 
   return (
     <Tag

@@ -1,12 +1,15 @@
-// tutor-student-chat-api — чат репетитор ↔ ученик (Telegram-like, 1:1).
+// tutor-student-chat-api — чат репетитор ↔ ученик (Telegram-like, 1:1 + группы).
 //
-// Беседа = 1:1 с линком tutor_students (lazy-create). ВСЕ записи идут через эту
-// функцию (service_role) — у authenticated только SELECT (RLS в миграции
-// 20260712150000). Реалтайм доставляет INSERT/UPDATE клиентам напрямую.
+// Direct-беседа = 1:1 с линком tutor_students (lazy-create). Групповая беседа
+// (kind='group') = 1:1 с УЧЕБНОЙ группой tutor_groups (is_primary=true);
+// членство НЕ копируется — живьём из tutor_group_memberships (миграция
+// 20260713120000). ВСЕ записи идут через эту функцию (service_role) — у
+// authenticated только SELECT (RLS в 20260712150000). Реалтайм доставляет
+// INSERT/UPDATE клиентам напрямую.
 //
 // Роуты:
-//   GET  /conversations?role=tutor|student        — список бесед с identity партнёра
-//   POST /conversations {tutor_student_id}        — get-or-create беседы
+//   GET  /conversations?role=tutor|student        — список бесед (direct + группы)
+//   POST /conversations {tutor_student_id | tutor_group_id} — get-or-create беседы
 //   GET  /conversations/:id/messages?before=&limit= — keyset-пагинация
 //   POST /conversations/:id/messages              — отправка (+notify, +@СократAI)
 //   POST /conversations/:id/read                  — mark-read своей стороны
@@ -233,7 +236,8 @@ function getAppUrl(): string {
 // ─── DB row shapes (column whitelists — никогда select('*')) ─────────────────
 
 const CONVERSATION_SELECT =
-  "id, tutor_student_id, last_message_at, last_message_preview, last_message_sender, " +
+  "id, kind, tutor_student_id, tutor_group_id, last_message_at, last_message_preview, " +
+  "last_message_sender, last_message_author_user_id, " +
   "tutor_last_read_at, student_last_read_at, tutor_unread_count, student_unread_count, " +
   "tutor_last_notified_at, student_last_notified_at";
 
@@ -242,10 +246,13 @@ const MESSAGE_SELECT =
 
 interface ConversationRow {
   id: string;
-  tutor_student_id: string;
+  kind: "direct" | "group";
+  tutor_student_id: string | null;
+  tutor_group_id: string | null;
   last_message_at: string | null;
   last_message_preview: string | null;
   last_message_sender: string | null;
+  last_message_author_user_id: string | null;
   tutor_last_read_at: string | null;
   student_last_read_at: string | null;
   tutor_unread_count: number;
@@ -271,12 +278,45 @@ interface TutorRow {
   telegram_id: string | null;
 }
 
+interface GroupRow {
+  id: string;
+  tutor_id: string;
+  name: string;
+  is_primary: boolean;
+  is_active: boolean;
+}
+
+/** Активный не-архивный член группы (живое членство, mirror is_chat_conversation_member). */
+interface GroupMemberRow {
+  tutor_student_id: string;
+  student_id: string;
+  display_name: string | null;
+}
+
 interface MemberContext {
   conversation: ConversationRow;
-  link: LinkRow;
+  kind: "direct" | "group";
+  /** direct only */
+  link: LinkRow | null;
+  /** group only */
+  group: GroupRow | null;
+  /** group only — активные не-архивные ученики группы */
+  members: GroupMemberRow[] | null;
   tutor: TutorRow;
   role: "tutor" | "student";
 }
+
+/** Per-member state строка групповой беседы (tutor_chat_members). */
+interface ChatMemberStateRow {
+  conversation_id: string;
+  user_id: string;
+  last_read_at: string | null;
+  unread_count: number;
+  last_notified_at: string | null;
+}
+
+const MEMBER_STATE_SELECT =
+  "conversation_id, user_id, last_read_at, unread_count, last_notified_at";
 
 async function loadLinkAndTutor(
   db: SupabaseClient,
@@ -297,7 +337,45 @@ async function loadLinkAndTutor(
   return { link: link as LinkRow, tutor: tutor as TutorRow };
 }
 
-/** Беседа + линк + роль вызывающего; null = не участник / не найдено. */
+/** Группа + её репетитор + активные не-архивные члены (живое членство). */
+async function loadGroupContext(
+  db: SupabaseClient,
+  tutorGroupId: string,
+): Promise<{ group: GroupRow; tutor: TutorRow; members: GroupMemberRow[] } | null> {
+  const { data: group, error: groupErr } = await db
+    .from("tutor_groups")
+    .select("id, tutor_id, name, is_primary, is_active")
+    .eq("id", tutorGroupId)
+    .maybeSingle();
+  if (groupErr || !group) return null;
+  const { data: tutor, error: tutorErr } = await db
+    .from("tutors")
+    .select("id, user_id, name, avatar_url, gender, telegram_id")
+    .eq("id", (group as GroupRow).tutor_id)
+    .maybeSingle();
+  if (tutorErr || !tutor) return null;
+  const { data: rows, error: memErr } = await db
+    .from("tutor_group_memberships")
+    .select("tutor_student_id, tutor_students!inner(id, student_id, display_name, archived_at)")
+    .eq("tutor_group_id", tutorGroupId)
+    .eq("is_active", true);
+  if (memErr) return null;
+  const members: GroupMemberRow[] = [];
+  for (const r of (rows ?? []) as Array<Record<string, unknown>>) {
+    const ts = r.tutor_students as
+      | { id: string; student_id: string; display_name: string | null; archived_at: string | null }
+      | null;
+    if (!ts || ts.archived_at) continue;
+    members.push({
+      tutor_student_id: ts.id,
+      student_id: ts.student_id,
+      display_name: ts.display_name,
+    });
+  }
+  return { group: group as GroupRow, tutor: tutor as TutorRow, members };
+}
+
+/** Беседа + линк/группа + роль вызывающего; null = не участник / не найдено. */
 async function resolveMemberContext(
   db: SupabaseClient,
   conversationId: string,
@@ -309,14 +387,28 @@ async function resolveMemberContext(
     .eq("id", conversationId)
     .maybeSingle();
   if (error || !conv) return null;
-  const loaded = await loadLinkAndTutor(db, (conv as ConversationRow).tutor_student_id);
+  const conversation = conv as ConversationRow;
+
+  if (conversation.kind === "group" && conversation.tutor_group_id) {
+    const loaded = await loadGroupContext(db, conversation.tutor_group_id);
+    if (!loaded) return null;
+    const { group, tutor, members } = loaded;
+    let role: "tutor" | "student" | null = null;
+    if (tutor.user_id === userId) role = "tutor";
+    else if (members.some((m) => m.student_id === userId)) role = "student";
+    if (!role) return null;
+    return { conversation, kind: "group", link: null, group, members, tutor, role };
+  }
+
+  if (!conversation.tutor_student_id) return null;
+  const loaded = await loadLinkAndTutor(db, conversation.tutor_student_id);
   if (!loaded) return null;
   const { link, tutor } = loaded;
   let role: "tutor" | "student" | null = null;
   if (link.student_id === userId) role = "student";
   else if (tutor.user_id === userId) role = "tutor";
   if (!role) return null;
-  return { conversation: conv as ConversationRow, link, tutor, role };
+  return { conversation, kind: "direct", link, group: null, members: null, tutor, role };
 }
 
 /** Identity партнёра для header/списка (column whitelist, никаких telegram-полей). */
@@ -324,6 +416,10 @@ async function buildPartnerIdentity(
   db: SupabaseClient,
   ctx: MemberContext,
 ): Promise<{ name: string; avatar_url: string | null; gender: string | null }> {
+  if (ctx.kind === "group") {
+    // «Партнёр» групповой беседы = сама группа (аватар рисует клиент).
+    return { name: ctx.group?.name ?? "Группа", avatar_url: null, gender: null };
+  }
   if (ctx.role === "student") {
     return {
       name: ctx.tutor.name?.trim() || "Репетитор",
@@ -331,14 +427,15 @@ async function buildPartnerIdentity(
       gender: ctx.tutor.gender ?? null,
     };
   }
+  const link = ctx.link!;
   const { data: profile } = await db
     .from("profiles")
     .select("full_name, username, avatar_url, gender")
-    .eq("id", ctx.link.student_id)
+    .eq("id", link.student_id)
     .maybeSingle();
   return {
     name: resolveStudentName(
-      ctx.link.display_name,
+      link.display_name,
       profile?.full_name as string | null,
       profile?.username as string | null,
     ),
@@ -420,8 +517,14 @@ async function postMessageAtomic(
     content: string;
     attachmentUrl: string | null;
     clientMsgId: string | null;
+    /** Группы: «Вася: » перед превью (список различает авторов). */
+    previewPrefix?: string;
   },
 ): Promise<PostMessageResult | null> {
+  const basePreview = buildPreview(input.content, Boolean(input.attachmentUrl));
+  const preview = basePreview && input.previewPrefix
+    ? `${input.previewPrefix}${basePreview}`
+    : basePreview;
   const { data, error } = await db.rpc("tsc_post_message", {
     _conversation_id: input.conversationId,
     _sender_role: input.senderRole,
@@ -429,7 +532,7 @@ async function postMessageAtomic(
     _content: input.content,
     _attachment_url: input.attachmentUrl,
     _client_msg_id: input.clientMsgId,
-    _preview: buildPreview(input.content, Boolean(input.attachmentUrl)),
+    _preview: preview,
   });
   if (error || !data) {
     console.error("tsc_post_message_rpc_failed", { error: error?.message });
@@ -462,6 +565,106 @@ async function insertAssistantMessage(
 
 // ─── Endpoint: GET /conversations ────────────────────────────────────────────
 
+type ListItem = Record<string, unknown> & {
+  last_message_at: string | null;
+  partner_name: string;
+};
+
+function byListOrder(a: ListItem, b: ListItem): number {
+  const at = a.last_message_at ? Date.parse(a.last_message_at) : 0;
+  const bt = b.last_message_at ? Date.parse(b.last_message_at) : 0;
+  if (at !== bt) return bt - at;
+  return a.partner_name.localeCompare(b.partner_name, "ru");
+}
+
+/**
+ * Синтез групповых строк списка (lazy: группа видна сразу после создания,
+ * физическая беседа создаётся при первом открытии). null = db-ошибка
+ * (частичный сбой НЕ маскируем — mirror батч-инварианта direct-веток).
+ */
+async function buildGroupListItems(
+  db: SupabaseClient,
+  groups: Array<{ id: string; name: string }>,
+  myUserId: string,
+): Promise<ListItem[] | null> {
+  if (groups.length === 0) return [];
+  const groupIds = groups.map((g) => g.id);
+  const [convsRes, memsRes] = await Promise.all([
+    db.from("tutor_student_conversations").select(CONVERSATION_SELECT).in("tutor_group_id", groupIds),
+    db
+      .from("tutor_group_memberships")
+      .select("tutor_group_id, tutor_students!inner(student_id, archived_at)")
+      .eq("is_active", true)
+      .in("tutor_group_id", groupIds),
+  ]);
+  if (convsRes.error || memsRes.error) {
+    console.error("tsc_list_groups_batch_failed", {
+      convs: convsRes.error?.message ?? null,
+      mems: memsRes.error?.message ?? null,
+    });
+    return null;
+  }
+  const convByGroup = new Map(
+    ((convsRes.data ?? []) as ConversationRow[]).map((c) => [c.tutor_group_id, c]),
+  );
+  // member_count = активные не-архивные ученики + репетитор.
+  const countByGroup = new Map<string, number>();
+  for (const r of (memsRes.data ?? []) as Array<Record<string, unknown>>) {
+    const ts = r.tutor_students as { archived_at: string | null } | null;
+    if (!ts || ts.archived_at) continue;
+    const gid = r.tutor_group_id as string;
+    countByGroup.set(gid, (countByGroup.get(gid) ?? 0) + 1);
+  }
+
+  const convIds = [...convByGroup.values()].map((c) => c.id);
+  let stateRows: ChatMemberStateRow[] = [];
+  if (convIds.length > 0) {
+    const { data: states, error: statesErr } = await db
+      .from("tutor_chat_members")
+      .select(MEMBER_STATE_SELECT)
+      .in("conversation_id", convIds);
+    if (statesErr) {
+      console.error("tsc_list_groups_states_failed", { error: statesErr.message });
+      return null;
+    }
+    stateRows = (states ?? []) as ChatMemberStateRow[];
+  }
+  const myStateByConv = new Map<string, ChatMemberStateRow>();
+  const peerReadMaxByConv = new Map<string, string>();
+  for (const s of stateRows) {
+    if (s.user_id === myUserId) {
+      myStateByConv.set(s.conversation_id, s);
+    } else if (s.last_read_at) {
+      const prev = peerReadMaxByConv.get(s.conversation_id);
+      if (!prev || Date.parse(s.last_read_at) > Date.parse(prev)) {
+        peerReadMaxByConv.set(s.conversation_id, s.last_read_at);
+      }
+    }
+  }
+
+  return groups.map((g) => {
+    const conv = convByGroup.get(g.id) ?? null;
+    const memberCount = (countByGroup.get(g.id) ?? 0) + 1;
+    return {
+      kind: "group",
+      tutor_student_id: null,
+      tutor_group_id: g.id,
+      conversation_id: conv?.id ?? null,
+      partner_name: g.name,
+      partner_avatar_url: null,
+      partner_gender: null,
+      group: { id: g.id, name: g.name, member_count: memberCount },
+      last_message_at: conv?.last_message_at ?? null,
+      last_message_preview: conv?.last_message_preview ?? null,
+      last_message_sender: conv?.last_message_sender ?? null,
+      last_message_author_user_id: conv?.last_message_author_user_id ?? null,
+      unread_count: conv ? (myStateByConv.get(conv.id)?.unread_count ?? 0) : 0,
+      peer_last_read_at: conv ? (peerReadMaxByConv.get(conv.id) ?? null) : null,
+      archived: false,
+    };
+  });
+}
+
 async function handleListConversations(
   db: SupabaseClient,
   userId: string,
@@ -475,6 +678,11 @@ async function handleListConversations(
   } else {
     role = (await resolveTutorPkId(db, userId)) ? "tutor" : "student";
   }
+  // Capability opt-in (ревью 5.6 р.2 #5, deploy-skew): групповые строки отдаём
+  // ТОЛЬКО клиенту, который их понимает (?groups=1). Старый бандл/stale PWA
+  // ронял бы на них React-ключи (tutor_student_id=null) и direct-create без
+  // ученика. Убрать флаг после стабилизации PWA-кэшей (отдельный коммит).
+  const groupsEnabled = searchParams.get("groups") === "1";
 
   if (role === "tutor") {
     const tutorPk = await resolveTutorPkId(db, userId);
@@ -492,7 +700,35 @@ async function handleListConversations(
     const linkRows = (links ?? []) as Array<
       { id: string; student_id: string; display_name: string | null; archived_at: string | null }
     >;
-    if (linkRows.length === 0) return jsonOk(cors, { items: [], role });
+
+    // Групповые чаты: все учебные (is_primary) активные группы репетитора.
+    let groupItems: ListItem[] = [];
+    if (groupsEnabled) {
+      const { data: groupRows, error: groupsErr } = await db
+        .from("tutor_groups")
+        .select("id, name")
+        .eq("tutor_id", tutorPk)
+        .eq("is_primary", true)
+        .eq("is_active", true);
+      if (groupsErr) {
+        console.error("tsc_list_tutor_groups_failed", { error: groupsErr.message });
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список чатов.");
+      }
+      const built = await buildGroupListItems(
+        db,
+        (groupRows ?? []) as Array<{ id: string; name: string }>,
+        userId,
+      );
+      if (built === null) {
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список чатов.");
+      }
+      groupItems = built;
+    }
+
+    if (linkRows.length === 0) {
+      groupItems.sort(byListOrder);
+      return jsonOk(cors, { items: groupItems, role });
+    }
 
     const linkIds = linkRows.map((l) => l.id);
     const studentIds = [...new Set(linkRows.map((l) => l.student_id))];
@@ -527,27 +763,27 @@ async function handleListConversations(
         if (l.archived_at && !conv?.last_message_at) return null;
         const profile = profileById.get(l.student_id);
         return {
+          kind: "direct",
           tutor_student_id: l.id,
+          tutor_group_id: null,
           conversation_id: conv?.id ?? null,
           partner_name: resolveStudentName(l.display_name, profile?.full_name, profile?.username),
           partner_avatar_url: profile?.avatar_url ?? null,
           partner_gender: profile?.gender ?? null,
+          group: null,
           last_message_at: conv?.last_message_at ?? null,
           last_message_preview: conv?.last_message_preview ?? null,
           last_message_sender: conv?.last_message_sender ?? null,
+          last_message_author_user_id: conv?.last_message_author_user_id ?? null,
           unread_count: conv?.tutor_unread_count ?? 0,
           peer_last_read_at: conv?.student_last_read_at ?? null,
           archived: Boolean(l.archived_at),
         };
       })
-      .filter(Boolean) as Array<{ last_message_at: string | null; partner_name: string }>;
+      .filter(Boolean) as ListItem[];
 
-    items.sort((a, b) => {
-      const at = a.last_message_at ? Date.parse(a.last_message_at) : 0;
-      const bt = b.last_message_at ? Date.parse(b.last_message_at) : 0;
-      if (at !== bt) return bt - at;
-      return a.partner_name.localeCompare(b.partner_name, "ru");
-    });
+    items.push(...groupItems);
+    items.sort(byListOrder);
     return jsonOk(cors, { items, role });
   }
 
@@ -564,6 +800,41 @@ async function handleListConversations(
     { id: string; tutor_id: string; archived_at: string | null }
   >;
   if (linkRows.length === 0) return jsonOk(cors, { items: [], role });
+
+  // Групповые чаты ученика: активные учебные группы, где он не-архивный член.
+  let studentGroups: Array<{ id: string; name: string }> = [];
+  const activeLinkIds = groupsEnabled
+    ? linkRows.filter((l) => !l.archived_at).map((l) => l.id)
+    : [];
+  if (activeLinkIds.length > 0) {
+    const { data: mems, error: memsErr } = await db
+      .from("tutor_group_memberships")
+      .select("tutor_group_id")
+      .in("tutor_student_id", activeLinkIds)
+      .eq("is_active", true);
+    if (memsErr) {
+      console.error("tsc_list_student_mems_failed", { error: memsErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список чатов.");
+    }
+    const groupIds = [...new Set(((mems ?? []) as Array<{ tutor_group_id: string }>).map((m) => m.tutor_group_id))];
+    if (groupIds.length > 0) {
+      const { data: groups, error: groupsErr } = await db
+        .from("tutor_groups")
+        .select("id, name")
+        .in("id", groupIds)
+        .eq("is_primary", true)
+        .eq("is_active", true);
+      if (groupsErr) {
+        console.error("tsc_list_student_groups_failed", { error: groupsErr.message });
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список чатов.");
+      }
+      studentGroups = (groups ?? []) as Array<{ id: string; name: string }>;
+    }
+  }
+  const groupItems = await buildGroupListItems(db, studentGroups, userId);
+  if (groupItems === null) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить список чатов.");
+  }
 
   const linkIds = linkRows.map((l) => l.id);
   const tutorIds = [...new Set(linkRows.map((l) => l.tutor_id))];
@@ -595,27 +866,27 @@ async function handleListConversations(
       if (l.archived_at && !conv?.last_message_at) return null;
       const tutor = tutorById.get(l.tutor_id);
       return {
+        kind: "direct",
         tutor_student_id: l.id,
+        tutor_group_id: null,
         conversation_id: conv?.id ?? null,
         partner_name: tutor?.name?.trim() || "Репетитор",
         partner_avatar_url: tutor?.avatar_url ?? null,
         partner_gender: tutor?.gender ?? null,
+        group: null,
         last_message_at: conv?.last_message_at ?? null,
         last_message_preview: conv?.last_message_preview ?? null,
         last_message_sender: conv?.last_message_sender ?? null,
+        last_message_author_user_id: conv?.last_message_author_user_id ?? null,
         unread_count: conv?.student_unread_count ?? 0,
         peer_last_read_at: conv?.tutor_last_read_at ?? null,
         archived: Boolean(l.archived_at),
       };
     })
-    .filter(Boolean) as Array<{ last_message_at: string | null; partner_name: string }>;
+    .filter(Boolean) as ListItem[];
 
-  items.sort((a, b) => {
-    const at = a.last_message_at ? Date.parse(a.last_message_at) : 0;
-    const bt = b.last_message_at ? Date.parse(b.last_message_at) : 0;
-    if (at !== bt) return bt - at;
-    return a.partner_name.localeCompare(b.partner_name, "ru");
-  });
+  items.push(...groupItems);
+  items.sort(byListOrder);
   return jsonOk(cors, { items, role });
 }
 
@@ -627,6 +898,44 @@ async function handleCreateConversation(
   cors: Record<string, string>,
   body: Record<string, unknown> | null,
 ): Promise<Response> {
+  // ── Групповая беседа: get-or-create по учебной группе ──
+  const tutorGroupId = typeof body?.tutor_group_id === "string" ? body.tutor_group_id : "";
+  if (UUID_RE.test(tutorGroupId)) {
+    const loadedGroup = await loadGroupContext(db, tutorGroupId);
+    if (!loadedGroup || !loadedGroup.group.is_primary || !loadedGroup.group.is_active) {
+      return jsonError(cors, 404, "NOT_FOUND", "Группа не найдена.");
+    }
+    const { group, tutor, members } = loadedGroup;
+    const role = tutor.user_id === userId
+      ? "tutor"
+      : members.some((m) => m.student_id === userId)
+        ? "student"
+        : null;
+    if (!role) {
+      return jsonError(cors, 403, "FORBIDDEN", "Вы не состоите в этой группе.");
+    }
+    const { error: upsertErr } = await db
+      .from("tutor_student_conversations")
+      .upsert({ kind: "group", tutor_group_id: group.id }, {
+        onConflict: "tutor_group_id",
+        ignoreDuplicates: true,
+      });
+    if (upsertErr) {
+      console.error("tsc_create_group_conversation_failed", { error: upsertErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось создать чат. Попробуйте ещё раз.");
+    }
+    const { data: conv, error: selErr } = await db
+      .from("tutor_student_conversations")
+      .select("id")
+      .eq("tutor_group_id", group.id)
+      .single();
+    if (selErr || !conv) {
+      console.error("tsc_create_group_conversation_select_failed", { error: selErr?.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось создать чат. Попробуйте ещё раз.");
+    }
+    return jsonOk(cors, { conversation_id: (conv as { id: string }).id, role });
+  }
+
   const tutorStudentId = typeof body?.tutor_student_id === "string" ? body.tutor_student_id : "";
   if (!UUID_RE.test(tutorStudentId)) {
     return jsonError(cors, 400, "VALIDATION", "Не указан ученик для чата.");
@@ -714,14 +1023,94 @@ async function handleGetMessages(
 
   const partner = await buildPartnerIdentity(db, ctx);
 
+  if (ctx.kind === "group" && ctx.group && ctx.members) {
+    // Идентичности участников (репетитор + активные ученики) + read-state.
+    const studentIds = ctx.members.map((m) => m.student_id);
+    const [profilesRes, statesRes] = await Promise.all([
+      studentIds.length > 0
+        ? db.from("profiles").select("id, full_name, username, avatar_url, gender").in("id", studentIds)
+        : Promise.resolve({ data: [], error: null }),
+      db.from("tutor_chat_members").select(MEMBER_STATE_SELECT).eq("conversation_id", conversationId),
+    ]);
+    // Сбой батча НЕ маскируем 200-кой (ревью 5.6 р.2 #4): деградировавшая meta
+    // (нулевые watermark'и) затёрла бы хороший клиентский кэш — ✓✓ бы «мигали».
+    if (profilesRes.error || statesRes.error) {
+      console.error("tsc_get_messages_group_batch_failed", {
+        profiles: profilesRes.error?.message ?? null,
+        states: statesRes.error?.message ?? null,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить сообщения.");
+    }
+    const profileById = new Map(
+      ((profilesRes.data ?? []) as Array<
+        { id: string; full_name: string | null; username: string | null; avatar_url: string | null; gender: string | null }
+      >).map((p) => [p.id, p]),
+    );
+    const stateRows = (statesRes.data ?? []) as ChatMemberStateRow[];
+    let myLastReadAt: string | null = null;
+    let peerLastReadAt: string | null = null;
+    for (const s of stateRows) {
+      if (s.user_id === userId) {
+        myLastReadAt = s.last_read_at;
+      } else if (s.last_read_at) {
+        // ✓✓ «прочитал хотя бы один» = MAX по остальным членам.
+        if (!peerLastReadAt || Date.parse(s.last_read_at) > Date.parse(peerLastReadAt)) {
+          peerLastReadAt = s.last_read_at;
+        }
+      }
+    }
+    const members = [
+      {
+        user_id: ctx.tutor.user_id,
+        name: ctx.tutor.name?.trim() || "Репетитор",
+        avatar_url: ctx.tutor.avatar_url ?? null,
+        gender: ctx.tutor.gender ?? null,
+        role: "tutor",
+      },
+      ...ctx.members.map((m) => {
+        const profile = profileById.get(m.student_id);
+        return {
+          user_id: m.student_id,
+          name: resolveStudentName(m.display_name, profile?.full_name, profile?.username),
+          avatar_url: profile?.avatar_url ?? null,
+          gender: profile?.gender ?? null,
+          role: "student",
+        };
+      }),
+    ];
+
+    return jsonOk(cors, {
+      messages,
+      has_more: hasMore,
+      conversation: {
+        id: ctx.conversation.id,
+        kind: "group",
+        tutor_student_id: null,
+        tutor_group_id: ctx.group.id,
+        my_role: ctx.role,
+        archived: !ctx.group.is_active,
+        tutor_last_read_at: null,
+        student_last_read_at: null,
+        my_last_read_at: myLastReadAt,
+        peer_last_read_at: peerLastReadAt,
+        partner,
+        group: { id: ctx.group.id, name: ctx.group.name, member_count: members.length },
+        members,
+      },
+    });
+  }
+
+  const link = ctx.link!;
   return jsonOk(cors, {
     messages,
     has_more: hasMore,
     conversation: {
       id: ctx.conversation.id,
-      tutor_student_id: ctx.link.id,
+      kind: "direct",
+      tutor_student_id: link.id,
+      tutor_group_id: null,
       my_role: ctx.role,
-      archived: Boolean(ctx.link.archived_at),
+      archived: Boolean(link.archived_at),
       tutor_last_read_at: ctx.conversation.tutor_last_read_at,
       student_last_read_at: ctx.conversation.student_last_read_at,
       my_last_read_at: ctx.role === "tutor"
@@ -731,6 +1120,8 @@ async function handleGetMessages(
         ? ctx.conversation.student_last_read_at
         : ctx.conversation.tutor_last_read_at,
       partner,
+      group: null,
+      members: null,
     },
   });
 }
@@ -746,12 +1137,20 @@ async function handlePostMessage(
 ): Promise<Response> {
   const ctx = await resolveMemberContext(db, conversationId, userId);
   if (!ctx) return jsonError(cors, 404, "NOT_FOUND", "Чат не найден.");
-  if (ctx.link.archived_at) {
+  if (ctx.kind === "direct" && ctx.link?.archived_at) {
     return jsonError(
       cors,
       403,
       "CHAT_ARCHIVED",
       "Ученик в архиве — отправка сообщений недоступна. История сохранена.",
+    );
+  }
+  if (ctx.kind === "group" && ctx.group && !ctx.group.is_active) {
+    return jsonError(
+      cors,
+      403,
+      "CHAT_ARCHIVED",
+      "Группа неактивна — отправка сообщений недоступна. История сохранена.",
     );
   }
 
@@ -808,6 +1207,20 @@ async function handlePostMessage(
     return jsonError(cors, 429, "RATE_LIMITED", "Слишком много сообщений подряд. Подождите минуту.");
   }
 
+  // Группа: имя автора печётся в превью списка («Вася: держите фото…») —
+  // sender_role='student' не различает учеников группы.
+  let previewPrefix: string | undefined;
+  if (ctx.kind === "group") {
+    let authorName: string;
+    if (ctx.role === "tutor") {
+      authorName = ctx.tutor.name?.trim() || "Репетитор";
+    } else {
+      const member = ctx.members?.find((m) => m.student_id === userId);
+      authorName = member?.display_name?.trim() || "Ученик";
+    }
+    previewPrefix = `${authorName.split(/\s+/)[0]}: `;
+  }
+
   // Атомарно: insert + идемпотентный дедуп + денорм одной транзакцией (RPC).
   const posted = await postMessageAtomic(db, {
     conversationId,
@@ -816,6 +1229,7 @@ async function handlePostMessage(
     content: trimmed,
     attachmentUrl: serializeAttachmentUrls(refs),
     clientMsgId,
+    previewPrefix,
   });
   if (!posted) {
     return jsonError(cors, 500, "DB_ERROR", "Не удалось отправить сообщение. Попробуйте ещё раз.");
@@ -831,19 +1245,27 @@ async function handlePostMessage(
     void logAnalyticsEvent(db, {
       event_name: "chat_first_message_sent",
       actor_user_id: userId,
-      tutor_id: ctx.link.tutor_id,
-      student_id: ctx.link.student_id,
-      tutor_student_id: ctx.link.id,
+      tutor_id: ctx.kind === "group" ? ctx.group!.tutor_id : ctx.link!.tutor_id,
+      student_id: ctx.kind === "group"
+        ? (ctx.role === "student" ? userId : null)
+        : ctx.link!.student_id,
+      tutor_student_id: ctx.link?.id ?? null,
       source: ctx.role,
     });
   }
 
-  // Delayed-уведомление получателю (не await — отдельный isolate спит 15с).
-  enqueueInternal("notify", {
-    conversation_id: conversationId,
-    message_id: message.id,
-    recipient: ctx.role === "tutor" ? "student" : "tutor",
-  });
+  // Delayed-уведомление (не await — отдельный isolate спит 15с). Группа —
+  // без recipient: хендлер сам резолвит АКТУАЛЬНЫХ членов после сна.
+  enqueueInternal(
+    "notify",
+    ctx.kind === "group"
+      ? { conversation_id: conversationId, message_id: message.id }
+      : {
+        conversation_id: conversationId,
+        message_id: message.id,
+        recipient: ctx.role === "tutor" ? "student" : "tutor",
+      },
+  );
 
   // @СократAI → фоновый AI-ответ.
   if (MENTION_RE.test(trimmed)) {
@@ -868,6 +1290,22 @@ async function handleMarkRead(
   if (!ctx) return jsonError(cors, 404, "NOT_FOUND", "Чат не найден.");
 
   const nowIso = new Date().toISOString();
+
+  if (ctx.kind === "group") {
+    // Групповая беседа: своя member-строка (watermark + сброс бейджа).
+    const { error } = await db
+      .from("tutor_chat_members")
+      .upsert(
+        { conversation_id: conversationId, user_id: userId, last_read_at: nowIso, unread_count: 0 },
+        { onConflict: "conversation_id,user_id" },
+      );
+    if (error) {
+      console.error("tsc_mark_read_group_failed", { error: error.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось отметить прочитанным.");
+    }
+    return jsonOk(cors, { ok: true, read_at: nowIso });
+  }
+
   const patch = ctx.role === "tutor"
     ? { tutor_last_read_at: nowIso, tutor_unread_count: 0 }
     : { student_last_read_at: nowIso, student_unread_count: 0 };
@@ -884,16 +1322,113 @@ async function handleMarkRead(
 
 // ─── Internal: POST /internal/notify ─────────────────────────────────────────
 
+/** Push на все подписки получателя; true = доставлено (first-success). */
+async function deliverPush(
+  db: SupabaseClient,
+  recipientUserId: string,
+  payload: PushPayload,
+): Promise<boolean> {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return false;
+  const { data: subs } = await db
+    .from("push_subscriptions")
+    .select("endpoint, p256dh, auth")
+    .eq("user_id", recipientUserId);
+  for (const sub of (subs ?? []) as PushSubscriptionData[]) {
+    try {
+      const result = await sendPushNotification(
+        sub,
+        payload,
+        VAPID_PUBLIC_KEY,
+        VAPID_PRIVATE_KEY,
+        VAPID_SUBJECT,
+      );
+      if (result.gone) {
+        await db
+          .from("push_subscriptions")
+          .delete()
+          .eq("user_id", recipientUserId)
+          .eq("endpoint", sub.endpoint);
+        continue;
+      }
+      if (result.success) return true;
+    } catch (err) {
+      console.warn("tsc_notify_push_error", { error: String(err) });
+    }
+  }
+  return false;
+}
+
+/** Telegram chat_id ученика: profiles.telegram_user_id → telegram_sessions. */
+async function resolveStudentTelegramChatId(
+  db: SupabaseClient,
+  studentUserId: string,
+): Promise<number | null> {
+  const { data: profile } = await db
+    .from("profiles")
+    .select("telegram_user_id")
+    .eq("id", studentUserId)
+    .maybeSingle();
+  let chatId = (profile?.telegram_user_id as number | null) ?? null;
+  if (!chatId) {
+    const { data: session } = await db
+      .from("telegram_sessions")
+      .select("telegram_user_id")
+      .eq("user_id", studentUserId)
+      .maybeSingle();
+    chatId = (session?.telegram_user_id as number | null) ?? null;
+  }
+  return chatId;
+}
+
+/** tutors.telegram_id — TEXT; NaN → канала нет. */
+function parseTutorTelegramChatId(raw: string | null): number | null {
+  const parsed = Number(raw ?? "");
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** HTML-сообщение в Telegram; true = отправлено. */
+async function deliverTelegram(
+  chatId: number | null,
+  senderLabel: string,
+  preview: string,
+  url: string,
+): Promise<boolean> {
+  if (!chatId || !TELEGRAM_BOT_TOKEN) return false;
+  try {
+    const text = `💬 <b>${escapeHtmlEntities(senderLabel)}</b>: ${
+      escapeHtmlEntities(preview)
+    }\n\n<a href="${escapeHtmlEntities(url)}">Открыть чат в Сократе</a>`;
+    const tgResp = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }),
+      },
+    );
+    return tgResp.ok;
+  } catch (err) {
+    console.warn("tsc_notify_telegram_error", { error: String(err) });
+    return false;
+  }
+}
+
 async function handleInternalNotify(
   db: SupabaseClient,
   body: Record<string, unknown> | null,
 ): Promise<Response> {
   const conversationId = typeof body?.conversation_id === "string" ? body.conversation_id : "";
   const messageId = typeof body?.message_id === "string" ? body.message_id : "";
+  // recipient задан для direct-бесед; группа резолвит получателей сама.
   const recipient = body?.recipient === "tutor" || body?.recipient === "student"
     ? body.recipient
     : null;
-  if (!UUID_RE.test(conversationId) || !UUID_RE.test(messageId) || !recipient) {
+  if (!UUID_RE.test(conversationId) || !UUID_RE.test(messageId)) {
     return new Response(JSON.stringify({ error: "bad_request" }), { status: 400 });
   }
 
@@ -907,7 +1442,7 @@ async function handleInternalNotify(
     .maybeSingle();
   const { data: msg } = await db
     .from("tutor_student_chat_messages")
-    .select("id, content, attachment_url, sender_role, created_at")
+    .select("id, content, attachment_url, sender_role, author_user_id, created_at")
     .eq("id", messageId)
     .maybeSingle();
   if (!conv || !msg) return new Response(JSON.stringify({ ok: true }), { status: 200 });
@@ -915,6 +1450,134 @@ async function handleInternalNotify(
   const senderRole = msg.sender_role as string;
   if (senderRole === "assistant") {
     return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }
+
+  const contentPreview = buildPreview(
+    (msg.content as string) ?? "",
+    parseAttachmentUrls(msg.attachment_url as string | null).length > 0,
+  ) ?? "Новое сообщение";
+  const shortPreview = contentPreview.length > NOTIFY_PREVIEW_CHARS
+    ? `${contentPreview.slice(0, NOTIFY_PREVIEW_CHARS - 1)}…`
+    : contentPreview;
+  const appUrl = getAppUrl();
+
+  // ── Групповая беседа: fan-out всем ТЕКУЩИМ членам, кроме автора ──
+  if (conversation.kind === "group" && conversation.tutor_group_id) {
+    const loaded = await loadGroupContext(db, conversation.tutor_group_id);
+    if (!loaded) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    const { group, tutor, members } = loaded;
+    const authorUserId = (msg.author_user_id as string | null) ?? null;
+
+    let senderName: string;
+    if (senderRole === "tutor") {
+      senderName = tutor.name?.trim() || "Репетитор";
+    } else {
+      const authorMember = members.find((m) => m.student_id === authorUserId);
+      const { data: profile } = authorUserId
+        ? await db
+          .from("profiles")
+          .select("full_name, username")
+          .eq("id", authorUserId)
+          .maybeSingle()
+        : { data: null };
+      senderName = resolveStudentName(
+        authorMember?.display_name,
+        (profile?.full_name as string | null) ?? null,
+        (profile?.username as string | null) ?? null,
+      );
+    }
+    const senderLabel = `${senderName} · ${group.name}`;
+
+    const { data: states, error: statesErr } = await db
+      .from("tutor_chat_members")
+      .select(MEMBER_STATE_SELECT)
+      .eq("conversation_id", conversationId);
+    if (statesErr) {
+      // Fail-closed (ревью 5.6 р.2 #4): без state нельзя проверить read/throttle —
+      // лучше пропустить уведомление, чем спамить читающих и обойти троттлинг.
+      console.error("tsc_notify_group_states_failed", { error: statesErr.message });
+      return new Response(JSON.stringify({ ok: true, skipped: "state_error" }), { status: 200 });
+    }
+    const stateByUser = new Map(
+      ((states ?? []) as ChatMemberStateRow[]).map((s) => [s.user_id, s]),
+    );
+
+    const targets: Array<{ userId: string; role: "tutor" | "student"; url: string }> = [];
+    if (tutor.user_id !== authorUserId) {
+      targets.push({
+        userId: tutor.user_id,
+        role: "tutor",
+        url: `${appUrl}/tutor/chat/${conversationId}`,
+      });
+    }
+    for (const m of members) {
+      if (m.student_id === authorUserId) continue;
+      targets.push({
+        userId: m.student_id,
+        role: "student",
+        url: `${appUrl}/chat?id=group:${conversationId}`,
+      });
+    }
+
+    const msgCreatedMs = Date.parse(msg.created_at as string);
+    // Каскад одному получателю: push → telegram → отметка троттлинга.
+    const deliverToTarget = async (
+      t: { userId: string; role: "tutor" | "student"; url: string },
+    ): Promise<boolean> => {
+      const state = stateByUser.get(t.userId);
+      // Per-member re-check + троттлинг (mirror direct, но по member-строке).
+      if (state?.last_read_at && Date.parse(state.last_read_at) >= msgCreatedMs) return false;
+      if (
+        state?.last_notified_at &&
+        Date.now() - Date.parse(state.last_notified_at) < NOTIFY_THROTTLE_MS
+      ) return false;
+
+      let delivered = await deliverPush(db, t.userId, {
+        title: senderLabel,
+        body: shortPreview,
+        url: t.url,
+      });
+      if (!delivered) {
+        const chatId = t.role === "student"
+          ? await resolveStudentTelegramChatId(db, t.userId)
+          : parseTutorTelegramChatId(tutor.telegram_id);
+        delivered = await deliverTelegram(chatId, senderLabel, shortPreview, t.url);
+      }
+      if (delivered) {
+        await db
+          .from("tutor_chat_members")
+          .upsert(
+            {
+              conversation_id: conversationId,
+              user_id: t.userId,
+              last_notified_at: new Date().toISOString(),
+            },
+            { onConflict: "conversation_id,user_id" },
+          );
+      }
+      return delivered;
+    };
+
+    // Чанки по 4 (ревью 5.6 р.2 #12): последовательный каскад ×15 участников с
+    // медленными push-endpoint'ами линейно растил задержку последним получателям.
+    let deliveredCount = 0;
+    const NOTIFY_CONCURRENCY = 4;
+    for (let i = 0; i < targets.length; i += NOTIFY_CONCURRENCY) {
+      const chunk = targets.slice(i, i + NOTIFY_CONCURRENCY);
+      const results = await Promise.allSettled(chunk.map((t) => deliverToTarget(t)));
+      for (const r of results) {
+        if (r.status === "fulfilled" && r.value) deliveredCount += 1;
+        if (r.status === "rejected") {
+          console.warn("tsc_notify_group_target_failed", { error: String(r.reason) });
+        }
+      }
+    }
+    return new Response(JSON.stringify({ ok: true, delivered: deliveredCount }), { status: 200 });
+  }
+
+  // ── Direct-беседа: прежний одиночный recipient ──
+  if (!recipient || !conversation.tutor_student_id) {
+    return new Response(JSON.stringify({ ok: true, skipped: "no_recipient" }), { status: 200 });
   }
 
   const readAt = recipient === "tutor"
@@ -951,106 +1614,21 @@ async function handleInternalNotify(
     );
   }
 
-  const contentPreview = buildPreview(
-    (msg.content as string) ?? "",
-    parseAttachmentUrls(msg.attachment_url as string | null).length > 0,
-  ) ?? "Новое сообщение";
-  const shortPreview = contentPreview.length > NOTIFY_PREVIEW_CHARS
-    ? `${contentPreview.slice(0, NOTIFY_PREVIEW_CHARS - 1)}…`
-    : contentPreview;
-
-  const appUrl = getAppUrl();
   const recipientUserId = recipient === "tutor" ? tutor.user_id : link.student_id;
   const url = recipient === "tutor"
     ? `${appUrl}/tutor/chat/${conversationId}`
     : `${appUrl}/chat?id=tutor:${conversationId}`;
 
-  let delivered = false;
-
-  // 1) Push
-  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-    const { data: subs } = await db
-      .from("push_subscriptions")
-      .select("endpoint, p256dh, auth")
-      .eq("user_id", recipientUserId);
-    const payload: PushPayload = {
-      title: `Сообщение от ${senderName}`,
-      body: shortPreview,
-      url,
-    };
-    for (const sub of (subs ?? []) as PushSubscriptionData[]) {
-      try {
-        const result = await sendPushNotification(
-          sub,
-          payload,
-          VAPID_PUBLIC_KEY,
-          VAPID_PRIVATE_KEY,
-          VAPID_SUBJECT,
-        );
-        if (result.gone) {
-          await db
-            .from("push_subscriptions")
-            .delete()
-            .eq("user_id", recipientUserId)
-            .eq("endpoint", sub.endpoint);
-          continue;
-        }
-        if (result.success) {
-          delivered = true;
-          break;
-        }
-      } catch (err) {
-        console.warn("tsc_notify_push_error", { error: String(err) });
-      }
-    }
-  }
-
-  // 2) Telegram fallback
-  if (!delivered && TELEGRAM_BOT_TOKEN) {
-    let chatId: number | null = null;
-    if (recipient === "student") {
-      const { data: profile } = await db
-        .from("profiles")
-        .select("telegram_user_id")
-        .eq("id", link.student_id)
-        .maybeSingle();
-      chatId = (profile?.telegram_user_id as number | null) ?? null;
-      if (!chatId) {
-        const { data: session } = await db
-          .from("telegram_sessions")
-          .select("telegram_user_id")
-          .eq("user_id", link.student_id)
-          .maybeSingle();
-        chatId = (session?.telegram_user_id as number | null) ?? null;
-      }
-    } else {
-      // tutors.telegram_id — TEXT; NaN → канала нет.
-      const parsed = Number(tutor.telegram_id ?? "");
-      chatId = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-    }
-    if (chatId) {
-      try {
-        const text = `💬 <b>${escapeHtmlEntities(senderName)}</b>: ${
-          escapeHtmlEntities(shortPreview)
-        }\n\n<a href="${escapeHtmlEntities(url)}">Открыть чат в Сократе</a>`;
-        const tgResp = await fetch(
-          `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              chat_id: chatId,
-              text,
-              parse_mode: "HTML",
-              disable_web_page_preview: true,
-            }),
-          },
-        );
-        if (tgResp.ok) delivered = true;
-      } catch (err) {
-        console.warn("tsc_notify_telegram_error", { error: String(err) });
-      }
-    }
+  let delivered = await deliverPush(db, recipientUserId, {
+    title: `Сообщение от ${senderName}`,
+    body: shortPreview,
+    url,
+  });
+  if (!delivered) {
+    const chatId = recipient === "student"
+      ? await resolveStudentTelegramChatId(db, link.student_id)
+      : parseTutorTelegramChatId(tutor.telegram_id);
+    delivered = await deliverTelegram(chatId, senderName, shortPreview, url);
   }
 
   if (delivered) {
@@ -1065,17 +1643,32 @@ async function handleInternalNotify(
 
 // ─── Internal: POST /internal/ai-reply (@СократAI) ───────────────────────────
 
-function buildChatAiSystemPrompt(tutorName: string, studentName: string): string {
+function buildChatAiSystemPrompt(params: {
+  kind: "direct" | "group";
+  tutorName: string;
+  studentName?: string;
+  groupName?: string;
+  memberNames?: string[];
+}): string {
+  const whoLine = params.kind === "group"
+    ? `Тебя позвали упоминанием @СократAI. Это ГРУППОВОЙ чат группы «${params.groupName ?? "Группа"}»: репетитор ${params.tutorName} и ученики: ${
+      params.memberNames && params.memberNames.length > 0 ? params.memberNames.join(", ") : "участники группы"
+    }.`
+    : `Тебя позвали упоминанием @СократAI. В чате два человека: репетитор ${params.tutorName} и ученик ${params.studentName ?? "Ученик"}.`;
+  const addressLine = params.kind === "group"
+    ? "- Обращайся ПО ИМЕНИ к тому, кто задал вопрос. Не выдумывай сообщений за участников."
+    : "- Обращайся к тому, кто задал вопрос. Не выдумывай сообщений за репетитора или ученика.";
   return [
     "Ты — Сократ AI, помощник в общем чате репетитора и ученика на платформе «Сократ AI».",
-    `Тебя позвали упоминанием @СократAI. В чате два человека: репетитор ${tutorName} и ученик ${studentName}.`,
+    whoLine,
     "Сообщения в истории помечены, кто их написал.",
     "",
     "Правила:",
     "- Отвечай по-русски, по существу и достаточно кратко (обычно до 150 слов).",
+    "- Пиши обычным текстом БЕЗ markdown-разметки: никаких **звёздочек**, ## заголовков и списков со звёздочками. Нумерованные пункты «1. 2. 3.» — можно.",
     "- Формулы пиши в LaTeX с $...$ (inline) или $$...$$ (display).",
     "- Здесь МОЖНО давать полное решение и прямой ответ: репетитор присутствует в чате и сам решает, как использовать твой разбор.",
-    "- Обращайся к тому, кто задал вопрос. Не выдумывай сообщений за репетитора или ученика.",
+    addressLine,
     "- Если вопрос неясен — задай один короткий уточняющий вопрос.",
     "",
     'Верни СТРОГО JSON без пояснений: {"reply": "<твой ответ>"}',
@@ -1094,7 +1687,7 @@ async function handleInternalAiReply(
 
   const { data: conv } = await db
     .from("tutor_student_conversations")
-    .select("id, tutor_student_id")
+    .select("id, kind, tutor_student_id, tutor_group_id")
     .eq("id", conversationId)
     .maybeSingle();
   const { data: trigger } = await db
@@ -1104,9 +1697,34 @@ async function handleInternalAiReply(
     .maybeSingle();
   if (!conv || !trigger) return new Response(JSON.stringify({ ok: true }), { status: 200 });
 
-  const loaded = await loadLinkAndTutor(db, (conv as { tutor_student_id: string }).tutor_student_id);
-  if (!loaded) return new Response(JSON.stringify({ ok: true }), { status: 200 });
-  const { link, tutor } = loaded;
+  const convRow = conv as {
+    id: string;
+    kind: "direct" | "group";
+    tutor_student_id: string | null;
+    tutor_group_id: string | null;
+  };
+  const isGroup = convRow.kind === "group" && Boolean(convRow.tutor_group_id);
+
+  let link: LinkRow | null = null;
+  let group: GroupRow | null = null;
+  let members: GroupMemberRow[] = [];
+  let tutor: TutorRow;
+  if (isGroup) {
+    const loadedGroup = await loadGroupContext(db, convRow.tutor_group_id!);
+    if (!loadedGroup) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    group = loadedGroup.group;
+    tutor = loadedGroup.tutor;
+    members = loadedGroup.members;
+  } else {
+    if (!convRow.tutor_student_id) {
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }
+    const loaded = await loadLinkAndTutor(db, convRow.tutor_student_id);
+    if (!loaded) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    link = loaded.link;
+    tutor = loaded.tutor;
+  }
+  const tutorPkId = isGroup ? group!.tutor_id : link!.tutor_id;
 
   const senderRole = trigger.sender_role as string;
   const authorUserId = trigger.author_user_id as string | null;
@@ -1139,7 +1757,7 @@ async function handleInternalAiReply(
       .from("analytics_events")
       .select("id", { count: "exact", head: true })
       .eq("event_name", "tutor_chat_ai_ran")
-      .eq("tutor_id", link.tutor_id)
+      .eq("tutor_id", tutorPkId)
       .gte("occurred_at", midnight.toISOString());
     if ((ranToday ?? 0) >= TUTOR_CHAT_AI_DAILY_CAP) {
       await insertAssistantMessage(
@@ -1158,9 +1776,9 @@ async function handleInternalAiReply(
   await logAnalyticsEvent(db, {
     event_name: senderRole === "tutor" ? "tutor_chat_ai_ran" : "student_chat_ai_ran",
     actor_user_id: authorUserId,
-    tutor_id: link.tutor_id,
-    student_id: link.student_id,
-    tutor_student_id: link.id,
+    tutor_id: tutorPkId,
+    student_id: link?.student_id ?? (senderRole === "student" ? authorUserId : null),
+    tutor_student_id: link?.id ?? null,
   });
 
   // «СократAI печатает…» — degrade-safe broadcast, пока ждём gateway.
@@ -1169,36 +1787,71 @@ async function handleInternalAiReply(
   // ── Контекст: последние N сообщений (ASC) с пометкой автора ──
   const { data: historyRows } = await db
     .from("tutor_student_chat_messages")
-    .select("sender_role, content, created_at")
+    .select("sender_role, author_user_id, content, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(AI_CONTEXT_MESSAGES);
   const history = ((historyRows ?? []) as Array<
-    { sender_role: string; content: string; created_at: string }
+    { sender_role: string; author_user_id: string | null; content: string; created_at: string }
   >).reverse();
 
+  // Карта uid → имя (в группе различает учеников; в 1:1 — один ученик).
   const tutorName = tutor.name?.trim() || "Репетитор";
-  const { data: studentProfile } = await db
-    .from("profiles")
-    .select("full_name, username")
-    .eq("id", link.student_id)
-    .maybeSingle();
-  const studentName = resolveStudentName(
-    link.display_name,
-    studentProfile?.full_name as string | null,
-    studentProfile?.username as string | null,
-  );
+  const nameByUid = new Map<string, string>();
+  nameByUid.set(tutor.user_id, tutorName);
+  let studentName = "Ученик";
+  if (isGroup) {
+    const memberIds = members.map((m) => m.student_id);
+    const { data: profs } = memberIds.length > 0
+      ? await db.from("profiles").select("id, full_name, username").in("id", memberIds)
+      : { data: [] };
+    const profById = new Map(
+      ((profs ?? []) as Array<{ id: string; full_name: string | null; username: string | null }>)
+        .map((p) => [p.id, p]),
+    );
+    for (const m of members) {
+      const p = profById.get(m.student_id);
+      nameByUid.set(
+        m.student_id,
+        resolveStudentName(m.display_name, p?.full_name ?? null, p?.username ?? null),
+      );
+    }
+  } else {
+    const { data: studentProfile } = await db
+      .from("profiles")
+      .select("full_name, username")
+      .eq("id", link!.student_id)
+      .maybeSingle();
+    studentName = resolveStudentName(
+      link!.display_name,
+      studentProfile?.full_name as string | null,
+      studentProfile?.username as string | null,
+    );
+    nameByUid.set(link!.student_id, studentName);
+  }
 
-  const aiMessages: LovableMessage[] = [
-    { role: "system", content: buildChatAiSystemPrompt(tutorName, studentName) },
-  ];
+  const systemPrompt = buildChatAiSystemPrompt(
+    isGroup
+      ? {
+        kind: "group",
+        tutorName,
+        groupName: group!.name,
+        memberNames: members.map((m) => nameByUid.get(m.student_id) ?? "Ученик"),
+      }
+      : { kind: "direct", tutorName, studentName },
+  );
+  const aiMessages: LovableMessage[] = [{ role: "system", content: systemPrompt }];
   for (const h of history) {
     if (!h.content?.trim()) continue;
     if (h.sender_role === "assistant") {
       aiMessages.push({ role: "assistant", content: h.content });
+    } else if (h.sender_role === "tutor") {
+      aiMessages.push({ role: "user", content: `Репетитор ${tutorName}: ${h.content}` });
     } else {
-      const label = h.sender_role === "tutor" ? `Репетитор ${tutorName}` : `Ученик ${studentName}`;
+      const name = (h.author_user_id ? nameByUid.get(h.author_user_id) : null) ??
+        (isGroup ? null : studentName);
+      const label = name ? `Ученик ${name}` : "Ученик";
       aiMessages.push({ role: "user", content: `${label}: ${h.content}` });
     }
   }

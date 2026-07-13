@@ -1,12 +1,42 @@
-# Чат репетитор ↔ ученик («Чаты») + @СократAI + PWA-наджи
+# Чат репетитор ↔ ученик («Чаты») + группы + @СократAI + PWA-наджи
 
-Telegram-подобный realtime-чат 1:1 репетитор↔ученик с вызовом AI (@СократAI) в общей переписке + умные наджи установки PWA/уведомлений. Реализовано 2026-07-12. История: `~/.claude/plans/functional-frolicking-flute.md` + memory `project_tutor_student_chat_2026_07_12.md`. **НЕ путать** с AI-чатом ученика (`chats`/`chat_messages`) — отдельная система.
+Telegram-подобный realtime-чат 1:1 репетитор↔ученик + **групповые чаты учебных групп** (2026-07-13, секция ниже) с вызовом AI (@СократAI) в общей переписке + умные наджи установки PWA/уведомлений. Реализовано 2026-07-12. История: `~/.claude/plans/functional-frolicking-flute.md` (1:1) + `~/.claude/plans/virtual-giggling-duckling.md` (группы) + memory `project_tutor_student_chat_2026_07_12.md`. **НЕ путать** с AI-чатом ученика (`chats`/`chat_messages`) — отдельная система.
 
 ## Модель данных (миграции `20260712150000…150300`)
 
 - **`tutor_student_conversations`** — 1:1 с `tutor_students` (UNIQUE `tutor_student_id`, lazy-create). Денорм для списка: `last_message_at/preview/sender`; галочки-watermark: `tutor_last_read_at`/`student_last_read_at` («прочитано» ⇔ `msg.created_at <= peer_last_read_at`, БЕЗ per-message флагов); бейджи `tutor_unread_count`/`student_unread_count`; троттлинг `*_last_notified_at`.
 - **`tutor_student_chat_messages`** — `sender_role ('tutor'|'student'|'assistant')`, `author_user_id → auth.users SET NULL`, `content ≤4000`, `attachment_url` (dual-format через `parseAttachmentUrls`), `client_msg_id` (идемпотентность), `created_at`. Индексы `(conversation_id, created_at DESC, id DESC)` + partial-unique `(conversation_id, client_msg_id)`.
 - **RLS SELECT-only** через SECURITY DEFINER `is_chat_conversation_member(_conversation_id)` (JOIN `tutor_students`+`tutors`: `ts.student_id = auth.uid() OR t.user_id = auth.uid()` — **FK-дрейф: `tutor_students.tutor_id → tutors.id`, raw JOIN в USING() запрещён**). **Никаких INSERT/UPDATE/DELETE политик — ВСЕ записи через edge (service_role)**; денорм-счётчики нельзя доверять клиенту.
+
+## Групповые чаты (миграция `20260713120000`, решения владельца 2026-07-13)
+
+Группа = **учебная** `tutor_groups` (`is_primary=true AND is_active=true`); метки чат НЕ получают. Не вторая система — обобщение той же: `tutor_student_conversations.kind ('direct'|'group')` + `tutor_group_id UNIQUE FK CASCADE` (+ `tutor_student_id` стал NULLable, CHECK «ровно один из двух»; `last_message_author_user_id` — автор последнего сообщения). **Индекс `uq_tsc_group` НЕ partial** — PostgREST `upsert(onConflict)` не инферит partial-индексы; NULL'ы direct-бесед в UNIQUE не конфликтуют.
+
+- **Членство НЕ копируется — живьём** из `tutor_group_memberships(is_active)` JOIN `tutor_students(archived_at IS NULL)` внутри `is_chat_conversation_member` (group-ветка: владелец через `tutor_groups.tutor_id → tutors.user_id` ИЛИ активный член). Убрали из группы → мгновенно теряет ВСЮ историю (RLS); добавили → видит всю. Ноль синхронизации.
+- **`tutor_chat_members` — per-member СОСТОЯНИЕ, НЕ членство**: `(conversation_id, user_id) PK`, `last_read_at`/`unread_count`/`last_notified_at`. SELECT-RLS через `is_chat_conversation_member` (члены видят read-state друг друга — нужно для ✓✓); write — только service_role. В realtime publication. Direct-чаты ОСТАЛИСЬ на двухпартийных колонках (гибрид намеренный — прод не мигрируем).
+- **`tsc_post_message` ветвится по `c.kind`**: direct-путь прежний; group — тот же атомарный insert+денорм БЕЗ двухпартийных счётчиков + **fan-out unread** UPSERT'ом всем текущим получателям кроме автора (assistant → всем) + watermark автора (написал = прочитал). Мини-группы ≤ ~15 — fan-out тривиален.
+- **Own-детект — ТОЛЬКО по `author_user_id`, НЕ по `sender_role`** (у двух учеников группы одинаковый `sender_role='student'`): `ConversationView.isOwnMessage` = `_localStatus ? true : kind==='group' ? author_user_id===myUserId : sender_role===perspective`. Регресс = чужие сообщения справа как «свои».
+- **✓✓ в группе = «прочитал хотя бы один»** (решение владельца): `peer_last_read_at = MAX(last_read_at)` остальных членов; live — binding `tutor_chat_members` (open-беседа: filter conversation_id; список: unfiltered + клиентский фильтр `user_id===myUid` для своего бейджа). Group-строки в conversations-UPDATE хендлере НЕ читают `tutor_*/student_unread_count` (не про меня).
+- **Превью списка**: имя автора **печётся сервером** (`previewPrefix` в `postMessageAtomic`, первое слово имени) — клиент добавляет только «СократAI:»; «Вы:» только в direct. Свой бейдж unread приходит событием member-строки, не conversations-UPDATE.
+- **Lazy-создание**: список СИНТЕЗИРУЕТ строку для каждой учебной группы (`buildGroupListItems`) — чат виден сразу после создания группы; физическая беседа = `POST /conversations {tutor_group_id}` при первом открытии. Удаление группы → CASCADE беседы+сообщений (UI удаления групп пока нет).
+- **Notify group**: `/internal/notify` БЕЗ `recipient` → после 15с резолвит АКТУАЛЬНЫХ членов, per-member re-check (`member.last_read_at`) + троттлинг 5 мин (`member.last_notified_at`), каскад push→telegram по роли. Title «{автор} · {группа}». Deep-link ученика `?id=group:<convId>` (Chat.tsx парсит оба префикса `tutor:`/`group:` в один overlay), репетитора — `/tutor/chat/<convId>`.
+- **@СократAI в группе**: звать могут все; квота АВТОРА (student → `checkAiQuota`, tutor → cap 30/день по `group.tutor_id`); контекст с картой имён по `author_user_id`; group-промпт «обращайся по имени». Ответ assistant инкрементит unread всем через ту же RPC.
+- **Typing payload** += `{user_id, display_name}` — self-фильтр по uid (роль не различает учеников), «Вася печатает…»; legacy payload без uid фильтруется по роли (1:1).
+- **Markdown-фикс (2026-07-13)**: AI-промпт запрещает markdown + `MathText` opt-in `markdownLite` (`**`→`<strong>`, `` ` ``→`<code>`, только chat-assistant; KB не затронут). Плавающая дата-пилюля в `ConversationView` (data-chat-iso + бинарный поиск верхнего видимого, rAF).
+- **UI группы**: `ConversationRow`/header — Users-иконка на `bg-socrat-folder-bg`; header-тап → Dialog со списком участников (`meta.members`; скролл даёт сам примитив `DialogContent` — `max-h-[85vh] overflow-y-auto`); цветные имена авторов над чужими пузырями (`authorColorClass(uid)`, палитра `*-700` — 12px на белом обязан давать AA ≥4.5:1).
+- **Deploy-порядок**: миграция → edge (Lovable) → фронт (`deploy-sokratai`). Известный minor: в превью группы своё сообщение показывается своим именем, не «Вы:» (имя запечено сервером).
+
+### Ревью р.2 ChatGPT-5.6 (2026-07-13) — фиксы, НЕ откатывать
+
+- **`?groups=1` capability-флаг на GET /conversations**: edge отдаёт групповые строки ТОЛЬКО клиенту с флагом (deploy-skew: старый бандл/stale PWA ронял React-ключи на `tutor_student_id=null` и звал direct-create без ученика). Временный — убрать синхронно (edge+клиент) после стабилизации PWA-кэшей.
+- **Снапшот первого непрочитанного — В РЕНДЕР-ФАЗЕ (write-once ref), НЕ в effect**: divider обязан попасть в тот же коммит, что и сообщения, иначе initial-scroll не находит его в DOM → лента уходит вниз → mark-read гасит всю пачку. Initial-scroll гейтится «снапшот взят» (+ группа ждёт `myUserId`).
+- **Member-события realtime до резолва uid — СКИП** (`useChatRealtime`): своя строка ушла бы в peer-ветку и монотонный MAX завысил `peer_last_read_at` навсегда → ложные ✓✓.
+- **Watermark-гард fan-out в `tsc_post_message`**: `ON CONFLICT DO UPDATE` НЕ инкрементит unread, если `last_read_at >= v_row.created_at` (конкурентный markRead коммитился первым → ложный бейдж 1).
+- **Батчи member-state — проверять `.error`**: GET messages группы → 500 (не 200 с занулёнными watermark'ами — «мигали» бы ✓✓); notify группы → fail-closed skip (без state нельзя проверить read/throttle — лучше пропустить, чем спамить).
+- **Notify группы — чанки по 4** (`Promise.allSettled`), не последовательный каскад ×15.
+- **`ConversationRow.onSelect(item)` — стабильный колбэк с параметром** (не inline-замыкание) — иначе `memo` мёртв (конвенция PickerTaskCard, rule 50 W3.4).
+- **Плавающая пилюля — кэш узлов** `dayNodesRef` (пересобирается на смену `messages`), не `querySelectorAll` на каждый scroll-кадр.
+- **Мутации групп/членства инвалидируют `['chat','conversations']`** (список синтезируется из memberships, realtime-событий по ним нет): `invalidateGroupRosterCaches` + `AddStudentDialog` (оба блока) + `TutorStudentProfile` (смена основной группы). Новый write-path членства → тоже инвалидировать.
 
 ## Единственный write-path сообщений — RPC `tsc_post_message` (КРИТИЧНО)
 
@@ -61,4 +91,4 @@ Un-awaited self-fetch (паттерн `enqueueReferenceGeneration`; `EdgeRuntime
 
 ## При расширении
 
-Новое поле сообщения → `tsc_post_message` + `MESSAGE_SELECT` + тип. Новый write — только через edge (RLS SELECT-only). Realtime — merge-helper, не invalidate; list-канал — refcount. Новый AI-путь в чате — квота-**reservation ДО** вызова. Новая точка наджа — через `NotificationsNudge`/`useNotificationsSetup`, не свой баннер. **Проверка edge перед коммитом: `npx esbuild supabase/functions/tutor-student-chat-api/index.ts --outfile=NUL`** (tsc Deno-код не ловит — `*/` в комментарии обрушил сборку в ревью).
+Новое поле сообщения → `tsc_post_message` + `MESSAGE_SELECT` + тип. Новый write — только через edge (RLS SELECT-only). Realtime — merge-helper, не invalidate; list-канал — refcount. Новый AI-путь в чате — квота-**reservation ДО** вызова. Новая точка наджа — через `NotificationsNudge`/`useNotificationsSetup`, не свой баннер. **Группы:** любой новый хендлер/поверхность обязаны быть kind-aware (ветка через `resolveMemberContext.kind`); own-детект — по `author_user_id`; членство — только живой вывод из memberships (никогда не копировать в свою таблицу); новый тип беседы → расширяй `kind`, не плоди таблицы. **Проверка edge перед коммитом: `npx esbuild supabase/functions/tutor-student-chat-api/index.ts --outfile=NUL`** (tsc Deno-код не ловит — `*/` в комментарии обрушил сборку в ревью).

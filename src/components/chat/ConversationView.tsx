@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { parseISO } from 'date-fns';
-import { ArrowDown, ArrowLeft, Loader2, MessagesSquare } from 'lucide-react';
+import { ArrowDown, ArrowLeft, Loader2, MessagesSquare, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { ChatBubble } from '@/components/chat/ChatBubble';
 import { ChatComposer } from '@/components/chat/ChatComposer';
-import { ChatDateSeparator } from '@/components/chat/ChatDateSeparator';
+import { ChatDateSeparator, formatChatDateLabel } from '@/components/chat/ChatDateSeparator';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useConversationMessages } from '@/hooks/chat/useConversationMessages';
 import { useChatRealtime } from '@/hooks/chat/useChatRealtime';
 import { useSendChatMessage } from '@/hooks/chat/useSendChatMessage';
 import { useTypingBroadcast } from '@/hooks/chat/useTypingBroadcast';
 import { chatConversationsKey } from '@/hooks/chat/chatQueryKeys';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 import {
   AI_MENTION_RE,
   deleteChatUploads,
+  getMyUserId,
   markChatRead,
   uploadChatImage,
 } from '@/lib/tutorStudentChatApi';
@@ -69,14 +72,55 @@ export function ConversationView({
   const { data, isLoading, error, refetch, fetchOlder, isLoadingOlder } =
     useConversationMessages(conversationId);
   useChatRealtime(conversationId, true);
+
+  // uid для own-детекта в группах (sender_role не различает учеников).
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    void getMyUserId().then((uid) => {
+      if (mounted) setMyUserId(uid);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const conversationMeta = data?.conversation ?? null;
+  const isGroup = conversationMeta?.kind === 'group';
+  const groupInfo = conversationMeta?.group ?? null;
+  const groupMembers = useMemo(() => conversationMeta?.members ?? [], [conversationMeta]);
+  const authorByUid = useMemo(() => {
+    const map = new Map<string, ChatPartnerIdentity>();
+    for (const m of groupMembers) {
+      map.set(m.user_id, { name: m.name, avatar_url: m.avatar_url, gender: m.gender });
+    }
+    return map;
+  }, [groupMembers]);
+  const selfDisplayName = useMemo(
+    () => (isGroup && myUserId ? (authorByUid.get(myUserId)?.name ?? null) : null),
+    [isGroup, myUserId, authorByUid],
+  );
+
   const {
     partnerTyping,
+    partnerTypingName,
     assistantTyping,
     notifyTyping,
     previewAssistantTyping,
     clearAssistantTyping,
-  } = useTypingBroadcast(conversationId, perspective, true);
+  } = useTypingBroadcast(conversationId, perspective, true, selfDisplayName);
   const { send, retry } = useSendChatMessage(conversationId, perspective);
+
+  // Own-детект: оптимистичные — свои by construction; группа — по author_user_id
+  // (у двух учеников одинаковый sender_role); 1:1 — прежняя role-модель.
+  const isOwnMessage = useCallback(
+    (m: TutorStudentChatMessage): boolean => {
+      if (m._localStatus) return true;
+      if (isGroup) return m.author_user_id != null && m.author_user_id === myUserId;
+      return m.sender_role === perspective;
+    },
+    [isGroup, myUserId, perspective],
+  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -86,6 +130,15 @@ export function ConversationView({
   const didInitialScrollRef = useRef(false);
   const lastMarkedMessageIdRef = useRef<string | null>(null);
   const lastMessageIdRef = useRef<string | null>(null);
+  // Плавающая дата-пилюля (Telegram): дата верхнего видимого сообщения при
+  // скролле, гаснет через ~1с покоя.
+  const [floatingDayIso, setFloatingDayIso] = useState<string | null>(null);
+  const [floatingDayVisible, setFloatingDayVisible] = useState(false);
+  const floatingDayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floatingDayRafRef = useRef<number | null>(null);
+  // Кэш узлов сообщений — обновляется на смену messages, НЕ на каждый scroll-кадр
+  // (ревью 5.6 р.2 #9: querySelectorAll по 1-2k узлов 60 раз/с дёргал iOS).
+  const dayNodesRef = useRef<HTMLElement[]>([]);
 
   const messages = useMemo(() => data?.messages ?? [], [data?.messages]);
   const conversation = data?.conversation ?? null;
@@ -102,19 +155,26 @@ export function ConversationView({
     setNewSinceScroll(0);
   }, [conversationId]);
 
-  useEffect(() => {
-    if (!conversation || firstUnreadIdRef.current !== null || messages.length === 0) return;
+  // Снимок первого непрочитанного — ЛЕНИВО В РЕНДЕР-ФАЗЕ (write-once ref), НЕ в
+  // effect: divider обязан попасть в тот же коммит, что и сообщения — иначе
+  // initial-scroll не находил его в DOM, уезжал вниз и mark-read гасил всю пачку
+  // непрочитанных (ревью 5.6 р.2 #1). Telegram-семантика прежняя: разделитель не
+  // гоняется за новыми сообщениями в течение сессии.
+  if (
+    firstUnreadIdRef.current === null &&
+    conversation !== null &&
+    messages.length > 0 &&
+    // Группа: ждём uid — без него own-детект пометил бы свои сообщения непрочитанными.
+    (!isGroup || myUserId !== null)
+  ) {
     const myReadAt = conversation.my_last_read_at
       ? parseISO(conversation.my_last_read_at).getTime()
       : 0;
     const firstUnread = messages.find(
-      (m) =>
-        m.sender_role !== perspective &&
-        !m._localStatus &&
-        parseISO(m.created_at).getTime() > myReadAt,
+      (m) => !isOwnMessage(m) && parseISO(m.created_at).getTime() > myReadAt,
     );
     firstUnreadIdRef.current = firstUnread?.id ?? '';
-  }, [conversation, messages, perspective]);
+  }
 
   // ── Scroll management ──
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -123,8 +183,11 @@ export function ConversationView({
   }, []);
 
   useEffect(() => {
-    // Initial scroll: к разделителю непрочитанных, иначе вниз.
+    // Initial scroll: к разделителю непрочитанных, иначе вниз. Гейт на снапшот:
+    // пока он не взят (группа ждёт uid) — не скроллим, иначе divider ещё не в
+    // DOM и лента ушла бы вниз с mark-read'ом всей пачки (ревью 5.6 р.2 #1).
     if (didInitialScrollRef.current || messages.length === 0) return;
+    if (firstUnreadIdRef.current === null) return;
     didInitialScrollRef.current = true;
     requestAnimationFrame(() => {
       const unreadEl = firstUnreadIdRef.current
@@ -133,7 +196,7 @@ export function ConversationView({
       if (unreadEl) unreadEl.scrollIntoView({ block: 'center' });
       else scrollToBottom();
     });
-  }, [conversationId, messages.length, scrollToBottom]);
+  }, [conversationId, messages.length, scrollToBottom, myUserId]);
 
   useEffect(() => {
     // Новые сообщения в ХВОСТЕ: sticky-bottom если рядом с низом, иначе
@@ -144,14 +207,14 @@ export function ConversationView({
     const prevLastId = lastMessageIdRef.current;
     lastMessageIdRef.current = last?.id ?? null;
     if (!didInitialScrollRef.current || !last || last.id === prevLastId) return;
-    const isOwn = last.sender_role === perspective;
+    const isOwn = isOwnMessage(last);
     if (isOwn || isAtBottom) {
       requestAnimationFrame(() => scrollToBottom(isOwn ? 'smooth' : 'auto'));
       setNewSinceScroll(0);
     } else {
       setNewSinceScroll((n) => n + 1);
     }
-  }, [messages, perspective, isAtBottom, scrollToBottom]);
+  }, [messages, isOwnMessage, isAtBottom, scrollToBottom]);
 
   // ── Mark-read: только когда пользователь РЕАЛЬНО у низа ленты и вкладка
   // видима (ревью 5.6 P1: открытие с 30 непрочитанными сразу давало ✓✓ и
@@ -160,12 +223,12 @@ export function ConversationView({
   // scrollIntoView к разделителю непрочитанных.
   const lastIncomingId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].sender_role !== perspective && !messages[i]._localStatus) {
+      if (!isOwnMessage(messages[i])) {
         return messages[i].id;
       }
     }
     return null;
-  }, [messages, perspective]);
+  }, [messages, isOwnMessage]);
 
   const maybeMarkRead = useCallback(() => {
     if (!conversation) return;
@@ -201,6 +264,54 @@ export function ConversationView({
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [maybeMarkRead]);
 
+  // Кэш узлов для пилюли — после каждого изменения ленты (append/prepend/замена
+  // оптимистичного пузыря серверной строкой меняет key → узел пересоздаётся).
+  useEffect(() => {
+    const el = containerRef.current;
+    dayNodesRef.current = el
+      ? Array.from(el.querySelectorAll<HTMLElement>('[data-chat-iso]'))
+      : [];
+  }, [messages]);
+
+  // Пилюля даты: бинарный поиск верхнего видимого сообщения (тексты в
+  // document-order → top-координаты монотонны; ≤ ~10 rect-замеров на тик).
+  const updateFloatingDay = useCallback(() => {
+    floatingDayRafRef.current = null;
+    const el = containerRef.current;
+    if (!el) return;
+    // Чат без скролла (умещается на экран) — пилюля не нужна.
+    if (el.scrollHeight <= el.clientHeight + 4) return;
+    const nodes = dayNodesRef.current;
+    if (nodes.length === 0) return;
+    const topEdge = el.getBoundingClientRect().top;
+    let lo = 0;
+    let hi = nodes.length - 1;
+    let found = nodes.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (nodes[mid].getBoundingClientRect().bottom > topEdge + 1) {
+        found = mid;
+        hi = mid - 1;
+      } else {
+        lo = mid + 1;
+      }
+    }
+    const iso = nodes[found]?.dataset.chatIso;
+    if (!iso) return;
+    setFloatingDayIso(iso);
+    setFloatingDayVisible(true);
+    if (floatingDayHideTimerRef.current) clearTimeout(floatingDayHideTimerRef.current);
+    floatingDayHideTimerRef.current = setTimeout(() => setFloatingDayVisible(false), 1000);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (floatingDayHideTimerRef.current) clearTimeout(floatingDayHideTimerRef.current);
+      if (floatingDayRafRef.current !== null) cancelAnimationFrame(floatingDayRafRef.current);
+    },
+    [],
+  );
+
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -210,6 +321,11 @@ export function ConversationView({
     if (atBottom) {
       setNewSinceScroll(0);
       maybeMarkRead();
+    }
+
+    // Плавающая дата-пилюля — rAF-троттлинг DOM-замеров.
+    if (floatingDayRafRef.current === null) {
+      floatingDayRafRef.current = requestAnimationFrame(updateFloatingDay);
     }
 
     if (el.scrollTop < LOAD_OLDER_THRESHOLD_PX && data?.hasMore && !isLoadingOlder) {
@@ -222,7 +338,7 @@ export function ConversationView({
         });
       });
     }
-  }, [data?.hasMore, fetchOlder, isLoadingOlder, maybeMarkRead]);
+  }, [data?.hasMore, fetchOlder, isLoadingOlder, maybeMarkRead, updateFloatingDay]);
 
   // Ответ СократAI пришёл → гасим «печатает…».
   useEffect(() => {
@@ -291,10 +407,20 @@ export function ConversationView({
   const subtitle = assistantTyping
     ? 'СократAI печатает…'
     : partnerTyping
-      ? 'печатает…'
+      ? isGroup && partnerTypingName
+        ? `${partnerTypingName} печатает…`
+        : 'печатает…'
       : archived
-        ? 'ученик в архиве'
-        : null;
+        ? isGroup
+          ? 'группа неактивна'
+          : 'ученик в архиве'
+        : isGroup && groupInfo
+          ? `${groupInfo.member_count} ${
+            pluralizeRu(groupInfo.member_count, ['участник', 'участника', 'участников'])
+          }`
+          : null;
+
+  const [membersOpen, setMembersOpen] = useState(false);
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-socrat-surface', className)}>
@@ -312,13 +438,29 @@ export function ConversationView({
             <ArrowLeft className="h-5 w-5" />
           </button>
         )}
-        <UserAvatar
-          name={partner?.name}
-          avatarUrl={partner?.avatar_url}
-          gender={(partner?.gender as 'male' | 'female' | null) ?? null}
-          size="sm"
-        />
-        <div className="min-w-0 flex-1">
+        {isGroup ? (
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-socrat-folder-bg">
+            <Users className="h-4 w-4 text-socrat-folder" aria-hidden="true" />
+          </span>
+        ) : (
+          <UserAvatar
+            name={partner?.name}
+            avatarUrl={partner?.avatar_url}
+            gender={(partner?.gender as 'male' | 'female' | null) ?? null}
+            size="sm"
+          />
+        )}
+        <button
+          type="button"
+          onClick={isGroup ? () => setMembersOpen(true) : undefined}
+          disabled={!isGroup}
+          className={cn(
+            'flex min-h-11 min-w-0 flex-1 flex-col justify-center text-left',
+            isGroup && 'cursor-pointer rounded-md px-1 hover:bg-socrat-surface',
+          )}
+          style={{ touchAction: 'manipulation' }}
+          aria-label={isGroup ? 'Участники группы' : undefined}
+        >
           <p className="truncate text-[15px] font-semibold leading-tight text-slate-900">
             {partner?.name ?? 'Чат'}
           </p>
@@ -332,8 +474,40 @@ export function ConversationView({
               {subtitle}
             </p>
           )}
-        </div>
+        </button>
       </div>
+
+      {/* Участники группы */}
+      {isGroup && (
+        <Dialog open={membersOpen} onOpenChange={setMembersOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>{groupInfo?.name ?? 'Группа'}</DialogTitle>
+            </DialogHeader>
+            <ul className="flex flex-col gap-1">
+              {groupMembers.map((m) => (
+                <li key={m.user_id} className="flex min-h-[44px] items-center gap-2.5 rounded-lg px-1.5">
+                  <UserAvatar
+                    name={m.name}
+                    avatarUrl={m.avatar_url}
+                    gender={(m.gender as 'male' | 'female' | null) ?? null}
+                    size="sm"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm text-slate-900">
+                    {m.name}
+                    {m.user_id === myUserId && <span className="text-slate-400"> (вы)</span>}
+                  </span>
+                  {m.role === 'tutor' && (
+                    <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
+                      Репетитор
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Messages */}
       <div className="relative flex-1 min-h-0">
@@ -368,7 +542,11 @@ export function ConversationView({
                 <MessagesSquare className="h-6 w-6 text-accent" aria-hidden="true" />
               </div>
               <p className="text-sm font-medium text-slate-700">
-                {partner?.name ? `Начните диалог с ${partner.name}` : 'Начните диалог'}
+                {isGroup
+                  ? `Начните общий чат группы${groupInfo?.name ? ` «${groupInfo.name}»` : ''}`
+                  : partner?.name
+                    ? `Начните диалог с ${partner.name}`
+                    : 'Начните диалог'}
               </p>
               <p className="text-xs text-slate-500">
                 Напишите @СократAI, чтобы позвать AI-помощника в этот чат
@@ -387,7 +565,7 @@ export function ConversationView({
             const showDate = !prev || !isSameDay(prev.created_at, m.created_at);
             const showUnreadDivider = firstUnreadIdRef.current === m.id;
             return (
-              <div key={m.id}>
+              <div key={m.id} data-chat-iso={m.created_at}>
                 {showDate && <ChatDateSeparator iso={m.created_at} />}
                 {showUnreadDivider && (
                   <div
@@ -404,14 +582,35 @@ export function ConversationView({
                 )}
                 <ChatBubble
                   message={m}
-                  isOwn={m.sender_role === perspective}
+                  isOwn={isOwnMessage(m)}
                   partner={partner}
                   status={statusFor(m)}
                   onRetry={handleRetry}
+                  showAuthor={isGroup}
+                  author={
+                    isGroup && m.author_user_id
+                      ? (authorByUid.get(m.author_user_id) ?? null)
+                      : null
+                  }
                 />
               </div>
             );
           })}
+        </div>
+
+        {/* Плавающая дата-пилюля (Telegram): дата видимой области при скролле */}
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center transition-opacity duration-200',
+            floatingDayVisible && floatingDayIso ? 'opacity-100' : 'opacity-0',
+          )}
+          aria-hidden="true"
+        >
+          {floatingDayIso && (
+            <span className="rounded-full bg-slate-900/60 px-3 py-0.5 text-xs font-medium text-white">
+              {formatChatDateLabel(floatingDayIso)}
+            </span>
+          )}
         </div>
 
         {/* Scroll-to-bottom FAB */}
@@ -442,7 +641,11 @@ export function ConversationView({
         onTyping={notifyTyping}
         isSending={isUploading}
         disabledHint={
-          archived ? 'Ученик в архиве — отправка недоступна, история сохранена.' : null
+          archived
+            ? isGroup
+              ? 'Группа неактивна — отправка недоступна, история сохранена.'
+              : 'Ученик в архиве — отправка недоступна, история сохранена.'
+            : null
         }
       />
     </div>

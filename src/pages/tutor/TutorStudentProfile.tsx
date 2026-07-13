@@ -486,6 +486,8 @@ function TutorStudentProfileContent() {
             }
           }
           refetchMemberships();
+          // Групповые чаты синтезируются из memberships — обновить список «Чаты».
+          void queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
         } catch (membershipError) {
           console.error('Membership sync failed after student profile update:', membershipError);
           const detail = membershipError instanceof Error ? membershipError.message : '';

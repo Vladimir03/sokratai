@@ -101,12 +101,15 @@ export default function Chat() {
   const navigate = useNavigate();
   const location = useLocation();
   const chatIdFromUrl = searchParams.get('id');
-  // Закреп-диалог с репетитором: ?id=tutor:<conversationId> (префикс не
-  // коллидирует с UUID AI-чатов). В этом режиме все AI-запросы отключаются
-  // через существующие guard'ы (currentChatId = undefined ниже).
+  // Закреп-диалог с репетитором: ?id=tutor:<conversationId>; групповой чат:
+  // ?id=group:<conversationId> (префиксы не коллидируют с UUID AI-чатов).
+  // Оба монтируют один ConversationView; AI-запросы отключаются через
+  // существующие guard'ы (currentChatId = undefined ниже).
   const tutorConversationId = chatIdFromUrl?.startsWith('tutor:')
     ? chatIdFromUrl.slice('tutor:'.length)
-    : null;
+    : chatIdFromUrl?.startsWith('group:')
+      ? chatIdFromUrl.slice('group:'.length)
+      : null;
   const isMobile = useIsMobile();
   const deviceType = useDeviceType();
   

@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { format, isToday, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Archive } from 'lucide-react';
+import { Archive, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import type { ChatConversationListItem, ChatPerspective } from '@/types/tutorStudentChat';
@@ -17,7 +17,8 @@ export interface ConversationRowProps {
   item: ChatConversationListItem;
   myRole: ChatPerspective;
   active?: boolean;
-  onClick: () => void;
+  /** Стабильный колбэк с параметром (НЕ inline-замыкание на строку) — иначе memo мёртв (ревью 5.6 р.2 #8). */
+  onSelect: (item: ChatConversationListItem) => void;
 }
 
 /** Telegram-строка списка чатов: аватар, имя (bold при непрочитанном), превью, время, бейдж. */
@@ -25,13 +26,16 @@ export const ConversationRow = memo(function ConversationRow({
   item,
   myRole,
   active = false,
-  onClick,
+  onSelect,
 }: ConversationRowProps) {
   const hasUnread = item.unread_count > 0;
-  const previewPrefix = item.last_message_sender === myRole
-    ? 'Вы: '
-    : item.last_message_sender === 'assistant'
-      ? 'СократAI: '
+  const isGroupItem = item.kind === 'group' || Boolean(item.group);
+  // Группа: имя автора уже запечено в превью сервером («Вася: …»);
+  // клиент добавляет только 'СократAI: ' (assistant без имени).
+  const previewPrefix = item.last_message_sender === 'assistant'
+    ? 'СократAI: '
+    : !isGroupItem && item.last_message_sender === myRole
+      ? 'Вы: '
       : '';
   const preview = item.last_message_preview
     ? `${previewPrefix}${item.last_message_preview}`
@@ -40,7 +44,7 @@ export const ConversationRow = memo(function ConversationRow({
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => onSelect(item)}
       className={cn(
         'flex w-full min-h-[64px] items-center gap-3 px-3 py-2.5 text-left transition-colors',
         active ? 'bg-accent/10' : 'hover:bg-socrat-surface',
@@ -48,13 +52,19 @@ export const ConversationRow = memo(function ConversationRow({
       style={{ touchAction: 'manipulation' }}
       aria-current={active ? 'true' : undefined}
     >
-      <UserAvatar
-        name={item.partner_name}
-        avatarUrl={item.partner_avatar_url}
-        gender={(item.partner_gender as 'male' | 'female' | null) ?? null}
-        size="md"
-        className="shrink-0"
-      />
+      {isGroupItem ? (
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-socrat-folder-bg">
+          <Users className="h-5 w-5 text-socrat-folder" aria-hidden="true" />
+        </span>
+      ) : (
+        <UserAvatar
+          name={item.partner_name}
+          avatarUrl={item.partner_avatar_url}
+          gender={(item.partner_gender as 'male' | 'female' | null) ?? null}
+          size="md"
+          className="shrink-0"
+        />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span

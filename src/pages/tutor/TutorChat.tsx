@@ -10,8 +10,13 @@ import NotificationsNudge from '@/components/pwa/NotificationsNudge';
 import { useChatConversations } from '@/hooks/chat/useChatConversations';
 import { chatConversationsKey } from '@/hooks/chat/chatQueryKeys';
 import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight';
-import { ensureChatConversation } from '@/lib/tutorStudentChatApi';
+import { ensureChatConversation, ensureGroupChatConversation } from '@/lib/tutorStudentChatApi';
 import type { ChatConversationListItem } from '@/types/tutorStudentChat';
+
+/** Стабильный ключ строки списка: direct — линк ученика, группа — группа. */
+function rowKey(item: ChatConversationListItem): string {
+  return item.tutor_group_id ?? item.tutor_student_id ?? item.conversation_id ?? 'row';
+}
 
 // Tutor chrome breakpoint = 1024px (не 768 — rule: рельса появляется с lg).
 function useIsDesktopChrome(): boolean {
@@ -54,14 +59,19 @@ export default function TutorChat() {
         return;
       }
       // Беседы ещё нет — lazy-create и патчим строку списка новым id.
-      setOpeningId(item.tutor_student_id);
+      const isGroupItem = item.kind === 'group' || Boolean(item.group);
+      setOpeningId(rowKey(item));
       try {
-        const res = await ensureChatConversation(item.tutor_student_id);
+        const res = isGroupItem && item.tutor_group_id
+          ? await ensureGroupChatConversation(item.tutor_group_id)
+          : await ensureChatConversation(item.tutor_student_id!);
         queryClient.setQueryData<ChatConversationListItem[]>(
           chatConversationsKey('tutor'),
           (prev) =>
             prev?.map((i) =>
-              i.tutor_student_id === item.tutor_student_id
+              (isGroupItem
+                  ? i.tutor_group_id != null && i.tutor_group_id === item.tutor_group_id
+                  : i.tutor_student_id != null && i.tutor_student_id === item.tutor_student_id)
                 ? { ...i, conversation_id: res.conversation_id }
                 : i,
             ),
@@ -74,6 +84,14 @@ export default function TutorChat() {
       }
     },
     [navigate, queryClient],
+  );
+
+  // void-обёртка со стабильной ссылкой для memo-строк (ConversationRow.onSelect).
+  const handleOpenRow = useCallback(
+    (item: ChatConversationListItem) => {
+      void handleOpen(item);
+    },
+    [handleOpen],
   );
 
   const showList = isDesktop || !conversationId;
@@ -131,12 +149,12 @@ export default function TutorChat() {
           </div>
         )}
         {(items ?? []).map((item) => (
-          <div key={item.tutor_student_id} className={openingId === item.tutor_student_id ? 'opacity-60' : undefined}>
+          <div key={rowKey(item)} className={openingId === rowKey(item) ? 'opacity-60' : undefined}>
             <ConversationRow
               item={item}
               myRole="tutor"
               active={Boolean(conversationId) && item.conversation_id === conversationId}
-              onClick={() => void handleOpen(item)}
+              onSelect={handleOpenRow}
             />
           </div>
         ))}

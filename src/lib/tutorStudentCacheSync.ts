@@ -184,6 +184,9 @@ export async function invalidateGroupRosterCaches(queryClient: QueryClient): Pro
       ['tutor', 'received-payments'],
       ['tutor', 'students'],
       ['tutor', 'student'],
+      // Групповые чаты: состав/наличие учебной группы = строка списка «Чаты»
+      // (синтезируется из memberships; realtime событий по membership нет).
+      ['chat', 'conversations'],
     ].map((queryKey) =>
       queryClient.invalidateQueries({ queryKey, refetchType: 'active' }),
     ),

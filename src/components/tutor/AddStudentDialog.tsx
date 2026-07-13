@@ -236,6 +236,8 @@ export function AddStudentDialog({
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'group-memberships'] });
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
+    // Групповые чаты синтезируются из memberships — обновить список «Чаты».
+    void queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
     setCredentialsData(null);
     setPendingTutorStudentId(null);
     resetManualForm();
@@ -426,6 +428,8 @@ export function AddStudentDialog({
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'group-memberships'] });
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
+      // Групповые чаты синтезируются из memberships — обновить список «Чаты».
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
 
       const descParts: string[] = [];
       if (errN > 0) descParts.push(`не удалось добавить: ${errN}`);

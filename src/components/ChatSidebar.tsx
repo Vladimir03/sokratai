@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 import { Plus, X, Loader2, Pin } from "lucide-react";
-import { useState, useRef } from "react";
+import { useCallback, useState, useRef } from "react";
 import { toast } from "sonner";
 import { CreateChatDialog } from "./CreateChatDialog";
 import { CustomChatItem } from "./CustomChatItem";
@@ -11,7 +11,7 @@ import { ConversationRow } from "@/components/chat/ConversationRow";
 import NotificationsNudge from "@/components/pwa/NotificationsNudge";
 import { useChatConversations } from "@/hooks/chat/useChatConversations";
 import { chatConversationsKey } from "@/hooks/chat/chatQueryKeys";
-import { ensureChatConversation } from "@/lib/tutorStudentChatApi";
+import { ensureChatConversation, ensureGroupChatConversation } from "@/lib/tutorStudentChatApi";
 import type { ChatConversationListItem } from "@/types/tutorStudentChat";
 
 interface ChatSidebarProps {
@@ -47,27 +47,40 @@ export function ChatSidebar({ currentChatId, activeTutorConversationId, onChatSe
   // Закреплённые диалоги с репетиторами (Telegram-закреп) — над AI-чатами.
   const { data: tutorDialogs = [] } = useChatConversations('student');
 
-  const handleTutorDialogSelect = async (item: ChatConversationListItem) => {
-    if (item.conversation_id) {
-      onChatSelect(`tutor:${item.conversation_id}`);
-      return;
-    }
-    try {
-      const res = await ensureChatConversation(item.tutor_student_id);
-      queryClient.setQueryData<ChatConversationListItem[]>(
-        chatConversationsKey('student'),
-        (prev) =>
-          prev?.map((i) =>
-            i.tutor_student_id === item.tutor_student_id
-              ? { ...i, conversation_id: res.conversation_id }
-              : i,
-          ),
-      );
-      onChatSelect(`tutor:${res.conversation_id}`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Не удалось открыть чат с репетитором');
-    }
-  };
+  // Стабильная ссылка — memo-строки ConversationRow (ревью 5.6 р.2 #8).
+  const handleTutorDialogSelect = useCallback(
+    (item: ChatConversationListItem) => {
+      const isGroupItem = item.kind === 'group' || Boolean(item.group);
+      const prefix = isGroupItem ? 'group' : 'tutor';
+      if (item.conversation_id) {
+        onChatSelect(`${prefix}:${item.conversation_id}`);
+        return;
+      }
+      void (async () => {
+        try {
+          // Lazy-create: групповая беседа — по группе, direct — по линку ученика.
+          const res = isGroupItem && item.tutor_group_id
+            ? await ensureGroupChatConversation(item.tutor_group_id)
+            : await ensureChatConversation(item.tutor_student_id!);
+          queryClient.setQueryData<ChatConversationListItem[]>(
+            chatConversationsKey('student'),
+            (prev) =>
+              prev?.map((i) =>
+                (isGroupItem
+                    ? i.tutor_group_id != null && i.tutor_group_id === item.tutor_group_id
+                    : i.tutor_student_id != null && i.tutor_student_id === item.tutor_student_id)
+                  ? { ...i, conversation_id: res.conversation_id }
+                  : i,
+              ),
+          );
+          onChatSelect(`${prefix}:${res.conversation_id}`);
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Не удалось открыть чат');
+        }
+      })();
+    },
+    [onChatSelect, queryClient],
+  );
 
   const { data: user } = useQuery({
     queryKey: ['user'],
@@ -229,18 +242,20 @@ export function ChatSidebar({ currentChatId, activeTutorConversationId, onChatSe
               </div>
               <div className="px-4 py-2 text-sm text-muted-foreground font-medium flex items-center gap-1.5">
                 <Pin className="h-3.5 w-3.5" aria-hidden="true" />
-                РЕПЕТИТОР
+                {tutorDialogs.some((i) => i.kind === 'group' || i.group)
+                  ? 'РЕПЕТИТОР И ГРУППЫ'
+                  : 'РЕПЕТИТОР'}
               </div>
               {tutorDialogs.map((item) => (
                 <ConversationRow
-                  key={item.tutor_student_id}
+                  key={item.tutor_group_id ?? item.tutor_student_id ?? item.conversation_id}
                   item={item}
                   myRole="student"
                   active={
                     Boolean(activeTutorConversationId) &&
                     item.conversation_id === activeTutorConversationId
                   }
-                  onClick={() => void handleTutorDialogSelect(item)}
+                  onSelect={handleTutorDialogSelect}
                 />
               ))}
               <div className="mx-4 my-2 border-b" />
