@@ -1343,6 +1343,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
             status: r.status,
             success: r.success,
             gone: r.gone,
+            error: r.error ?? null,
           });
         } catch (e) {
           results.push({ error: e instanceof Error ? e.message : String(e) });

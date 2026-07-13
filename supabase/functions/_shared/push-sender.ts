@@ -24,6 +24,8 @@ export interface PushResult {
   success: boolean;
   status: number;
   gone: boolean;
+  /** Тело ответа пуш-сервиса при HTTP-ошибке ИЛИ текст исключения (status 0). */
+  error?: string;
 }
 
 // ─── Base64 URL helpers ──────────────────────────────────────
@@ -326,14 +328,16 @@ export async function sendPushNotification(
     const gone = response.status === 410;
     const success = response.status >= 200 && response.status < 300;
 
+    let errText: string | undefined;
     if (!success) {
-      const text = await response.text().catch(() => '');
-      console.error(`Push send failed: ${response.status} ${text}`);
+      errText = (await response.text().catch(() => '')).slice(0, 300);
+      console.error(`Push send failed: ${response.status} ${errText}`);
     }
 
-    return { success, status: response.status, gone };
+    return { success, status: response.status, gone, error: errText };
   } catch (error) {
-    console.error('sendPushNotification error:', error);
-    return { success: false, status: 0, gone: false };
+    const msg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error('sendPushNotification error:', msg);
+    return { success: false, status: 0, gone: false, error: msg };
   }
 }
