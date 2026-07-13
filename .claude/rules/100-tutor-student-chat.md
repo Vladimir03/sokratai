@@ -39,6 +39,7 @@ Un-awaited self-fetch (паттерн `enqueueReferenceGeneration`; `EdgeRuntime
 ## Bucket `tutor-chat-uploads` (приватный)
 
 Путь `{conversationId}/{uploaderUid}/{fileId}.ext`. INSERT-политика: свой namespace + member + **кап 300 объектов/беседу** (анти-abuse: message-rate-limit срабатывает после upload). Чтение: любой member (`createSignedUrl` клиентом — RU-safe `api.sokratai.ru`). `chat-images` НЕ подходит (owner-folder-only SELECT). Клиент `uploadChatImage` (`compressForUpload`); частичный сбой загрузки → `deleteChatUploads` сирот + черновик сохраняется (`allSettled`, не `Promise.all`).
+- **Lovable-quirk (2026-07-12):** `INSERT INTO storage.buckets(...file_size_limit, allowed_mime_types)` в миграции **не применяется на Lovable** — платформа блокирует любой DML по `storage.buckets` (создаёт бакет своим API, но лимиты/mime не выставляет). Миграция корректна для стандартного Supabase; на Lovable **бакет-лимиты выставляются ВРУЧНУЮ** (Backend → Storage → bucket → Settings: 10485760 байт + image/*). Защита остаётся: RLS INSERT (own-folder + member + кап 300) + клиентский `MAX_CHAT_IMAGE_BYTES`/`compressForUpload`. Любой новый бакет через миграцию на этом проекте → тот же ручной шаг.
 
 ## Frontend
 
