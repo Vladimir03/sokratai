@@ -15,6 +15,7 @@
 // в этот же роутер (TASK-6).
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { logAnalyticsEventOnce } from "../_shared/analytics.ts";
 import { egePrimaryToScaled, ogeMark } from "../_shared/score-scales.ts";
 import {
   BEHIND_GOAL_PCT,
@@ -613,6 +614,39 @@ async function handleUpdateTarget(
 
 // ─── Entry point ────────────────────────────────────────────────────────────────
 
+/**
+ * POST /track — client funnel beacon (QR-онбординг, item 6). Клиент шлёт клик по
+ * community-CTA; сервер пишет analytics_events. Whitelist имени события: клиент
+ * НЕ может вписать произвольное (CHECK-таблицы). Дедуп once-per-tutor. PII-free.
+ */
+async function handleTrackEvent(
+  db: SupabaseClient,
+  userId: string,
+  body: Record<string, unknown> | null,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const event = typeof body?.event === "string" ? body.event : "";
+  if (event !== "community_cta_clicked") {
+    return jsonError(cors, 400, "UNKNOWN_EVENT", "Неизвестное событие.");
+  }
+  const rawChannel = typeof body?.channel === "string" ? body.channel : "";
+  const channel = rawChannel === "telegram" || rawChannel === "vk" ? rawChannel : null;
+
+  const tutorPkId = await resolveTutorPkId(db, userId);
+  await logAnalyticsEventOnce(
+    db,
+    {
+      event_name: "community_cta_clicked",
+      actor_user_id: userId,
+      tutor_id: tutorPkId,
+      source: channel,
+      meta: channel ? { channel } : null,
+    },
+    { tutor_id: tutorPkId },
+  );
+  return jsonOk(cors, { ok: true });
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   const cors = getCorsHeaders(req);
   if (req.method === "OPTIONS") {
@@ -635,6 +669,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
 
     const seg = route.segments;
+
+    // POST /track — client funnel beacon (community_cta_clicked)
+    if (seg.length === 1 && seg[0] === "track" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleTrackEvent(db, userId, body, cors);
+    }
 
     // POST /assignments/:id/students/:sid/review-task
     if (

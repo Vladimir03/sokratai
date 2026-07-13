@@ -10,6 +10,7 @@
 import { lazy, Suspense, useState } from "react";
 import { ClipboardCheck } from "lucide-react";
 import { logDemoCheckViewed } from "@/lib/demoCheckApi";
+import { markDemoSeen } from "@/lib/demoSeen";
 
 const DemoCheckSheet = lazy(() =>
   import("@/components/tutor/demo-check/DemoCheckSheet").then((m) => ({
@@ -27,6 +28,7 @@ export function DemoCheckCard({ subject }: DemoCheckCardProps) {
 
   const handleOpen = () => {
     logDemoCheckViewed(); // funnel: tutor_demo_check_viewed (fire-and-forget)
+    markDemoSeen(); // «вау» состоялось → открываем community-CTA (CommunityJoinCard)
     setOpen(true);
   };
 

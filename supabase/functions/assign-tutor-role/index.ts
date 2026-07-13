@@ -1,4 +1,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  persistPromoAttributionAndTrack,
+  persistTutorTelegramFromMetadata,
+} from "../_shared/promo-intent.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -145,6 +149,17 @@ Deno.serve(async (req) => {
     } else {
       console.log("Tutor profile created:", user.id);
     }
+
+    // Persist QR/referral attribution + funnel + опц. telegram для no-email-confirm
+    // пути (email-verify покрывает confirm-путь). Читает promo/ref/telegram из
+    // signup-метаданных на auth.users. Best-effort, idempotent, PII-free. Этот путь
+    // — только tutor-регистрация (функция назначает роль tutor), так что gate не нужен.
+    const signupMeta = authUser.user.user_metadata as
+      | Record<string, unknown>
+      | null
+      | undefined;
+    await persistPromoAttributionAndTrack(supabaseAdmin, user.id, signupMeta);
+    await persistTutorTelegramFromMetadata(supabaseAdmin, user.id, signupMeta);
 
     return new Response(
       JSON.stringify({ success: true }),

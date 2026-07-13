@@ -34,6 +34,10 @@ UI: `/admin → вкладка «Тарифы»` (`src/components/admin/AdminTut
 
 **Инвариант:** новый способ пометить репетитора платящим — ТОЛЬКО через `admin_grant_tutor_plan` ИЛИ YooKassa-webhook тарифа (оба аудируются в `admin_tutor_plan_grants`), не raw `UPDATE profiles`.
 
+### Промо-скидка BLINOV_20 (egor-qr-onboarding, 2026-07-13)
+
+Ветка −20% в `yookassa-create-payment` поверх серверной цены (см. ниже). **По сохранённому `profiles.promo_code`, НЕ из запроса** (anti-tamper: promo/amount клиент не шлёт). −20% на **band-цену** в течение **первых 6 месяцев подписки** (`!isFirstTutorPayment && paidCount < PROMO_BLINOV_20_WINDOW_MONTHS`) — **интро-месяц исключён** (−20% со 2-го платежа: месяцы 2–6). Ответ несёт `promo_applied/promo_percent/amount_before_promo`; модалка рисует строку скидки. Календарной даты в yookassa НЕТ — **claim-дедлайн 31.12.2026** живёт в `_shared/promo-intent.ts::PROMO_CLAIM_DEADLINES` (после — код не цепляется новым аккаунтам; закреплённые дорабатывают окно). `profiles.promo_code`/`registration_source` пишутся из signUp-метаданных (`persistPromoAttribution`, гейт new+tutor+signup). **При правке тарифной цены — сохранить discount-блок и порядок (скидка ПОСЛЕ intro/band/TEAM-гейтов).** Детали: `docs/delivery/features/egor-qr-onboarding/` + memory `project_egor_qr_onboarding.md`.
+
 ## Самообслуживание — YooKassa-оплата тарифа «AI-старт» (2026-07-02)
 
 `yookassa-create-payment` принимает опциональный `plan: 'tutor_ai_start'` (absent → ученический Premium 699₽/30д, byte-identical; неизвестное значение → 400 `UNKNOWN_PLAN`). Инварианты money-path:

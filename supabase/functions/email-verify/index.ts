@@ -44,6 +44,10 @@
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  persistPromoAttributionAndTrack,
+  persistTutorTelegramFromMetadata,
+} from "../_shared/promo-intent.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -369,6 +373,15 @@ Deno.serve(async (req) => {
   }
 
   await flushConsentIntent(adminClient, data.user.id, metadata);
+
+  // Persist QR/referral attribution + funnel (promo/ref) + опц. telegram — ТОЛЬКО
+  // для регистрации (type=signup), НЕ для magiclink-логина (P1 #5). Promo/telegram
+  // метаданные несут лишь tutor-формы; студенческий SignUp их не шлёт. Best-effort,
+  // idempotent, PII-free. Tutor-role allow-list выше не тронут (rule 96).
+  if (type === "signup") {
+    await persistPromoAttributionAndTrack(adminClient, data.user.id, metadata);
+    await persistTutorTelegramFromMetadata(adminClient, data.user.id, metadata);
+  }
 
   console.warn(
     JSON.stringify({

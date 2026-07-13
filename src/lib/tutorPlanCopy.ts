@@ -13,6 +13,16 @@
 /** Прямая связь с основателем — поддержка/вопросы (для 21+ учеников — и оплата AI-команды). */
 export const TUTOR_SUPPORT_TELEGRAM_URL = 'https://t.me/Analyst_Vladimir';
 
+/**
+ * Сообщество репетиторов (community-CTA после первого «вау», фича
+ * egor-qr-onboarding). Единственный источник ссылок — не хардкодить инлайн.
+ *  - Telegram — чат/канал репетиторов Сократа (та же ручка, что на лендинге).
+ *  - VK — чат репетиторов (инвайт-ссылка).
+ */
+export const SOKRAT_COMMUNITY_TELEGRAM_URL = 'https://t.me/sokrat_rep';
+export const SOKRAT_COMMUNITY_VK_URL =
+  'https://vk.me/join/WooW6wjwjhNwG7R0rzmKxpEBunNfHq1C3QQ=';
+
 /** Фичи AI-слоя — копия обещания лендинга (Pricing.tsx, тариф «AI-старт»).
  *  Используется в TutorTariffSection (карточка тарифа) и TutorPaymentModal (benefits). */
 export const AI_FEATURES = [

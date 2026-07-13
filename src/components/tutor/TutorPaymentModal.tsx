@@ -58,6 +58,10 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
   const [confirmationToken, setConfirmationToken] = useState<string | null>(null);
   const [redirectUrl, setRedirectUrl] = useState<string | null>(null);
   const [amount, setAmount] = useState<number | null>(null);
+  /** Промо-скидка BLINOV_20 (egor-qr-onboarding) — сервер вернул applied/percent/before. */
+  const [promoApplied, setPromoApplied] = useState(false);
+  const [promoPercent, setPromoPercent] = useState<number | null>(null);
+  const [amountBeforePromo, setAmountBeforePromo] = useState<number | null>(null);
   /** Social proof «Уже N репетиторов проверяют ДЗ с AI» (round 3). */
   const [payingTutorsCount, setPayingTutorsCount] = useState<number | null>(null);
   /** ID созданного платежа — успех поллим по НЕМУ (payments.subscription_activated_at),
@@ -89,6 +93,18 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
     });
   };
 
+  // Промо-скидка (сервер вернул applied/percent/before). Промо-поля в ЗАПРОСЕ нет
+  // — цену считает только сервер по profiles.promo_code (anti-tamper).
+  const applyPromoFromData = (data: Record<string, unknown> | null | undefined) => {
+    if (data?.promo_applied === true) {
+      setPromoApplied(true);
+      if (typeof data.promo_percent === 'number') setPromoPercent(data.promo_percent);
+      if (typeof data.amount_before_promo === 'number') {
+        setAmountBeforePromo(data.amount_before_promo);
+      }
+    }
+  };
+
   const createRedirectPaymentAndOpen = async () => {
     const { data, error } = await invokeCreatePayment('redirect');
     if (error || !data?.confirmation_url) {
@@ -98,6 +114,7 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
     if (typeof data.amount === 'number') setAmount(data.amount);
     if (typeof data.paying_tutors_count === 'number') setPayingTutorsCount(data.paying_tutors_count);
     if (typeof data.payment_id === 'string') setPaymentId(data.payment_id);
+    applyPromoFromData(data);
     setRedirectUrl(data.confirmation_url);
     openUrlInNewTab(data.confirmation_url);
   };
@@ -125,6 +142,9 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
       setConfirmationToken(null);
       setRedirectUrl(null);
       setAmount(null);
+      setPromoApplied(false);
+      setPromoPercent(null);
+      setAmountBeforePromo(null);
       setPayingTutorsCount(null);
       setPaymentId(null);
       return;
@@ -187,6 +207,7 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
         setPayingTutorsCount(data.paying_tutors_count);
       }
       if (typeof data?.payment_id === 'string') setPaymentId(data.payment_id);
+      applyPromoFromData(data);
 
       // Redirect flow: no token, but has confirmation_url
       if (!error && data?.confirmation_url && confirmationType === 'redirect') {
@@ -387,8 +408,18 @@ export function TutorPaymentModal({ isOpen, onClose, onSuccess }: TutorPaymentMo
           <DialogDescription>
             {amount !== null ? (
               <>
-                К оплате: <span className="font-semibold tabular-nums">{amount} ₽</span> за 30 дней
-                AI для всех учеников.
+                К оплате: <span className="font-semibold tabular-nums">{amount} ₽</span>
+                {promoApplied && amountBeforePromo !== null ? (
+                  <span className="ml-1.5 text-slate-400 line-through tabular-nums">
+                    {amountBeforePromo} ₽
+                  </span>
+                ) : null}{' '}
+                за 30 дней AI для всех учеников.
+                {promoApplied ? (
+                  <span className="mt-1 block font-medium text-accent">
+                    −{promoPercent ?? 20}% по промокоду закреплено
+                  </span>
+                ) : null}
               </>
             ) : (
               'AI-проверка ДЗ и Сократ-диалог для всех ваших учеников.'

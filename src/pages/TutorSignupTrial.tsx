@@ -7,6 +7,7 @@ import { CheckCircle2 } from "lucide-react";
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+import { capturePromoFromUrl, getStoredPromo } from "@/lib/promoCapture";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
@@ -118,6 +119,12 @@ export default function TutorSignupTrial() {
     [isTrialIntent],
   );
 
+  // Захват ?ref/?promo/?utm → localStorage (идемпотентно). Только чтение URL,
+  // signUp/redirect-логику не трогаем (rule 96).
+  useEffect(() => {
+    capturePromoFromUrl(params);
+  }, [params]);
+
   // Redirect already-authenticated users (no signup_started fire on mount).
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +220,8 @@ export default function TutorSignupTrial() {
 
     try {
       const username = generateUsernameFromEmail(validation.data.email);
+      // Промо/ref из ссылки Егора (localStorage, P0) → метаданные signUp.
+      const { promo, ref } = getStoredPromo();
 
       const { data, error: authError } = await supabase.auth.signUp({
         email: validation.data.email,
@@ -232,6 +241,8 @@ export default function TutorSignupTrial() {
             signup_source: "tutor-landing-trial",
             consent_intent: "web-signup-tutor",
             trial_intent: isTrialIntent,
+            ...(promo ? { promo } : {}),
+            ...(ref ? { ref } : {}),
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
         },

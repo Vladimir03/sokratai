@@ -14,12 +14,14 @@
  * незакрытый шаг). Lucide без эмодзи (rule 90).
  */
 import { useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { BadgePercent, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTutorHomeworkAssignments } from "@/hooks/useTutorHomework";
+import { useTutorPlan } from "@/hooks/useTutorPlan";
 import { DemoCheckCard } from "@/components/tutor/home/DemoCheckCard";
 import { InstallSheet } from "@/components/pwa/InstallSheet";
 import { useNotificationsSetup } from "@/hooks/useNotificationsSetup";
+import { hasActiveDiscountPromo } from "@/lib/promoCapture";
 import { supabase } from "@/lib/supabaseClient";
 
 const DISMISS_KEY = "sokrat-activation-checklist-dismissed";
@@ -40,6 +42,8 @@ interface ActivationChecklistProps {
   hasStudents: boolean;
   /** Предмет репетитора → образец демо (fallback физика). */
   subject?: string | null;
+  /** user_id репетитора → проверка premium для промо-бейджа (rule 99). */
+  userId?: string | null;
   onAddStudent: () => void;
   onAssignHomework: () => void;
 }
@@ -55,9 +59,19 @@ interface Step {
 export function ActivationChecklist({
   hasStudents,
   subject,
+  userId,
   onAddStudent,
   onAssignHomework,
 }: ActivationChecklistProps) {
+  // Действующий скидочный промокод Егора (точный BLINOV_20 в окне акции, P0 #2 —
+  // не любое ?promo=). Читаем один раз — стабильно за сессию.
+  const [promoBadgeEligible] = useState<boolean>(() => hasActiveDiscountPromo());
+  // Тариф (rule 99): бейдж «−20% закреплено» скрываем у premium. Тот же
+  // кэш-ключ, что у TariffNudgeBanner на этой странице → без лишнего запроса.
+  const { data: plan } = useTutorPlan(userId);
+  // Показываем только когда план загружен и это НЕ premium (иначе флэш-и-скрыть).
+  const showPromoBadge = promoBadgeEligible && plan != null && plan.tier !== "premium";
+
   const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(DISMISS_KEY) === "1";
@@ -168,6 +182,18 @@ export function ActivationChecklist({
       <DemoCheckCard subject={subject} />
 
       <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+        {/* Тихий бейдж закреплённой скидки (промо Егора). Не CTA (rule 90) —
+            страховка «−20% не потерялись», без таймера/давления. */}
+        {showPromoBadge ? (
+          <div className="mb-3 flex items-center gap-2 rounded-md border border-accent/20 bg-accent/5 px-3 py-2">
+            <BadgePercent className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+            <span className="text-sm text-slate-700">
+              <span className="font-semibold text-slate-900">−20% закреплено</span>
+              <span className="text-slate-500"> · применится при оплате</span>
+            </span>
+          </div>
+        ) : null}
+
         <div className="mb-3 flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-slate-900">

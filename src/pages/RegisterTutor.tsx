@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { GraduationCap } from "lucide-react";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
+import { capturePromoFromUrl, getStoredPromo } from "@/lib/promoCapture";
 import {
   applyPendingConsent,
   recordConsent,
@@ -40,13 +41,22 @@ function isExistingEmailError(error: unknown): boolean {
 
 const RegisterTutor = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Мягкий дозвон-канал (item 7): необязательно, не блокирует регистрацию.
+  const [telegram, setTelegram] = useState("");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   // Экран «подтвердите почту» вместо выброса (тупик #2). null → показываем форму.
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+
+  // Захват ?ref/?promo/?utm из ссылки Егора → localStorage (идемпотентно).
+  // Только чтение URL — auth/signUp/redirect-логику не трогаем (rule 96).
+  useEffect(() => {
+    capturePromoFromUrl(searchParams);
+  }, [searchParams]);
 
   // Redirect only if user is already a tutor
   useEffect(() => {
@@ -101,6 +111,10 @@ const RegisterTutor = () => {
         }),
       );
 
+      // Промо/ref из ссылки Егора (localStorage, P0) → метаданные signUp, чтобы
+      // email-verify/assign-tutor-role записали profiles.promo_code (fast-follow).
+      const { promo, ref } = getStoredPromo();
+
       // Step 1: Register the user.
       // user_metadata carries server-side finalization intent for email-verify
       // edge function: it reads `signup_source` to decide whether to assign
@@ -114,6 +128,9 @@ const RegisterTutor = () => {
             username: validation.data.name,
             signup_source: "tutor-register",
             consent_intent: "web-signup-tutor",
+            ...(promo ? { promo } : {}),
+            ...(ref ? { ref } : {}),
+            ...(telegram.trim() ? { telegram: telegram.trim() } : {}),
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
         },
@@ -269,6 +286,23 @@ const RegisterTutor = () => {
                 disabled={loading}
                 style={{ fontSize: 16, touchAction: "manipulation" }}
               />
+            </div>
+            {/* Мягкий дозвон-канал (item 7): опционально, НЕ блокирует
+                регистрацию (нет required/валидации-гейта). Email уже собран. */}
+            <div className="space-y-1">
+              <Input
+                type="text"
+                autoComplete="off"
+                placeholder="Telegram (по желанию)"
+                value={telegram}
+                onChange={(e) => setTelegram(e.target.value)}
+                disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
+              />
+              <p className="text-xs text-muted-foreground leading-snug">
+                По желанию — будем напоминать про ДЗ и присылать важное. Можно
+                добавить позже в профиле.
+              </p>
             </div>
             {/* Custom-rendered consent checkbox (same `.rtc-consent-checkbox`
                 pattern as TutorSignupTrial.tsx `.tst-checkbox`). Replaced

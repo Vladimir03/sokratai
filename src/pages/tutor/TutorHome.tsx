@@ -16,6 +16,7 @@ import {
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import { TariffNudgeBanner } from '@/components/tutor/home/TariffNudgeBanner';
 import { ActivationChecklist } from '@/components/tutor/home/ActivationChecklist';
+import { CommunityJoinCard } from '@/components/tutor/home/CommunityJoinCard';
 import NotificationsNudge from '@/components/pwa/NotificationsNudge';
 import { isMobileDevice } from '@/lib/pwaInstall';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
@@ -241,6 +242,7 @@ function TutorHomeContent() {
             <ActivationChecklist
               hasStudents={hasStudents}
               subject={resolveTutorDefaultSubject(tutor?.subjects, null)}
+              userId={tutor?.user_id}
               onAddStudent={handleAddStudent}
               onAssignHomework={handleAssignHomework}
             />
@@ -254,6 +256,10 @@ function TutorHomeContent() {
                 message="Сократ на телефоне: уведомления о сообщениях и сдачах учеников"
               />
             )}
+
+            {/* Community-CTA после первого «вау» (демо-разбор). Сам скрыт до
+                флага sokrat-demo-seen; non-blocking (фича egor-qr-onboarding). */}
+            <CommunityJoinCard />
 
             <HomeCTAs
               onAssignHomework={handleAssignHomework}

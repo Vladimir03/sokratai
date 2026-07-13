@@ -37,6 +37,23 @@ const TUTOR_BAND_10_PRICE = 1000; // ≤10 активных учеников
 const TUTOR_BAND_20_PRICE = 2000; // 11–20 активных учеников
 const TUTOR_MAX_SELF_SERVE_STUDENTS = 20;
 
+// ─── Промокод BLINOV_20 (канал Егора, egor-qr-onboarding) ────────────────────
+// −20% на BAND-цену тарифа в течение первых 6 месяцев подписки. Интро-месяц НЕ
+// трогаем (решение Vladimir): −20% идёт со 2-го платежа. Длительность считается
+// по числу уже оплаченных тарифных месяцев (paidCount) → окно = платежи #2..#6.
+// Календарной даты ЗДЕСЬ нет: «докуда можно ЗАКРЕПИТЬ код» (claim-дедлайн) живёт
+// в _shared/promo-intent.ts. Скидку применяет ТОЛЬКО сервер по сохранённому
+// profiles.promo_code (в запросе клиента promo-поля нет, anti-tamper).
+const PROMO_BLINOV_20 = "BLINOV_20";
+const PROMO_BLINOV_20_DISCOUNT = 0.2; // −20%
+const PROMO_BLINOV_20_WINDOW_MONTHS = 6; // первые 6 месяцев подписки
+
+/** case-insensitive матч сохранённого кода (в БД лежит как из URL — `BLINOV_20`). */
+function isPromoBlinov20(promoCode: string | null): boolean {
+  const normalized = typeof promoCode === "string" ? promoCode.trim().toUpperCase() : "";
+  return normalized === PROMO_BLINOV_20;
+}
+
 interface CreatePaymentRequest {
   return_url?: string;
   confirmation_type?: "embedded" | "redirect";
@@ -158,6 +175,10 @@ Deno.serve(async (req) => {
     // Social proof «Уже N репетиторов проверяют ДЗ с AI» (решение Vladimir,
     // round 3). Fail-open: не посчиталось → поле опускается, оплата не страдает.
     let payingTutorsCount: number | null = null;
+    // Промо-скидка (BLINOV_20) — для строки цены в модалке. Считается сервером.
+    let promoApplied = false;
+    let promoPercent = 0;
+    let amountBeforePromo: number | null = null;
 
     if (isTutorPlan) {
       // 1) NOT_A_TUTOR gate (КРИТИЧНО): без него любой ученик купил бы Premium
@@ -264,7 +285,7 @@ Deno.serve(async (req) => {
 
       const { data: profileRow, error: profileError } = await supabase
         .from("profiles")
-        .select("subscription_tier, subscription_expires_at")
+        .select("subscription_tier, subscription_expires_at, promo_code")
         .eq("id", user.id)
         .maybeSingle();
       if (profileError) return priceLookupError(profileError, "profile");
@@ -281,6 +302,33 @@ Deno.serve(async (req) => {
         : activeStudents <= 10
           ? TUTOR_BAND_10_PRICE
           : TUTOR_BAND_20_PRICE;
+
+      // Скидка BLINOV_20: −20% на band-цену в течение первых 6 месяцев подписки.
+      // Интро-месяц НЕ трогаем (решение Vladimir) → gate на !isFirstTutorPayment,
+      // поэтому −20% идёт со 2-го платежа. paidCount = уже оплаченные тарифные
+      // месяцы → окно = платежи #2..#6 (paidCount 1..5); #7+ — полная цена.
+      // Известная гонка (accepted-risk): два параллельно созданных платежа видят
+      // один paidCount → оба скидочные, НО считаются только status='succeeded', а
+      // двойную оплату режет YooKassa idempotency + one-flow модалка → репетитор
+      // получает ровно столько скидочных месяцев, сколько реально оплатил.
+      //
+      // ANTI-TAMPER (P1 #3, осознанное решение): клиент НЕ может подставить цену —
+      // в запросе нет ни amount, ни promo. profiles.promo_code технически
+      // редактируем самим юзером через RLS, но BLINOV_20 — ПУБЛИЧНЫЙ код с визитки:
+      // самоприсвоить ≡ вписать код с карточки → приемлемо. Строгий column-lock
+      // (REVOKE UPDATE(promo_code,registration_source) FROM authenticated) —
+      // опциональный follow-up (фрагилен: нужно перечислить все прочие колонки).
+      // Student Premium вне этой ветки не затронут.
+      const storedPromo =
+        typeof profileRow?.promo_code === "string" ? profileRow.promo_code : null;
+      const promoWindowOpen =
+        !isFirstTutorPayment && (paidCount ?? 0) < PROMO_BLINOV_20_WINDOW_MONTHS;
+      if (promoWindowOpen && isPromoBlinov20(storedPromo)) {
+        amountBeforePromo = amountRub;
+        amountRub = Math.max(1, Math.round(amountRub * (1 - PROMO_BLINOV_20_DISCOUNT)));
+        promoApplied = true;
+        promoPercent = Math.round(PROMO_BLINOV_20_DISCOUNT * 100);
+      }
 
       // Social proof: сколько репетиторов сейчас «на AI» (валидный premium ИЛИ
       // активный триал среди владельцев строк tutors). Fail-open try/catch.
@@ -312,6 +360,7 @@ Deno.serve(async (req) => {
         payingTutorsCount = null; // fail-open — просто не показываем строку
       }
       description = `Тариф AI-старт для репетитора на ${SUBSCRIPTION_DAYS} дней`;
+      if (promoApplied) description += ` (−${promoPercent}% по промокоду)`;
       // metadata.plan — информационная копия; webhook доверяет ТОЛЬКО строке
       // payments (body вебхука подделываем — rule: DB row is the trust anchor).
       metadata = {
@@ -441,7 +490,12 @@ Deno.serve(async (req) => {
         event_name: "tutor_payment_created",
         actor_user_id: user.id,
         tutor_id: tutorRowId,
-        meta: { amount: amountRub, first: isFirstTutorPayment, students: activeStudents },
+        meta: {
+          amount: amountRub,
+          first: isFirstTutorPayment,
+          students: activeStudents,
+          promo: promoApplied,
+        },
       });
     }
 
@@ -454,6 +508,13 @@ Deno.serve(async (req) => {
         status: payment.status,
         amount: amountRub,
         ...(payingTutorsCount !== null ? { paying_tutors_count: payingTutorsCount } : {}),
+        ...(promoApplied
+          ? {
+              promo_applied: true,
+              promo_percent: promoPercent,
+              amount_before_promo: amountBeforePromo,
+            }
+          : {}),
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

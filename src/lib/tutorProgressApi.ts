@@ -57,6 +57,33 @@ async function requestTutorProgressApi<T>(
   return resp.json() as Promise<T>;
 }
 
+/**
+ * Fire-and-forget beacon «клик по community-CTA» (воронка QR-онбординга, item 6).
+ * Не блокирует навигацию (ссылки target=_blank → страница жива; `keepalive`
+ * подстраховывает). Сбой телеметрии молча игнорируется — на UX не влияет.
+ */
+export function trackCommunityCtaClicked(channel: 'telegram' | 'vk'): void {
+  void (async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      await fetch(`${SUPABASE_URL}/functions/v1/tutor-progress-api/track`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_KEY,
+        },
+        body: JSON.stringify({ event: 'community_cta_clicked', channel }),
+        keepalive: true,
+      });
+    } catch {
+      // best-effort — телеметрия не критична
+    }
+  })();
+}
+
 // ─── Review «проверено» ────────────────────────────────────────────────────────
 
 export interface ReviewTaskResponse {

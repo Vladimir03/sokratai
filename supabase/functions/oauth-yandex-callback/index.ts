@@ -25,6 +25,7 @@ import {
   redirectWithSessionHash,
   redirectToError,
 } from "../_shared/oauth-helpers.ts";
+import { persistPromoAttributionAndTrack } from "../_shared/promo-intent.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -76,6 +77,9 @@ Deno.serve(async (req) => {
   }
   const redirectTo = stateData.redirectTo;
   const intendedRole = stateData.intendedRole === "tutor" ? "tutor" : "student";
+  // QR/referral attribution (egor-qr-onboarding), threaded through the state.
+  const promo = typeof stateData.promo === "string" ? stateData.promo : null;
+  const ref = typeof stateData.ref === "string" ? stateData.ref : null;
 
   // ─── 1. Exchange code → Yandex access_token (server-to-server) ───
   const tokenRes = await fetch("https://oauth.yandex.ru/token", {
@@ -141,6 +145,8 @@ Deno.serve(async (req) => {
     yandex_id: info.id ?? null,
     avatar_url: avatarUrl,
     signup_source: signupSource,
+    ...(promo ? { promo } : {}),
+    ...(ref ? { ref } : {}),
   });
   if ("error" in created) {
     return redirectToError(created.error, ERR_EVENT);
@@ -163,6 +169,14 @@ Deno.serve(async (req) => {
   );
   if (roleStatus === "role_failed") {
     return redirectToError("role_finalization_failed", ERR_EVENT);
+  }
+
+  // Persist QR/referral attribution — ONLY for a newly-created TUTOR account
+  // (P1 #5: attribution belongs to tutor registration, not to logins nor to
+  // student OAuth signups — else 'egor' would land on a student profile).
+  // Idempotent, best-effort, PII-free. Does not touch role/session logic (rule 96).
+  if (created.isNewUser && intendedRole === "tutor") {
+    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref });
   }
 
   // ─── 6. Redirect browser with tokens in URL hash ───

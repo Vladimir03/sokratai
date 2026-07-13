@@ -71,20 +71,26 @@ Deno.serve(async (req) => {
     rawRedirectTo,
   );
 
+  // QR/referral attribution (egor-qr-onboarding) — carried in the signed state
+  // so the callback can persist it after the redirect. Additive.
+  const promo = url.searchParams.get("promo");
+  const ref = url.searchParams.get("ref");
+
   // PKCE — verifier travels in the signed state; challenge goes to VK.
   const codeVerifier = randomCodeVerifier();
   const codeChallenge = await codeChallengeS256(codeVerifier);
 
-  const state = await signState(
-    {
-      redirectTo: rawRedirectTo,
-      intendedRole,
-      codeVerifier,
-      nonce: crypto.randomUUID(),
-      issuedAt: Date.now(),
-    },
-    STATE_SECRET,
-  );
+  const statePayload: Record<string, unknown> = {
+    redirectTo: rawRedirectTo,
+    intendedRole,
+    codeVerifier,
+    nonce: crypto.randomUUID(),
+    issuedAt: Date.now(),
+  };
+  if (promo) statePayload.promo = promo.slice(0, 64);
+  if (ref) statePayload.ref = ref.slice(0, 64);
+
+  const state = await signState(statePayload, STATE_SECRET);
 
   const authUrl = new URL("https://id.vk.com/authorize");
   authUrl.searchParams.set("response_type", "code");

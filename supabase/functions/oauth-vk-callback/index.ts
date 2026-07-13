@@ -26,6 +26,7 @@ import {
   redirectWithSessionHash,
   redirectToError,
 } from "../_shared/oauth-helpers.ts";
+import { persistPromoAttributionAndTrack } from "../_shared/promo-intent.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -79,6 +80,9 @@ Deno.serve(async (req) => {
   const redirectTo = stateData.redirectTo;
   const intendedRole = stateData.intendedRole === "tutor" ? "tutor" : "student";
   const codeVerifier = stateData.codeVerifier;
+  // QR/referral attribution (egor-qr-onboarding), threaded through the state.
+  const promo = typeof stateData.promo === "string" ? stateData.promo : null;
+  const ref = typeof stateData.ref === "string" ? stateData.ref : null;
 
   // ─── 1. Exchange code → VK tokens (OAuth 2.1 PKCE, public client) ───
   const tokenRes = await fetch("https://id.vk.com/oauth2/auth", {
@@ -156,6 +160,8 @@ Deno.serve(async (req) => {
     avatar_url: avatarUrl,
     signup_source: signupSource,
     email_synthesized: rawEmail === null,
+    ...(promo ? { promo } : {}),
+    ...(ref ? { ref } : {}),
   });
   if ("error" in created) {
     return redirectToError(created.error, ERR_EVENT);
@@ -178,6 +184,13 @@ Deno.serve(async (req) => {
   );
   if (roleStatus === "role_failed") {
     return redirectToError("role_finalization_failed", ERR_EVENT);
+  }
+
+  // Persist QR/referral attribution — ONLY for a newly-created TUTOR account
+  // (P1 #5: not logins nor student OAuth signups — else 'egor' lands on a student
+  // profile). Rule 96: additive, does not touch role/session logic. Best-effort.
+  if (created.isNewUser && intendedRole === "tutor") {
+    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref });
   }
 
   // ─── 6. Redirect browser with tokens in URL hash ───

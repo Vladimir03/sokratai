@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { stashPendingConsent, type ConsentSource } from "@/lib/consent";
+import { getStoredPromo } from "@/lib/promoCapture";
 import { toast } from "sonner";
 
 /**
@@ -57,6 +58,14 @@ export default function VkAuthButton({
       const initUrl = new URL(OAUTH_INIT_URL);
       initUrl.searchParams.set("redirectTo", absoluteRedirectTo);
       initUrl.searchParams.set("intendedRole", intendedRole);
+
+      // QR/referral промо (Егор) → signed state OAuth ТОЛЬКО в tutor-контексте
+      // (P1 #5: не ученический вход). Callback пишет promo_code новым репетиторам.
+      if (intendedRole === "tutor") {
+        const { promo, ref } = getStoredPromo();
+        if (promo) initUrl.searchParams.set("promo", promo);
+        if (ref) initUrl.searchParams.set("ref", ref);
+      }
 
       window.location.href = initUrl.toString();
     } catch (e) {

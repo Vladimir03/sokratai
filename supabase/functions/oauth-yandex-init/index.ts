@@ -66,15 +66,23 @@ Deno.serve(async (req) => {
     rawRedirectTo,
   );
 
-  const state = await signState(
-    {
-      redirectTo: rawRedirectTo,
-      intendedRole,
-      nonce: crypto.randomUUID(),
-      issuedAt: Date.now(),
-    },
-    STATE_SECRET,
-  );
+  // QR/referral attribution (egor-qr-onboarding) — carried in the HMAC-signed
+  // state so the callback can persist it after the OAuth round-trip (localStorage
+  // is lost across the provider redirect). Additive: does NOT affect role/redirect
+  // derivation. Absent for non-referral logins.
+  const promo = url.searchParams.get("promo");
+  const ref = url.searchParams.get("ref");
+
+  const statePayload: Record<string, unknown> = {
+    redirectTo: rawRedirectTo,
+    intendedRole,
+    nonce: crypto.randomUUID(),
+    issuedAt: Date.now(),
+  };
+  if (promo) statePayload.promo = promo.slice(0, 64);
+  if (ref) statePayload.ref = ref.slice(0, 64);
+
+  const state = await signState(statePayload, STATE_SECRET);
 
   const authUrl = new URL("https://oauth.yandex.ru/authorize");
   authUrl.searchParams.set("response_type", "code");

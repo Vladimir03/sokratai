@@ -1,5 +1,6 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { capturePromoFromUrl } from "@/lib/promoCapture";
 
 const TutorSignupTrial = lazy(() => import("./TutorSignupTrial"));
 const SignUp = lazy(() => import("./SignUp"));
@@ -22,6 +23,13 @@ const PageLoader = () => (
 
 export default function SignupRouter() {
   const [params] = useSearchParams();
+
+  // Захват ?ref/?promo/?utm → localStorage (идемпотентно; дочерняя форма
+  // захватит повторно — first-source-wins). Только чтение URL (rule 96).
+  useEffect(() => {
+    capturePromoFromUrl(params);
+  }, [params]);
+
   const isTutorTrial =
     params.get("ref") === "tutor-landing" || params.get("trial") === "7";
 

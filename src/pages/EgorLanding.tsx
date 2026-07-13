@@ -1,5 +1,7 @@
 import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import sokratLogo from "@/assets/sokrat-logo.png";
+import { capturePromoFromUrl } from "@/lib/promoCapture";
 
 // Промо-лендинг под QR визитки/буклета Егора Блинова (конференция в Иваново).
 // Публичный роут /egor. UTM/промо пробрасываются в регистрацию; визиты считает
@@ -8,9 +10,17 @@ const REG_URL =
   "/register-tutor?ref=egor&promo=BLINOV_20&utm_source=egor&utm_campaign=ivanovo";
 
 export default function EgorLanding() {
+  const [searchParams] = useSearchParams();
+
   useEffect(() => {
     document.title = "Сократ AI для репетиторов — приглашение Егора Блинова";
   }, []);
+
+  // Belt-and-suspenders: если QR/реклама привели на /egor с ?ref/?promo/?utm —
+  // закрепляем сразу (основной захват — на /register-tutor). Идемпотентно.
+  useEffect(() => {
+    capturePromoFromUrl(searchParams);
+  }, [searchParams]);
 
   return (
     <div className="egor-lp">

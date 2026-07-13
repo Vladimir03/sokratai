@@ -33,7 +33,11 @@ export type AnalyticsEventName =
   // чат репетитор↔ученик (CHECK-whitelist расширен миграцией 20260712150300)
   | "chat_first_message_sent" // в беседе появилось первое сообщение
   | "tutor_chat_ai_ran" // @СократAI вызван репетитором (COUNT за сутки = cap)
-  | "student_chat_ai_ran"; // @СократAI вызван учеником
+  | "student_chat_ai_ran" // @СократAI вызван учеником
+  // QR-онбординг лидов Егора (CHECK-whitelist расширен миграцией 20260713140000)
+  | "qr_lead_registered" // репетитор зарегистрировался из QR-канала (ref/promo)
+  | "promo_captured" // промокод действующей акции закреплён на аккаунте
+  | "community_cta_clicked"; // клик по community-CTA (TG/VK) на /tutor/home
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;
