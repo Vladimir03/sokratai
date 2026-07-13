@@ -92,7 +92,12 @@ export function NotificationsNudge({
             setDismissed(true);
           }
         } else if ('Notification' in window && Notification.permission === 'denied') {
+          toast.info('Уведомления заблокированы в настройках браузера');
           setDismissed(true); // браузер заблокировал повторный запрос
+        } else {
+          // Любой другой сбой (подписка/бэкенд) — НЕ молчим («мёртвая кнопка»,
+          // баг превью 2026-07-13).
+          toast.error('Не удалось включить уведомления. Попробуйте ещё раз.');
         }
         return;
       }
@@ -140,37 +145,56 @@ export function NotificationsNudge({
 
   return (
     <>
+      {/* Колонка: строка «иконка + текст + ✕», под ней CTA на всю ширину —
+          в узком сайдбаре (w-80) прежний однострочный flex ломал текст в
+          столбик слов и наезжал кнопкой (баг превью 2026-07-13). */}
       <div
         className={cn(
-          'flex items-center gap-3 transition-all duration-300',
+          'flex flex-col gap-2.5 transition-all duration-300',
           variant === 'banner'
             ? 'mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 md:p-4'
             : 'mb-4 rounded-lg border border-slate-200 bg-white p-4',
           className,
         )}
       >
-        <Icon
-          className={cn(
-            'h-5 w-5 shrink-0',
-            variant === 'banner' ? 'text-amber-600' : 'text-accent',
-          )}
-          aria-hidden="true"
-        />
-        <p
-          className={cn(
-            'min-w-0 flex-1 text-sm md:text-base',
-            variant === 'banner' ? 'text-amber-900' : 'text-slate-700',
-          )}
-        >
-          {text}
-        </p>
+        <div className="flex items-start gap-2.5">
+          <Icon
+            className={cn(
+              'mt-0.5 h-5 w-5 shrink-0',
+              variant === 'banner' ? 'text-amber-600' : 'text-accent',
+            )}
+            aria-hidden="true"
+          />
+          <p
+            className={cn(
+              'min-w-0 flex-1 text-sm leading-snug md:text-base',
+              variant === 'banner' ? 'text-amber-900' : 'text-slate-700',
+            )}
+          >
+            {text}
+          </p>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label="Закрыть"
+            className={cn(
+              '-m-2 flex h-9 w-9 shrink-0 items-center justify-center transition-colors',
+              variant === 'banner'
+                ? 'text-amber-500 hover:text-amber-700'
+                : 'text-slate-400 hover:text-slate-600',
+            )}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
         <button
           type="button"
           disabled={busy}
           onClick={() => void stageAction()}
           className={cn(
             // ≥44px — students mobile-first (rule 90; ревью 5.6 P2 touch targets)
-            'min-h-[44px] shrink-0 rounded-lg px-3.5 text-sm font-semibold text-white transition-colors md:px-4 md:text-base',
+            'min-h-[44px] w-full rounded-lg px-3.5 text-sm font-semibold text-white transition-colors md:text-base',
             variant === 'banner'
               ? 'bg-amber-600 hover:bg-amber-700'
               : 'bg-accent hover:bg-accent/90',
@@ -179,20 +203,6 @@ export function NotificationsNudge({
           style={{ touchAction: 'manipulation' }}
         >
           {busy ? '…' : ctaLabel}
-        </button>
-        <button
-          type="button"
-          onClick={handleDismiss}
-          aria-label="Закрыть"
-          className={cn(
-            'flex h-10 w-10 shrink-0 items-center justify-center transition-colors',
-            variant === 'banner'
-              ? 'text-amber-500 hover:text-amber-700'
-              : 'text-slate-400 hover:text-slate-600',
-          )}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <X className="h-4 w-4" />
         </button>
       </div>
 

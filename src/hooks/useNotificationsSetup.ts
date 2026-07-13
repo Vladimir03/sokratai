@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePwaInstall } from '@/hooks/usePwaInstall';
-import { isPushSupported, subscribeToPush } from '@/lib/pushApi';
+import { hasVapidKey, isPushSupported, subscribeToPush } from '@/lib/pushApi';
 import { isMobileDevice, promptNativeInstall } from '@/lib/pwaInstall';
 
 export type PushState = 'granted' | 'default' | 'denied' | 'unsupported';
@@ -31,6 +31,9 @@ export function useNotificationsSetup() {
     void permissionTick;
     if (!('Notification' in window)) return 'unsupported';
     if (!isPushSupported()) return 'unsupported';
+    // Без VAPID-ключа подписка невозможна — CTA не предлагаем (иначе «мёртвая
+    // кнопка», баг превью 2026-07-13).
+    if (!hasVapidKey()) return 'unsupported';
     return Notification.permission as PushState;
   }, [permissionTick]);
 

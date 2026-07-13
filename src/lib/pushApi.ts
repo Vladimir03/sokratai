@@ -1,7 +1,20 @@
 import { supabase } from '@/lib/supabaseClient';
 import { isProductionHost } from '@/registerServiceWorker';
 
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+// HARDCODED fallback (2026-07-13): VITE_VAPID_PUBLIC_KEY не задан ни в Lovable-env,
+// ни на VPS (в бандле компилировался в undefined → subscribeToPush всегда false,
+// кнопка «Включить уведомления» выглядела мёртвой). VAPID public key НЕ секрет —
+// он по спецификации отдаётся каждому браузеру (mirror паттерна supabaseClient.ts
+// с anon-ключом). ДОЛЖЕН совпадать с edge-секретом VAPID_PUBLIC_KEY (пара с
+// VAPID_PRIVATE_KEY) — иначе push-сервисы отвергнут отправку (VAPID mismatch).
+const VAPID_PUBLIC_KEY =
+  (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) ||
+  'BPlP4vc8XYPsqFhfQUBgpvjYyRNvTJtpQbHq91MJI8DHFXO0QSNzkJgEZPip_2bjqlcYLs6SuCowwLn7W92EbQk';
+
+/** Есть ли VAPID public key в сборке (без него подписка невозможна). */
+export function hasVapidKey(): boolean {
+  return Boolean(VAPID_PUBLIC_KEY);
+}
 
 /** Convert URL-safe base64 string to Uint8Array (for applicationServerKey). */
 function urlBase64ToUint8Array(base64String: string): Uint8Array {

@@ -49,6 +49,11 @@ export function AppNotificationsCard() {
     try {
       const ok = await setup.runPush();
       if (ok) toast.success('Уведомления включены!');
+      else if ('Notification' in window && Notification.permission === 'denied') {
+        toast.info('Уведомления заблокированы в настройках браузера');
+      } else {
+        toast.error('Не удалось включить уведомления. Попробуйте ещё раз.');
+      }
     } finally {
       setBusy(false);
     }

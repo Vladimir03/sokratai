@@ -64,6 +64,7 @@ export function PostSubmissionNudge({ tick }: { tick: number }) {
       if (action.kind === 'push') {
         const ok = await setup.runPush();
         if (ok) toast.success('Уведомления включены!');
+        else toast.error('Не удалось включить уведомления — можно повторить из Профиля.');
         setOpen(false);
         return;
       }
