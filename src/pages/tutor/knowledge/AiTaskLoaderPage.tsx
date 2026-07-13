@@ -127,6 +127,11 @@ function AiTaskLoaderContent() {
   const [crops, setCrops] = useState<Array<CropState | null>>([]);
   const [rowStatus, setRowStatus] = useState<RowStatus[]>([]);
   const [selected, setSelected] = useState<boolean[]>([]);
+  // Мягкое скрытие «удалённых» черновиков (запрос Милады 2026-07-13): НЕ вырезаем
+  // из массивов — индексы должны быть стабильны (cropUploadCacheRef по абсолютному
+  // индексу, source_image_index → uploadedRefs по абсолютному индексу). removed[i]
+  // прячет строку из вида и исключает из commit; undo = снять флаг.
+  const [removed, setRemoved] = useState<boolean[]>([]);
   const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
   const [stats, setStats] = useState<ExtractStats | null>(null);
   const [folderId, setFolderId] = useState(initialFolderId);
@@ -208,6 +213,7 @@ function AiTaskLoaderContent() {
       setRowStatus(newDrafts.map(() => 'idle'));
       // Default-deselect drafts that look like duplicates (edge fingerprint_match).
       setSelected(newDrafts.map((d) => d.fingerprint_match === null));
+      setRemoved(newDrafts.map(() => false));
       setUploadedRefs(newUploadedRefs);
       setStats(newStats);
       setFolderId(chosenFolderId);
@@ -275,35 +281,55 @@ function AiTaskLoaderContent() {
     setExpandedIndex((prev) => (prev === index ? null : index));
   }, []);
 
+  // Удалить черновик из списка (мягко) + тост «Вернуть» (запрос Милады). Сохранённую
+  // строку не трогаем (она уже в БД — «удаление» из вида ввело бы в заблуждение).
+  const removeDraft = useCallback(
+    (index: number) => {
+      if (rowStatus[index] === 'saved') return;
+      setRemoved((prev) => prev.map((r, i) => (i === index ? true : r)));
+      setExpandedIndex((prev) => (prev === index ? null : prev));
+      toast('Задача убрана из списка', {
+        action: {
+          label: 'Вернуть',
+          onClick: () => setRemoved((prev) => prev.map((r, i) => (i === index ? false : r))),
+        },
+        duration: 6000,
+      });
+    },
+    [rowStatus],
+  );
+
   const selectedCount = useMemo(
-    () => selected.filter((s, i) => s && rowStatus[i] !== 'saved').length,
-    [selected, rowStatus],
+    () => selected.filter((s, i) => s && !removed[i] && rowStatus[i] !== 'saved').length,
+    [selected, removed, rowStatus],
   );
   const failedCount = useMemo(
     () => rowStatus.filter((s) => s === 'failed').length,
     [rowStatus],
   );
   const dupCount = useMemo(
-    () => drafts.filter((d, i) => d.fingerprint_match !== null && selected[i]).length,
-    [drafts, selected],
+    () => drafts.filter((d, i) => d.fingerprint_match !== null && selected[i] && !removed[i]).length,
+    [drafts, selected, removed],
   );
+  // Видимые (не удалённые) черновики — для заголовка «Найдено задач».
+  const visibleCount = useMemo(() => removed.filter((r) => !r).length, [removed]);
 
   // Массовые действия (BulkActionsBar).
   const applyBulk = useCallback(
     (patch: Partial<ReviewOverrides>) => {
       setOverrides((prev) =>
         prev.map((ov, i) =>
-          selected[i] && rowStatus[i] !== 'saved'
+          selected[i] && !removed[i] && rowStatus[i] !== 'saved'
             ? applyOverridePatch(ov, patch, topicExamById)
             : ov,
         ),
       );
     },
-    [selected, rowStatus, topicExamById],
+    [selected, removed, rowStatus, topicExamById],
   );
   const selectAll = useCallback(
-    () => setSelected((prev) => prev.map((_, i) => rowStatus[i] !== 'saved')),
-    [rowStatus],
+    () => setSelected((prev) => prev.map((_, i) => rowStatus[i] !== 'saved' && !removed[i])),
+    [rowStatus, removed],
   );
   const deselectAll = useCallback(() => setSelected((prev) => prev.map(() => false)), []);
   const deselectDups = useCallback(
@@ -364,7 +390,7 @@ function AiTaskLoaderContent() {
     if (selectedCount === 0 || isSaving) return;
     const chosen = drafts
       .map((draft, index) => ({ draft, index }))
-      .filter(({ index }) => selected[index] && rowStatus[index] !== 'saved');
+      .filter(({ index }) => selected[index] && !removed[index] && rowStatus[index] !== 'saved');
 
     setIsSaving(true);
     try {
@@ -433,7 +459,9 @@ function AiTaskLoaderContent() {
         }),
       );
 
-      const skippedDup = drafts.filter((d, i) => !selected[i] && d.fingerprint_match !== null).length;
+      const skippedDup = drafts.filter(
+        (d, i) => !selected[i] && !removed[i] && d.fingerprint_match !== null,
+      ).length;
       trackKbAiLoaderEvent('kb_ai_tasks_saved', {
         folderId,
         saved,
@@ -476,6 +504,7 @@ function AiTaskLoaderContent() {
     overrides,
     crops,
     selected,
+    removed,
     rowStatus,
     selectedCount,
     folderId,
@@ -505,6 +534,7 @@ function AiTaskLoaderContent() {
         onRefine={handleRefine}
         refining={refiningIndex === index}
         hideSelect={hideSelect}
+        onRemove={removeDraft}
       />
     ),
     [
@@ -521,6 +551,7 @@ function AiTaskLoaderContent() {
       updateCrop,
       handleRefine,
       refiningIndex,
+      removeDraft,
     ],
   );
 
@@ -562,7 +593,7 @@ function AiTaskLoaderContent() {
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-slate-700">
-                Найдено задач: {drafts.length}
+                Найдено задач: {visibleCount}
                 {stats && stats.low_confidence_answers > 0 ? (
                   <span className="ml-2 font-normal text-amber-700">
                     · {stats.low_confidence_answers} без ответа
@@ -632,12 +663,14 @@ function AiTaskLoaderContent() {
                   crops={crops}
                   rowStatus={rowStatus}
                   selected={selected}
+                  removed={removed}
                   subject={subject}
                   topics={subjectTopics}
                   disabled={isSaving}
                   expandedIndex={expandedIndex}
                   onToggleSelect={toggleSelect}
                   onToggleExpand={toggleExpand}
+                  onRemove={removeDraft}
                   onChangeDraft={updateDraft}
                   onChangeOverride={updateOverride}
                   renderExpanded={(i) => renderDraftCard(i, true)}
@@ -645,9 +678,10 @@ function AiTaskLoaderContent() {
               </div>
             ) : null}
 
-            {/* Карточки: mobile всегда; desktop — когда выбран режим «Карточки». */}
+            {/* Карточки: mobile всегда; desktop — когда выбран режим «Карточки».
+                Удалённые (removed) черновики скрыты. */}
             <div className={cn('space-y-3', view === 'table' && 'md:hidden')}>
-              {drafts.map((_, index) => renderDraftCard(index, false))}
+              {drafts.map((_, index) => (removed[index] ? null : renderDraftCard(index, false)))}
             </div>
 
             {/* Primary CTA */}

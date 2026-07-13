@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { AlertTriangle, Check, ChevronDown, Image as ImageIcon, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Image as ImageIcon, Trash2, X } from 'lucide-react';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
@@ -36,6 +36,7 @@ interface DraftRowProps {
   disabled: boolean;
   onToggleSelect: (i: number) => void;
   onToggleExpand: (i: number) => void;
+  onRemove: (i: number) => void;
   onChangeDraft: (i: number, patch: Partial<ExtractedTask>) => void;
   onChangeOverride: (i: number, patch: Partial<ReviewOverrides>) => void;
 }
@@ -53,6 +54,7 @@ const DraftRow = memo(function DraftRow({
   disabled,
   onToggleSelect,
   onToggleExpand,
+  onRemove,
   onChangeDraft,
   onChangeOverride,
 }: DraftRowProps) {
@@ -216,20 +218,34 @@ const DraftRow = memo(function DraftRow({
             ) : null}
           </span>
         </td>
-        {/* ⌄ */}
-        <td className="px-1 py-2 text-center">
-          <button
-            type="button"
-            onClick={() => onToggleExpand(index)}
-            aria-expanded={expanded}
-            aria-label={expanded ? 'Свернуть задачу' : 'Раскрыть задачу'}
-            className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-socrat-surface hover:text-socrat-primary [touch-action:manipulation]"
-          >
-            <ChevronDown
-              className={cn('h-4 w-4 transition-transform duration-200', expanded && 'rotate-180')}
-              aria-hidden="true"
-            />
-          </button>
+        {/* ⌄ раскрыть + ✕ удалить */}
+        <td className="px-1 py-2">
+          <div className="flex items-center justify-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => onToggleExpand(index)}
+              aria-expanded={expanded}
+              aria-label={expanded ? 'Свернуть задачу' : 'Раскрыть задачу'}
+              className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-socrat-surface hover:text-socrat-primary [touch-action:manipulation]"
+            >
+              <ChevronDown
+                className={cn('h-4 w-4 transition-transform duration-200', expanded && 'rotate-180')}
+                aria-hidden="true"
+              />
+            </button>
+            {status !== 'saved' ? (
+              <button
+                type="button"
+                onClick={() => onRemove(index)}
+                disabled={disabled}
+                aria-label={`Удалить задачу ${index + 1} из списка`}
+                title="Удалить из списка"
+                className="rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 [touch-action:manipulation]"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden="true" />
+              </button>
+            ) : null}
+          </div>
         </td>
       </tr>
     </>
@@ -242,12 +258,15 @@ interface DraftTableProps {
   crops: Array<CropState | null>;
   rowStatus: RowStatus[];
   selected: boolean[];
+  /** Мягко удалённые строки — скрыты из таблицы (undo в родителе). */
+  removed: boolean[];
   subject: string;
   topics: KBTopicWithCounts[];
   disabled: boolean;
   expandedIndex: number | null;
   onToggleSelect: (i: number) => void;
   onToggleExpand: (i: number) => void;
+  onRemove: (i: number) => void;
   onChangeDraft: (i: number, patch: Partial<ExtractedTask>) => void;
   onChangeOverride: (i: number, patch: Partial<ReviewOverrides>) => void;
   /** Expand-row content (DraftCard) — рендерит родитель. */
@@ -260,12 +279,14 @@ export function DraftTable({
   crops,
   rowStatus,
   selected,
+  removed,
   subject,
   topics,
   disabled,
   expandedIndex,
   onToggleSelect,
   onToggleExpand,
+  onRemove,
   onChangeDraft,
   onChangeOverride,
   renderExpanded,
@@ -290,7 +311,7 @@ export function DraftTable({
           <col style={{ width: '80px' }} />
           <col style={{ width: '190px' }} />
           <col style={{ width: '130px' }} />
-          <col style={{ width: '40px' }} />
+          <col style={{ width: '68px' }} />
         </colgroup>
         <thead>
           <tr>
@@ -307,26 +328,29 @@ export function DraftTable({
           </tr>
         </thead>
         <tbody>
-          {drafts.map((draft, index) => (
-            <FragmentRow
-              key={index}
-              index={index}
-              draft={draft}
-              override={overrides[index]}
-              crop={crops[index] ?? null}
-              status={rowStatus[index] ?? 'idle'}
-              selected={selected[index] ?? false}
-              expanded={expandedIndex === index}
-              subject={subject}
-              topics={topics}
-              disabled={disabled}
-              onToggleSelect={onToggleSelect}
-              onToggleExpand={onToggleExpand}
-              onChangeDraft={onChangeDraft}
-              onChangeOverride={onChangeOverride}
-              renderExpanded={renderExpanded}
-            />
-          ))}
+          {drafts.map((draft, index) =>
+            removed[index] ? null : (
+              <FragmentRow
+                key={index}
+                index={index}
+                draft={draft}
+                override={overrides[index]}
+                crop={crops[index] ?? null}
+                status={rowStatus[index] ?? 'idle'}
+                selected={selected[index] ?? false}
+                expanded={expandedIndex === index}
+                subject={subject}
+                topics={topics}
+                disabled={disabled}
+                onToggleSelect={onToggleSelect}
+                onToggleExpand={onToggleExpand}
+                onRemove={onRemove}
+                onChangeDraft={onChangeDraft}
+                onChangeOverride={onChangeOverride}
+                renderExpanded={renderExpanded}
+              />
+            ),
+          )}
         </tbody>
       </table>
     </div>

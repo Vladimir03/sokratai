@@ -46,6 +46,8 @@ interface DraftCardProps {
   refining?: boolean;
   /** Скрыть чекбокс/шапку выбора (expand-row таблицы — выбор уже в строке). */
   hideSelect?: boolean;
+  /** Удалить черновик из списка (только в режиме карточек — в таблице ✕ в строке). */
+  onRemove?: (index: number) => void;
 }
 
 const CONFIDENCE_META: Record<
@@ -143,6 +145,7 @@ function DraftCardComponent({
   onRefine,
   refining,
   hideSelect,
+  onRemove,
 }: DraftCardProps) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
@@ -258,9 +261,23 @@ function DraftCardComponent({
             {!hasOverride && draft.topic_suggestion ? <Chip>{draft.topic_suggestion}</Chip> : null}
           </span>
         </label>
-        <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', confidence.className)}>
-          {confidence.label}
-        </span>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          <span className={cn('rounded-full px-2.5 py-0.5 text-[11px] font-semibold', confidence.className)}>
+            {confidence.label}
+          </span>
+          {onRemove && !hideSelect ? (
+            <button
+              type="button"
+              onClick={() => onRemove(index)}
+              disabled={disabled}
+              aria-label={`Удалить задачу ${index + 1} из списка`}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 [touch-action:manipulation]"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Удалить
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Dedup banner (edge fingerprint_match) */}
