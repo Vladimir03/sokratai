@@ -74,7 +74,13 @@ function StatCard({ value, label, sub }: { value: string; label: string; sub?: s
 function reportPeriodLabel(period: PublicStudentReportData['period']): string | null {
   if (!period || (!period.start && !period.end)) return null;
   if (period.start && period.end) {
-    return `за ${format(parseISO(period.start), 'd MMM', { locale: ru })} – ${format(parseISO(period.end), 'd MMM yyyy', { locale: ru })}`;
+    const s = parseISO(period.start);
+    const e = parseISO(period.end);
+    // Один месяц (напр. текущий месяц) → компактно «за 1–13 июня 2026».
+    if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
+      return `за ${format(s, 'd', { locale: ru })}–${format(e, 'd MMMM yyyy', { locale: ru })}`;
+    }
+    return `за ${format(s, 'd MMM', { locale: ru })} – ${format(e, 'd MMM yyyy', { locale: ru })}`;
   }
   if (period.start) return `с ${format(parseISO(period.start), 'd MMM yyyy', { locale: ru })}`;
   if (period.end) return `по ${format(parseISO(period.end), 'd MMM yyyy', { locale: ru })}`;

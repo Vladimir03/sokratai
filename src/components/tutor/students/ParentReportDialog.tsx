@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { format, subDays } from 'date-fns';
+import { format, parseISO, startOfMonth } from 'date-fns';
+import { ru } from 'date-fns/locale';
 import {
-  AlertCircle, Check, Copy, ExternalLink, Eye, Link2Off, Loader2,
+  AlertCircle, CalendarDays, Check, Copy, ExternalLink, Eye, Link2Off, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabaseClient';
@@ -64,7 +67,60 @@ function ReportPreviewDialog({
 // Родителю шлём ПРОД-домен (ссылка живёт у родителя в чате).
 const REPORT_BASE_URL = 'https://sokratai.ru';
 
-type PeriodKind = 'all' | 'last_month';
+type PeriodKind = 'all' | 'last_month' | 'custom';
+
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+// Date-only пикер (Safari-safe календарь в поповере, mirror DateTimeField без времени).
+// Значение — строка 'YYYY-MM-DD' (или '').
+function DateField({
+  value, onChange, placeholder, minDate, maxDate,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  minDate?: Date;
+  maxDate?: Date;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? parseISO(value) : undefined;
+  const disabled = (d: Date) => {
+    const day = startOfLocalDay(d);
+    if (maxDate && day > startOfLocalDay(maxDate)) return true;
+    if (minDate && day < startOfLocalDay(minDate)) return true;
+    return false;
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn('w-full justify-start text-left font-normal tabular-nums', !value && 'text-muted-foreground')}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <CalendarDays className="mr-2 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="truncate">
+            {value ? format(parseISO(value), 'd MMM yyyy', { locale: ru }) : placeholder}
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          selected={selected}
+          onSelect={(d) => { if (d) { onChange(format(d, 'yyyy-MM-dd')); setOpen(false); } }}
+          defaultMonth={selected}
+          locale={ru}
+          disabled={disabled}
+          className="pointer-events-auto"
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 const VERDICTS: { value: ReportVerdict; label: string; selectedCls: string }[] = [
   { value: 'good', label: 'Молодец', selectedCls: 'border-emerald-400 bg-emerald-50 text-emerald-800' },
@@ -128,8 +184,12 @@ export default function ParentReportDialog({
   const [showHwDone, setShowHwDone] = useState(true);
   const [showHwSuccess, setShowHwSuccess] = useState(true);
   const [periodKind, setPeriodKind] = useState<PeriodKind>('last_month');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
   const [comment, setComment] = useState('');
   const [showDebt, setShowDebt] = useState(true);
+
+  const todayStr = format(new Date(), 'yyyy-MM-dd');
 
   const linkQuery = useQuery({
     queryKey: ['tutor', 'report-link', tutorStudentId],
@@ -138,7 +198,7 @@ export default function ParentReportDialog({
       // Отдельный запрос, НЕ .limit(10) по всем (мог скрыть старую активную при >10 ссылках).
       const { data: active, error: activeErr } = await supabase
         .from('student_report_links')
-        .select('slug, verdict, show_mock_score, show_hw_done, show_hw_success, tutor_comment, period_kind, show_debt_line')
+        .select('slug, verdict, show_mock_score, show_hw_done, show_hw_success, tutor_comment, period_kind, period_start, period_end, show_debt_line')
         .eq('tutor_student_id', tutorStudentId)
         .is('revoked_at', null)
         .order('created_at', { ascending: false })
@@ -191,7 +251,9 @@ export default function ParentReportDialog({
       setShowMockScore(a.show_mock_score !== false);
       setShowHwDone(a.show_hw_done !== false);
       setShowHwSuccess(a.show_hw_success !== false);
-      setPeriodKind(a.period_kind === 'all' ? 'all' : 'last_month');
+      setPeriodKind(a.period_kind === 'all' ? 'all' : a.period_kind === 'custom' ? 'custom' : 'last_month');
+      setCustomStart((a.period_start as string | null) ?? '');
+      setCustomEnd((a.period_end as string | null) ?? '');
       setComment(a.tutor_comment ?? '');
       setShowDebt(a.show_debt_line !== false);
     } else {
@@ -200,6 +262,8 @@ export default function ParentReportDialog({
       setShowHwDone(true);
       setShowHwSuccess(true);
       setPeriodKind('last_month');
+      setCustomStart(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+      setCustomEnd(format(new Date(), 'yyyy-MM-dd'));
       setComment(d.prefillComment ?? '');
       setShowDebt(d.debtDefault);
     }
@@ -213,6 +277,9 @@ export default function ParentReportDialog({
   const commentRequired = verdict === 'ok' || verdict === 'attention';
   const commentMissing = commentRequired && comment.trim() === '';
   const verdictMissing = verdict === null;
+  // 'YYYY-MM-DD' сравнивается лексикографически = хронологически.
+  const customInvalid = periodKind === 'custom'
+    && (!customStart || !customEnd || customStart > customEnd || customEnd > todayStr);
 
   const saveLink = useMutation({
     mutationFn: async () => {
@@ -223,9 +290,16 @@ export default function ParentReportDialog({
       let periodStart: string | null = null;
       let periodEnd: string | null = null;
       if (periodKind === 'last_month') {
-        // 30 календарных дат включительно: [today-29 … today].
-        periodEnd = format(new Date(), 'yyyy-MM-dd');
-        periodStart = format(subDays(new Date(), 29), 'yyyy-MM-dd');
+        // «Текущий месяц»: с 1-го числа по сегодня (снимок; конец = сегодня, не в будущее).
+        periodStart = format(startOfMonth(new Date()), 'yyyy-MM-dd');
+        periodEnd = todayStr;
+      } else if (periodKind === 'custom') {
+        if (!customStart || !customEnd) throw new Error('Укажите даты периода «с» и «по».');
+        periodStart = customStart;
+        periodEnd = customEnd > todayStr ? todayStr : customEnd; // конец ≤ сегодня
+        // Проверяем ПОСЛЕ клампа: две одинаковые будущие даты → end клампится в сегодня,
+        // start остаётся в будущем → перевёрнутый диапазон; ловим именно здесь.
+        if (periodStart > periodEnd) throw new Error('Дата «с» позже даты «по».');
       }
       const config = {
         verdict,
@@ -399,12 +473,48 @@ export default function ParentReportDialog({
               <label className="text-sm font-medium text-slate-700">Период</label>
               <div className="mt-1.5 flex flex-wrap gap-2">
                 <Pill active={periodKind === 'last_month'} onClick={() => setPeriodKind('last_month')}>
-                  За последний месяц
+                  Текущий месяц
                 </Pill>
                 <Pill active={periodKind === 'all'} onClick={() => setPeriodKind('all')}>
                   За всё время
                 </Pill>
+                <Pill active={periodKind === 'custom'} onClick={() => setPeriodKind('custom')}>
+                  Свой период
+                </Pill>
               </div>
+              {periodKind === 'last_month' && (
+                <p className="mt-1 text-xs text-muted-foreground">С 1-го числа этого месяца по сегодня.</p>
+              )}
+              {periodKind === 'custom' && (
+                <>
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="mb-1 block text-xs text-muted-foreground">С</span>
+                      <DateField
+                        value={customStart}
+                        onChange={setCustomStart}
+                        placeholder="дата"
+                        maxDate={customEnd ? parseISO(customEnd) : new Date()}
+                      />
+                    </div>
+                    <div>
+                      <span className="mb-1 block text-xs text-muted-foreground">По</span>
+                      <DateField
+                        value={customEnd}
+                        onChange={setCustomEnd}
+                        placeholder="сегодня"
+                        minDate={customStart ? parseISO(customStart) : undefined}
+                        maxDate={new Date()}
+                      />
+                    </div>
+                  </div>
+                  {customInvalid && (
+                    <p className="mt-1 text-xs text-rose-500">
+                      Укажите даты: «с» не позже «по», конец — не в будущем.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Какие числа показать */}
@@ -431,7 +541,7 @@ export default function ParentReportDialog({
 
             <Button
               onClick={() => saveLink.mutate()}
-              disabled={saveLink.isPending || verdictMissing || commentMissing}
+              disabled={saveLink.isPending || verdictMissing || commentMissing || customInvalid}
               className="min-h-[44px] w-full"
             >
               {saveLink.isPending ? (
