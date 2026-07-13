@@ -40,7 +40,7 @@ function base64UrlEncode(buffer: ArrayBuffer | Uint8Array): string {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-function base64UrlDecode(str: string): Uint8Array {
+export function base64UrlDecode(str: string): Uint8Array {
   const padded = str + '='.repeat((4 - (str.length % 4)) % 4);
   const base64 = padded.replace(/-/g, '+').replace(/_/g, '/');
   const binary = atob(base64);
@@ -53,7 +53,7 @@ function base64UrlDecode(str: string): Uint8Array {
 
 // ─── VAPID JWT (RFC 8292) ────────────────────────────────────
 
-async function importVapidPrivateKey(base64Url: string): Promise<CryptoKey> {
+export async function importVapidPrivateKey(base64Url: string): Promise<CryptoKey> {
   const rawBytes = base64UrlDecode(base64Url);
 
   // VAPID private key is 32 bytes raw — wrap in PKCS8 for P-256

@@ -22,6 +22,8 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
+  base64UrlDecode,
+  importVapidPrivateKey,
   sendPushNotification,
   type PushPayload,
   type PushSubscriptionData,
@@ -1349,11 +1351,37 @@ Deno.serve(async (req: Request): Promise<Response> => {
           results.push({ error: e instanceof Error ? e.message : String(e) });
         }
       }
+      // Изоляция InvalidEncoding: длины ключей (public P-256 = 65 байт,
+      // private = 32, sub.p256dh = 65, sub.auth = 16) + отдельный импорт
+      // приватного VAPID. Определяет, битый ли приватный ключ на сервере
+      // (Lovable мог сохранить с обрезкой/пробелом) vs ключи подписки.
+      let vapidPrivLen = -1;
+      let vapidPubLen = -1;
+      let vapidPrivImport = "not-run";
+      try {
+        vapidPrivLen = base64UrlDecode(VAPID_PRIVATE_KEY).length;
+        vapidPubLen = base64UrlDecode(VAPID_PUBLIC_KEY).length;
+      } catch (e) {
+        vapidPrivImport = "decode-error: " + (e instanceof Error ? e.message : String(e));
+      }
+      if (vapidPrivImport === "not-run") {
+        try {
+          await importVapidPrivateKey(VAPID_PRIVATE_KEY);
+          vapidPrivImport = "ok";
+        } catch (e) {
+          vapidPrivImport = "import-error: " + (e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+        }
+      }
+      const firstSub = list[0];
       return jsonOk(cors, {
         subscriptions_found: list.length,
         vapid_configured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
-        // первые 16 символов публичного ключа — не секрет, для сверки с фронтом
         vapid_public_prefix: VAPID_PUBLIC_KEY.slice(0, 16),
+        vapid_public_len: vapidPubLen, // ожидается 65
+        vapid_private_len: vapidPrivLen, // ожидается 32
+        vapid_private_import: vapidPrivImport, // ожидается "ok"
+        sub_p256dh_len: firstSub ? base64UrlDecode(firstSub.p256dh).length : null, // 65
+        sub_auth_len: firstSub ? base64UrlDecode(firstSub.auth).length : null, // 16
         results,
       });
     }
