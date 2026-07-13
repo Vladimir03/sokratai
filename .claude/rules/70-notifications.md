@@ -17,8 +17,21 @@
 - **Frontend API**: `src/lib/pushApi.ts` — `isPushSupported()` (prod-only!), `subscribeToPush()`, `unsubscribeFromPush()`
 - **Opt-in надж**: `src/components/pwa/NotificationsNudge.tsx` (заменил удалённый `PushOptInBanner`) — умная кнопка push+установка PWA, смонтирована у ОБЕИХ ролей (чат/ДЗ/профиль/Главная тьютора), dismiss 14 дней. `isPushSupported` теперь на общем `PROD_HOSTS` (был мёртв на `sokratai.ru`). Детали — rule 100.
 - **Push sender**: `supabase/functions/_shared/push-sender.ts` — raw `crypto.subtle` (RFC 8291 + RFC 8292), zero npm deps
-- **Env vars**: `VITE_VAPID_PUBLIC_KEY` (frontend), `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` (edge function secrets)
+- **Env vars**: `VITE_VAPID_PUBLIC_KEY` (frontend, НЕ задан → хардкод-fallback в `pushApi.ts`), `VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` + `VAPID_SUBJECT` (edge secrets, пара 2026-07-13)
 - **КРИТИЧНО**: `isPushSupported()` возвращает `false` на non-prod hosts
+
+### Push заработал E2E только 2026-07-13 — пять слоёв багов + два крипто-бага (НЕ откатывать)
+
+Web push НИКОГДА не работал end-to-end до 2026-07-13 (всё маскировалось telegram/email-fallback). Разбор — memory `project_tutor_student_chat_2026_07_12.md`. Что чинили и **что нельзя ломать**:
+1. **`isPushSupported()` — на `PROD_HOSTS`** (был захардкожен `sokratai.lovable.app` → push мёртв на `sokratai.ru`).
+2. **VAPID public — хардкод-fallback в `src/lib/pushApi.ts`** (`VITE_VAPID_PUBLIC_KEY` не задан нигде → undefined в бандле → «мёртвая кнопка»). Public key не секрет. **ОБЯЗАН совпадать с edge `VAPID_PUBLIC_KEY`** (пара с private). Смена ключа → синхронно фронт + оба edge-секрета.
+3. **Таблица `push_subscriptions` НЕ существовала** (миграция `20260327120000` в репо, но не применена на проекте → `push-subscribe` падала 500 на upsert). Фикс — миграция `20260713100000` (идемпотентная). **Урок: миграция в репо ≠ применена; проверять `GET /rest/v1/<table>` → PGRST205 = нет таблицы.**
+4. **`push-subscribe` не была задеплоена** (404) — задеплоена Lovable. Клиент шлёт её через `supabase.functions.invoke` (правильные заголовки); `ensurePushSubscriptionSaved()` в `main.tsx` self-heal'ит рассинхрон браузер↔сервер при старте.
+5. **push-sender крипто — два латентных бага (никогда не исполнявшийся код):**
+   - **`importVapidPrivateKey`/`createVapidJwt` требуют И приватный, И ПУБЛИЧНЫЙ VAPID-ключ** → импорт приватного через **JWK (d + x/y из публичного)**, НЕ через минимальный PKCS8. **Deno/ring принимает PKCS8 на `importKey`, но бросает `InvalidEncoding` на `sign`.** НЕ возвращать к PKCS8.
+   - **ECDSA-`sign` отдаёт raw r||s (64 байта, P1363), НЕ DER.** `derToRaw` применять ТОЛЬКО при 0x30-маркере (защитный fallback); на raw-данных он ПОРТИТ подпись (был бы 403 FCM). Верификация фикса — Node sign+verify боевой парой.
+- **Диагностика**: `POST /tutor-student-chat-api/push-test` (авторизованный, RO) — шлёт push себе, возвращает длины ключей + пошаговые статусы (`step_create_vapid_jwt`, `step_import_sub_pubkey`) + FCM-статус. Оставлен в проде для будущей отладки push.
+- **Анти-спам (НЕ баг, спроектировано, rule 100)**: `/internal/notify` — 15-сек re-check (получатель прочитал вживую → молчим) + троттлинг 5 мин на получателя/беседу. Чистый тест push: получатель свёрнут + не открывать чат 15 сек + ≥5 мин от прошлого уведомления в этой беседе.
 
 ## Email-шаблоны для уведомлений о ДЗ (Phase 1.2)
 
