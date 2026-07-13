@@ -79,7 +79,7 @@ export async function importVapidPrivateKey(base64Url: string): Promise<CryptoKe
   );
 }
 
-async function createVapidJwt(
+export async function createVapidJwt(
   audience: string,
   subject: string,
   privateKeyBase64: string,

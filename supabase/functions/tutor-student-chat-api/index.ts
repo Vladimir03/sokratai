@@ -23,6 +23,7 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
   base64UrlDecode,
+  createVapidJwt,
   importVapidPrivateKey,
   sendPushNotification,
   type PushPayload,
@@ -1373,6 +1374,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
       }
       const firstSub = list[0];
+      // Пошаговая изоляция send-пайплайна: какой именно шаг даёт InvalidEncoding
+      // (Node прошёл весь код с валидным ключом → баг Deno-специфичный либо в
+      // конкретной подписке). jwt = createVapidJwt; subpub = raw ECDH import
+      // публичного ключа подписки (главный подозреваемый — Deno strict).
+      let jwtStep = "not-run";
+      let subpubStep = "not-run";
+      if (firstSub) {
+        try {
+          await createVapidJwt(new URL(firstSub.endpoint).origin, VAPID_SUBJECT, VAPID_PRIVATE_KEY);
+          jwtStep = "ok";
+        } catch (e) {
+          jwtStep = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+        }
+        try {
+          const raw = base64UrlDecode(firstSub.p256dh);
+          await crypto.subtle.importKey(
+            "raw",
+            raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer,
+            { name: "ECDH", namedCurve: "P-256" },
+            false,
+            [],
+          );
+          subpubStep = "ok";
+        } catch (e) {
+          subpubStep = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+        }
+      }
       return jsonOk(cors, {
         subscriptions_found: list.length,
         vapid_configured: Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY),
@@ -1382,6 +1410,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         vapid_private_import: vapidPrivImport, // ожидается "ok"
         sub_p256dh_len: firstSub ? base64UrlDecode(firstSub.p256dh).length : null, // 65
         sub_auth_len: firstSub ? base64UrlDecode(firstSub.auth).length : null, // 16
+        step_create_vapid_jwt: jwtStep, // ожидается "ok"
+        step_import_sub_pubkey: subpubStep, // ← если тут ошибка, виновник найден
         results,
       });
     }
