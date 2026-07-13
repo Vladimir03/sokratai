@@ -3258,6 +3258,41 @@ export type Database = {
           },
         ]
       }
+      tutor_chat_members: {
+        Row: {
+          conversation_id: string
+          last_notified_at: string | null
+          last_read_at: string | null
+          unread_count: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          conversation_id: string
+          last_notified_at?: string | null
+          last_read_at?: string | null
+          unread_count?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          conversation_id?: string
+          last_notified_at?: string | null
+          last_read_at?: string | null
+          unread_count?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tutor_chat_members_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_student_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tutor_feature_onboarding: {
         Row: {
           completed_at: string | null
@@ -4015,49 +4050,65 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          kind: string
           last_message_at: string | null
+          last_message_author_user_id: string | null
           last_message_preview: string | null
           last_message_sender: string | null
           student_last_notified_at: string | null
           student_last_read_at: string | null
           student_unread_count: number
+          tutor_group_id: string | null
           tutor_last_notified_at: string | null
           tutor_last_read_at: string | null
-          tutor_student_id: string
+          tutor_student_id: string | null
           tutor_unread_count: number
           updated_at: string
         }
         Insert: {
           created_at?: string
           id?: string
+          kind?: string
           last_message_at?: string | null
+          last_message_author_user_id?: string | null
           last_message_preview?: string | null
           last_message_sender?: string | null
           student_last_notified_at?: string | null
           student_last_read_at?: string | null
           student_unread_count?: number
+          tutor_group_id?: string | null
           tutor_last_notified_at?: string | null
           tutor_last_read_at?: string | null
-          tutor_student_id: string
+          tutor_student_id?: string | null
           tutor_unread_count?: number
           updated_at?: string
         }
         Update: {
           created_at?: string
           id?: string
+          kind?: string
           last_message_at?: string | null
+          last_message_author_user_id?: string | null
           last_message_preview?: string | null
           last_message_sender?: string | null
           student_last_notified_at?: string | null
           student_last_read_at?: string | null
           student_unread_count?: number
+          tutor_group_id?: string | null
           tutor_last_notified_at?: string | null
           tutor_last_read_at?: string | null
-          tutor_student_id?: string
+          tutor_student_id?: string | null
           tutor_unread_count?: number
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "tutor_student_conversations_tutor_group_id_fkey"
+            columns: ["tutor_group_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_groups"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "tutor_student_conversations_tutor_student_id_fkey"
             columns: ["tutor_student_id"]
