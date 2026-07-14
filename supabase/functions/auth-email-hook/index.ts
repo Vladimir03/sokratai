@@ -385,3 +385,5 @@ Deno.serve(async (req) => {
     })
   }
 })
+
+// deploy-touch 2026-07-14: re-deploy via Lovable sync so verify_jwt=false from config.toml is honored (agent deploy tool flips it to true — rule 96 §11a)
