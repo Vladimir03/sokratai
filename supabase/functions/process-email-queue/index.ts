@@ -251,7 +251,13 @@ Deno.serve(async (req) => {
       try {
         await sendLovableEmail(
           {
-            run_id: payload.run_id,
+            // Auth emails carry a real run_id from the Supabase Send-Email
+            // webhook. Transactional emails are enqueued directly by shared
+            // code with a fabricated run_id (no real Lovable "run" exists),
+            // which caused the API to reject them with 404 run_not_found.
+            // For purpose=transactional + an idempotency_key, the Lovable
+            // Email API creates the run inline — so omit run_id there.
+            run_id: payload.purpose === 'transactional' ? undefined : payload.run_id,
             to: payload.to,
             from: payload.from,
             sender_domain: payload.sender_domain,
