@@ -251,7 +251,11 @@ Deno.serve(async (req) => {
       try {
         await sendLovableEmail(
           {
-            run_id: payload.run_id,
+            // Transactional emails are enqueued by shared code with a
+            // fabricated run_id (no real Lovable "run" exists), which the
+            // API rejects with 404 run_not_found. For purpose=transactional
+            // + idempotency_key, the API creates the run inline — omit run_id.
+            run_id: payload.purpose === 'transactional' ? undefined : payload.run_id,
             to: payload.to,
             from: payload.from,
             sender_domain: payload.sender_domain,
