@@ -14,7 +14,6 @@
  * Anti-enumeration: ответ всегда нейтральный «если аккаунт есть — прислали ссылку».
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { sendStudentLoginLinkEmail } from "../_shared/email-sender.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,9 +23,8 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-// RU-safe proxy host для ссылки в письме (НЕ raw *.supabase.co).
-const VERIFY_BASE = "https://api.sokratai.ru/functions/v1/email-verify";
 const DEFAULT_LANDING = "https://sokratai.ru/student/schedule";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -127,21 +125,25 @@ Deno.serve(async (req) => {
       return neutral; // не активирован → OTP не его путь; молчим (anti-enumeration)
     }
 
-    const { data: linkData, error: genErr } = await admin.auth.admin.generateLink({
-      type: "magiclink",
-      email,
+    // Send via the NATIVE Supabase magic-link path (signInWithOtp), NOT via
+    // sendStudentLoginLinkEmail. generateLink() does not send — it forced us
+    // onto the transactional_emails queue, which is broken (Lovable email API
+    // 404 "run_not_found" on fabricated run_ids — 2026-07-14). signInWithOtp
+    // makes GoTrue send a magiclink email, firing auth-email-hook, which
+    // rewrites the URL to api.sokratai.ru/email-verify?type=magiclink (RU-safe,
+    // rule 96) and enqueues to the WORKING auth_emails queue.
+    // shouldCreateUser:false — the account was already verified as existing +
+    // activated above (foundId + last_sign_in_at); never create here.
+    const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
-    const hashedToken = linkData?.properties?.hashed_token;
-    if (genErr || !hashedToken) {
-      console.warn(JSON.stringify({ event: "student_otp_generatelink_failed", error: genErr?.message ?? "no_hash" }));
-      return neutral;
+    const { error: otpErr } = await anon.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false, emailRedirectTo: DEFAULT_LANDING },
+    });
+    if (otpErr) {
+      console.warn(JSON.stringify({ event: "student_otp_signin_failed", error: otpErr.message }));
     }
-
-    const loginUrl =
-      `${VERIFY_BASE}?token_hash=${encodeURIComponent(hashedToken)}` +
-      `&type=magiclink&redirect_to=${encodeURIComponent(DEFAULT_LANDING)}`;
-
-    await sendStudentLoginLinkEmail(admin, email, loginUrl);
     return neutral;
   } catch (e) {
     console.error(JSON.stringify({ event: "student_otp_error", error: e instanceof Error ? e.message : String(e) }));
