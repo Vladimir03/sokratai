@@ -221,3 +221,5 @@ Deno.serve(async (req) => {
   );
   return redirectWithSessionHash(redirectTo, minted.session);
 });
+
+// deploy-touch: warn-only nonce (ef11804) — force sync-triggered redeploy
