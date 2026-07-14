@@ -1106,6 +1106,10 @@ Spec/build-лог: `~/.claude/plans/atomic-humming-pumpkin.md` + memory `project
 
 При добавлении нового пути к AI с изображениями — проверить ВСЕ вызывающие точки.
 
+**Компрессия ОБЯЗАТЕЛЬНА на КАЖДОМ клиентском upload картинки для AI (баг 2026-07-14):** общий AI-чат ученика (`src/pages/Chat.tsx`) грузил фото в `chat-images` **без `compressForUpload`**, разрешая до 10 МБ, а `chat/index.ts::fetchImageAsBase64DataUrl` режет `> MAX_IMAGE_BYTES (5 МБ)` → возвращал `null` → сообщение молча деградировало в текст-only → при пустой подписи (`'[Изображение]'`) AI **выдумывал условие**. Фикс: `compressForUpload` перед `.upload()` (≤4 МБ, HEIC-reencode) — зеркало ДЗ/mock/чата-репетитора (`studentHomeworkApi`/`tutorStudentChatApi` уже так делают). **Инвариант: любой новый клиентский путь фото→AI ОБЯЗАН `compressForUpload` (клиентский кап ≤ серверного `MAX_IMAGE_BYTES`).**
+
+**Fail-closed анти-галлюцинация (chat/index.ts общий путь):** guided-homework имел HTTP-502 гард при потере картинки условия, а общий чат — НЕ имел. Теперь при `msg.image_url` present но `isValidImageUrl`/`fetchImageAsBase64DataUrl` провалились → `content` заменяется на явную инструкцию «НЕ придумывай, попроси прислать снова», НЕ молча `'[Изображение]'`. Server-fetch картинки — через `rewriteToDirect` (без VPS-round-trip). **Новый путь фото→AI: если картинка обязательна — fail-closed (не давать модели галлюцинировать на тексте-плейсхолдере).**
+
 ### Hint quality — FORBIDDEN_HINT_PHRASES + retry-once + fallback
 - `generateHint` в `guided_ai.ts` использует deterministic ban list `FORBIDDEN_HINT_PHRASES` + post-gen `validateHintContent`.
 - Запрещённые фразы: «перечитай условие», «выдели ключевые данные», «подумай внимательнее», «вспомни материал», «что тебе дано».
