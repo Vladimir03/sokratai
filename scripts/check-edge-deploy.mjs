@@ -52,12 +52,21 @@ for (let i = 0; i < names.length; i += CONCURRENCY) {
   results.push(...(await Promise.all(batch.map(probe))));
 }
 
+// Explicit allow-list: statuses proving the function is deployed AND booting.
+// Anything else (5xx from the function, gateway oddities) counts as a failure —
+// green output must never be reachable by exclusion (P1 review 2026-07-14:
+// the old subtraction-based `ok` painted 61 timeouts / any 500 as ✅).
+const OK_STATUSES = new Set([200, 204, 301, 302, 400, 401, 403, 405, 422, 429]);
+
 const missing = results.filter((r) => r.status === 404);
 const crashing = results.filter((r) => r.status === 503);
 const unreachable = results.filter((r) => r.status === 0);
-const ok = results.length - missing.length - crashing.length - unreachable.length;
+const badStatus = results.filter(
+  (r) => r.status !== 0 && r.status !== 404 && r.status !== 503 && !OK_STATUSES.has(r.status),
+);
+const ok = results.filter((r) => OK_STATUSES.has(r.status));
 
-console.log(`Edge deploy probe: ${results.length} functions, ${ok} OK`);
+console.log(`Edge deploy probe: ${results.length} functions, ${ok.length} OK`);
 if (missing.length) {
   console.error(`\n❌ NOT DEPLOYED (404) — ${missing.length}:`);
   for (const r of missing) console.error(`   ${r.name}`);
@@ -66,12 +75,20 @@ if (crashing.length) {
   console.error(`\n❌ BOOT-CRASH (503) — ${crashing.length}:`);
   for (const r of crashing) console.error(`   ${r.name}`);
 }
+if (badStatus.length) {
+  console.error(`\n❌ UNEXPECTED STATUS — ${badStatus.length}:`);
+  for (const r of badStatus) console.error(`   ${r.status} ${r.name}`);
+}
 if (unreachable.length) {
-  console.warn(`\n⚠️ network timeout — ${unreachable.length}: ${unreachable.map((r) => r.name).join(", ")}`);
+  console.error(`\n⚠️ UNREACHABLE (timeout/network) — ${unreachable.length}: ${unreachable.map((r) => r.name).join(", ")}`);
 }
 
-if (missing.length || crashing.length) {
+if (missing.length || crashing.length || badStatus.length) {
   console.error("\nRecovery: Lovable agent → redeploy the functions above (see rule 95).");
   process.exit(1);
+}
+if (unreachable.length) {
+  console.error("\nInconclusive: network failures — re-run when connectivity is stable.");
+  process.exit(2);
 }
 console.log("✅ all edge functions deployed and booting");

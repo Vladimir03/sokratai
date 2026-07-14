@@ -30,8 +30,9 @@ import {
   PROXY_URL,
   isAllowedRedirect,
   deriveIntendedRole,
-  signState,
+  signStateBounded,
   buildCompactStatePayload,
+  buildNonceCookie,
   randomCodeVerifier,
   codeChallengeS256,
 } from "../_shared/oauth-helpers.ts";
@@ -92,7 +93,8 @@ Deno.serve(async (req) => {
     ref,
   });
 
-  const state = await signState(statePayload, STATE_SECRET);
+  // Budget-enforced signing (≤ MAX_STATE_CHARS) — VK mangles longer states.
+  const state = await signStateBounded(statePayload, STATE_SECRET);
 
   const authUrl = new URL("https://id.vk.com/authorize");
   authUrl.searchParams.set("response_type", "code");
@@ -106,5 +108,14 @@ Deno.serve(async (req) => {
   authUrl.searchParams.set("code_challenge", codeChallenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
 
-  return Response.redirect(authUrl.toString(), 302);
+  // Manual 302 (Response.redirect forbids extra headers): bind the flow to
+  // this browser via the nonce cookie — login-CSRF guard, verified in callback.
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authUrl.toString(),
+      "Set-Cookie": buildNonceCookie("vk", String(statePayload.n)),
+      "Cache-Control": "no-store",
+    },
+  });
 });

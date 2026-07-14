@@ -21,6 +21,7 @@ import {
   corsHeaders,
   verifyStateDetailed,
   normalizeStatePayload,
+  verifyNonceCookie,
   findOrCreateUser,
   mintSession,
   assignTutorRoleIfNeeded,
@@ -77,6 +78,15 @@ Deno.serve(async (req) => {
   if (!stateRes.ok) {
     return redirectToError("invalid_state", ERR_EVENT, {
       why: stateRes.failure,
+      len: String(state.length),
+    });
+  }
+  // Login-CSRF guard: the state must belong to THIS browser (nonce cookie set
+  // by oauth-vk-init). Legacy long-key states are exempt during rollout.
+  const nonceFailure = verifyNonceCookie(req, "vk", stateRes.payload);
+  if (nonceFailure) {
+    return redirectToError("invalid_state", ERR_EVENT, {
+      why: nonceFailure,
       len: String(state.length),
     });
   }

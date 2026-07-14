@@ -70,16 +70,17 @@ export default function InvitePage() {
         if (cancelled) return;
         if (existing) {
           setSession(existing);
-          // Best-effort role check (same RPC as Login/TutorGuard) — a tutor
-          // must not one-click-claim another tutor's invite.
-          try {
-            const { data: isTutor } = await supabase.rpc('is_tutor', {
-              _user_id: existing.user.id,
-            });
-            if (!cancelled) setIsTutorAccount(Boolean(isTutor));
-          } catch {
-            // RPC failure → treat as student (claim-invite validates server-side anyway)
-          }
+          // Role check for UX only (hide the claim button from tutors). The
+          // authoritative gate is server-side: claim-invite returns 403
+          // TUTOR_ACCOUNT for tutor accounts. NB: supabase.rpc returns
+          // { data, error } — it does NOT throw, so check error explicitly
+          // (P1 review 2026-07-14: silent error read as "student").
+          const { data: isTutor, error: roleError } = await supabase.rpc('is_tutor', {
+            _user_id: existing.user.id,
+          });
+          if (!cancelled && !roleError) setIsTutorAccount(Boolean(isTutor));
+          // roleError → leave isTutorAccount=false; a tutor clicking the
+          // button gets the server's 403 with the same message.
         }
       } catch {
         // getSession failure → fall through to the anonymous form
@@ -93,7 +94,14 @@ export default function InvitePage() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function fetchTutor() {
+      // Reset for param-only navigation (component not remounted).
+      setLoading(true);
+      setError(null);
+      setTutor(null);
+
       if (!inviteCode) {
         setError('Неверная ссылка');
         setLoading(false);
@@ -107,6 +115,8 @@ export default function InvitePage() {
           .eq('invite_code', inviteCode)
           .single();
 
+        if (cancelled) return;
+
         if (fetchError || !data) {
           setError('Ссылка недействительна или устарела');
           setLoading(false);
@@ -115,13 +125,14 @@ export default function InvitePage() {
 
         setTutor(data);
       } catch {
-        setError('Ошибка при загрузке');
+        if (!cancelled) setError('Ошибка при загрузке');
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchTutor();
+    return () => { cancelled = true; };
   }, [inviteCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -252,6 +263,13 @@ export default function InvitePage() {
       if (status === 401) {
         // Stale session — fall back to the login/signup form.
         setSession(null);
+        return;
+      }
+      if (status === 403) {
+        // Server-side tutor gate (claim-invite TUTOR_ACCOUNT) — the client
+        // role check is best-effort, this is the authoritative answer.
+        setIsTutorAccount(true);
+        setClaimError(null);
         return;
       }
       if (status === 400) {

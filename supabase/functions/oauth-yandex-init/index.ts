@@ -26,8 +26,9 @@ import {
   PROXY_URL,
   isAllowedRedirect,
   deriveIntendedRole,
-  signState,
+  signStateBounded,
   buildCompactStatePayload,
+  buildNonceCookie,
 } from "../_shared/oauth-helpers.ts";
 
 const YANDEX_CLIENT_ID = Deno.env.get("YANDEX_OAUTH_CLIENT_ID");
@@ -83,7 +84,8 @@ Deno.serve(async (req) => {
     ref,
   });
 
-  const state = await signState(statePayload, STATE_SECRET);
+  // Budget-enforced signing (≤ MAX_STATE_CHARS) — providers mangle longer states.
+  const state = await signStateBounded(statePayload, STATE_SECRET);
 
   const authUrl = new URL("https://oauth.yandex.ru/authorize");
   authUrl.searchParams.set("response_type", "code");
@@ -97,7 +99,16 @@ Deno.serve(async (req) => {
   // prompt=select_account). Scopes are configured on the Yandex app itself.
   authUrl.searchParams.set("force_confirm", "yes");
 
-  return Response.redirect(authUrl.toString(), 302);
+  // Manual 302 (Response.redirect forbids extra headers): bind the flow to
+  // this browser via the nonce cookie — login-CSRF guard, verified in callback.
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: authUrl.toString(),
+      "Set-Cookie": buildNonceCookie("yandex", String(statePayload.n)),
+      "Cache-Control": "no-store",
+    },
+  });
 });
 
 // deploy-touch 2026-07-14: re-deploy via Lovable sync so verify_jwt=false from config.toml is honored (agent deploy tool flips it to true — rule 96 §11a)

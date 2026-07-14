@@ -101,6 +101,36 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: "Cannot link to yourself" }, 400);
     }
 
+    // Tutor accounts must not claim invites as students (would create a
+    // tutor→tutor link in tutor_students). The InvitePage UI hides the claim
+    // button for tutors, but that check is best-effort client-side — this is
+    // the authoritative gate (P1 review 2026-07-14).
+    const { data: tutorRole, error: tutorRoleError } = await supabaseAdmin
+      .from("user_roles")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("role", "tutor")
+      .maybeSingle();
+
+    if (tutorRoleError) {
+      console.error("claim-invite tutor role check error:", tutorRoleError);
+      return jsonResponse(
+        { error: "Не удалось проверить аккаунт. Попробуйте ещё раз.", code: "ROLE_CHECK_FAILED" },
+        500,
+      );
+    }
+
+    if (tutorRole) {
+      return jsonResponse(
+        {
+          error:
+            "Вы вошли как репетитор. Чтобы принять приглашение, войдите в аккаунт ученика.",
+          code: "TUTOR_ACCOUNT",
+        },
+        403,
+      );
+    }
+
     const { data: existingLink, error: existingLinkError } = await supabaseAdmin
       .from("tutor_students")
       .select("id")

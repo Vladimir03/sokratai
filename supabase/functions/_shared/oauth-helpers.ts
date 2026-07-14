@@ -190,6 +190,15 @@ export async function verifyState(
 // verifyStateDetailed + normalizeStatePayload accept BOTH formats, so states
 // minted by a not-yet-redeployed init keep working during rollout.
 
+/**
+ * Hard budget for the final signed state. VK breaks somewhere above ~255;
+ * 240 leaves margin for URL-encoding overhead. signStateBounded enforces it.
+ */
+export const MAX_STATE_CHARS = 240;
+
+/** Redirect paths longer than this are pathological — fall back to "/". */
+const MAX_REDIRECT_PATH_CHARS = 120;
+
 export function buildCompactStatePayload(input: {
   redirectTo: string;
   intendedRole: "tutor" | "student";
@@ -199,17 +208,58 @@ export function buildCompactStatePayload(input: {
 }): Record<string, unknown> {
   const u = new URL(input.redirectTo);
   const originIndex = ALLOWED_REDIRECT_ORIGINS.indexOf(`${u.protocol}//${u.host}`);
+  const path = `${u.pathname}${u.search}`;
   const payload: Record<string, unknown> = {
-    r: `${u.pathname}${u.search}`,
+    // Overlong path would blow the state budget → land on the origin root
+    // instead (still allow-listed; login flow re-routes by role).
+    r: path.length <= MAX_REDIRECT_PATH_CHARS ? path : "/",
     i: input.intendedRole === "tutor" ? "t" : "s",
     t: Math.floor(Date.now() / 1000),
     n: base64UrlEncode(crypto.getRandomValues(new Uint8Array(6))),
   };
   if (originIndex > 0) payload.o = originIndex;
   if (input.codeVerifier) payload.v = input.codeVerifier;
-  if (input.promo) payload.p = input.promo.slice(0, 64);
-  if (input.ref) payload.f = input.ref.slice(0, 64);
+  // Attribution shares the budget with the path — 32 chars each is plenty
+  // for real promo codes (BLINOV_20) and refs (egor).
+  if (input.promo) payload.p = input.promo.slice(0, 32);
+  if (input.ref) payload.f = input.ref.slice(0, 32);
   return payload;
+}
+
+/**
+ * Sign the compact payload and ENFORCE the MAX_STATE_CHARS budget: when the
+ * signed state is still too long, drop optional attribution (`p`/`f`) and, as
+ * a last resort, collapse the redirect path to "/". A slightly worse landing
+ * beats a provider-mangled state → systematic invalid_state (P1 review
+ * 2026-07-14: independent .slice(0,64) on promo+ref could re-overflow).
+ */
+export async function signStateBounded(
+  payload: Record<string, unknown>,
+  secret: string,
+): Promise<string> {
+  let state = await signState(payload, secret);
+  if (state.length <= MAX_STATE_CHARS) return state;
+
+  const { p: _p, f: _f, ...withoutAttribution } = payload;
+  state = await signState(withoutAttribution, secret);
+  console.warn(
+    JSON.stringify({
+      event: "oauth_state_overflow_dropped_attribution",
+      len: state.length,
+      timestamp: new Date().toISOString(),
+    }),
+  );
+  if (state.length <= MAX_STATE_CHARS) return state;
+
+  state = await signState({ ...withoutAttribution, r: "/" }, secret);
+  console.warn(
+    JSON.stringify({
+      event: "oauth_state_overflow_dropped_redirect",
+      len: state.length,
+      timestamp: new Date().toISOString(),
+    }),
+  );
+  return state;
 }
 
 export type NormalizedStatePayload = {
@@ -262,6 +312,61 @@ export function normalizeStatePayload(
           ? parsed.f
           : null,
   };
+}
+
+// ─── login-CSRF nonce binding (state ↔ browser cookie) ─────────────────────
+//
+// HMAC proves state INTEGRITY, not that the callback arrives in the browser
+// that started the flow. Without binding, an attacker can complete the
+// provider consent themselves and make a victim's browser open the callback
+// URL — logging the victim into the attacker's account (login CSRF; P1 review
+// 2026-07-14). Fix: init sets an HttpOnly cookie = the state's `n` nonce;
+// the callback requires them to match. SameSite=Lax cookies ARE sent on the
+// top-level GET navigation back from the provider.
+//
+// Rollout compat: legacy long-key states (uuid `nonce`, minted before this
+// deploy) carry no compact `n` and set no cookie — the check applies only to
+// compact states (`n` present), so in-flight logins survive the deploy.
+
+const NONCE_COOKIE_PATH = "/functions/v1/";
+const NONCE_COOKIE_MAX_AGE_SEC = 35 * 60; // outlives STATE_TTL_MS
+
+export function nonceCookieName(provider: "vk" | "yandex"): string {
+  return `sok_oauth_nonce_${provider}`;
+}
+
+/** Set-Cookie header value binding the flow to this browser. */
+export function buildNonceCookie(
+  provider: "vk" | "yandex",
+  nonce: string,
+): string {
+  return `${nonceCookieName(provider)}=${nonce}; Max-Age=${NONCE_COOKIE_MAX_AGE_SEC}; Path=${NONCE_COOKIE_PATH}; HttpOnly; Secure; SameSite=Lax`;
+}
+
+/**
+ * Verify the callback request carries the nonce cookie matching the state.
+ * Returns null when OK, or a PII-free failure tag for diagnostics.
+ * Legacy states without a compact `n` are exempt (see rollout note above).
+ */
+export function verifyNonceCookie(
+  req: Request,
+  provider: "vk" | "yandex",
+  payload: Record<string, unknown>,
+): "nonce_cookie_missing" | "nonce_mismatch" | null {
+  if (typeof payload.n !== "string") return null; // legacy state — exempt
+
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  const name = nonceCookieName(provider);
+  let cookieValue: string | null = null;
+  for (const part of cookieHeader.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) {
+      cookieValue = rest.join("=");
+      break;
+    }
+  }
+  if (!cookieValue) return "nonce_cookie_missing";
+  return cookieValue === payload.n ? null : "nonce_mismatch";
 }
 
 // ─── intended-role derivation (path-based guard) ───────────────────────────

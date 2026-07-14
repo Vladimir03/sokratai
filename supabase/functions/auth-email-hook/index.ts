@@ -63,7 +63,11 @@ const EMAIL_VERIFY_PROXY_URL = "https://api.sokratai.ru/functions/v1/email-verif
 const REWRITE_TYPES = new Set(['signup', 'recovery', 'magiclink'])
 
 const REWRITE_FALLBACK_REDIRECTS: Record<string, string> = {
-  signup: `https://${ROOT_DOMAIN}/tutor/home`,
+  // NEVER a tutor surface here (rule 96 #9): the fallback fires for ANY signup
+  // missing redirect_to, students included — a /tutor/home landing bounces
+  // them through TutorGuard. Role-specific landing must come only from the
+  // caller's emailRedirectTo. Root lets Login route by role.
+  signup: `https://${ROOT_DOMAIN}`,
   recovery: `https://${ROOT_DOMAIN}/reset-password`,
   magiclink: `https://${ROOT_DOMAIN}`,
 }
@@ -101,7 +105,13 @@ function rewriteConfirmationUrl(
     target.searchParams.set('redirect_to', redirectTo)
     return target.toString()
   } catch (err) {
-    console.error('[auth-email-hook] rewriteConfirmationUrl threw', err)
+    // PII guard: do NOT log the exception object — `new URL(...)` errors embed
+    // the input string, i.e. the confirmation URL with its token (a bearer for
+    // the account on recovery links). Event + type + error class only.
+    console.error('[auth-email-hook] rewriteConfirmationUrl threw', {
+      emailType,
+      errorName: err instanceof Error ? err.name : typeof err,
+    })
     return originalUrl
   }
 }
@@ -271,7 +281,8 @@ async function handleWebhook(req: Request): Promise<Response> {
   // The email action type is in payload.data.action_type (e.g., "signup", "recovery")
   // payload.type is the hook event type ("auth")
   const emailType = payload.data.action_type
-  console.log('Received auth event', { emailType, email: payload.data.email, run_id })
+  // PII-free logs (rule 96 #10): never the recipient address.
+  console.log('Received auth event', { emailType, run_id })
 
   const EmailTemplate = EMAIL_TEMPLATES[emailType]
   if (!EmailTemplate) {
@@ -352,7 +363,7 @@ async function handleWebhook(req: Request): Promise<Response> {
     })
   }
 
-  console.log('Auth email enqueued', { emailType, email: payload.data.email, run_id })
+  console.log('Auth email enqueued', { emailType, run_id })
 
   return new Response(
     JSON.stringify({ success: true, queued: true }),

@@ -34,9 +34,23 @@ const ResetPassword = () => {
   useEffect(() => {
     // email-verify appends ?email_verify_error=<code> on failure (expired /
     // already-used link) — surface it instead of a dead password form.
+    // The shared EMAIL_VERIFY_ERRORS texts are signup-worded («Зарегистрируйтесь
+    // заново») — override with recovery-appropriate copy here.
+    const RECOVERY_ERROR_OVERRIDES: Record<string, string> = {
+      token_expired:
+        "Ссылка для сброса пароля истекла. Запросите новую — мы пришлём свежее письмо.",
+      token_invalid:
+        "Ссылка для сброса пароля уже использована или недействительна. Запросите новую.",
+      invalid_type:
+        "Некорректная ссылка. Запросите сброс пароля заново.",
+      missing_params:
+        "Некорректная ссылка. Запросите сброс пароля заново.",
+      malformed_token:
+        "Ссылка повреждена. Запросите сброс пароля заново.",
+    };
     const authErr = readAuthRedirectError(new URLSearchParams(window.location.search));
     if (authErr) {
-      setGateError(authErr.message);
+      setGateError(RECOVERY_ERROR_OVERRIDES[authErr.code] ?? authErr.message);
       setGate("invalid");
       return;
     }
@@ -72,9 +86,15 @@ const ResetPassword = () => {
       if (error) throw error;
 
       toast.success("Пароль обновлён! Войдите с новым паролем.");
-      // Recovery session must not stay alive after the reset — sign out and
-      // let the user log in with the new password.
-      await supabase.auth.signOut();
+      // Recovery session must not stay alive after the reset. Global signOut
+      // needs the network (fails under RU DPI and leaves the local session
+      // intact) — fall back to a guaranteed local clear (P1 review 2026-07-14).
+      try {
+        const { error: signOutError } = await supabase.auth.signOut();
+        if (signOutError) await supabase.auth.signOut({ scope: "local" });
+      } catch {
+        await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+      }
       navigate("/login");
     } catch (error: unknown) {
       toast.error(translateAuthError(error, "Ошибка обновления пароля"));
