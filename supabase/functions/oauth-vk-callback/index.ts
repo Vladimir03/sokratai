@@ -21,6 +21,8 @@ import {
   corsHeaders,
   verifyStateDetailed,
   normalizeStatePayload,
+  loadAndConsumeOAuthState,
+  nonceCookieName,
   verifyNonceCookie,
   NONCE_ENFORCE,
   findOrCreateUser,
@@ -72,36 +74,62 @@ Deno.serve(async (req) => {
     return redirectToError("missing_code_state_or_device", ERR_EVENT);
   }
 
-  // Detailed verify: on failure the redirect carries a PII-free diagnostic
-  // (`why` = sig|ttl|malformed|missing_fields, `len` = received state length)
-  // so a single real login attempt pinpoints how VK mangled the state.
-  const stateRes = await verifyStateDetailed(state, STATE_SECRET);
-  if (!stateRes.ok) {
-    return redirectToError("invalid_state", ERR_EVENT, {
-      why: stateRes.failure,
-      len: String(state.length),
-    });
-  }
-  // Login-CSRF guard: the state must belong to THIS browser (nonce cookie set
-  // by oauth-vk-init). Stage 1 = warn-only (NONCE_ENFORCE) — see oauth-helpers.
-  const nonceFailure = verifyNonceCookie(req, "vk", stateRes.payload);
-  if (nonceFailure) {
-    if (NONCE_ENFORCE) {
+  // Admin client (service_role) — used for the state store + user create/session.
+  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  // State resolution. VK now uses a SERVER-SIDE store: `state` is a short
+  // random handle (no `.`) whose full payload lives in oauth_state_store — VK
+  // corrupts states longer than ~128 chars, so we never put the PKCE verifier
+  // in the URL. A signed compact state (contains `.`) is still accepted for
+  // in-flight logins started by the previous init during rollout.
+  let resolvedPayload: Record<string, unknown> | null = null;
+  if (state.includes(".")) {
+    // Legacy compact signed state (rollout fallback).
+    const stateRes = await verifyStateDetailed(state, STATE_SECRET);
+    if (!stateRes.ok) {
       return redirectToError("invalid_state", ERR_EVENT, {
-        why: nonceFailure,
+        why: stateRes.failure,
         len: String(state.length),
       });
     }
-    console.warn(
-      JSON.stringify({
-        event: "oauth_nonce_would_block",
-        provider: "vk",
-        why: nonceFailure,
-        timestamp: new Date().toISOString(),
-      }),
-    );
+    const nonceFailure = verifyNonceCookie(req, "vk", stateRes.payload);
+    if (nonceFailure) {
+      if (NONCE_ENFORCE) {
+        return redirectToError("invalid_state", ERR_EVENT, { why: nonceFailure, len: String(state.length) });
+      }
+      console.warn(JSON.stringify({ event: "oauth_nonce_would_block", provider: "vk", why: nonceFailure, timestamp: new Date().toISOString() }));
+    }
+    resolvedPayload = stateRes.payload;
+  } else {
+    // Server-side store: `state` is the one-time handle.
+    resolvedPayload = await loadAndConsumeOAuthState(admin, state);
+    if (!resolvedPayload) {
+      return redirectToError("invalid_state", ERR_EVENT, {
+        why: "handle_not_found",
+        len: String(state.length),
+      });
+    }
+    // Login-CSRF: the nonce cookie (set by init) must equal the handle.
+    // Stage 1 = warn-only (NONCE_ENFORCE) — see oauth-helpers.
+    const cookieHeader = req.headers.get("cookie") ?? "";
+    const name = nonceCookieName("vk");
+    let cookieVal: string | null = null;
+    for (const part of cookieHeader.split(";")) {
+      const [k, ...rest] = part.trim().split("=");
+      if (k === name) { cookieVal = rest.join("="); break; }
+    }
+    if (cookieVal !== state) {
+      const why = cookieVal ? "nonce_mismatch" : "nonce_cookie_missing";
+      if (NONCE_ENFORCE) {
+        return redirectToError("invalid_state", ERR_EVENT, { why, len: String(state.length) });
+      }
+      console.warn(JSON.stringify({ event: "oauth_nonce_would_block", provider: "vk", why, timestamp: new Date().toISOString() }));
+    }
   }
-  const norm = normalizeStatePayload(stateRes.payload);
+
+  const norm = normalizeStatePayload(resolvedPayload);
   if (!norm.redirectTo || !norm.codeVerifier) {
     return redirectToError("invalid_state", ERR_EVENT, {
       why: "missing_fields",
@@ -176,11 +204,7 @@ Deno.serve(async (req) => {
     [vkUser.first_name, vkUser.last_name].filter(Boolean).join(" ").trim() || null;
   const avatarUrl = typeof vkUser.avatar === "string" ? vkUser.avatar : null;
 
-  // ─── 3. Find or create the Supabase user ───
-  const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
+  // ─── 3. Find or create the Supabase user (reuses the `admin` client above) ───
   const signupSource =
     intendedRole === "tutor" ? "vk-oauth-tutor" : "vk-oauth-student";
 

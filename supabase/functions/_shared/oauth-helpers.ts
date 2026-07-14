@@ -262,6 +262,64 @@ export async function signStateBounded(
   return state;
 }
 
+// ─── server-side state store (VK: провайдер режет длинный state) ───────────
+//
+// VK ID corrupts an OAuth `state` longer than ~128 chars (our compact state
+// with the inline PKCE verifier is ~195) → invalid_state on every VK login.
+// Instead of embedding the payload in the URL, store it in oauth_state_store
+// keyed by a short random handle; the `state` param carries only the handle
+// (~32 chars), which VK round-trips intact. One-time use + TTL enforced here.
+// Yandex keeps the compact-state path (128 chars works, rule 10 minimal change).
+
+/** A store handle: 24 random bytes → 32 base64url chars, no `.` (distinguishes
+ *  it from a signed compact state, which always contains a `.`). */
+export function newStateHandle(): string {
+  return base64UrlEncode(crypto.getRandomValues(new Uint8Array(24)));
+}
+
+// deno-lint-ignore no-explicit-any
+type StoreClient = { from: (t: string) => any };
+
+/** Persist an OAuth flow payload; returns the handle to put in `state`. */
+export async function storeOAuthState(
+  admin: StoreClient,
+  handle: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  const { error } = await admin
+    .from("oauth_state_store")
+    .insert({ handle, payload });
+  if (error) {
+    console.error(
+      JSON.stringify({ event: "oauth_state_store_insert_failed", timestamp: new Date().toISOString() }),
+    );
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Load + DELETE (one-time use) the payload for a handle. Returns null when the
+ * handle is unknown, already consumed, or older than ttlMs.
+ */
+export async function loadAndConsumeOAuthState(
+  admin: StoreClient,
+  handle: string,
+  ttlMs: number = STATE_TTL_MS,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await admin
+    .from("oauth_state_store")
+    .select("payload, created_at")
+    .eq("handle", handle)
+    .maybeSingle();
+  if (error || !data) return null;
+  // One-time use: remove immediately (best-effort — a duplicate delete is fine).
+  await admin.from("oauth_state_store").delete().eq("handle", handle);
+  const createdMs = Date.parse(data.created_at as string);
+  if (!Number.isFinite(createdMs) || Date.now() - createdMs > ttlMs) return null;
+  return (data.payload ?? null) as Record<string, unknown> | null;
+}
+
 export type NormalizedStatePayload = {
   redirectTo: string | null;
   intendedRole: "tutor" | "student";
