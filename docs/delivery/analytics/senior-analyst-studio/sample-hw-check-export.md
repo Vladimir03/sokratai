@@ -40,6 +40,11 @@
 | **`tutor_force_completed_at`** | task_states | timestamptz | да | момент ручного закрытия без AI-вердикта. `null` = закрыто по AI / не закрыто |
 | `created_at` / `updated_at` | task_states | timestamptz | нет | служебные |
 
+**v2 (реальный экспорт, 2026-06-30) дополнительно содержит:** `exam_type` (ege/oge), `cefr_level`
+(уровень языка), `ai_nodes_json` (трасса блок-схемы физики Часть 2 — структурный вывод AI со
+`steps`+`confidence`; иначе null), `final_score` (вычисляемый = override → earned → ai). Полный
+актуальный список колонок — в `export-hw-check-anonymized.sql`.
+
 **Итоговый балл** (как считает продукт): `final = tutor_score_override ?? earned_score ?? ai_score ??
 (status='completed' ? max_score : 0)`.
 
