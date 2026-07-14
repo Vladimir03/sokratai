@@ -31,6 +31,7 @@ import {
   isAllowedRedirect,
   deriveIntendedRole,
   signState,
+  buildCompactStatePayload,
   randomCodeVerifier,
   codeChallengeS256,
 } from "../_shared/oauth-helpers.ts";
@@ -80,15 +81,16 @@ Deno.serve(async (req) => {
   const codeVerifier = randomCodeVerifier();
   const codeChallenge = await codeChallengeS256(codeVerifier);
 
-  const statePayload: Record<string, unknown> = {
+  // Compact payload (short keys, path-only redirect): VK ID was observed
+  // mangling our previous ~350-char state → systematic invalid_state
+  // (2026-07-14). Keeps the signed state well under 255 chars.
+  const statePayload = buildCompactStatePayload({
     redirectTo: rawRedirectTo,
     intendedRole,
     codeVerifier,
-    nonce: crypto.randomUUID(),
-    issuedAt: Date.now(),
-  };
-  if (promo) statePayload.promo = promo.slice(0, 64);
-  if (ref) statePayload.ref = ref.slice(0, 64);
+    promo,
+    ref,
+  });
 
   const state = await signState(statePayload, STATE_SECRET);
 

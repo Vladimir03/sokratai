@@ -173,6 +173,20 @@ systemctl reload nginx
 - **Version manifest для emergency force-update** — `dist/version.json` + client-side `versionCheck.ts` + force-reload banner при mismatch с `minSupportedVersion`. Spec: `docs/delivery/features/service-worker-prod/spec.md` §5 + TASK-6/7 (P1, deferred). Пока что emergency recovery через `?sw=off` kill-switch (P0, live с 2026-05-04, см. `src/lib/swKillSwitch.ts`).
 - ~~**Tutor-side push opt-in UI**~~ — **ЗАКРЫТО 2026-07-12**: `PushOptInBanner` удалён, заменён `NotificationsNudge` (push + установка PWA) у ОБЕИХ ролей + постоянный вход в профилях. `isPushSupported` починен на `PROD_HOSTS` (был мёртв на проде `sokratai.ru`). Детали — rule 100. Осталось (P1): iOS-онбординг «Установи на экран Домой» (без установки iOS 16.4+ push не работает — telegram-fallback покрывает).
 
+## Массовая потеря edge-функций (инцидент 2026-07-14) + probe-скрипт
+
+**Симптом у пользователей:** toast «Failed to send a request to the Edge Function» (supabase-js `FunctionsFetchError` — браузер вообще не получил CORS-валидный ответ). **Не путать** с «Edge Function returned a non-2xx status code» (`FunctionsHttpError` — функция жива, вернула ошибку).
+
+**Что случилось:** Lovable молча потерял деплой **45 из 57** функций — gateway отдавал `404 NOT_FOUND_FUNCTION_BLOB` (заголовок `sb-error-code`). Упали: все auth-письма (`auth-email-hook` + `process-email-queue` + cron очередей), `telegram-bot`, `yookassa-webhook`, инвайты, ручное добавление учеников, пробники. Выжили только недавно тронутые функции.
+
+**Диагностика (первый шаг при «Failed to send a request»):**
+```
+node scripts/check-edge-deploy.mjs
+```
+Пробит OPTIONS каждой функции репо через `api.sokratai.ru`: `404` = не задеплоена, `503` = boot-crash, остальное = ок. Точечная проверка: `curl -i -X OPTIONS https://api.sokratai.ru/functions/v1/<fn>` — тело 404 от gateway содержит `NOT_FOUND_FUNCTION_BLOB` (nginx-прокси ни при чём).
+
+**Восстановление:** через Lovable MCP — `send_message` агенту проекта sokratai со списком пропавших функций и явным запретом менять код (`supabase--deploy_edge_functions` умеет батч). Fallback: touch-коммит (тривиальный комментарий в `index.ts` каждой функции) → push → Lovable sync. После восстановления писем — попросить агента прогнать `email_domain--setup_email_infra` (идемпотентно: cron + wake-trigger `process-email-queue` + Vault-секрет) и проверить регистрацию `auth-email-hook` как send-email hook. **Готча:** верифицированный sender-домен = `notify.sokratai.ru` — `SENDER_DOMAIN` в `_shared/email-sender.ts` обязан совпадать (иначе `no_matching_sender`).
+
 ## Edge-функции деплоит Lovable, GitHub-CI deploy СЛОМАН (2026-06-08)
 
 Edge-функции (`supabase/functions/**`) деплоит **Lovable на синк main**, НЕ GitHub Actions. Workflow `.github/workflows/deploy-supabase-functions.yml` **падает на каждом push** (секрет `SUPABASE_ACCESS_TOKEN` пуст, регрессия минимум с 2026-06-05) → это dead weight, на него полагаться нельзя.

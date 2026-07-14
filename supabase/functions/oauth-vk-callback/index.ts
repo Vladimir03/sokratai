@@ -19,7 +19,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   PROXY_URL,
   corsHeaders,
-  verifyState,
+  verifyStateDetailed,
+  normalizeStatePayload,
   findOrCreateUser,
   mintSession,
   assignTutorRoleIfNeeded,
@@ -69,20 +70,29 @@ Deno.serve(async (req) => {
     return redirectToError("missing_code_state_or_device", ERR_EVENT);
   }
 
-  const stateData = await verifyState(state, STATE_SECRET);
-  if (
-    !stateData ||
-    typeof stateData.redirectTo !== "string" ||
-    typeof stateData.codeVerifier !== "string"
-  ) {
-    return redirectToError("invalid_state", ERR_EVENT);
+  // Detailed verify: on failure the redirect carries a PII-free diagnostic
+  // (`why` = sig|ttl|malformed|missing_fields, `len` = received state length)
+  // so a single real login attempt pinpoints how VK mangled the state.
+  const stateRes = await verifyStateDetailed(state, STATE_SECRET);
+  if (!stateRes.ok) {
+    return redirectToError("invalid_state", ERR_EVENT, {
+      why: stateRes.failure,
+      len: String(state.length),
+    });
   }
-  const redirectTo = stateData.redirectTo;
-  const intendedRole = stateData.intendedRole === "tutor" ? "tutor" : "student";
-  const codeVerifier = stateData.codeVerifier;
+  const norm = normalizeStatePayload(stateRes.payload);
+  if (!norm.redirectTo || !norm.codeVerifier) {
+    return redirectToError("invalid_state", ERR_EVENT, {
+      why: "missing_fields",
+      len: String(state.length),
+    });
+  }
+  const redirectTo = norm.redirectTo;
+  const intendedRole = norm.intendedRole;
+  const codeVerifier = norm.codeVerifier;
   // QR/referral attribution (egor-qr-onboarding), threaded through the state.
-  const promo = typeof stateData.promo === "string" ? stateData.promo : null;
-  const ref = typeof stateData.ref === "string" ? stateData.ref : null;
+  const promo = norm.promo;
+  const ref = norm.ref;
 
   // ─── 1. Exchange code → VK tokens (OAuth 2.1 PKCE, public client) ───
   const tokenRes = await fetch("https://id.vk.com/oauth2/auth", {

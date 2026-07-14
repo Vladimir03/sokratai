@@ -388,6 +388,25 @@ deriveIntendedRole path-guard, findOrCreateUser, mintSession, assignTutorRoleIfN
 
 ---
 
+## Сброс пароля — recovery RU-bypass (2026-07-14)
+
+`/forgot-password` (общий для учеников и репетиторов) → `resetPasswordForEmail(redirectTo: /reset-password)`. Цепочка:
+- **`auth-email-hook`** — `rewriteConfirmationUrl` переписывает ссылки типов **`signup` / `recovery` / `magiclink`** на `api.sokratai.ru/functions/v1/email-verify?type=<тип>` (fallback redirect по типу: recovery → `/reset-password`). `email_change`/`invite`/`reauthentication` — не переписываются (нет verified-flow). `EMAIL_SUBJECTS` — русские.
+- **`email-verify`** — `ALLOWED_TYPES = {signup, magiclink, recovery}` (обязан совпадать с `REWRITE_TYPES` хука). Для `recovery`: role/consent-финализация **пропускается** (существующий аккаунт; фатальный `role_failed` не должен ронять сброс), fallback redirect = `/reset-password`.
+- **`ResetPassword.tsx`** — 3-state gate `checking|ready|invalid`: **НЕ полагаться на `PASSWORD_RECOVERY`** (событие стреляет при парсе hash ДО маунта lazy-страницы); любая сессия → форма, `INITIAL_SESSION` без сессии → карточка «ссылка истекла» + CTA `/forgot-password`; читает `?email_verify_error=` через `readAuthRedirectError`. После смены пароля — `signOut()` → `/login`.
+
+## Инвайт залогиненного ученика — one-click claim (2026-07-14)
+
+`InvitePage` (`/invite/:code`) на маунте проверяет `getSession()` + best-effort `rpc('is_tutor')`: сессия ученика → карточка «Присоединиться к репетитору {имя}» (прямой `claimInvite`, `already_linked` = успех); сессия репетитора → предупреждение + «Выйти» (авто-claim для tutor запрещён). Ветки «email уже зарегистрирован» ОБЯЗАНЫ сохранять `pending_invite_code` в localStorage + переключать на login-режим — иначе привязка теряется навсегда (баг 2026-07-14: QR-инвайт зарегистрированного ученика молча не привязывал).
+
+## OAuth state — компактный формат <255 символов (2026-07-14)
+
+VK ID портил наш ~350-символьный state (PKCE-verifier внутри) → системный `invalid_state` у КАЖДОГО входа. Инварианты:
+- State строится ТОЛЬКО через `buildCompactStatePayload` (короткие ключи `r/o/i/v/p/f/t/n`, path-only redirect, verifier 32 байта = RFC-минимум 43 символа) — итог ~200 символов. **Никогда не класть в state полные URL/UUID-nonce/длинные значения.**
+- Callback'и используют `verifyStateDetailed` + `normalizeStatePayload` (принимает и legacy long-key формат) и при провале редиректят с PII-free диагностикой `&why=sig|ttl|malformed|missing_fields&len=<N>` — одна реальная попытка входа даёт точный диагноз.
+- `STATE_TTL_MS` = 30 мин (школьник на SMS-подтверждении легко превышает 10).
+- Тексты `OAUTH_CALLBACK_ERRORS` (`src/lib/authErrors.ts`) — провайдер-нейтральные («сервис входа»), никогда не называть конкретного провайдера; префиксные коды `vk_*`/`yandex_*` ловит `translateProviderOAuthError`.
+
 ## История
 
 | Дата | Event | Spec/PR |
@@ -398,6 +417,7 @@ deriveIntendedRole path-guard, findOrCreateUser, mintSession, assignTutorRoleIfN
 | 2026-07-06 | Tab-switch form-loss: `TutorGuard` `SIGNED_IN` (session-recovery на visibilitychange) → `checkAccess`→`setLoading(true)` размонтировал `/tutor` кабинет → потеря стейта форм ДЗ/ученик/задача. Фикс: тихая ре-верификация + 3-way `SIGNED_IN` (rule 5a) | memory `project_tab_switch_form_loss_2026_07_06.md` |
 | 2026-07-07 | Login DPI-resilience: `TutorLogin` email-вход висел на «Вход...» бесконечно (РФ-DPI роняет `signInWithPassword`/`is_tutor` — одиночные критичные запросы без таймаута). Фикс: `src/lib/authRetry.ts` (`callAuthWithRetry` — таймаут 10с/попытка + 1 ретрай ТОЛЬКО на сетевой сбой; `{error}` вроде неверного пароля резолвится без ретрая → fast-fail) + честный тост «Сеть не отвечает… попробуйте с VPN». **Инвариант: happy-path и auth-ошибки НЕ задеты** — таймаут/ретрай активны лишь при обрыве. Milada-репорт (у неё обе роли были, блок = сеть). Repro нельзя headless (нужны креды) — хелпер юнит-проверен в preview | `src/lib/authRetry.ts` |
 | 2026-07-07 | 406-ФЗ: убран Google + Telegram-**вход** из UI; добавлены Yandex ID + VK ID (`_shared/oauth-helpers.ts` + кнопки `{Yandex,Vk}AuthButton`); email+пароль оставлен; Telegram-**бот** не тронут. Миграция Telegram-only (~30 акк.): бот `/parol` → `/set-password` → edge `student-set-password` ставит email+пароль на существующий аккаунт (история цела; reuse `telegram_login_tokens`, миграций нет; бот НЕ минтит сессию) | `~/.claude/plans/1-rustling-key.md` |
+| 2026-07-14 | Авария: Lovable потерял 45/57 edge-функций (`NOT_FOUND_FUNCTION_BLOB`) → сломаны auth-письма/OTP/инвайты/добавление учеников/бот/оплаты. Восстановлено через Lovable MCP + `email_domain--setup_email_infra`. Фиксы поверх: recovery RU-bypass, one-click invite claim, компактный OAuth state (VK), русификация ошибок. Probe: `scripts/check-edge-deploy.mjs` (rule 95) | план `sharded-bouncing-popcorn.md` |
 | 2026-07-08 | Онбординг-тупик #2: после signup без сессии (email-confirm) репетитора выкидывало тостом → покидал продукт. Фикс — **`src/components/auth/EmailConfirmWaiting.tsx`** (экран «Подтвердите почту» + `supabase.auth.resend({type:'signup'})` + «Изменить почту»), смонтирован в `RegisterTutor`/`TutorSignupTrial` вместо `toast+return`. **Чисто клиентский UX — email-verify edge / конфиг Supabase / назначение роли НЕ тронуты.** **Инвариант авто-впуска (review P1):** слушатель `onAuthStateChange` навигирует ТОЛЬКО на `SIGNED_IN` с `session.user.id !== baselineUserIdRef` (baseline пишется из `INITIAL_SESSION`); **НЕ реагировать на `INITIAL_SESSION`** — он реплеит текущую/устаревшую сессию на маунте и увёл бы уже-вошедшего (напр. ученика) на `/tutor/home` до подтверждения нового email | memory `project_activation_aha_left_shift_2026_07_08` |
 
 При появлении новых regression'ов в auth flow в РФ — **сначала** проверь этот файл, потом runbook, потом plan-файл.

@@ -37,10 +37,12 @@
  * sokratai.lovable.app, localhost. Prevents open-redirect abuse from
  * attacker-supplied email links.
  *
- * P2 scope: ALLOWED_TYPES is narrowed to `signup` only. Other Supabase OTP
- * types (`magiclink`, `recovery`, `email_change`, `invite`) require their
- * own template configuration and tested redirect flows — add deliberately
- * when used, not preemptively.
+ * ALLOWED_TYPES: `signup` (registration confirm), `magiclink` (student OTP
+ * login, 2026-07-01), `recovery` (password reset, 2026-07-14 — lands on
+ * /reset-password; role/consent finalization skipped). Remaining OTP types
+ * (`email_change`, `invite`) require their own template configuration and
+ * tested redirect flows — add deliberately when used, not preemptively.
+ * Must stay in sync with REWRITE_TYPES in auth-email-hook/index.ts.
  */
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -76,7 +78,7 @@ const ALLOWED_REDIRECT_ORIGINS = [
 // `signup` — email-confirm регистрации. `magiclink` — беспарольный вход «по коду»
 // (онбординг v2, T7): student-otp-request генерит magiclink hashed_token и шлёт
 // ссылку на ЭТОТ endpoint через наш RU-safe email-пайплайн (не *.supabase.co).
-const ALLOWED_TYPES = new Set(["signup", "magiclink"]);
+const ALLOWED_TYPES = new Set(["signup", "magiclink", "recovery"]);
 
 function isAllowedRedirect(target: string): boolean {
   try {
@@ -272,7 +274,12 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const tokenHash = url.searchParams.get("token_hash");
   const type = url.searchParams.get("type");
-  const redirectTo = url.searchParams.get("redirect_to") || FALLBACK_REDIRECT;
+  // Recovery without an explicit redirect_to MUST land on the password form —
+  // falling back to "/" would silently log the user in with no way to set a
+  // new password.
+  const redirectTo =
+    url.searchParams.get("redirect_to") ||
+    (type === "recovery" ? "https://sokratai.ru/reset-password" : FALLBACK_REDIRECT);
 
   if (!tokenHash || !type) {
     console.warn(
@@ -330,7 +337,7 @@ Deno.serve(async (req) => {
 
   const { data, error } = await anonClient.auth.verifyOtp({
     token_hash: tokenHash,
-    type: type as "signup" | "magiclink",
+    type: type as "signup" | "magiclink" | "recovery",
   });
 
   if (error || !data?.session || !data?.user) {
@@ -362,17 +369,22 @@ Deno.serve(async (req) => {
       ? (data.user.user_metadata as Record<string, unknown>)
       : null;
 
-  const roleStatus = await assignTutorRoleIfNeeded(adminClient, data.user.id, metadata);
-  if (roleStatus === "role_failed") {
-    // Reviewer P2 (Round 2): surface a deterministic error state rather than
-    // silently land the user on /tutor/home → TutorGuard bounce → /register-tutor.
-    // User keeps their auth.users row + email_confirmed_at=now; support can
-    // backfill `user_roles` via SQL. The error param tells the page to show
-    // a recovery CTA instead of just the empty signup form.
-    return redirectToError("role_finalization_failed", FALLBACK_LOGIN_URL);
-  }
+  // Recovery = existing account resetting a password: role/consent finalization
+  // is not applicable, and its FATAL role_failed path must never bounce a
+  // password reset to /login mid-flow.
+  if (type !== "recovery") {
+    const roleStatus = await assignTutorRoleIfNeeded(adminClient, data.user.id, metadata);
+    if (roleStatus === "role_failed") {
+      // Reviewer P2 (Round 2): surface a deterministic error state rather than
+      // silently land the user on /tutor/home → TutorGuard bounce → /register-tutor.
+      // User keeps their auth.users row + email_confirmed_at=now; support can
+      // backfill `user_roles` via SQL. The error param tells the page to show
+      // a recovery CTA instead of just the empty signup form.
+      return redirectToError("role_finalization_failed", FALLBACK_LOGIN_URL);
+    }
 
-  await flushConsentIntent(adminClient, data.user.id, metadata);
+    await flushConsentIntent(adminClient, data.user.id, metadata);
+  }
 
   // Persist QR/referral attribution + funnel (promo/ref) + опц. telegram — ТОЛЬКО
   // для регистрации (type=signup), НЕ для magiclink-логина (P1 #5). Promo/telegram

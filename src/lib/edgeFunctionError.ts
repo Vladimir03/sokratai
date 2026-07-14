@@ -53,6 +53,16 @@ export async function extractEdgeFunctionError(
 
   const generic = (error as { message?: unknown })?.message;
   if (typeof generic === "string" && generic && !generic.includes("non-2xx")) {
+    // `FunctionsFetchError` ("Failed to send a request to the Edge Function"):
+    // the browser never got a CORS-valid response — function undeployed/boot-crash
+    // or network drop. Raw English text must not reach the user.
+    if (generic.includes("Failed to send a request")) {
+      return {
+        message:
+          "Сервер временно недоступен. Проверьте интернет и попробуйте ещё раз через минуту.",
+        code: "EDGE_UNREACHABLE",
+      };
+    }
     return { message: generic, code: null };
   }
   return { message: fallback, code: null };

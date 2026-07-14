@@ -55,7 +55,10 @@ export type TutorPlanExpiryInput = Omit<TutorPlanExpiryData, 'unsubscribeUrl'>;
 // ─── Constants ───────────────────────────────────────────────
 
 const SENDER_FROM = 'Сократ <noreply@sokratai.ru>';
-const SENDER_DOMAIN = 'sokratai.ru';
+// Verified sender domain in Lovable email infra is notify.sokratai.ru (mirrors
+// auth-email-hook). 'sokratai.ru' here caused no_matching_sender rejections
+// after the 2026-07-14 email-infra refresh.
+const SENDER_DOMAIN = 'notify.sokratai.ru';
 const QUEUE_NAME = 'transactional_emails';
 const TEMP_EMAIL_SUFFIX = '@temp.sokratai.ru';
 

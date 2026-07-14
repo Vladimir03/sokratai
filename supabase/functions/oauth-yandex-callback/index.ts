@@ -18,7 +18,8 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   PROXY_URL,
   corsHeaders,
-  verifyState,
+  verifyStateDetailed,
+  normalizeStatePayload,
   findOrCreateUser,
   mintSession,
   assignTutorRoleIfNeeded,
@@ -71,15 +72,26 @@ Deno.serve(async (req) => {
     return redirectToError("missing_code_or_state", ERR_EVENT);
   }
 
-  const stateData = await verifyState(state, STATE_SECRET);
-  if (!stateData || typeof stateData.redirectTo !== "string") {
-    return redirectToError("invalid_state", ERR_EVENT);
+  // Detailed verify + PII-free diagnostics (mirror of the VK callback).
+  const stateRes = await verifyStateDetailed(state, STATE_SECRET);
+  if (!stateRes.ok) {
+    return redirectToError("invalid_state", ERR_EVENT, {
+      why: stateRes.failure,
+      len: String(state.length),
+    });
   }
-  const redirectTo = stateData.redirectTo;
-  const intendedRole = stateData.intendedRole === "tutor" ? "tutor" : "student";
+  const norm = normalizeStatePayload(stateRes.payload);
+  if (!norm.redirectTo) {
+    return redirectToError("invalid_state", ERR_EVENT, {
+      why: "missing_fields",
+      len: String(state.length),
+    });
+  }
+  const redirectTo = norm.redirectTo;
+  const intendedRole = norm.intendedRole;
   // QR/referral attribution (egor-qr-onboarding), threaded through the state.
-  const promo = typeof stateData.promo === "string" ? stateData.promo : null;
-  const ref = typeof stateData.ref === "string" ? stateData.ref : null;
+  const promo = norm.promo;
+  const ref = norm.ref;
 
   // ─── 1. Exchange code → Yandex access_token (server-to-server) ───
   const tokenRes = await fetch("https://oauth.yandex.ru/token", {

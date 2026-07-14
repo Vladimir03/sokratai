@@ -17,12 +17,12 @@ const corsHeaders = {
 }
 
 const EMAIL_SUBJECTS: Record<string, string> = {
-  signup: 'Confirm your email',
-  invite: "You've been invited",
-  magiclink: 'Your login link',
-  recovery: 'Reset your password',
-  email_change: 'Confirm your new email',
-  reauthentication: 'Your verification code',
+  signup: 'Подтвердите почту — Сократ AI',
+  invite: 'Вас пригласили в Сократ AI',
+  magiclink: 'Ссылка для входа — Сократ AI',
+  recovery: 'Сброс пароля — Сократ AI',
+  email_change: 'Подтвердите новую почту — Сократ AI',
+  reauthentication: 'Код подтверждения — Сократ AI',
 }
 
 // Template mapping
@@ -41,30 +41,38 @@ const SENDER_DOMAIN = "notify.sokratai.ru"
 const ROOT_DOMAIN = "sokratai.ru"
 const FROM_DOMAIN = "sokratai.ru" // Domain shown in From address (may be root or sender subdomain)
 
-// RU-bypass confirmation URL rewriting (2026-05-16, see .claude/rules/96-auth-ru-bypass.md).
+// RU-bypass confirmation URL rewriting (2026-05-16, recovery/magiclink added
+// 2026-07-14, see .claude/rules/96-auth-ru-bypass.md).
 // Supabase by default emits `payload.data.url` pointing at
 // `https://<project>.supabase.co/auth/v1/verify?token=...`. That host is
 // SNI-blocked by RU ISPs (canonical Supabase domain). The user clicks the
-// link, TLS handshake is reset, registration never completes.
+// link, TLS handshake is reset, the flow never completes.
 //
-// Fix: for `signup` emails, rewrite the URL to our custom email-verify edge
-// function on api.sokratai.ru (Selectel Moscow direct, RU-friendly). The
-// edge function runs the same verifyOtp flow + finalizes tutor role +
-// flushes consent server-side, then redirects to redirect_to with tokens
-// in URL hash. See supabase/functions/email-verify/index.ts.
+// Fix: for `signup` / `recovery` / `magiclink` emails, rewrite the URL to our
+// custom email-verify edge function on api.sokratai.ru (Selectel Moscow
+// direct, RU-friendly). The edge function runs the same verifyOtp flow
+// (+ finalizes tutor role + flushes consent for signup), then redirects to
+// redirect_to with tokens in the URL hash.
+// See supabase/functions/email-verify/index.ts (ALLOWED_TYPES must match
+// REWRITE_TYPES here).
 //
-// Other email types (recovery, magiclink, email_change, invite,
-// reauthentication) still use the default Supabase URL. When those flows
-// are needed for RU users, extend ALLOWED_TYPES in email-verify and add
-// the rewrite here.
+// email_change / invite have no verified flow in email-verify and
+// reauthentication is code-only — they keep the default Supabase URL.
 const EMAIL_VERIFY_PROXY_URL = "https://api.sokratai.ru/functions/v1/email-verify"
 
-function rewriteSignupConfirmationUrl(
+const REWRITE_TYPES = new Set(['signup', 'recovery', 'magiclink'])
+
+const REWRITE_FALLBACK_REDIRECTS: Record<string, string> = {
+  signup: `https://${ROOT_DOMAIN}/tutor/home`,
+  recovery: `https://${ROOT_DOMAIN}/reset-password`,
+  magiclink: `https://${ROOT_DOMAIN}`,
+}
+
+function rewriteConfirmationUrl(
   originalUrl: string,
   emailType: string,
-  fallbackRedirect: string,
 ): string {
-  if (emailType !== 'signup') return originalUrl
+  if (!REWRITE_TYPES.has(emailType)) return originalUrl
 
   try {
     const parsed = new URL(originalUrl)
@@ -76,11 +84,12 @@ function rewriteSignupConfirmationUrl(
       parsed.searchParams.get('token') ||
       ''
     const redirectTo =
-      parsed.searchParams.get('redirect_to') || fallbackRedirect
+      parsed.searchParams.get('redirect_to') ||
+      REWRITE_FALLBACK_REDIRECTS[emailType]
 
     if (!tokenHash) {
       console.warn(
-        '[auth-email-hook] signup URL missing token_hash/token — using default URL',
+        `[auth-email-hook] ${emailType} URL missing token_hash/token — using default URL`,
         { hasTokenHash: !!parsed.searchParams.get('token_hash'), hasToken: !!parsed.searchParams.get('token') },
       )
       return originalUrl
@@ -88,11 +97,11 @@ function rewriteSignupConfirmationUrl(
 
     const target = new URL(EMAIL_VERIFY_PROXY_URL)
     target.searchParams.set('token_hash', tokenHash)
-    target.searchParams.set('type', 'signup')
+    target.searchParams.set('type', emailType)
     target.searchParams.set('redirect_to', redirectTo)
     return target.toString()
   } catch (err) {
-    console.error('[auth-email-hook] rewriteSignupConfirmationUrl threw', err)
+    console.error('[auth-email-hook] rewriteConfirmationUrl threw', err)
     return originalUrl
   }
 }
@@ -273,14 +282,10 @@ async function handleWebhook(req: Request): Promise<Response> {
     )
   }
 
-  // For signup emails, rewrite Supabase's default *.supabase.co URL (RU-blocked)
-  // to our api.sokratai.ru/functions/v1/email-verify proxy. Other types keep
-  // the default URL (not in critical RU-bypass path yet).
-  const confirmationUrl = rewriteSignupConfirmationUrl(
-    payload.data.url,
-    emailType,
-    `https://${ROOT_DOMAIN}/tutor/home`, // fallback when redirect_to missing
-  )
+  // For signup/recovery/magiclink emails, rewrite Supabase's default
+  // *.supabase.co URL (RU-blocked) to our api.sokratai.ru/functions/v1/email-verify
+  // proxy. Other types keep the default URL (no verified flow yet).
+  const confirmationUrl = rewriteConfirmationUrl(payload.data.url, emailType)
 
   // Build template props from payload.data (HookData structure)
   const templateProps = {

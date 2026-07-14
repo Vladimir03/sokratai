@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/lib/supabaseClient";
+import { readAuthRedirectError, translateAuthError } from "@/lib/authErrors";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -15,19 +16,41 @@ const passwordSchema = z.object({
   path: ["confirmPassword"],
 });
 
+// Recovery links arrive via api.sokratai.ru/functions/v1/email-verify (RU-bypass,
+// rule 96), which redirects here with tokens in the URL hash. supabase-js parses
+// the hash at client init — BEFORE this lazy page mounts — so we must NOT rely on
+// the PASSWORD_RECOVERY event. INITIAL_SESSION is replayed per-subscriber after
+// the hash parse, which makes the gate below race-free.
+type Gate = "checking" | "ready" | "invalid";
+
 const ResetPassword = () => {
   const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [gate, setGate] = useState<Gate>("checking");
+  const [gateError, setGateError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if we have a valid session from the reset link
-    supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        // User clicked the reset link, they can now set a new password
+    // email-verify appends ?email_verify_error=<code> on failure (expired /
+    // already-used link) — surface it instead of a dead password form.
+    const authErr = readAuthRedirectError(new URLSearchParams(window.location.search));
+    if (authErr) {
+      setGateError(authErr.message);
+      setGate("invalid");
+      return;
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setGate("ready");
+      } else if (event === "INITIAL_SESSION") {
+        // Hash parsed (or absent), still no session → dead/expired link.
+        setGate("invalid");
       }
     });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
@@ -48,10 +71,13 @@ const ResetPassword = () => {
 
       if (error) throw error;
 
-      toast.success("Пароль обновлён!");
+      toast.success("Пароль обновлён! Войдите с новым паролем.");
+      // Recovery session must not stay alive after the reset — sign out and
+      // let the user log in with the new password.
+      await supabase.auth.signOut();
       navigate("/login");
-    } catch (error: any) {
-      toast.error(error.message || "Ошибка обновления пароля");
+    } catch (error: unknown) {
+      toast.error(translateAuthError(error, "Ошибка обновления пароля"));
     } finally {
       setLoading(false);
     }
@@ -63,31 +89,56 @@ const ResetPassword = () => {
         <CardHeader className="space-y-1">
           <CardTitle className="text-3xl font-bold text-center">Новый пароль</CardTitle>
           <CardDescription className="text-center">
-            Введите новый пароль для вашего аккаунта
+            {gate === "invalid"
+              ? "Не получилось открыть ссылку из письма"
+              : "Введите новый пароль для вашего аккаунта"}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleUpdatePassword} className="space-y-4">
-            <Input
-              type="password"
-              placeholder="Новый пароль"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              disabled={loading}
-            />
-            <Input
-              type="password"
-              placeholder="Подтвердите пароль"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-              disabled={loading}
-            />
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Сохранение..." : "Сохранить пароль"}
-            </Button>
-          </form>
+          {gate === "checking" && (
+            <p className="text-center text-sm text-muted-foreground py-6">
+              Проверяем ссылку…
+            </p>
+          )}
+
+          {gate === "invalid" && (
+            <div className="space-y-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                {gateError ??
+                  "Ссылка недействительна или истекла. Запросите новое письмо для сброса пароля."}
+              </p>
+              <Button asChild className="w-full">
+                <Link to="/forgot-password">Запросить новую ссылку</Link>
+              </Button>
+              <Link to="/login" className="text-sm text-muted-foreground hover:underline inline-block">
+                Назад к входу
+              </Link>
+            </div>
+          )}
+
+          {gate === "ready" && (
+            <form onSubmit={handleUpdatePassword} className="space-y-4">
+              <Input
+                type="password"
+                placeholder="Новый пароль"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <Input
+                type="password"
+                placeholder="Подтвердите пароль"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Сохранение..." : "Сохранить пароль"}
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>

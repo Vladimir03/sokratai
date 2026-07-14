@@ -27,6 +27,7 @@ import {
   isAllowedRedirect,
   deriveIntendedRole,
   signState,
+  buildCompactStatePayload,
 } from "../_shared/oauth-helpers.ts";
 
 const YANDEX_CLIENT_ID = Deno.env.get("YANDEX_OAUTH_CLIENT_ID");
@@ -73,14 +74,14 @@ Deno.serve(async (req) => {
   const promo = url.searchParams.get("promo");
   const ref = url.searchParams.get("ref");
 
-  const statePayload: Record<string, unknown> = {
+  // Compact payload (short keys, path-only redirect) — mirrors the VK flow;
+  // providers may mangle long state values (see oauth-helpers 2026-07-14).
+  const statePayload = buildCompactStatePayload({
     redirectTo: rawRedirectTo,
     intendedRole,
-    nonce: crypto.randomUUID(),
-    issuedAt: Date.now(),
-  };
-  if (promo) statePayload.promo = promo.slice(0, 64);
-  if (ref) statePayload.ref = ref.slice(0, 64);
+    promo,
+    ref,
+  });
 
   const state = await signState(statePayload, STATE_SECRET);
 

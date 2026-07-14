@@ -55,36 +55,46 @@ const SUPABASE_AUTH_ERRORS: Record<string, string> = {
     "Сессия истекла. Войдите снова.",
   "Database error saving new user":
     "Не удалось создать аккаунт. Попробуйте через минуту или напишите в поддержку.",
+  // gotrue throttle (`over_email_send_rate_limit`): "For security purposes, you can
+  // only request this after N seconds" — N varies, so match on the stable prefix.
+  "For security purposes, you can only request this":
+    "Слишком частые запросы. Подождите минуту и попробуйте снова.",
+  "over_email_send_rate_limit":
+    "Слишком частые запросы. Подождите минуту и попробуйте снова.",
 };
 
 /**
- * Reason codes from oauth-google-callback edge function
- * (supabase/functions/oauth-google-callback/index.ts::redirectToErrorPage).
- * Returned as `?oauth_error=<reason>` on /login redirect after a failed
- * Google OAuth round-trip.
+ * Reason codes from the OAuth callback edge functions
+ * (oauth-yandex-callback, oauth-vk-callback; legacy oauth-google-callback is
+ * DORMANT). Returned as `?oauth_error=<reason>` on /login redirect after a
+ * failed OAuth round-trip. The map is shared by ALL providers — keep texts
+ * provider-neutral («сервис входа»), never name a specific provider.
+ * Provider-prefixed codes (`vk_*`, `yandex_*`, `google_*`) are handled by
+ * translateProviderOAuthError below.
  */
 const OAUTH_CALLBACK_ERRORS: Record<string, string> = {
-  // From Google itself (prefixed `google_` in callback)
-  google_access_denied: "Вы отменили вход через Google. Можно войти по email.",
-  google_invalid_request: "Google отклонил запрос. Попробуйте ещё раз.",
-  google_server_error:
-    "Google недоступен. Попробуйте через минуту или войдите по email.",
-
-  // Internal errors
   not_configured:
     "Сервис временно недоступен. Попробуйте через несколько минут.",
   missing_code_or_state:
-    "Ошибка авторизации Google. Попробуйте войти заново.",
+    "Не удалось завершить вход. Попробуйте войти заново.",
+  missing_code_state_or_device:
+    "Не удалось завершить вход. Попробуйте войти заново.",
   invalid_state:
-    "Ссылка для входа устарела. Нажмите «Продолжить с Google» ещё раз.",
+    "Не удалось завершить вход. Попробуйте ещё раз.",
   token_exchange_failed:
-    "Не удалось связаться с Google. Попробуйте через минуту.",
+    "Сервис входа не ответил. Попробуйте через минуту или войдите по email.",
+  no_access_token:
+    "Сервис входа не вернул данные. Попробуйте ещё раз или войдите по email.",
   no_id_token:
-    "Google не вернул данные о пользователе. Попробуйте ещё раз.",
+    "Сервис входа не вернул данные о пользователе. Попробуйте ещё раз.",
   invalid_id_token:
-    "Google вернул некорректные данные. Попробуйте ещё раз.",
+    "Сервис входа вернул некорректные данные. Попробуйте ещё раз.",
+  userinfo_failed:
+    "Не удалось получить профиль. Попробуйте ещё раз или войдите по email.",
+  no_user_id:
+    "Сервис входа не вернул данные о пользователе. Попробуйте ещё раз.",
   email_not_verified:
-    "Ваш email в Google не подтверждён. Подтвердите email в настройках Google и попробуйте снова.",
+    "Email в вашем аккаунте не подтверждён. Подтвердите его в настройках сервиса и попробуйте снова.",
   create_user_failed:
     "Не удалось создать аккаунт. Напишите в поддержку.",
   link_failed:
@@ -94,6 +104,21 @@ const OAUTH_CALLBACK_ERRORS: Record<string, string> = {
   role_finalization_failed:
     "Аккаунт создан, но не удалось активировать роль репетитора. Напишите в поддержку — починим за пару минут.",
 };
+
+/**
+ * Provider-prefixed reason codes: the callbacks forward the provider's own
+ * `?error=` as `vk_<error>` / `yandex_<error>` / `google_<error>`.
+ * Returns null when the code has no known provider prefix.
+ */
+function translateProviderOAuthError(code: string): string | null {
+  const m = code.match(/^(vk|yandex|google)_(.+)$/);
+  if (!m) return null;
+  const reason = m[2];
+  if (reason.includes("access_denied") || reason.includes("cancel")) {
+    return "Вы отменили вход. Можно попробовать снова или войти по email.";
+  }
+  return "Сервис входа отклонил запрос. Попробуйте ещё раз или войдите по email.";
+}
 
 /**
  * Reason codes from email-verify edge function
@@ -189,7 +214,8 @@ export function readAuthRedirectError(
       code: oauthErr,
       message:
         OAUTH_CALLBACK_ERRORS[oauthErr] ??
-        "Не удалось войти. Попробуйте email или Telegram.",
+        translateProviderOAuthError(oauthErr) ??
+        "Не удалось войти. Попробуйте по email и паролю.",
     };
   }
 

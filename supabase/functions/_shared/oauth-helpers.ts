@@ -44,8 +44,11 @@ export const PROXY_URL = "https://api.sokratai.ru";
 /** Where the browser is sent when the flow fails irrecoverably. */
 export const FALLBACK_LOGIN_URL = "https://sokratai.ru/login";
 
-/** State TTL — covers a slow consent screen. */
-export const STATE_TTL_MS = 10 * 60 * 1000;
+/**
+ * State TTL — covers a slow consent screen (school students routinely spend
+ * many minutes on the provider's SMS-code flow; raised 10 → 30 min 2026-07-14).
+ */
+export const STATE_TTL_MS = 30 * 60 * 1000;
 
 /**
  * Allow-list for `redirectTo` (open-redirect protection). Mirrors Supabase Auth
@@ -112,18 +115,25 @@ export async function signState(
   return `${dataB64}.${base64UrlEncode(sig)}`;
 }
 
+export type StateVerifyFailure = "malformed" | "sig" | "ttl" | "error";
+
+export type StateVerifyResult =
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; failure: StateVerifyFailure };
+
 /**
- * Verify signature + TTL and return the parsed payload, or `null` on any
- * failure. Generic — each provider extracts its own fields (`redirectTo`,
- * `intendedRole`, `codeVerifier`, …).
+ * Verify signature + TTL and return the parsed payload or a machine-readable
+ * failure reason (PII-free — safe to surface in the error redirect as `why=`).
+ * Accepts both the legacy long-key payload (`issuedAt` in ms) and the compact
+ * payload (`t` in seconds) — see buildCompactStatePayload.
  */
-export async function verifyState(
+export async function verifyStateDetailed(
   state: string,
   secret: string,
   ttlMs: number = STATE_TTL_MS,
-): Promise<Record<string, unknown> | null> {
+): Promise<StateVerifyResult> {
   const [dataB64, sigB64] = state.split(".");
-  if (!dataB64 || !sigB64) return null;
+  if (!dataB64 || !sigB64) return { ok: false, failure: "malformed" };
 
   try {
     const encoder = new TextEncoder();
@@ -137,16 +147,121 @@ export async function verifyState(
       ["verify"],
     );
     const ok = await crypto.subtle.verify("HMAC", key, sigBytes, dataBytes);
-    if (!ok) return null;
+    if (!ok) return { ok: false, failure: "sig" };
 
     const parsed = JSON.parse(new TextDecoder().decode(dataBytes));
-    if (typeof parsed?.issuedAt !== "number") return null;
-    if (Date.now() - parsed.issuedAt > ttlMs) return null;
-    return parsed as Record<string, unknown>;
+    const issuedAtMs =
+      typeof parsed?.issuedAt === "number"
+        ? parsed.issuedAt
+        : typeof parsed?.t === "number"
+          ? parsed.t * 1000
+          : null;
+    if (issuedAtMs === null) return { ok: false, failure: "malformed" };
+    if (Date.now() - issuedAtMs > ttlMs) return { ok: false, failure: "ttl" };
+    return { ok: true, payload: parsed as Record<string, unknown> };
   } catch (e) {
     console.warn("[oauth-helpers] verifyState threw", e);
-    return null;
+    return { ok: false, failure: "error" };
   }
+}
+
+/** Legacy boolean-style wrapper over verifyStateDetailed. */
+export async function verifyState(
+  state: string,
+  secret: string,
+  ttlMs: number = STATE_TTL_MS,
+): Promise<Record<string, unknown> | null> {
+  const res = await verifyStateDetailed(state, secret, ttlMs);
+  return res.ok ? res.payload : null;
+}
+
+// ─── compact state payload ─────────────────────────────────────────────────
+//
+// Some providers mangle long `state` values (VK ID observed corrupting our
+// ~350-char state with the PKCE verifier inside → systematic invalid_state,
+// 2026-07-14). Keep the signed state comfortably under 255 chars by using
+// short keys and a path-only redirect:
+//   r = redirect path+query ("/student/schedule")
+//   o = index into ALLOWED_REDIRECT_ORIGINS (omitted for sokratai.ru)
+//   i = intended role: "t" | "s"
+//   v = PKCE code_verifier (VK only, 43 chars)
+//   p / f = promo / ref attribution
+//   t = issuedAt in SECONDS   n = short nonce
+// verifyStateDetailed + normalizeStatePayload accept BOTH formats, so states
+// minted by a not-yet-redeployed init keep working during rollout.
+
+export function buildCompactStatePayload(input: {
+  redirectTo: string;
+  intendedRole: "tutor" | "student";
+  codeVerifier?: string;
+  promo?: string | null;
+  ref?: string | null;
+}): Record<string, unknown> {
+  const u = new URL(input.redirectTo);
+  const originIndex = ALLOWED_REDIRECT_ORIGINS.indexOf(`${u.protocol}//${u.host}`);
+  const payload: Record<string, unknown> = {
+    r: `${u.pathname}${u.search}`,
+    i: input.intendedRole === "tutor" ? "t" : "s",
+    t: Math.floor(Date.now() / 1000),
+    n: base64UrlEncode(crypto.getRandomValues(new Uint8Array(6))),
+  };
+  if (originIndex > 0) payload.o = originIndex;
+  if (input.codeVerifier) payload.v = input.codeVerifier;
+  if (input.promo) payload.p = input.promo.slice(0, 64);
+  if (input.ref) payload.f = input.ref.slice(0, 64);
+  return payload;
+}
+
+export type NormalizedStatePayload = {
+  redirectTo: string | null;
+  intendedRole: "tutor" | "student";
+  codeVerifier: string | null;
+  promo: string | null;
+  ref: string | null;
+};
+
+/** Map a verified state payload (compact OR legacy long-key) to named fields. */
+export function normalizeStatePayload(
+  parsed: Record<string, unknown>,
+): NormalizedStatePayload {
+  let redirectTo: string | null = null;
+  if (typeof parsed.redirectTo === "string") {
+    redirectTo = parsed.redirectTo;
+  } else if (typeof parsed.r === "string" && parsed.r.startsWith("/")) {
+    const originIndex =
+      typeof parsed.o === "number" &&
+      parsed.o >= 0 &&
+      parsed.o < ALLOWED_REDIRECT_ORIGINS.length
+        ? parsed.o
+        : 0;
+    redirectTo = `${ALLOWED_REDIRECT_ORIGINS[originIndex]}${parsed.r}`;
+  }
+
+  const intendedRole =
+    parsed.intendedRole === "tutor" || parsed.i === "t" ? "tutor" : "student";
+
+  return {
+    redirectTo,
+    intendedRole,
+    codeVerifier:
+      typeof parsed.codeVerifier === "string"
+        ? parsed.codeVerifier
+        : typeof parsed.v === "string"
+          ? parsed.v
+          : null,
+    promo:
+      typeof parsed.promo === "string"
+        ? parsed.promo
+        : typeof parsed.p === "string"
+          ? parsed.p
+          : null,
+    ref:
+      typeof parsed.ref === "string"
+        ? parsed.ref
+        : typeof parsed.f === "string"
+          ? parsed.f
+          : null,
+  };
 }
 
 // ─── intended-role derivation (path-based guard) ───────────────────────────
@@ -177,9 +292,14 @@ export function deriveIntendedRole(
 
 // ─── PKCE (VK ID OAuth 2.1) ────────────────────────────────────────────────
 
-/** RFC 7636 code_verifier — 48 random bytes → 64 base64url chars (43–128 range). */
+/**
+ * RFC 7636 code_verifier — 32 random bytes → 43 base64url chars (the RFC
+ * minimum; 256 bits of entropy). Kept short deliberately: the verifier rides
+ * inside the signed `state`, and the whole state must stay well under 255
+ * chars (providers mangle longer values — see buildCompactStatePayload).
+ */
 export function randomCodeVerifier(): string {
-  const bytes = new Uint8Array(48);
+  const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return base64UrlEncode(bytes);
 }
@@ -363,12 +483,28 @@ export function redirectWithSessionHash(
   return Response.redirect(target.toString(), 302);
 }
 
-/** Redirect to the login page with an `oauth_error` reason. PII-free log. */
-export function redirectToError(reason: string, eventName: string): Response {
+/**
+ * Redirect to the login page with an `oauth_error` reason. PII-free log.
+ * `extraParams` (also PII-free, e.g. `{ why: "sig", len: "354" }`) are appended
+ * to the redirect AND the log — used for the invalid_state diagnostics.
+ */
+export function redirectToError(
+  reason: string,
+  eventName: string,
+  extraParams?: Record<string, string>,
+): Response {
   console.warn(
-    JSON.stringify({ event: eventName, reason, timestamp: new Date().toISOString() }),
+    JSON.stringify({
+      event: eventName,
+      reason,
+      ...(extraParams ?? {}),
+      timestamp: new Date().toISOString(),
+    }),
   );
   const target = new URL(FALLBACK_LOGIN_URL);
   target.searchParams.set("oauth_error", reason);
+  for (const [k, v] of Object.entries(extraParams ?? {})) {
+    target.searchParams.set(k, v);
+  }
   return Response.redirect(target.toString(), 302);
 }

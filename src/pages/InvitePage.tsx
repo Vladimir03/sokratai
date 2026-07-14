@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import type { Session } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -50,6 +51,46 @@ export default function InvitePage() {
   const [authSuccess, setAuthSuccess] = useState(false);
   const [claimedTutorName, setClaimedTutorName] = useState<string | null>(null);
   const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false);
+
+  // Existing-session state (one-click claim for already-logged-in students).
+  // Without this a registered student scanning a tutor's QR saw only the
+  // signup form and was never linked (bug 2026-07-14).
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  const [isTutorAccount, setIsTutorAccount] = useState(false);
+  const [claiming, setClaiming] = useState(false);
+  const [claimError, setClaimError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      try {
+        const { data: { session: existing } } = await supabase.auth.getSession();
+        if (cancelled) return;
+        if (existing) {
+          setSession(existing);
+          // Best-effort role check (same RPC as Login/TutorGuard) — a tutor
+          // must not one-click-claim another tutor's invite.
+          try {
+            const { data: isTutor } = await supabase.rpc('is_tutor', {
+              _user_id: existing.user.id,
+            });
+            if (!cancelled) setIsTutorAccount(Boolean(isTutor));
+          } catch {
+            // RPC failure → treat as student (claim-invite validates server-side anyway)
+          }
+        }
+      } catch {
+        // getSession failure → fall through to the anonymous form
+      } finally {
+        if (!cancelled) setSessionChecked(true);
+      }
+    }
+
+    checkSession();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     async function fetchTutor() {
@@ -138,7 +179,11 @@ export default function InvitePage() {
 
         if (authError) {
           if (authError.message.includes('already registered')) {
-            setFormError('Этот email уже зарегистрирован. Попробуйте войти или восстановите пароль.');
+            // Keep the invite for the deferred claim (AuthGuard/Login run
+            // claimPendingInvite after auth) and steer to the login form.
+            if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+            setIsLogin(true);
+            setFormError('Этот email уже зарегистрирован. Войдите — репетитор подключится автоматически.');
           } else {
             setFormError(authError.message);
           }
@@ -150,7 +195,9 @@ export default function InvitePage() {
         // or if the email is already taken (masked as success for security).
         // Detect fake signup: identities array is empty → email already exists.
         if (signUpData.user && (!signUpData.user.identities || signUpData.user.identities.length === 0)) {
-          setFormError('Этот email уже зарегистрирован. Попробуйте войти или восстановите пароль.');
+          if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+          setIsLogin(true);
+          setFormError('Этот email уже зарегистрирован. Войдите — репетитор подключится автоматически.');
           setSubmitting(false);
           return;
         }
@@ -190,8 +237,48 @@ export default function InvitePage() {
     navigate('/homework');
   };
 
+  // One-click claim for an already-logged-in (non-tutor) account.
+  const handleClaimWithSession = async () => {
+    if (!inviteCode) return;
+    setClaimError(null);
+    setClaiming(true);
+    try {
+      const result = await claimInvite(inviteCode); // 'linked' | 'already_linked' — both success
+      localStorage.removeItem('pending_invite_code');
+      setClaimedTutorName(result.tutor_name);
+      setAuthSuccess(true);
+    } catch (err: unknown) {
+      const status = (err as { context?: { status?: number } })?.context?.status;
+      if (status === 401) {
+        // Stale session — fall back to the login/signup form.
+        setSession(null);
+        return;
+      }
+      if (status === 400) {
+        setClaimError('Не удалось подключиться по этой ссылке. Проверьте, что это ссылка вашего репетитора.');
+      } else if (status === 404) {
+        setClaimError('Ссылка недействительна или устарела. Попросите у репетитора новую.');
+      } else {
+        setClaimError('Не удалось подключиться. Проверьте интернет и попробуйте ещё раз.');
+      }
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const handleSignOutToForm = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      // best-effort
+    }
+    setSession(null);
+    setIsTutorAccount(false);
+    setClaimError(null);
+  };
+
   // Loading state
-  if (loading) {
+  if (loading || !sessionChecked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
         <Card className="w-full max-w-md" animate={false}>
@@ -282,6 +369,65 @@ export default function InvitePage() {
             >
               Перейти к домашним заданиям
             </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Logged-in variant — one-click claim (no re-registration).
+  if (session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-background to-muted/30 p-4">
+        <Card className="w-full max-w-md text-center" animate={false}>
+          <CardHeader>
+            <CardTitle className="text-xl">
+              Вас пригласил репетитор {tutor.name}
+            </CardTitle>
+            <CardDescription>
+              Вы вошли как <strong>{session.user.email ?? 'ваш аккаунт'}</strong>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {isTutorAccount ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Вы вошли как репетитор. Чтобы принять приглашение, войдите в
+                  аккаунт ученика.
+                </p>
+                <Button
+                  onClick={handleSignOutToForm}
+                  className="w-full"
+                  size="lg"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  Выйти и войти как ученик
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  onClick={handleClaimWithSession}
+                  className="w-full"
+                  size="lg"
+                  disabled={claiming}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  {claiming ? 'Подключение...' : `Присоединиться к репетитору ${tutor.name}`}
+                </Button>
+                {claimError && (
+                  <p className="text-sm text-destructive">{claimError}</p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleSignOutToForm}
+                  className="text-sm text-muted-foreground hover:underline"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  Это не мой аккаунт — выйти
+                </button>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
