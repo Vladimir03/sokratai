@@ -260,3 +260,4 @@ Deno.serve(async (req) => {
 });
 
 // deploy-touch: warn-only nonce (ef11804) — force sync-triggered redeploy
+// deploy-touch: server-side state store (7b8d39c) — force sync-triggered redeploy

@@ -134,3 +134,5 @@ Deno.serve(async (req) => {
     },
   });
 });
+
+// deploy-touch: server-side state store (7b8d39c) — force sync-triggered redeploy
