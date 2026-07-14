@@ -2557,6 +2557,24 @@ export type Database = {
         }
         Relationships: []
       }
+      oauth_state_store: {
+        Row: {
+          created_at: string
+          handle: string
+          payload: Json
+        }
+        Insert: {
+          created_at?: string
+          handle: string
+          payload: Json
+        }
+        Update: {
+          created_at?: string
+          handle?: string
+          payload?: Json
+        }
+        Relationships: []
+      }
       onboarding_analytics: {
         Row: {
           completed_at: string | null
