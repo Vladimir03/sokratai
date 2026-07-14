@@ -403,13 +403,21 @@ deriveIntendedRole path-guard, findOrCreateUser, mintSession, assignTutorRoleIfN
 
 `InvitePage` (`/invite/:code`) на маунте проверяет `getSession()` + best-effort `rpc('is_tutor')`: сессия ученика → карточка «Присоединиться к репетитору {имя}» (прямой `claimInvite`, `already_linked` = успех); сессия репетитора → предупреждение + «Выйти» (авто-claim для tutor запрещён). Ветки «email уже зарегистрирован» ОБЯЗАНЫ сохранять `pending_invite_code` в localStorage + переключать на login-режим — иначе привязка теряется навсегда (баг 2026-07-14: QR-инвайт зарегистрированного ученика молча не привязывал).
 
-## OAuth state — компактный формат <255 символов (2026-07-14)
+## OAuth state — компактный формат <255 символов + nonce-cookie (2026-07-14)
 
-VK ID портил наш ~350-символьный state (PKCE-verifier внутри) → системный `invalid_state` у КАЖДОГО входа. Инварианты:
-- State строится ТОЛЬКО через `buildCompactStatePayload` (короткие ключи `r/o/i/v/p/f/t/n`, path-only redirect, verifier 32 байта = RFC-минимум 43 символа) — итог ~200 символов. **Никогда не класть в state полные URL/UUID-nonce/длинные значения.**
-- Callback'и используют `verifyStateDetailed` + `normalizeStatePayload` (принимает и legacy long-key формат) и при провале редиректят с PII-free диагностикой `&why=sig|ttl|malformed|missing_fields&len=<N>` — одна реальная попытка входа даёт точный диагноз.
+VK ID портил наш ~350-символьный state (PKCE-verifier внутри) → системный `invalid_state` у КАЖДОГО входа. Инварианты (+ фиксы ревью ChatGPT-5.6 р.1):
+- State строится ТОЛЬКО через `buildCompactStatePayload` (короткие ключи `r/o/i/v/p/f/t/n`, path-only redirect ≤120 симв., verifier 32 байта = RFC-минимум 43 символа, promo/ref ≤32) и подписывается ТОЛЬКО через **`signStateBounded`** — жёсткий бюджет `MAX_STATE_CHARS=240` (переполнение → drop promo/ref → drop path). **Никогда не класть в state полные URL/UUID-nonce/длинные значения и не подписывать голым `signState` в init.**
+- **Login-CSRF binding:** init ставит HttpOnly-cookie `sok_oauth_nonce_{vk|yandex}` (= `n` из state, `Path=/functions/v1/`, SameSite=Lax) через ручной 302 (`Response.redirect` не даёт заголовков); callback обязан звать `verifyNonceCookie` ДО использования payload. HMAC доказывает целостность, но НЕ принадлежность браузеру — без cookie атакующий скармливает жертве свой callback-URL и логинит её в свой аккаунт. Legacy-state (без `n`) exempt только на rollout-окно.
+- Callback'и используют `verifyStateDetailed` + `normalizeStatePayload` (принимает и legacy long-key формат) и при провале редиректят с PII-free диагностикой `&why=sig|ttl|malformed|missing_fields|nonce_cookie_missing|nonce_mismatch&len=<N>`.
 - `STATE_TTL_MS` = 30 мин (школьник на SMS-подтверждении легко превышает 10).
 - Тексты `OAUTH_CALLBACK_ERRORS` (`src/lib/authErrors.ts`) — провайдер-нейтральные («сервис входа»), никогда не называть конкретного провайдера; префиксные коды `vk_*`/`yandex_*` ловит `translateProviderOAuthError`.
+
+## Доп. инварианты фиксов ревью (2026-07-14, р.1)
+
+- **`claim-invite` — серверный гейт репетитора:** аккаунт с ролью `tutor` получает **403 `TUTOR_ACCOUNT`** (проверка `user_roles`, сбой проверки → 500, НЕ fail-open). Клиентский `rpc('is_tutor')` в InvitePage — только UX (спрятать кнопку), читать `{data, error}` явно (`supabase.rpc` НЕ бросает исключений — молчаливый error = «ученик» = fail-open).
+- **`ResetPassword` signOut:** проверять `{error}`; на сбое (RU DPI) — гарантированный `signOut({ scope: "local" })`, иначе recovery-сессия остаётся жить локально.
+- **auth-email-hook:** signup-fallback = корень `sokratai.ru`, НИКОГДА `/tutor/home` (правило #9 — фолбэк общий для студентов); НЕ логировать exception-объект `new URL(...)` (в message вшита входная строка с token) и email получателя (правило #10).
+- **`scripts/check-edge-deploy.mjs`:** зелёный вывод ТОЛЬКО по явному allow-list статусов; 5xx = failure, все таймауты = exit 2 (inconclusive) — никогда не «OK вычитанием».
 
 ## История
 
