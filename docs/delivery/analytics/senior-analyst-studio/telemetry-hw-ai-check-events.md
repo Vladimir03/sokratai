@@ -77,8 +77,43 @@ where c.event_type = 'check_completed'
 group by 1 order by 2 desc;
 ```
 
-## Экспорт для аналитики
+## Экспорт для аналитики (обезличенный, той же солью)
 
-Когда понадобится отдать Кате — обезличить так же, как в `export-hw-check-anonymized.sql`
-(хешировать `student_id`/`tutor_id`/`task_id`/`task_state_id` той же солью → стабильная связка с
-ретроспективной выгрузкой по `student_anon`/`task_id`). Сырые id наружу не отдавать.
+Обезличиваем raw id той же солью и теми же префиксами, что в `export-hw-check-anonymized.sql` →
+`task_state_id` / `student_anon` / `task_id` совпадают с ретроспективной выгрузкой → таблицы
+джойнятся. Свободного текста в телеметрии нет by design.
+
+```sql
+with params as (select 'CHANGE_ME__HW_EXPORT_SALT_2026'::text as salt)  -- ТА ЖЕ соль, что в основном экспорте
+select
+  e.event_type, e.occurred_at,
+  'ts_'  || substr(md5(e.task_state_id::text || p.salt), 1, 10) as task_state_id,
+  'stu_' || substr(md5(e.student_id::text    || p.salt), 1, 10) as student_anon,
+  'tut_' || substr(md5(e.tutor_id::text      || p.salt), 1, 10) as tutor_anon,
+  'asg_' || substr(md5(e.assignment_id::text || p.salt), 1, 10) as assignment_anon,
+  'tsk_' || substr(md5(e.task_id::text       || p.salt), 1, 10) as task_id,
+  e.subject, e.check_format, e.task_kind, e.kim_number, e.max_score,
+  e.verdict, e.confidence, e.error_type, e.failure_reason, e.ai_score,                    -- check_completed
+  e.correction_kind, e.tutor_score_override, e.ai_score_at_correction, e.override_delta,  -- tutor_correction
+  e.meta
+from hw_ai_check_events e cross join params p
+order by e.occurred_at;
+```
+
+## Как связать два файла
+
+| | Файл 1 — выгрузка задач (`export-hw-check-anonymized.sql`) | Файл 2 — телеметрия (этот экспорт) |
+|---|---|---|
+| Грейн | 1 строка = (ученик × задача), **итоговое** состояние | 1 строка = **событие** (проверка/правка); N на задачу |
+| Период | ретроспектива, весь период | вперёд, с момента включения |
+| Внутри | ai_score, правки репетитора, override_delta (F1/F2), контекст | verdict, confidence, error_type, failure_reason, тайминг |
+| Ключ | `task_state_id` | `task_state_id` (+ `event_type`) |
+
+- **Джойн — по `task_state_id`** (одна соль → хеши совпадают). Один `task_state_id`: в Файле 1 = 1 строка
+  (итог), в Файле 2 = N событий (история проверок этой задачи).
+- **Где что брать:** финальный балл / правки репетитора / стратификация → Файл 1. Вердикт / уверенность /
+  тип ошибки / причина сбоя / error-rate по типам → Файл 2.
+- **`event_type`:** `check_completed` несёт verdict/confidence/error_type/failure_reason; `tutor_correction`
+  — correction_kind/override_delta. Фильтровать по нему.
+- **Файл 2 пуст, пока телеметрия не пишет** (после применения миграции Lovable + первых проверок).
+  Запускать к нужному окну (2–4 недели).
