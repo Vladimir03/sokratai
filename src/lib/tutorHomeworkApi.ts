@@ -117,7 +117,7 @@ export interface CreateAssignmentTask {
    */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** CEFR-level fix (2026-05-29): явный уровень для языковых задач; null → авто-детект. */
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ этого номера. */
   kim_number?: number | null;
   /**
@@ -189,7 +189,7 @@ export interface HomeworkTemplateTask {
   /** Explicit task_kind (вкл. 'speaking'); без него reuse откатывал в numeric. */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
   /** CEFR-уровень — пишется только для языковых задач (french/english/spanish). */
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ — round-trips через шаблон (grading по ФИПИ). */
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии round-trip через шаблон. */
@@ -733,7 +733,7 @@ export interface TutorHomeworkAssignmentDetails {
     /** voice-speaking-mvp: 'speaking' для устных задач (round-trips on edit). */
     task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
     /** CEFR-level fix: round-trips on edit so the «Уровень» selector preserves value. */
-    cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+    cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
     /** Phase 2 (2026-06-21): № КИМ — round-trips on edit (grading по ФИПИ). */
     kim_number?: number | null;
     /** Criteria-grading feature (2026-06): структурные критерии — round-trip on edit. */
@@ -1512,7 +1512,7 @@ export interface UpdateAssignmentTask {
   /** voice-speaking-mvp: explicit 'speaking' persists as-is; else backend derives. */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** CEFR-level fix: явный уровень для языковых задач; null → авто-детект. */
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   /** Phase 2 (2026-06-21): № КИМ из KB → grading по критериям ФИПИ. */
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии (любой предмет). */

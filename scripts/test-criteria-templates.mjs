@@ -57,6 +57,8 @@ const tutorOnly = (t) => t.filter((c) => c.kind === "tutor_only");
 const SUM_FORMATS = [
   ["french", "DELF B1 production écrite — exprimez votre point de vue", 25, 25, 0],
   ["french", "DELF B2 production écrite — essai argumenté", 25, 25, 0],
+  ["french", "DELF A1 production écrite — écrivez une carte postale", 25, 25, 0],
+  ["french", "DELF A1 production orale — présentez-vous simplement", 25, 23, 1],
   ["french", "DELF A2 production écrite — décrire vos dernières vacances", 25, 25, 0],
   ["french", "DELF A2 production orale — présentez votre ville natale", 25, 23, 1],
   ["french", "DELF B1 production orale — expression d'un point de vue", 25, 23, 1],
@@ -138,10 +140,30 @@ test("cefr_level forces the rubric level over text heuristic", () => {
       cefr_level: cefr,
     }).methodology;
 
+  assert.match(methodologyFor("A1"), /A1/, "cefr_level=A1 → A1 methodology");
   assert.match(methodologyFor("A2"), /A2/, "cefr_level=A2 → A2 methodology");
   assert.match(methodologyFor("B2"), /B2/, "cefr_level=B2 → B2 methodology");
   // null → авто-детект: нейтральный текст падает в дефолт B1 (прежнее поведение).
   assert.match(methodologyFor(null), /B1/, "cefr_level=null → auto-detect (B1 default)");
+});
+
+// A1-уровень (2026-07-14, запрос Эмилии): при feedback_language='auto' A1 (как A2)
+// должен давать РУССКИЕ объяснения, НЕ иммерсию. Ловит регрессию useTarget
+// (A1 обязан быть в русской ветке вместе с A2).
+test("A1 auto feedback language → Russian explanations (not immersion)", () => {
+  const r = resolveSubjectRubric({
+    subject: "french",
+    exam_type: "ege",
+    kim_number: null,
+    task_kind: "extended",
+    task_text: "DELF A1 — écrivez une carte postale.",
+    tutor_rubric: null,
+    cefr_level: "A1",
+    feedback_language: "auto",
+  });
+  assert.match(r.methodology, /A1/, "A1 methodology resolved");
+  assert.ok(r.response_language_instruction, "response_language_instruction present for A1 french");
+  assert.match(r.response_language_instruction, /ПО-РУССКИ/, "A1 auto → Russian branch (mirror A2)");
 });
 
 // strict-criteria-grading (2026-06-29): `grading_discipline` клауза строгости.

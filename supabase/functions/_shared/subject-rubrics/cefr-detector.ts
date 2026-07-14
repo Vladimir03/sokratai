@@ -18,9 +18,9 @@
 
 import type { CefrLevel } from "./types.ts";
 
-const EXPLICIT_CEFR_RE = /\b(A2|B1\.[12]|B1|B2\.[12]|B2|C1)\b/i;
-const DELF_RE = /\bDELF\s*(A2|B1|B2)\b/i;
-const DELE_RE = /\bDELE\s*(A2|B1|B2|C1)\b/i;
+const EXPLICIT_CEFR_RE = /\b(A1|A2|B1\.[12]|B1|B2\.[12]|B2|C1)\b/i;
+const DELF_RE = /\bDELF\s*(A1|A2|B1|B2)\b/i;
+const DELE_RE = /\bDELE\s*(A1|A2|B1|B2|C1)\b/i;
 const IELTS_RE = /\bIELTS\s*([4-9](?:\.5)?)\b/i;
 const TOEFL_RE = /\bTOEFL\s*(?:iBT)?\s*([0-9]{2,3})\b/i;
 // JS `\b` treats only ASCII [A-Za-z0-9_] as word chars, so /\bЕГЭ\b/ NEVER
@@ -57,7 +57,7 @@ function toeflScoreToCefr(score: number): CefrLevel {
  */
 function normaliseExplicitCefr(raw: string): CefrLevel {
   const upper = raw.toUpperCase().replace(/\.\d+$/, "");
-  if (upper === "A2" || upper === "B1" || upper === "B2" || upper === "C1") {
+  if (upper === "A1" || upper === "A2" || upper === "B1" || upper === "B2" || upper === "C1") {
     return upper;
   }
   return "B1";

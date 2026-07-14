@@ -119,7 +119,7 @@ export interface DraftTask {
    * уровень рубрики на бэкенде (resolveSubjectRubric). Селектор «Уровень»
    * показывается только для foreign-language subjects.
    */
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   /**
    * № КИМ задачи (Phase 2, 2026-06-21 → редактируем с unified-task-model F2,
    * 2026-07-05: каскад «Тип → № КИМ → Тема» прямо в карточке конструктора —
@@ -180,7 +180,7 @@ export interface MetaState {
    * subjects (french/english/spanish) с письменными/устными задачами — иначе AI
    * молча грейдит по B1 (баг Эмилии). null → не задан (валидация заблокирует save).
    */
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   /**
    * Язык AI-feedback (Phase 11, 2026-05-31), homework_tutor_assignments.feedback_language.
    * 'auto' (default) — A2 русский / B1+ изучаемый; 'russian' / 'target' — override.

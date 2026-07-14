@@ -14,16 +14,16 @@
  * нужен только явный человекочитаемый маркер, который репетитор сам вписал.
  */
 
-export type CefrLevel = 'A2' | 'B1' | 'B2' | 'C1';
+export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1';
 
 // Safari < 16.4 не поддерживает lookbehind (.claude/rules/80-cross-browser.md) —
 // используем capturing groups, без lookbehind/lookahead на Unicode-границах.
-const DELF_DELE_RE = /\b(?:DELF|DELE)\s*(A2|B1|B2|C1)\b/i;
-const EXPLICIT_CEFR_RE = /\b(A2|B1|B2|C1)\b/;
+const DELF_DELE_RE = /\b(?:DELF|DELE)\s*(A1|A2|B1|B2|C1)\b/i;
+const EXPLICIT_CEFR_RE = /\b(A1|A2|B1|B2|C1)\b/;
 
 function normalize(raw: string): CefrLevel | null {
   const u = raw.toUpperCase();
-  return u === 'A2' || u === 'B1' || u === 'B2' || u === 'C1' ? u : null;
+  return u === 'A1' || u === 'A2' || u === 'B1' || u === 'B2' || u === 'C1' ? u : null;
 }
 
 /**

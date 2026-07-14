@@ -295,7 +295,7 @@ export interface EvaluateStudentAnswerParams {
    * CEFR-level fix (2026-05-29): forces the language rubric level (A2/B1/B2),
    * overriding task_text heuristics. null → auto-detect.
    */
-  cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
+  cefrLevel?: "A1" | "A2" | "B1" | "B2" | "C1" | null;
   /**
    * Assignment-level feedback language (Phase 11, 2026-05-31). 'auto' (default)
    * → A2 русский / B1+ изучаемый; 'russian' / 'target' — явный override.
@@ -383,7 +383,7 @@ export interface GenerateHintParams {
    */
   taskKind?: "numeric" | "extended" | "proof" | "speaking" | null;
   /** Explicit CEFR level («Уровень» selector); forces language rubric level. CEFR-level fix. */
-  cefrLevel?: "A2" | "B1" | "B2" | "C1" | null;
+  cefrLevel?: "A1" | "A2" | "B1" | "B2" | "C1" | null;
   /** See EvaluateStudentAnswerParams.feedbackLanguage (Phase 11). */
   feedbackLanguage?: "auto" | "russian" | "target" | null;
   conversationHistory: GuidedConversationHistoryMessage[];

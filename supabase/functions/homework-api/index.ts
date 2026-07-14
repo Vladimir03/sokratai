@@ -414,7 +414,7 @@ const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
 const VALID_EXAM_TYPES = ["ege", "oge"] as const;
-const VALID_CEFR_LEVELS = ["A2", "B1", "B2", "C1"] as const;
+const VALID_CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 
 /**
  * Normalize a client-supplied CEFR level for `homework_tutor_tasks.cefr_level`
@@ -422,9 +422,9 @@ const VALID_CEFR_LEVELS = ["A2", "B1", "B2", "C1"] as const;
  * `null` preserves the previous text-heuristic behaviour; an explicit value
  * forces the language rubric level in `resolveSubjectRubric`.
  */
-function normalizeCefrLevel(v: unknown): "A2" | "B1" | "B2" | "C1" | null {
+function normalizeCefrLevel(v: unknown): "A1" | "A2" | "B1" | "B2" | "C1" | null {
   return typeof v === "string" && (VALID_CEFR_LEVELS as readonly string[]).includes(v)
-    ? (v as "A2" | "B1" | "B2" | "C1")
+    ? (v as "A1" | "A2" | "B1" | "B2" | "C1")
     : null;
 }
 
@@ -9446,6 +9446,10 @@ async function runStudentAnswerGrading(args: {
     recentMessages,
     feedbackKind,
   } = args;
+  // Шаг-1 инструментирование (2026-07-12): сквозная латентность грейдинга
+  // (резолв фото + OCR + вызов модели + вердикт) → hw_ai_check_events.latency_ms.
+  // Best-effort телеметрия ниже; на грейдинг/баллы не влияет.
+  const gradingStartedAt = Date.now();
   const { currentState, currentOrder, stateByOrder, sortedOrders, tasks } = ctx;
 
   // Initialize available_score if null (backward compat for old threads)
@@ -9519,8 +9523,8 @@ async function runStudentAnswerGrading(args: {
       ? task.task_kind
       : null,
     // CEFR-level fix (2026-05-29): explicit tutor level forces the language rubric
-    // level (A2/B1/B2/C1) — иначе детект из task_text + дефолт B1 (баг Эмилии).
-    cefrLevel: (task.cefr_level === "A2" || task.cefr_level === "B1" || task.cefr_level === "B2" || task.cefr_level === "C1")
+    // level (A1/A2/B1/B2/C1) — иначе детект из task_text + дефолт B1 (баг Эмилии).
+    cefrLevel: (task.cefr_level === "A1" || task.cefr_level === "A2" || task.cefr_level === "B1" || task.cefr_level === "B2" || task.cefr_level === "C1")
       ? task.cefr_level
       : null,
     // Phase 11 (2026-05-31): assignment-level feedback language → response_language_instruction.
@@ -9808,6 +9812,8 @@ async function runStudentAnswerGrading(args: {
       ? (result as Record<string, unknown>).failure_reason
       : null,
     ai_score: typeof effectiveAiScore === "number" ? effectiveAiScore : null,
+    latency_ms: Date.now() - gradingStartedAt,
+    image_missing: (result as Record<string, unknown>).failure_reason === "task_image_missing",
     meta: {
       feedback_kind: feedbackKind,
       raw_verdict: result.verdict !== effectiveVerdict ? result.verdict : undefined,
@@ -10669,7 +10675,7 @@ async function handleRequestHint(
     // CEFR-level fix (2026-05-29): forward explicit tutor level to the hint rubric.
     cefrLevel: (() => {
       const cl = (task as { cefr_level?: unknown }).cefr_level;
-      return (cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") ? cl : null;
+      return (cl === "A1" || cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") ? cl : null;
     })(),
     // Phase 11 (2026-05-31): assignment-level feedback language.
     feedbackLanguage: normalizeFeedbackLanguage((assignment as { feedback_language?: unknown })?.feedback_language) ?? "auto",

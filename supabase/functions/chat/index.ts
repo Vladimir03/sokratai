@@ -1268,7 +1268,7 @@ async function processAIRequest(
   let resolvedTaskKind: "numeric" | "extended" | "proof" | null = null;
   let resolvedRubricText: string | null = null;
   // CEFR-level fix (2026-05-29): explicit tutor level for language rubric.
-  let resolvedCefr: "A2" | "B1" | "B2" | "C1" | null = null;
+  let resolvedCefr: "A1" | "A2" | "B1" | "B2" | "C1" | null = null;
   // Phase 11 (2026-05-31): assignment-level feedback language (server-confirmed).
   let resolvedFeedbackLanguage: "auto" | "russian" | "target" = "auto";
   // Phase 8 (2026-05-20): start с client-supplied gender (UI consistency)
@@ -1458,7 +1458,7 @@ async function processAIRequest(
             resolvedRubricText = rubric;
           }
           const cl = (taskRow as { cefr_level?: unknown }).cefr_level;
-          if (cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") {
+          if (cl === "A1" || cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") {
             resolvedCefr = cl;
           }
         }

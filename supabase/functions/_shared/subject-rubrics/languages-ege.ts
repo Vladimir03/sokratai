@@ -39,9 +39,11 @@ type LanguageFormat =
   | "ege-en-monologue" // Task 3 устной части ЕГЭ (voice-speaking-mvp)
   | "oge-en-letter" // ОГЭ письмо (voice-speaking-mvp)
   | "oge-en-monologue" // ОГЭ устная часть Task 3 (voice-speaking-mvp)
+  | "delf-a1-ecrite" // DELF A1 production écrite (2026-07-14, запрос Эмилии)
   | "delf-a2-ecrite" // DELF A2 production écrite (CEFR-level fix 2026-05-29)
   | "delf-b1-ecrite" // DELF B1 production écrite
   | "delf-b2-ecrite" // DELF B2 production écrite
+  | "delf-a1-orale" // DELF A1 production orale (2026-07-14, запрос Эмилии)
   | "delf-a2-orale" // DELF A2 production orale (CEFR-level fix 2026-05-29)
   | "delf-b1-orale" // DELF B1 production orale (voice-speaking-mvp)
   | "delf-b2-orale" // DELF B2 production orale (voice-speaking-mvp)
@@ -122,6 +124,12 @@ function detectLanguageFormat(
   // маршрутизирует прямо в рубрику уровня. A2 теперь имеет собственную рубрику —
   // раньше проваливался в B1.
   if (subject === "french") {
+    if (cefr === "A1") {
+      return {
+        format: oralIntent ? "delf-a1-orale" : "delf-a1-ecrite",
+        cefr: "A1",
+      };
+    }
     if (cefr === "A2") {
       return {
         format: oralIntent ? "delf-a2-orale" : "delf-a2-ecrite",
@@ -208,7 +216,7 @@ const DEFAULT_ROLE = "Ты — наставник по иностранному 
 // assignment-level `feedback_language` + per-task `cefr_level`:
 //   'russian' → объяснения по-русски (примеры на изучаемом)
 //   'target'  → полная иммерсия на изучаемом
-//   'auto'    → A2 → русский, B1+ → изучаемый (педагогический стандарт)
+//   'auto'    → A1/A2 → русский, B1+ → изучаемый (педагогический стандарт)
 //
 // Возвращает null для не-языковых subjects (физика/математика не трогаем).
 
@@ -231,7 +239,7 @@ export function buildResponseLanguageInstruction(
     ? true
     : feedbackLanguage === "russian"
     ? false
-    : cefr !== "A2"; // auto: A2 → русский, B1/B2/C1 → изучаемый
+    : cefr !== "A2" && cefr !== "A1"; // auto: A1/A2 → русский, B1/B2/C1 → изучаемый
 
   if (useTarget) {
     return [
@@ -317,6 +325,22 @@ const METHODOLOGY_DELF_A2_ECRITE = [
   "ВАЖНО: на A2 НЕ требуй сложной аргументации, subjonctif, нюансов B1/B2.",
 ].join("\n");
 
+// A1-уровень (2026-07-14, запрос Эмилии). DRAFT — валидирует Эмилия на первых
+// работах. САМЫЙ начальный уровень: короткие простые фразы о себе и повседневности,
+// présent, ~40 слов. НЕ требуй passé composé/futur, аргументации, объёма A2+.
+const METHODOLOGY_DELF_A1_ECRITE = [
+  "DELF A1 — Production écrite (~40 mots, 25 баллов). Уровень A1: самые простые короткие тексты о себе и повседневности (carte postale, message court, fiche / formulaire, несколько простых фраз).",
+  "1. Respect de la consigne (2 балла): тип текста (carte postale / message / fiche), тема и объём (~40 слов) соблюдены.",
+  "2. Capacité à décrire / informer (4 балла): очень простое сообщение о себе, семье, вкусах, планах — короткими фразами.",
+  "3. Capacité à interagir (4 балла): базовые речевые формулы (saluer, se présenter, remercier, inviter простыми словами).",
+  "4. Cohérence et cohésion (3 балла): элементарные связки (et, mais, parce que) и знаки препинания; связь между фразами минимальна — это нормально для A1.",
+  "5. Lexique étendue (2 балла): элементарный словарь A1 (la famille, les loisirs, les nombres, les jours, les goûts) достаточен для темы.",
+  "6. Lexique maîtrise (2 балла): орфография самых частотных слов; ошибки допустимы, если смысл понятен.",
+  "7. Morphosyntaxe étendue (4 балла): présent частотных глаголов (être, avoir, aller, faire, verbes en -er), простые артикли и предлоги.",
+  "8. Morphosyntaxe maîtrise (4 балла): базовое спряжение в présent, простое согласование рода/числа. Ошибки нормальны для A1.",
+  "ВАЖНО: на A1 НЕ требуй passé composé / futur, аргументации, сложных связок или объёма A2+ (~40 слов достаточно). Оценивай доброжелательно — это начальный уровень.",
+].join("\n");
+
 // ⚠ IELTS использует AVERAGE-агрегацию (overall band = среднее 4 критериев,
 // НЕ сумма). Текущий sanitizer (`sanitizeCriteriaBreakdown`) поддерживает
 // только additive (sum) рубрики. Поэтому IELTS отдаёт `criteria = null` —
@@ -390,6 +414,18 @@ const METHODOLOGY_DELF_A2_ORALE = [
   "4. Morphosyntaxe étendue + maîtrise (4+4 = 8 баллов): présent, passé composé, futur proche; простые согласования и спряжения.",
   "5. Système phonologique (2 балла) — оценивает РЕПЕТИТОР, AI пропускает.",
   "ВАЖНО: на A2 НЕ требуй развёрнутой аргументации / дебатов — достаточно простого связного монолога.",
+].join("\n");
+
+// A1-уровень (2026-07-14, запрос Эмилии). DRAFT — валидирует Эмилия.
+const METHODOLOGY_DELF_A1_ORALE = [
+  "DELF A1 — Production orale, monologue très simple (se présenter, parler de soi, 25 баллов).",
+  "AI оценивает по транскрипту (23 балла), произношение оценивает репетитор на слух.",
+  "1. Capacité à se présenter / parler de soi (5 баллов): простые фразы о себе, семье, вкусах, повседневных занятиях.",
+  "2. Capacité à répondre à des questions simples (4 балла): понятные ответы на элементарные вопросы (nom, âge, goûts, habitudes).",
+  "3. Lexique étendue + maîtrise (4+2 = 6 баллов): элементарный словарь повседневных тем + базовая точность.",
+  "4. Morphosyntaxe étendue + maîtrise (4+4 = 8 баллов): présent частотных глаголов; простые согласования рода/числа.",
+  "5. Système phonologique (2 балла) — оценивает РЕПЕТИТОР, AI пропускает.",
+  "ВАЖНО: на A1 достаточно очень простого монолога о себе; НЕ требуй развёрнутых тем, passé composé или аргументации.",
 ].join("\n");
 
 const METHODOLOGY_EGE_EN_MONOLOGUE = [
@@ -539,6 +575,29 @@ const CRITERIA_DELF_A2_ORALE: SubjectCriterionTemplate[] = [
   { label: "Système phonologique", max: 2, kind: "tutor_only" },
 ];
 
+// A1-уровень (2026-07-14, запрос Эмилии). DRAFT — валидирует Эмилия. Σ = 25 (écrite),
+// Σ AI-gradable = 23 + phonétique 2 tutor_only (orale) — та же структура, что A2/B1/B2.
+const CRITERIA_DELF_A1_ECRITE: SubjectCriterionTemplate[] = [
+  { label: "Respect de la consigne", max: 2 },
+  { label: "Capacité à décrire / informer", max: 4 },
+  { label: "Capacité à interagir", max: 4 },
+  { label: "Cohérence et cohésion", max: 3 },
+  { label: "Lexique étendue", max: 2 },
+  { label: "Lexique maîtrise", max: 2 },
+  { label: "Morphosyntaxe étendue", max: 4 },
+  { label: "Morphosyntaxe maîtrise", max: 4 },
+];
+
+const CRITERIA_DELF_A1_ORALE: SubjectCriterionTemplate[] = [
+  { label: "Se présenter / parler de soi", max: 5 },
+  { label: "Répondre à des questions simples", max: 4 },
+  { label: "Lexique étendue", max: 4 },
+  { label: "Lexique maîtrise", max: 2 },
+  { label: "Morphosyntaxe étendue", max: 4 },
+  { label: "Morphosyntaxe maîtrise", max: 4 },
+  { label: "Système phonologique", max: 2, kind: "tutor_only" },
+];
+
 // ⚠ IELTS criteria templates intentionally NOT defined as additive arrays.
 // IELTS overall band = AVERAGE of 4 band-1-9 criteria, incompatible with the
 // sum-aggregating sanitizer (`sanitizeCriteriaBreakdown`). `getLanguagesMethodology`
@@ -579,6 +638,10 @@ export function getLanguagesMethodology(
       methodology = METHODOLOGY_OGE_EN_MONOLOGUE;
       criteria = CRITERIA_OGE_EN_MONOLOGUE;
       break;
+    case "delf-a1-ecrite":
+      methodology = METHODOLOGY_DELF_A1_ECRITE;
+      criteria = CRITERIA_DELF_A1_ECRITE;
+      break;
     case "delf-a2-ecrite":
       methodology = METHODOLOGY_DELF_A2_ECRITE;
       criteria = CRITERIA_DELF_A2_ECRITE;
@@ -590,6 +653,10 @@ export function getLanguagesMethodology(
     case "delf-b2-ecrite":
       methodology = METHODOLOGY_DELF_B2_ECRITE;
       criteria = CRITERIA_DELF_B2_ECRITE;
+      break;
+    case "delf-a1-orale":
+      methodology = METHODOLOGY_DELF_A1_ORALE;
+      criteria = CRITERIA_DELF_A1_ORALE;
       break;
     case "delf-a2-orale":
       methodology = METHODOLOGY_DELF_A2_ORALE;

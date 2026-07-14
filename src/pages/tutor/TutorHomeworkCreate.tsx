@@ -225,7 +225,7 @@ function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnap
       // (каскад в tasks). feedback_language — assignment-level, в metaDirty ниже.
       cefr_level: (() => {
         const cl = assignment.tasks[0]?.cefr_level;
-        return cl === 'A2' || cl === 'B1' || cl === 'B2' || cl === 'C1' ? cl : null;
+        return cl === 'A1' || cl === 'A2' || cl === 'B1' || cl === 'B2' || cl === 'C1' ? cl : null;
       })(),
       feedback_language:
         ((a as { feedback_language?: unknown }).feedback_language === 'russian' ||
@@ -799,7 +799,7 @@ function TutorHomeworkCreateContent() {
     // несут один уровень через каскад). feedback_language — из assignment.
     const firstTaskCefr = existingAssignment.tasks[0]?.cefr_level;
     const prefilledCefr =
-      firstTaskCefr === 'A2' || firstTaskCefr === 'B1' || firstTaskCefr === 'B2' || firstTaskCefr === 'C1'
+      firstTaskCefr === 'A1' || firstTaskCefr === 'A2' || firstTaskCefr === 'B1' || firstTaskCefr === 'B2' || firstTaskCefr === 'C1'
         ? firstTaskCefr
         : null;
     const rawFeedbackLang = (a as { feedback_language?: unknown }).feedback_language;
@@ -2063,7 +2063,7 @@ function TutorHomeworkCreateContent() {
                 id="hw-cefr-level"
                 value={meta.cefr_level ?? ''}
                 onChange={(e) => {
-                  const next = e.target.value === '' ? null : (e.target.value as 'A2' | 'B1' | 'B2' | 'C1');
+                  const next = e.target.value === '' ? null : (e.target.value as 'A1' | 'A2' | 'B1' | 'B2' | 'C1');
                   setMeta({ ...meta, cefr_level: next });
                   // Каскад в tasks state: cefr_level хранится per-task, поэтому
                   // меняем у всех задач сразу. Это также триггерит tasksDirty
@@ -2076,6 +2076,7 @@ function TutorHomeworkCreateContent() {
                 aria-invalid={errors.cefr_level ? 'true' : undefined}
               >
                 <option value="">— выберите уровень —</option>
+                <option value="A1">A1</option>
                 <option value="A2">A2</option>
                 <option value="B1">B1</option>
                 <option value="B2">B2</option>
@@ -2085,7 +2086,7 @@ function TutorHomeworkCreateContent() {
                 <p className="text-sm text-red-500">{errors.cefr_level}</p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  AI проверит работу строго по критериям этого уровня (A2 ≈ 60–80 слов, B1 ≈ 160–180). Применится ко всем задачам ДЗ.
+                  AI проверит работу строго по критериям этого уровня (A1 ≈ 40, A2 ≈ 60–80, B1 ≈ 160–180 слов). Применится ко всем задачам ДЗ.
                 </p>
               )}
             </div>
@@ -2101,7 +2102,7 @@ function TutorHomeworkCreateContent() {
                 className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
                 style={{ fontSize: '16px', touchAction: 'manipulation' }}
               >
-                <option value="auto">Авто (A2 — русский, B1+ — изучаемый)</option>
+                <option value="auto">Авто (A1/A2 — русский, B1+ — изучаемый)</option>
                 <option value="russian">Русский</option>
                 <option value="target">Изучаемый язык</option>
               </select>

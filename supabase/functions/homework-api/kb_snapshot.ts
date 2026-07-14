@@ -42,7 +42,7 @@ export interface KbTaskLike {
 
 const CHECK_FORMATS = new Set(["short_answer", "detailed_solution"]);
 const TASK_KINDS = new Set(["numeric", "extended", "proof", "speaking"]);
-const CEFR_LEVELS = new Set(["A2", "B1", "B2", "C1"]);
+const CEFR_LEVELS = new Set(["A1", "A2", "B1", "B2", "C1"]);
 
 function asCheckFormat(v: unknown): string | null {
   return typeof v === "string" && CHECK_FORMATS.has(v) ? v : null;

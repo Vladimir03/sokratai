@@ -177,7 +177,7 @@ export interface KBTask {
    * рубрику — осознанное решение владельца; publish только модераторами).
    */
   task_kind: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
-  cefr_level: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   grading_criteria_json: GradingCriterion[] | null;
   /** Source task → its canonical public copy (set on source tasks in сократ) */
   published_task_id: string | null;
@@ -230,7 +230,7 @@ export interface CreateKBTaskInput {
   difficulty?: number | null;
   /** unified-task-model M1 (2026-07-05): AI-настройка — паритет с ДЗ. */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   grading_criteria_json?: GradingCriterion[] | null;
 }
 
@@ -257,7 +257,7 @@ export interface UpdateKBTaskInput {
   source_label?: string | null;
   /** unified-task-model M1 (2026-07-05): AI-настройка — паритет с ДЗ. */
   task_kind?: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
-  cefr_level?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefr_level?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   grading_criteria_json?: GradingCriterion[] | null;
 }
 
@@ -345,7 +345,7 @@ export interface HWDraftTask {
    * — path B перестаёт ронять критерии/CEFR/speaking. Optional (старые черновики).
    */
   gradingCriteriaSnapshot?: GradingCriterion[] | null;
-  cefrLevelSnapshot?: 'A2' | 'B1' | 'B2' | 'C1' | null;
+  cefrLevelSnapshot?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   taskKindSnapshot?: 'speaking' | null;
 }
 

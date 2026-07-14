@@ -21,7 +21,7 @@ export type ExamType = "ege" | "oge";
  * CEFR level for language subjects. Auto-detected from task_text or default B1.
  * Maps loosely to ЕГЭ ≈ B2 / ОГЭ ≈ B1 / IELTS 5-6 ≈ B1 / IELTS 6.5+ ≈ B2.
  */
-export type CefrLevel = "A2" | "B1" | "B2" | "C1";
+export type CefrLevel = "A1" | "A2" | "B1" | "B2" | "C1";
 
 /**
  * Resolver input. All fields except `subject` and `task_kind` are best-effort
