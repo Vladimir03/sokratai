@@ -21,6 +21,7 @@ import {
   verifyStateDetailed,
   normalizeStatePayload,
   verifyNonceCookie,
+  NONCE_ENFORCE,
   findOrCreateUser,
   mintSession,
   assignTutorRoleIfNeeded,
@@ -82,13 +83,23 @@ Deno.serve(async (req) => {
     });
   }
   // Login-CSRF guard: the state must belong to THIS browser (nonce cookie set
-  // by oauth-yandex-init). Legacy long-key states are exempt during rollout.
+  // by oauth-yandex-init). Stage 1 = warn-only (NONCE_ENFORCE) — see oauth-helpers.
   const nonceFailure = verifyNonceCookie(req, "yandex", stateRes.payload);
   if (nonceFailure) {
-    return redirectToError("invalid_state", ERR_EVENT, {
-      why: nonceFailure,
-      len: String(state.length),
-    });
+    if (NONCE_ENFORCE) {
+      return redirectToError("invalid_state", ERR_EVENT, {
+        why: nonceFailure,
+        len: String(state.length),
+      });
+    }
+    console.warn(
+      JSON.stringify({
+        event: "oauth_nonce_would_block",
+        provider: "yandex",
+        why: nonceFailure,
+        timestamp: new Date().toISOString(),
+      }),
+    );
   }
   const norm = normalizeStatePayload(stateRes.payload);
   if (!norm.redirectTo) {

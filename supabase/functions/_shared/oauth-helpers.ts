@@ -331,6 +331,19 @@ export function normalizeStatePayload(
 const NONCE_COOKIE_PATH = "/functions/v1/";
 const NONCE_COOKIE_MAX_AGE_SEC = 35 * 60; // outlives STATE_TTL_MS
 
+/**
+ * Two-stage rollout of the nonce check. Stage 1 (false) = WARN-ONLY: callbacks
+ * log `oauth_nonce_would_block` but let the login through. Flip to true ONLY
+ * after BOTH: (a) the cookie-setting inits are confirmed live in prod
+ * (Set-Cookie sok_oauth_nonce_* on the init 302), and (b) prod logs show no
+ * legitimate `oauth_nonce_would_block` events for a few days (cookie-blocking
+ * browsers / Safari quirks would surface here). Enforcing while the OLD init
+ * is still deployed would block EVERY login (compact states carry `n`, but no
+ * cookie gets set) — deploy-order hazard, edge functions deploy via Lovable
+ * sync with unpredictable lag (rule 96 §11a).
+ */
+export const NONCE_ENFORCE = false;
+
 export function nonceCookieName(provider: "vk" | "yandex"): string {
   return `sok_oauth_nonce_${provider}`;
 }
