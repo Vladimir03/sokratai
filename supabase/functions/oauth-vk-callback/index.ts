@@ -234,3 +234,5 @@ Deno.serve(async (req) => {
   );
   return redirectWithSessionHash(redirectTo, minted.session);
 });
+
+// deploy-touch 2026-07-14T13:00 — trigger Lovable watcher redeploy for 3799ac2 (helper-only change); no logic change (rule 96 §11a)
