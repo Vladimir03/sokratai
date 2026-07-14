@@ -95,7 +95,7 @@ interface ChatRequestBody {
 // because after Phase B migration (CLAUDE.md "# Network & Infrastructure"),
 // frontend stores proxy URLs in DB but server-side fetches still go direct.
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
-import { SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
+import { SUPABASE_PROXY_URL, rewriteToDirect } from "../_shared/proxy-url.ts";
 import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
@@ -1202,22 +1202,36 @@ async function processAIRequest(
     if (msg.image_url) {
       console.log("📷 Processing message with image:", msg.image_url.substring(0, 100) + "...");
 
+      // Anti-hallucination note: when the student attached an image but we
+      // can't attach it to the model, the AI must NOT invent the contents.
+      // The general chat has no fail-closed HTTP guard (unlike guided homework)
+      // — instead we tell the model explicitly to ask for a re-send. Without
+      // this, an image dropped for size/network reasons + no typed text
+      // ('[Изображение]' placeholder) → the AI hallucinated a made-up problem
+      // (bug 2026-07-14).
+      const buildDroppedImageContent = (): string => {
+        const note =
+          "[Ученик прислал изображение, но оно не загрузилось. НЕ придумывай его содержание. " +
+          "Попроси прислать фото ещё раз (лучше сжатое) или описать задачу текстом.]";
+        const typed =
+          typeof msg.content === "string" && msg.content.trim() && msg.content.trim() !== "[Изображение]"
+            ? `${msg.content.trim()}\n\n`
+            : "";
+        return `${typed}${note}`;
+      };
+
       if (!isValidImageUrl(msg.image_url)) {
         console.error('[SECURITY] Rejected invalid image URL:', msg.image_url);
-        return {
-          role: msg.role,
-          content: msg.content || "Image was rejected due to security policy",
-        };
+        return { role: msg.role, content: buildDroppedImageContent() };
       }
 
-      // Download and convert to base64 — Lovable gateway doesn't fetch external URLs
-      const base64Url = await fetchImageAsBase64DataUrl(msg.image_url);
+      // Download and convert to base64 — Lovable gateway doesn't fetch external URLs.
+      // rewriteToDirect: fetch the storage object directly (supabase.co) instead
+      // of round-tripping through the api.sokratai.ru VPS proxy (rule 40).
+      const base64Url = await fetchImageAsBase64DataUrl(rewriteToDirect(msg.image_url));
       if (!base64Url) {
-        console.error("📷 Failed to download message image, skipping:", msg.image_url.slice(0, 80));
-        return {
-          role: msg.role,
-          content: msg.content || "Изображение не удалось загрузить",
-        };
+        console.error("📷 Failed to download message image:", msg.image_url.slice(0, 80));
+        return { role: msg.role, content: buildDroppedImageContent() };
       }
 
       return {

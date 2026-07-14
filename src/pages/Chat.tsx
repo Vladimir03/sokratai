@@ -20,6 +20,7 @@ import DevPanel from "@/components/DevPanel";
 import { PageContent } from "@/components/PageContent";
 import { saveChatToSessionCache, loadChatFromSessionCache, clearChatCache } from "@/utils/chatCache";
 import { preloadPyodide } from "@/utils/pyodide";
+import { compressForUpload } from "@/lib/imageCompression";
 import { haptics } from "@/utils/haptics";
 import { useSubscription } from "@/hooks/useSubscription";
 import { SubscriptionBanner, MessageLimitWarning, TrialExpiryReminder } from "@/components/SubscriptionBanner";
@@ -1223,11 +1224,28 @@ export default function Chat() {
       let imageFileName: string | undefined;
       
       if (uploadedFile && user?.id) {
-        const fileName = `${user.id}/${Date.now()}-${uploadedFile.name}`;
-        
+        // Compress before upload: phone photos are routinely 5-10 MB, but the
+        // chat AI edge function refuses to inline anything over 5 MB (MAX_IMAGE_BYTES)
+        // — an uncompressed photo uploaded fine, displayed in the UI, but was
+        // silently dropped server-side, so the AI got only "[Изображение]" and
+        // hallucinated (bug 2026-07-14). compressForUpload → ≤ 4 MB + HEIC re-encode.
+        let fileToUpload = uploadedFile;
+        try {
+          fileToUpload = await compressForUpload(uploadedFile);
+        } catch (compressErr) {
+          console.error('Image compression failed, uploading original:', compressErr);
+          // Non-bomb failure → fall back to original (still gated by the 10 MB
+          // select cap); a >64 MP decompression bomb rethrows to the outer catch.
+          if (compressErr instanceof Error && /слишком больш|too large|мегапикс/i.test(compressErr.message)) {
+            throw compressErr;
+          }
+        }
+
+        const fileName = `${user.id}/${Date.now()}-${fileToUpload.name}`;
+
         const { data, error } = await supabase.storage
           .from('chat-images')
-          .upload(fileName, uploadedFile);
+          .upload(fileName, fileToUpload);
 
         if (error) {
           console.error('Upload error:', error);
