@@ -96,8 +96,9 @@ export interface PulsePayload {
     newTutors7d: number;
     /**
      * ₽, integer — Σ NET-суммы последнего succeeded-платежа plan='tutor_ai_start'
-     * за 35 дней (net = amount − refunded_amount; возвраты учитываются с
-     * миграции 20260715130000).
+     * за 35 дней. net = amount − возвраты из payment_refunds, известные на
+     * момент снапшота (time-aware: недельная Δ показывает момент возврата;
+     * миграция 20260715130000).
      */
     mrr: number;
     weeklyValueTutors: { count: number; names: string[] };
@@ -174,11 +175,17 @@ interface TutorMsgRow {
 }
 
 interface PaymentRow {
+  id: string;
   user_id: string;
   amount: number | string | null;
-  /** Сумма успешных возвратов (миграция 20260715130000); выручка = amount − это. */
-  refunded_amount: number | string | null;
   status: string;
+  created_at: string;
+}
+
+/** Успешный возврат (payment_refunds, миграция 20260715130000). */
+interface RefundRow {
+  payment_id: string;
+  amount: number | string | null;
   created_at: string;
 }
 
@@ -318,7 +325,8 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   }
   const profileByUserId = new Map(profiles.map((p) => [p.id, p]));
 
-  const [tutorStudents, assignments, sas, threads, valueMsgs, tutorMsgs14d, payments, crmRows] = await Promise.all([
+  const [tutorStudents, assignments, sas, threads, valueMsgs, tutorMsgs14d, payments, refunds, crmRows] =
+    await Promise.all([
     fetchAll<TutorStudentRow>(
       (from, to) =>
         db.from("tutor_students").select("tutor_id, status, archived_at, created_at").order("id").range(from, to),
@@ -375,12 +383,25 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       (from, to) =>
         db
           .from("payments")
-          .select("user_id, amount, refunded_amount, status, created_at")
+          .select("id, user_id, amount, status, created_at")
           .eq("plan", "tutor_ai_start")
           .eq("status", "succeeded")
           .order("id")
           .range(from, to),
       "payments",
+    ),
+    // Возвраты — по датам (ревью р.2 P1 #3): агрегат payments.refunded_amount
+    // здесь НЕ используется — он ретроактивно занижал бы исторический
+    // снапшот mrrAt(now−7d), и недельная Δ не показывала бы момент возврата.
+    fetchAll<RefundRow>(
+      (from, to) =>
+        db
+          .from("payment_refunds")
+          .select("payment_id, amount, created_at")
+          .eq("status", "succeeded")
+          .order("id")
+          .range(from, to),
+      "payment_refunds",
     ),
     fetchAll<CrmRow>(
       (from, to) =>
@@ -517,11 +538,29 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     paymentsByUserId.set(p.user_id, list);
   }
 
+  // Возвраты по платежу, отсортированные хронологически (для time-aware net)
+  const refundsByPaymentId = new Map<string, RefundRow[]>();
+  for (const r of refunds) {
+    const list = refundsByPaymentId.get(r.payment_id) ?? [];
+    list.push(r);
+    refundsByPaymentId.set(r.payment_id, list);
+  }
+
+  /** Сумма успешных возвратов платежа, известных НА МОМЕНТ asOf. */
+  const refundedAsOf = (paymentId: string, toIso: string): number => {
+    let sum = 0;
+    for (const r of refundsByPaymentId.get(paymentId) ?? []) {
+      if (r.created_at <= toIso) sum += Number(r.amount ?? 0);
+    }
+    return sum;
+  };
+
   /**
    * MRR на момент asOf: Σ NET-суммы ПОСЛЕДНЕГО succeeded-платежа каждого
-   * репетитора за 35 дней до asOf. net = amount − refunded_amount (миграция
-   * 20260715130000): частичный возврат уменьшает вклад, полный — обнуляет
-   * (clamp на 0 — возврат не может уйти в минус по чужим платежам).
+   * репетитора за 35 дней до asOf. net = amount − возвраты, известные к asOf
+   * (time-aware, ревью р.2 P1 #3): исторический снапшот mrrAt(now−7d) НЕ
+   * видит сегодняшний возврат → недельная Δ честно показывает падение в
+   * момент возврата. Clamp на 0 — вклад платежа не уходит в минус.
    */
   const mrrAt = (asOf: Date): number => {
     const to = asOf.toISOString();
@@ -534,7 +573,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
         if (last == null || p.created_at > last.created_at) last = p;
       }
       if (last) {
-        const net = Number(last.amount ?? 0) - Number(last.refunded_amount ?? 0);
+        const net = Number(last.amount ?? 0) - refundedAsOf(last.id, to);
         sum += Math.max(net, 0);
       }
     }

@@ -182,10 +182,20 @@ async function handleRefundSucceeded(
   }
 
   const apiRefund = verification.data;
+  if (apiRefund.status === "canceled") {
+    // Финальное состояние: succeeded он уже не станет. Настоящий
+    // refund.succeeded для canceled-возврата YooKassa не шлёт → подделка.
+    console.log(`Refund ${refundId} is canceled in API - ignoring`);
+    return jsonResponse(200, { success: true, message: "Refund canceled" });
+  }
   if (apiRefund.status !== "succeeded") {
-    // Возврат в обработке/отменён — учитываем только успешные.
-    console.log(`Refund ${refundId} not succeeded (api status=${apiRefund.status}) - ignoring`);
-    return jsonResponse(200, { success: true, message: "Refund not succeeded" });
+    // Событие refund.succeeded ФИНАЛЬНОЕ — второго не будет. Если API ещё
+    // отдаёт pending (лаг webhook↔API), ответ 200 потерял бы возврат навсегда
+    // (ревью р.2 P1 #4) → 500, YooKassa ретраит до консистентности.
+    console.error(
+      `Refund ${refundId} not yet succeeded in API (status=${apiRefund.status}) - asking for retry`,
+    );
+    return jsonResponse(500, { error: "Refund state not settled" });
   }
 
   const paymentId = apiRefund.payment_id;
@@ -247,8 +257,19 @@ Deno.serve(async (req) => {
     return jsonResponse(405, { error: "Method not allowed" });
   }
 
+  // Битый JSON — единственный класс, где ретраи бесполезны (тело не изменится)
+  // → 200. Остальные неожиданные исключения — 500 (ревью р.2 P2 #5): раньше
+  // общий catch отдавал 200 и транзиентный сбой на настоящем money-событии
+  // подтверждался без обработки.
+  let body: YooKassaWebhookEvent;
   try {
-    const body: YooKassaWebhookEvent = await req.json();
+    body = await req.json();
+  } catch (parseError) {
+    console.error("Webhook body parse failed:", parseError);
+    return jsonResponse(200, { success: false, error: "Invalid body" });
+  }
+
+  try {
     console.log("Received YooKassa webhook:", JSON.stringify(body, null, 2));
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -266,13 +287,21 @@ Deno.serve(async (req) => {
     }
 
     // ── Trust anchor #1: наша строка payments ────────────────────────────────
+    // maybeSingle (ревью р.2 P0 #1): error = транзиентный сбой БД/PostgREST →
+    // 500 (YooKassa ретраит); data == null = строки реально нет (подделка) →
+    // 200. Раньше .single() схлопывал оба случая в 200 — настоящая оплата при
+    // мигнувшей БД навсегда оставалась без активации (ретраев больше нет).
     const { data: paymentRow, error: fetchError } = await supabase
       .from("payments")
       .select("id, user_id, amount, status, subscription_activated_at, plan")
       .eq("id", paymentId)
-      .single();
+      .maybeSingle();
 
-    if (fetchError || !paymentRow) {
+    if (fetchError) {
+      console.error(`Payment ${paymentId} lookup failed (transient):`, fetchError);
+      return jsonResponse(500, { error: "Lookup unavailable" });
+    }
+    if (!paymentRow) {
       console.error(`Payment ${paymentId} not found in database - possible forged webhook`);
       return jsonResponse(200, { success: false, error: "Validation failed" });
     }
@@ -341,7 +370,11 @@ Deno.serve(async (req) => {
       }
 
       // Статус в payments — верифицированный из API (не из body) + сырой body
-      // для диагностики.
+      // для диагностики. Сбой записи → 500 ДО активации (ревью р.2 P1 #2):
+      // иначе подписка активировалась бы при строке pending — платёж выпадал
+      // из MRR и ошибочно возвращал интро-цену 200₽ (create-payment считает
+      // «первый платёж» отсутствием succeeded-строк). Активации ещё не было —
+      // ретрай YooKassa безопасно повторит всё с начала.
       const { error: updatePaymentError } = await supabase
         .from("payments")
         .update({
@@ -352,6 +385,7 @@ Deno.serve(async (req) => {
         .eq("id", paymentId);
       if (updatePaymentError) {
         console.error("Failed to update payment status:", updatePaymentError);
+        return jsonResponse(500, { error: "Status update failed" });
       }
 
       // ── Атомарная активация (P0-2): claim + profiles + audit одной
@@ -428,7 +462,9 @@ Deno.serve(async (req) => {
       })
       .eq("id", paymentId);
     if (updatePaymentError) {
+      // Сбой записи легитимного статуса → 500, YooKassa ретраит (ревью р.2 #2).
       console.error("Failed to update payment status:", updatePaymentError);
+      return jsonResponse(500, { error: "Status update failed" });
     }
 
     if (verifiedStatus === "canceled") {
@@ -438,8 +474,9 @@ Deno.serve(async (req) => {
 
     return jsonResponse(200, { success: true });
   } catch (error) {
+    // Неожиданное исключение на настоящем money-событии → 500: YooKassa
+    // ретраит, событие не теряется (parse-ошибки обработаны выше 200-м).
     console.error("Error processing webhook:", error);
-    // Parse/unexpected errors: 200 (ретраи бесполезны), инцидент в логах.
-    return jsonResponse(200, { success: true, error: "Processing error logged" });
+    return jsonResponse(500, { error: "Processing failed" });
   }
 });
