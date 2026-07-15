@@ -47,8 +47,8 @@
 ## Stage 2 — Telegram-дайджест (`ceo-telegram-digest`, 2026-07-15)
 
 Edge с guard `SCHEDULER_SECRET` (verbatim `tutor-plan-expiry-reminder`), body `{mode: weekly|daily}`; `verify_jwt=false`. Получатели — секрет `CEO_DIGEST_CHAT_IDS` (comma-separated chat id; получатель ОБЯЗАН хоть раз нажать Start у бота, иначе Telegram 403). Отправка — `_shared/telegram-send.ts` (извлечён из reminder'а; новый потребитель telegram-отправки → импортировать его, не копипастить).
-- **weekly** (cron пн 04:00 UTC = 07:00 МСК): реюз `computePulse` — шапка + пре-воронка + движение воронки за 7д (по `stageDates`, полный список репетиторов = Map из stuck-списков поведенческих ступеней) + топ-3 «кому написать» (at-risk → свежие застрявшие 1–4 с подсказкой `STUCK_HINTS`).
-- **daily** (cron 05:00 UTC = 08:00 МСК): события за 24ч — новые `tutors` (канал через экспортированный `resolveChannel`), оплаты по `payments.subscription_activated_at` (точный момент активации, не created_at), новые триалы владельцев tutors-строк. **Всё пусто → НЕ шлём** (`outcome='empty'`).
+- **weekly** (cron `0 6 * * 1` = пн 09:00 МСК): реюз `computePulse` — шапка + пре-воронка + движение воронки за 7д (по `stageDates`, полный список репетиторов = Map из stuck-списков поведенческих ступеней) + топ-3 «кому написать» (at-risk → свежие застрявшие 1–4 с подсказкой `STUCK_HINTS`).
+- **daily** (cron `0 6 * * *` = 09:00 МСК): события за 24ч — новые `tutors` (канал через экспортированный `resolveChannel`), оплаты по `payments.subscription_activated_at` (точный момент активации, не created_at), новые триалы владельцев tutors-строк. **Всё пусто → НЕ шлём** (`outcome='empty'`).
 - **Идемпотентность**: `ceo_digest_log` UNIQUE(mode, period_key=МСК-дата), claim-first (upsert ignoreDuplicates → 0 строк = уже обработан); ВСЕ отправки упали → claim снимается + 500 (ручной повтор безопасен). Имена в личку владельцев допустимы (не analytics_events).
 - **Cron — через Lovable Management API, НЕ миграцией** (rule 95). Ручной тест: `curl -X POST .../ceo-telegram-digest -H "Authorization: Bearer $SCHEDULER_SECRET" -d '{"mode":"daily"}'`.
 
