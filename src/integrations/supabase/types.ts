@@ -2638,6 +2638,44 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_refunds: {
+        Row: {
+          amount: number
+          created_at: string
+          currency: string
+          id: string
+          payment_id: string
+          status: string
+          webhook_data: Json | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          currency?: string
+          id: string
+          payment_id: string
+          status: string
+          webhook_data?: Json | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          currency?: string
+          id?: string
+          payment_id?: string
+          status?: string
+          webhook_data?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_refunds_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payments: {
         Row: {
           amount: number
@@ -2646,6 +2684,7 @@ export type Database = {
           id: string
           idempotency_key: string | null
           plan: string | null
+          refunded_amount: number
           status: string
           subscription_activated_at: string | null
           subscription_days: number
@@ -2661,6 +2700,7 @@ export type Database = {
           id: string
           idempotency_key?: string | null
           plan?: string | null
+          refunded_amount?: number
           status?: string
           subscription_activated_at?: string | null
           subscription_days?: number
@@ -2676,6 +2716,7 @@ export type Database = {
           id?: string
           idempotency_key?: string | null
           plan?: string | null
+          refunded_amount?: number
           status?: string
           subscription_activated_at?: string | null
           subscription_days?: number
@@ -5296,6 +5337,16 @@ export type Database = {
       }
       yookassa_activate_subscription: {
         Args: { p_payment_id: string }
+        Returns: Json
+      }
+      yookassa_record_refund: {
+        Args: {
+          p_amount: number
+          p_payment_id: string
+          p_refund_id: string
+          p_status: string
+          p_webhook?: Json
+        }
         Returns: Json
       }
     }
