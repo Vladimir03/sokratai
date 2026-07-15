@@ -18,6 +18,10 @@
  * (ON CONFLICT DO NOTHING → 0 строк = период уже обработан). Если после
  * claim НИ ОДНА отправка не удалась — claim снимается и возвращается 500
  * (ручной повтор безопасен).
+ *
+ * ⚠️ Деплой ТОЛЬКО sync-on-push (rule 96 §11a): агентский deploy-тул Lovable
+ * включает JWT-гейт вопреки config.toml → gateway отбивал бы Bearer
+ * SCHEDULER_SECRET (не JWT) до входа в функцию, cron молча умирал бы.
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { computePulse, resolveChannel, type PulsePayload, type PulseTutor } from "../_shared/ceo-pulse.ts";
