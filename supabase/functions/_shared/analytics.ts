@@ -37,7 +37,12 @@ export type AnalyticsEventName =
   // QR-онбординг лидов Егора (CHECK-whitelist расширен миграцией 20260713140000)
   | "qr_lead_registered" // репетитор зарегистрировался из QR-канала (ref/promo)
   | "promo_captured" // промокод действующей акции закреплён на аккаунте
-  | "community_cta_clicked"; // клик по community-CTA (TG/VK) на /tutor/home
+  | "community_cta_clicked" // клик по community-CTA (TG/VK) на /tutor/home
+  // клиентские краши ErrorBoundary/MarkdownErrorBoundary (CHECK-whitelist
+  // расширен миграцией 20260715120000; writer — edge client-error-report).
+  // ОСОЗНАННОЕ исключение из «meta без свободного текста»: meta.message =
+  // технический текст ошибки (усечён + route санитизирован на edge).
+  | "client_error";
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;

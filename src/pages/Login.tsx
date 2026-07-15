@@ -13,6 +13,7 @@ import VkAuthButton from "@/components/VkAuthButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
 import { applyPendingConsent } from "@/lib/consent";
 import { requestStudentOtp } from "@/lib/studentClaimApi";
+import { InAppBrowserNudge } from "@/components/InAppBrowserNudge";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -212,6 +213,7 @@ const Login = () => {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          <InAppBrowserNudge />
           {/* Email/Password Login - Primary */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">

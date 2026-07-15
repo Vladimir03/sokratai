@@ -10,6 +10,7 @@ import { parseISO } from 'date-fns';
 import { MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import NotificationsNudge from '@/components/pwa/NotificationsNudge';
+import { InAppBrowserNudge } from '@/components/InAppBrowserNudge';
 
 function formatStatus(status: string | null, deadline: string | null) {
   if (deadline && parseISO(deadline).getTime() <= Date.now()) return 'deadline_missed';
@@ -46,6 +47,7 @@ const StudentHomework = () => {
               message="Включи уведомления, чтобы не пропустить ДЗ и проверку репетитора"
             />
             <div className="max-w-5xl mx-auto space-y-4">
+              <InAppBrowserNudge />
               <h1 className="text-2xl font-bold">Домашние задания</h1>
 
               {isLoading && <p className="text-muted-foreground">Загрузка...</p>}

@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from 'react';
+import { reportClientError } from '@/lib/clientErrorReport';
 
 interface Props {
   children: ReactNode;
@@ -25,6 +26,9 @@ class MarkdownErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error) {
     console.error('MarkdownErrorBoundary: markdown render failed:', error.message);
+    // Деградация пузыря тоже должна быть видна в /admin «Ошибки» — иначе
+    // fallback молча прячет проблему рендера.
+    reportClientError(error.message, 'markdown_bubble');
   }
 
   render() {

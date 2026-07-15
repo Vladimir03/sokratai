@@ -8,6 +8,7 @@ import { PageContent } from '@/components/PageContent';
 import { listStudentLessons, type StudentLesson } from '@/lib/studentScheduleApi';
 import { LessonGroupHeader } from '@/components/student/schedule/LessonGroupHeader';
 import { LessonFeedItem } from '@/components/student/schedule/LessonFeedItem';
+import { InAppBrowserNudge } from '@/components/InAppBrowserNudge';
 
 type GroupKey = 'today' | 'upcoming' | 'past';
 
@@ -60,6 +61,7 @@ const StudentSchedule = () => {
         <PageContent>
           <main className="container mx-auto px-4 pb-8">
             <div className="max-w-3xl mx-auto space-y-4">
+              <InAppBrowserNudge />
               <h1 className="text-2xl font-bold">Занятия</h1>
 
               {isLoading && <p className="text-muted-foreground">Загрузка...</p>}

@@ -2,6 +2,12 @@
 
 Продукт используется на Safari (macOS/iOS) — это главный источник багов. **Все правила ниже обязательны.**
 
+## Официальный минимум поддержки (решение Vladimir, 2026-07-15)
+
+**Safari 15 / iOS 15 (iPhone 6s/7 и новее).** У школьников массово старые iPhone, застрявшие на iOS 15 навсегда; Telegram in-app браузер на iOS = тот же WebKit. Любая фича, падающая на Safari 15, — блокер (инцидент Глеба: lookbehind в remark-gfm ронял экран задачи у всех на iOS ≤ 16.3).
+
+**QA-чеклист перед крупным релизом (обязательный пункт):** прогнать критический путь **вход → открыть ДЗ → отправить ответ → получить AI-фидбэк** на реальном старом iPhone (iOS 15/16 — есть у учеников Егора). Автоэмуляции старого WebKit у нас нет; Playwright WebKit ≠ старый Safari. Наблюдаемость крашей после релиза — /admin → вкладка «Ошибки» (`analytics_events.client_error`, писатели `ErrorBoundary`/`MarkdownErrorBoundary` через edge `client-error-report`).
+
 ## Build targets
 - В `vite.config.ts` установлен `build.target: ['es2020', 'safari15', 'chrome90']`
 - В `package.json` есть `browserslist` — используется autoprefixer для CSS

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { supabase } from '@/lib/supabaseClient';
 import { claimStudentByToken, registerStudent, type ClaimResult } from '@/lib/studentClaimApi';
 import { pluralizeRu } from '@/lib/pluralizeRu';
+import { InAppBrowserNudge } from '@/components/InAppBrowserNudge';
 
 const TEMP_EMAIL_SUFFIX = '@temp.sokratai.ru';
 
@@ -129,6 +130,11 @@ export default function StudentClaimPage() {
       className="flex min-h-screen flex-col items-center justify-center bg-socrat-surface px-4 py-10"
     >
       <div className="mb-6 text-lg font-semibold text-accent">Сократ</div>
+
+      {/* empty:hidden — при null-надже wrapper не оставляет фантомный отступ */}
+      <div className="mb-4 w-full max-w-sm empty:hidden">
+        <InAppBrowserNudge />
+      </div>
 
       <div className="w-full max-w-sm rounded-xl border border-border bg-white p-6 shadow-sm">
         {step === 'loading' && (

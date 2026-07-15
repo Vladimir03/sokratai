@@ -18,9 +18,10 @@ import { AdminPayments } from "@/components/admin/AdminPayments";
 import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminMockExams } from "@/components/admin/AdminMockExams";
 import { AdminTutorPlans } from "@/components/admin/AdminTutorPlans";
+import { AdminClientErrors } from "@/components/admin/AdminClientErrors";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap, Wallet } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap, Wallet, AlertTriangle } from "lucide-react";
 import { BusinessDashboard } from "@/components/admin/business/BusinessDashboard";
 import { ProductDiscoveryDashboard } from "@/components/admin/discovery/ProductDiscoveryDashboard";
 import { cn } from "@/lib/utils";
@@ -245,6 +246,10 @@ const Admin = () => {
               <CreditCard className="w-4 h-4" />
               Платежи
             </TabsTrigger>
+            <TabsTrigger value="client-errors" className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4" />
+              Ошибки
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="analytics">
@@ -346,6 +351,10 @@ const Admin = () => {
 
           <TabsContent value="payments">
             <AdminPayments />
+          </TabsContent>
+
+          <TabsContent value="client-errors">
+            <AdminClientErrors />
           </TabsContent>
         </Tabs>
       </div>

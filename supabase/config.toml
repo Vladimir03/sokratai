@@ -17,6 +17,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.claim-invite]
     verify_jwt = true
+  [functions.client-error-report]
+    verify_jwt = false
   [functions.email-verify]
     verify_jwt = false
   [functions.get-solution]
