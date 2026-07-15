@@ -45,6 +45,9 @@ export const AdminRetentionCards = ({ cohortRetention }: AdminRetentionCardsProp
     <Card animate={false}>
       <CardHeader>
         <CardTitle className="text-lg">Когортный Retention</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          DN = активность (сообщение в AI-чате или треде ДЗ) ровно в день N после регистрации (UTC).
+        </p>
       </CardHeader>
       <CardContent>
         {sortedData.length === 0 ? (

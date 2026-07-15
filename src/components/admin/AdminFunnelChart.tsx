@@ -23,6 +23,10 @@ export const AdminFunnelChart = ({ funnel }: AdminFunnelChartProps) => {
     <Card animate={false}>
       <CardHeader>
         <CardTitle className="text-lg">Воронка конверсии</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Зарегистрированные за период → завершили онбординг → хоть раз написали (AI-чат или тред ДЗ, за всё время).
+          Воронка активации репетиторов поимённо — во вкладке «Пульс».
+        </p>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">

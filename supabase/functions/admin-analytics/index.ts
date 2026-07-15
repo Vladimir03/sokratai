@@ -1,10 +1,131 @@
+/**
+ * admin-analytics — данные вкладки «Аналитика» в /admin.
+ *
+ * Аудит формул 2026-07-15 (запрос владельца) — исправлено:
+ * 1. «Активных сегодня» считало СТРОКИ сообщений, а не уникальных пользователей.
+ * 2. Активность считалась ТОЛЬКО по AI-чату ученика (chat_messages) — работа в
+ *    ДЗ (guided-треды) была невидима; теперь активность = сообщения пользователя
+ *    в AI-чате + сообщения ученика/репетитора в тредах ДЗ (author_user_id).
+ * 3. Воронка «отправил первое сообщение» делала N+1 запросов (по одному на
+ *    пользователя) — теперь одна chunked-выборка, объединённая с ретеншном.
+ * 4. Все выборки строк — с пагинацией (PostgREST молча режет на 1000 строк —
+ *    сообщения за неделю уже превышали лимит → тихий недосчёт).
+ * 5. Premium-сегмент требовал непустой subscription_expires_at — «Премиум
+ *    (бессрочно)» (ручные гранты) падал в free/trial.
+ * 6. «Сообщений за период» считало и ответы AI (каждое сообщение юзера ×2) —
+ *    теперь только сообщения пользователей.
+ *
+ * Определения метрик (для tooltips фронта — держать в синхроне):
+ * - Активность = сообщение пользователя в AI-чате (chat_messages, role='user')
+ *   ИЛИ сообщение в треде ДЗ (homework_tutor_thread_messages, role∈{user,tutor},
+ *   по author_user_id). Чат репетитор↔ученик пока не учитывается.
+ * - WAU — уникальные активные за ISO-неделю (пн–вс); крайние недели диапазона
+ *   могут быть неполными.
+ * - Ретеншн D1/D3/D7 — активность РОВНО в день N после регистрации (классический
+ *   bounded day-N). Дни — по UTC.
+ * - Новые за период — все строки profiles, включая учеников, заведённых
+ *   репетитором вручную (placeholder-аккаунты) — отдельно не различаются.
+ */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const PAGE = 1000;
+
+/** PostgREST режет ответ на 1000 строк — читаем до конца пагинацией. */
+async function fetchAll<T>(
+  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  label: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await makeQuery(from, from + PAGE - 1);
+    if (error) throw new Error(`${label}: ${error.message}`);
+    const batch = data ?? [];
+    rows.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return rows;
+}
+
+/** .in()-выборка чанками по 100 id (лимит длины URL) + пагинация каждого чанка. */
+async function fetchAllIn<T>(
+  ids: string[],
+  makeQuery: (
+    chunk: string[],
+    from: number,
+    to: number,
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  label: string,
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    const chunkRows = await fetchAll<T>((from, to) => makeQuery(chunk, from, to), label);
+    rows.push(...chunkRows);
+  }
+  return rows;
+}
+
+interface ChatMsgRow {
+  user_id: string;
+  role: string;
+  created_at: string;
+}
+
+interface HwMsgRow {
+  author_user_id: string | null;
+  role: string;
+  created_at: string;
+}
+
+/** Активность пользователя: {userId, day (YYYY-MM-DD), createdAt}. */
+interface ActivityEvent {
+  userId: string;
+  createdAt: string;
+}
+
+/** Сообщения пользователей за период из обоих источников (AI-чат + треды ДЗ). */
+async function fetchActivityInRange(
+  db: SupabaseClient,
+  startIso: string,
+  endIso: string,
+): Promise<ActivityEvent[]> {
+  const [chatMsgs, hwMsgs] = await Promise.all([
+    fetchAll<ChatMsgRow>(
+      (from, to) =>
+        db
+          .from("chat_messages")
+          .select("user_id, role, created_at")
+          .eq("role", "user")
+          .gte("created_at", startIso)
+          .lte("created_at", endIso)
+          .range(from, to),
+      "chat_messages_range",
+    ),
+    fetchAll<HwMsgRow>(
+      (from, to) =>
+        db
+          .from("homework_tutor_thread_messages")
+          .select("author_user_id, role, created_at")
+          .in("role", ["user", "tutor"])
+          .gte("created_at", startIso)
+          .lte("created_at", endIso)
+          .range(from, to),
+      "hw_messages_range",
+    ),
+  ]);
+  const events: ActivityEvent[] = [];
+  for (const m of chatMsgs) events.push({ userId: m.user_id, createdAt: m.created_at });
+  for (const m of hwMsgs) {
+    if (m.author_user_id) events.push({ userId: m.author_user_id, createdAt: m.created_at });
+  }
+  return events;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -14,7 +135,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    
+
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -38,9 +159,9 @@ serve(async (req) => {
 
     // Check admin access using service role
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-    
+
     const { data: isAdmin } = await supabaseAdmin.rpc("is_admin", { _user_id: user.id });
-    
+
     if (!isAdmin) {
       return new Response(JSON.stringify({ error: "Forbidden: Admin access required" }), {
         status: 403,
@@ -52,8 +173,7 @@ serve(async (req) => {
     const url = new URL(req.url);
     let startDateParam = url.searchParams.get("startDate");
     let endDateParam = url.searchParams.get("endDate");
-    
-    // Also check request body if no query params
+
     if (!startDateParam && !endDateParam) {
       try {
         const body = await req.json();
@@ -63,32 +183,39 @@ serve(async (req) => {
         // No body or invalid JSON, use defaults
       }
     }
-    
+
     const now = new Date();
     const endDate = endDateParam ? new Date(endDateParam + "T23:59:59.999Z") : now;
-    const startDate = startDateParam 
-      ? new Date(startDateParam + "T00:00:00.000Z") 
+    const startDate = startDateParam
+      ? new Date(startDateParam + "T00:00:00.000Z")
       : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
+
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // 0. Get tutor user IDs
-    const { data: tutorRoles } = await supabaseAdmin
+    // 0. Tutor user IDs
+    const { data: tutorRoles, error: rolesError } = await supabaseAdmin
       .from("user_roles")
       .select("user_id")
       .eq("role", "tutor");
+    if (rolesError) throw new Error(`user_roles: ${rolesError.message}`);
     const tutorSet = new Set((tutorRoles || []).map((r: { user_id: string }) => r.user_id));
 
-    // 1. Registration stats by day (with tutor/student split)
-    const { data: registrations } = await supabaseAdmin
-      .from("profiles")
-      .select("id, created_at")
-      .gte("created_at", startDateStr)
-      .lte("created_at", endDateStr);
+    // 1. Registrations in range (paginated)
+    const registrations = await fetchAll<{ id: string; created_at: string | null }>(
+      (from, to) =>
+        supabaseAdmin
+          .from("profiles")
+          .select("id, created_at")
+          .gte("created_at", startDateStr)
+          .lte("created_at", endDateStr)
+          .order("created_at", { ascending: true })
+          .range(from, to),
+      "profiles_range",
+    );
 
     const registrationsByDay: Record<string, { total: number; students: number; tutors: number }> = {};
-    registrations?.forEach((r) => {
+    registrations.forEach((r) => {
       const day = r.created_at?.split("T")[0];
       if (day) {
         if (!registrationsByDay[day]) registrationsByDay[day] = { total: 0, students: 0, tutors: 0 };
@@ -101,26 +228,19 @@ serve(async (req) => {
       }
     });
 
-    // 2. Message activity by day
-    const { data: messages } = await supabaseAdmin
-      .from("chat_messages")
-      .select("created_at, user_id")
-      .gte("created_at", startDateStr)
-      .lte("created_at", endDateStr);
+    // 2. Активность за период: сообщения пользователей (AI-чат + треды ДЗ)
+    const activityEvents = await fetchActivityInRange(supabaseAdmin, startDateStr, endDateStr);
 
     const messagesByDay: Record<string, number> = {};
     const uniqueUsersByDay: Record<string, Set<string>> = {};
-    
-    messages?.forEach((m) => {
-      const day = m.created_at?.split("T")[0];
-      if (day) {
-        messagesByDay[day] = (messagesByDay[day] || 0) + 1;
-        if (!uniqueUsersByDay[day]) uniqueUsersByDay[day] = new Set();
-        uniqueUsersByDay[day].add(m.user_id);
-      }
+    activityEvents.forEach((ev) => {
+      const day = ev.createdAt.split("T")[0];
+      messagesByDay[day] = (messagesByDay[day] || 0) + 1;
+      if (!uniqueUsersByDay[day]) uniqueUsersByDay[day] = new Set();
+      uniqueUsersByDay[day].add(ev.userId);
     });
 
-    // WAU: for each day, count unique users active in the ISO week (Mon-Sun) containing that day
+    // WAU: ISO-неделя (пн–вс)
     const getMonday = (dateStr: string) => {
       const d = new Date(dateStr);
       const day = d.getUTCDay();
@@ -129,7 +249,6 @@ serve(async (req) => {
       return d.toISOString().split("T")[0];
     };
 
-    // Group unique users by week
     const uniqueUsersByWeek: Record<string, Set<string>> = {};
     Object.entries(uniqueUsersByDay).forEach(([day, users]) => {
       const monday = getMonday(day);
@@ -137,189 +256,154 @@ serve(async (req) => {
       users.forEach((u) => uniqueUsersByWeek[monday].add(u));
     });
 
-    // For each chart day, look up its week
     const wauByDay: Record<string, { total: number; students: number; tutors: number }> = {};
     const processedWeeks = new Set<string>();
 
-    // 3. Cohort retention calculation
-    const calculateCohortRetention = async () => {
-      // Get all users registered in the selected period
-      const { data: cohortUsers } = await supabaseAdmin
-        .from("profiles")
-        .select("id, created_at")
-        .gte("created_at", startDateStr)
-        .lte("created_at", endDateStr)
-        .order("created_at", { ascending: true });
-
-      if (!cohortUsers || cohortUsers.length === 0) {
-        return [];
+    // 3–4. Ретеншн когорт + воронка «первое сообщение» — ОДНА all-time выборка
+    // активности когортных пользователей (было: N+1 запросов в воронке).
+    const cohortUserIds = registrations.map((r) => r.id);
+    const allTimeActivityByUser: Record<string, string[]> = {};
+    if (cohortUserIds.length > 0) {
+      const [cohortChat, cohortHw] = await Promise.all([
+        fetchAllIn<ChatMsgRow>(
+          cohortUserIds,
+          (chunk, from, to) =>
+            supabaseAdmin
+              .from("chat_messages")
+              .select("user_id, role, created_at")
+              .eq("role", "user")
+              .in("user_id", chunk)
+              .range(from, to),
+          "chat_messages_cohort",
+        ),
+        fetchAllIn<HwMsgRow>(
+          cohortUserIds,
+          (chunk, from, to) =>
+            supabaseAdmin
+              .from("homework_tutor_thread_messages")
+              .select("author_user_id, role, created_at")
+              .in("role", ["user", "tutor"])
+              .in("author_user_id", chunk)
+              .range(from, to),
+          "hw_messages_cohort",
+        ),
+      ]);
+      for (const m of cohortChat) {
+        (allTimeActivityByUser[m.user_id] ||= []).push(m.created_at);
       }
+      for (const m of cohortHw) {
+        if (!m.author_user_id) continue;
+        (allTimeActivityByUser[m.author_user_id] ||= []).push(m.created_at);
+      }
+    }
 
-      // Group users by registration date
-      const usersByDate: Record<string, string[]> = {};
-      cohortUsers.forEach((user) => {
-        const regDate = user.created_at?.split("T")[0];
-        if (regDate) {
-          if (!usersByDate[regDate]) usersByDate[regDate] = [];
-          usersByDate[regDate].push(user.id);
+    // Retention: активность РОВНО в день N после регистрации (bounded day-N, UTC)
+    const usersByDate: Record<string, string[]> = {};
+    registrations.forEach((r) => {
+      const regDate = r.created_at?.split("T")[0];
+      if (regDate) {
+        (usersByDate[regDate] ||= []).push(r.id);
+      }
+    });
+
+    const today = new Date(now.toISOString().split("T")[0]);
+    const cohortRetention = Object.entries(usersByDate).map(([regDate, users]) => {
+      const cohortDate = new Date(regDate);
+      const cohortSize = users.length;
+
+      const calcRetention = (retentionDay: number) => {
+        const targetDate = new Date(cohortDate.getTime() + retentionDay * 24 * 60 * 60 * 1000);
+        if (targetDate > today) {
+          return { retained: -1, rate: -1 }; // Not yet available
         }
-      });
-
-      // Get all messages for these users
-      const userIds = cohortUsers.map(u => u.id);
-      const { data: allMessages } = await supabaseAdmin
-        .from("chat_messages")
-        .select("user_id, created_at")
-        .in("user_id", userIds);
-
-      // Index messages by user
-      const messagesByUser: Record<string, string[]> = {};
-      allMessages?.forEach((m) => {
-        if (!messagesByUser[m.user_id]) messagesByUser[m.user_id] = [];
-        messagesByUser[m.user_id].push(m.created_at);
-      });
-
-      // Calculate retention for each cohort date
-      const cohortRetention: Array<{
-        date: string;
-        cohortSize: number;
-        d1: { retained: number; rate: number };
-        d3: { retained: number; rate: number };
-        d7: { retained: number; rate: number };
-      }> = [];
-
-      const today = new Date(now.toISOString().split("T")[0]);
-
-      for (const [regDate, users] of Object.entries(usersByDate)) {
-        const cohortDate = new Date(regDate);
-        const cohortSize = users.length;
-
-        const calcRetention = (retentionDay: number) => {
-          const targetDate = new Date(cohortDate.getTime() + retentionDay * 24 * 60 * 60 * 1000);
-          
-          // Check if enough time has passed for this retention metric
-          if (targetDate > today) {
-            return { retained: -1, rate: -1 }; // Not yet available
-          }
-
-          let retained = 0;
-          for (const userId of users) {
-            const userMessages = messagesByUser[userId] || [];
-            const hasActivity = userMessages.some((msgDate) => {
-              const msgDay = msgDate.split("T")[0];
-              return msgDay === targetDate.toISOString().split("T")[0];
-            });
-            if (hasActivity) retained++;
-          }
-
-          return {
-            retained,
-            rate: cohortSize > 0 ? Math.round((retained / cohortSize) * 100) : 0,
-          };
+        const targetDay = targetDate.toISOString().split("T")[0];
+        let retained = 0;
+        for (const userId of users) {
+          const userActivity = allTimeActivityByUser[userId] || [];
+          if (userActivity.some((ts) => ts.split("T")[0] === targetDay)) retained++;
+        }
+        return {
+          retained,
+          rate: cohortSize > 0 ? Math.round((retained / cohortSize) * 100) : 0,
         };
+      };
 
-        cohortRetention.push({
-          date: regDate,
-          cohortSize,
-          d1: calcRetention(1),
-          d3: calcRetention(3),
-          d7: calcRetention(7),
-        });
-      }
+      return {
+        date: regDate,
+        cohortSize,
+        d1: calcRetention(1),
+        d3: calcRetention(3),
+        d7: calcRetention(7),
+      };
+    });
 
-      return cohortRetention;
-    };
-
-    const cohortRetention = await calculateCohortRetention();
-
-    // 4. Conversion funnel
-    const { count: totalRegistered } = await supabaseAdmin
-      .from("profiles")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", startDateStr)
-      .lte("created_at", endDateStr);
-
-    const { count: completedOnboarding } = await supabaseAdmin
+    // Funnel
+    const { count: completedOnboarding, error: onboardingError } = await supabaseAdmin
       .from("profiles")
       .select("id", { count: "exact", head: true })
       .gte("created_at", startDateStr)
       .lte("created_at", endDateStr)
       .eq("onboarding_completed", true);
+    if (onboardingError) throw new Error(`onboarding: ${onboardingError.message}`);
 
-    const { data: usersWithMessages } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .gte("created_at", startDateStr)
-      .lte("created_at", endDateStr);
+    const sentFirstMessage = cohortUserIds.filter(
+      (id) => (allTimeActivityByUser[id]?.length ?? 0) > 0,
+    ).length;
 
-    let sentFirstMessage = 0;
-    if (usersWithMessages) {
-      for (const user of usersWithMessages) {
-        const { count } = await supabaseAdmin
-          .from("chat_messages")
-          .select("id", { count: "exact", head: true })
-          .eq("user_id", user.id)
-          .eq("role", "user");
-        if (count && count > 0) sentFirstMessage++;
-      }
-    }
-
-    // 5. Summary stats (with tutor/student split)
-    const { data: allProfiles } = await supabaseAdmin
-      .from("profiles")
-      .select("id");
-    const totalUsers = allProfiles?.length || 0;
-    const totalTutors = allProfiles?.filter((p) => tutorSet.has(p.id)).length || 0;
+    // 5. Summary stats
+    const allProfiles = await fetchAll<{ id: string }>(
+      (from, to) => supabaseAdmin.from("profiles").select("id").range(from, to),
+      "profiles_all",
+    );
+    const totalUsers = allProfiles.length;
+    const totalTutors = allProfiles.filter((p) => tutorSet.has(p.id)).length;
     const totalStudents = totalUsers - totalTutors;
 
-    const newUsers = registrations?.length || 0;
-    const newTutors = registrations?.filter((r) => tutorSet.has(r.id)).length || 0;
+    const newUsers = registrations.length;
+    const newTutors = registrations.filter((r) => tutorSet.has(r.id)).length;
     const newStudents = newUsers - newTutors;
 
-    const { count: totalMessages } = await supabaseAdmin
-      .from("chat_messages")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", startDateStr)
-      .lte("created_at", endDateStr);
+    // Сообщений за период = сообщения ПОЛЬЗОВАТЕЛЕЙ (без ответов AI), оба источника
+    const totalMessages = activityEvents.length;
 
-    const { count: activeUsersToday } = await supabaseAdmin
-      .from("chat_messages")
-      .select("user_id", { count: "exact", head: true })
-      .gte("created_at", new Date(now.toISOString().split("T")[0]).toISOString());
+    // Активных сегодня = УНИКАЛЬНЫЕ пользователи с активностью с начала суток (UTC)
+    const todayStartIso = new Date(now.toISOString().split("T")[0]).toISOString();
+    const todayEvents = await fetchActivityInRange(supabaseAdmin, todayStartIso, now.toISOString());
+    const activeUsersToday = new Set(todayEvents.map((ev) => ev.userId)).size;
 
-    // 6. User segments analytics
+    // 6. Сегменты (premium: NULL expires = бессрочный премиум, mirror admin_list_tutor_plans)
     const calculateSegments = async () => {
       const nowDate = new Date();
-      
-      // Get all profiles with subscription info
-      const { data: allProfiles } = await supabaseAdmin
-        .from("profiles")
-        .select("id, subscription_tier, subscription_expires_at, trial_ends_at");
 
-      if (!allProfiles) {
-        return {
-          premium: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
-          trial: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
-          free: { count: 0, avgMessagesPerDay: 0, highlyActive: 0 },
-        };
-      }
+      const segProfiles = await fetchAll<{
+        id: string;
+        subscription_tier: string | null;
+        subscription_expires_at: string | null;
+        trial_ends_at: string | null;
+      }>(
+        (from, to) =>
+          supabaseAdmin
+            .from("profiles")
+            .select("id, subscription_tier, subscription_expires_at, trial_ends_at")
+            .range(from, to),
+        "profiles_segments",
+      );
 
-      // Categorize users into segments
       const segments: { premium: string[]; trial: string[]; free: string[] } = {
         premium: [],
         trial: [],
         free: [],
       };
 
-      allProfiles.forEach((profile) => {
-        const isPremium = 
-          profile.subscription_tier === "premium" && 
-          profile.subscription_expires_at && 
-          new Date(profile.subscription_expires_at) > nowDate;
-        
-        const isTrial = 
-          !isPremium && 
-          profile.trial_ends_at && 
+      segProfiles.forEach((profile) => {
+        const isPremium =
+          profile.subscription_tier === "premium" &&
+          (profile.subscription_expires_at == null ||
+            new Date(profile.subscription_expires_at) > nowDate);
+
+        const isTrial =
+          !isPremium &&
+          profile.trial_ends_at &&
           new Date(profile.trial_ends_at) > nowDate;
 
         if (isPremium) {
@@ -331,28 +415,17 @@ serve(async (req) => {
         }
       });
 
-      // Get messages from last 7 days for daily averages
+      // Активность за 7 дней (оба источника) для средних
       const sevenDaysAgo = new Date(nowDate.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      
-      const { data: recentMessages } = await supabaseAdmin
-        .from("chat_messages")
-        .select("user_id, created_at")
-        .eq("role", "user")
-        .gte("created_at", sevenDaysAgo);
+      const recentEvents = await fetchActivityInRange(supabaseAdmin, sevenDaysAgo, nowDate.toISOString());
 
-      // Count messages per user per day
       const userDailyMessages: Record<string, Record<string, number>> = {};
-      
-      recentMessages?.forEach((m) => {
-        const userId = m.user_id;
-        const day = m.created_at?.split("T")[0];
-        if (userId && day) {
-          if (!userDailyMessages[userId]) userDailyMessages[userId] = {};
-          userDailyMessages[userId][day] = (userDailyMessages[userId][day] || 0) + 1;
-        }
+      recentEvents.forEach((ev) => {
+        const day = ev.createdAt.split("T")[0];
+        if (!userDailyMessages[ev.userId]) userDailyMessages[ev.userId] = {};
+        userDailyMessages[ev.userId][day] = (userDailyMessages[ev.userId][day] || 0) + 1;
       });
 
-      // Calculate metrics for each segment
       const calculateSegmentMetrics = (userIds: string[]) => {
         if (userIds.length === 0) {
           return { count: 0, avgMessagesPerDay: 0, highlyActive: 0 };
@@ -365,15 +438,12 @@ serve(async (req) => {
         userIds.forEach((userId) => {
           const dailyData = userDailyMessages[userId] || {};
           const days = Object.keys(dailyData);
-          
+
           if (days.length > 0) {
             const totalMsgs = Object.values(dailyData).reduce((a, b) => a + b, 0);
-            const avgPerDay = totalMsgs / days.length;
-            
             totalDailyMessages += totalMsgs;
             totalDays += days.length;
-            
-            // Check if user has 8+ messages on any day
+
             const hasHighActivity = Object.values(dailyData).some((count) => count >= 8);
             if (hasHighActivity) highlyActive++;
           }
@@ -397,69 +467,48 @@ serve(async (req) => {
 
     const segmentsData = await calculateSegments();
 
-    // 7. Top 10 active users for the period
+    // 7. Топ-10 активных за период (активность = оба источника)
     const calculateTopUsers = async () => {
       const nowDate = new Date();
       const daysDiff = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
 
-      // Get user message counts for the period
-      const { data: userMessages } = await supabaseAdmin
-        .from("chat_messages")
-        .select("user_id")
-        .eq("role", "user")
-        .gte("created_at", startDateStr)
-        .lte("created_at", endDateStr);
+      if (activityEvents.length === 0) return [];
 
-      if (!userMessages || userMessages.length === 0) {
-        return [];
-      }
-
-      // Count messages per user
       const messageCounts: Record<string, number> = {};
-      userMessages.forEach((m) => {
-        messageCounts[m.user_id] = (messageCounts[m.user_id] || 0) + 1;
+      activityEvents.forEach((ev) => {
+        messageCounts[ev.userId] = (messageCounts[ev.userId] || 0) + 1;
       });
 
-      // Sort and get top 10 user IDs
       const sortedUsers = Object.entries(messageCounts)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10);
 
       const topUserIds = sortedUsers.map(([id]) => id);
+      if (topUserIds.length === 0) return [];
 
-      if (topUserIds.length === 0) {
-        return [];
-      }
-
-      // Get profile info for top users
-      const { data: profiles } = await supabaseAdmin
+      const { data: profiles, error: topProfilesError } = await supabaseAdmin
         .from("profiles")
         .select("id, username, telegram_username, subscription_tier, subscription_expires_at, trial_ends_at")
         .in("id", topUserIds);
+      if (topProfilesError) throw new Error(`profiles_top: ${topProfilesError.message}`);
+      if (!profiles) return [];
 
-      if (!profiles) {
-        return [];
-      }
-
-      // Create a map for quick profile lookup
       const profileMap = new Map(profiles.map((p) => [p.id, p]));
 
-      // Build top users array with segment info
       return sortedUsers.map(([userId, messageCount]) => {
         const profile = profileMap.get(userId);
         if (!profile) {
           return null;
         }
 
-        // Determine segment
-        const isPremium = 
-          profile.subscription_tier === "premium" && 
-          profile.subscription_expires_at && 
-          new Date(profile.subscription_expires_at) > nowDate;
-        
-        const isTrial = 
-          !isPremium && 
-          profile.trial_ends_at && 
+        const isPremium =
+          profile.subscription_tier === "premium" &&
+          (profile.subscription_expires_at == null ||
+            new Date(profile.subscription_expires_at) > nowDate);
+
+        const isTrial =
+          !isPremium &&
+          profile.trial_ends_at &&
           new Date(profile.trial_ends_at) > nowDate;
 
         const segment = isPremium ? "premium" : isTrial ? "trial" : "free";
