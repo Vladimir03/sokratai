@@ -23,6 +23,21 @@ import { logAnalyticsEvent } from "../_shared/analytics.ts";
  * Retry-семантика: транзиентный сбой верификации/активации → 500 (YooKassa
  * ретраит с backoff до ~24ч); подделка/несовпадение → 200 без активации
  * (ретраи бесполезны, попытка залогирована).
+ *
+ * Ревью ChatGPT-5.6 (P1 #4, 2026-07-15) — два money-бага одной природы:
+ *   1) `refund.succeeded` резолвился по `object.id`, но там ID ВОЗВРАТА
+ *      (платёж — в `object.payment_id`) → возврат падал в «payment not found»,
+ *      оплата навсегда оставалась succeeded, возвращённые деньги считались
+ *      выручкой (MRR Пульса). Теперь: отдельная ветка, верификация возврата
+ *      через `GET /v3/refunds/{id}`, payment_id берётся ИЗ API, запись —
+ *      идемпотентная RPC yookassa_record_refund (миграция 20260715130000).
+ *   2) Прочие события писали `status: body.object.status` ВСЛЕПУЮ. Body не
+ *      подписан → поддельный `payment.canceled` переводил чужую succeeded-оплату
+ *      в canceled: искажение MRR + сброс интро-цены 200₽ (yookassa-create-payment
+ *      считает «первый платёж» по отсутствию succeeded-строк). Теперь статус
+ *      берётся ТОЛЬКО из YooKassa API.
+ * Подписка при возврате НЕ отзывается автоматически (прежнее продуктовое
+ * решение) — только фиксируется факт и сумма.
  */
 
 const corsHeaders = {
@@ -41,6 +56,8 @@ interface YooKassaWebhookEvent {
   object: {
     id: string;
     status: string;
+    /** Только у refund-объектов: ID платежа, к которому относится возврат. */
+    payment_id?: string;
     amount?: {
       value: string;
       currency: string;
@@ -62,29 +79,36 @@ interface YooKassaApiPayment {
   };
 }
 
+interface YooKassaApiRefund {
+  id: string;
+  payment_id: string;
+  status: string;
+  amount: {
+    value: string;
+    currency: string;
+  };
+}
+
 /**
- * Фактическое состояние платежа из YooKassa API (server-to-server, Basic auth).
+ * Фактическое состояние ресурса из YooKassa API (server-to-server, Basic auth).
  * 1 ретрай на 429/5xx/network. `ok:false` = транзиентный сбой (нельзя ни
- * активировать, ни отбрасывать — вернуть 500 для ретрая вебхука).
- * `notFound:true` = YooKassa не знает такой платёж (подделка) — не ретраить.
+ * действовать, ни отбрасывать — вернуть 500 для ретрая вебхука).
+ * `notFound:true` = YooKassa не знает такой ресурс (подделка) — не ретраить.
  */
-async function fetchPaymentFromYooKassa(
-  paymentId: string,
-): Promise<{ ok: boolean; notFound?: boolean; payment?: YooKassaApiPayment }> {
+async function fetchYooKassaResource<T>(
+  path: string,
+): Promise<{ ok: boolean; notFound?: boolean; data?: T }> {
   const maxAttempts = 2;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const resp = await fetch(
-        `https://api.yookassa.ru/v3/payments/${encodeURIComponent(paymentId)}`,
-        {
-          headers: {
-            "Authorization": `Basic ${btoa(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`)}`,
-          },
+      const resp = await fetch(`https://api.yookassa.ru/v3/${path}`, {
+        headers: {
+          "Authorization": `Basic ${btoa(`${YOOKASSA_SHOP_ID}:${YOOKASSA_SECRET_KEY}`)}`,
         },
-      );
+      });
       if (resp.ok) {
-        const payment = (await resp.json()) as YooKassaApiPayment;
-        return { ok: true, payment };
+        const data = (await resp.json()) as T;
+        return { ok: true, data };
       }
       if (resp.status === 404) {
         return { ok: true, notFound: true };
@@ -107,11 +131,110 @@ async function fetchPaymentFromYooKassa(
   return { ok: false };
 }
 
+const fetchPaymentFromYooKassa = (paymentId: string) =>
+  fetchYooKassaResource<YooKassaApiPayment>(`payments/${encodeURIComponent(paymentId)}`);
+
+const fetchRefundFromYooKassa = (refundId: string) =>
+  fetchYooKassaResource<YooKassaApiRefund>(`refunds/${encodeURIComponent(refundId)}`);
+
 function jsonResponse(status: number, payload: Record<string, unknown>): Response {
   return new Response(JSON.stringify(payload), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/**
+ * `refund.succeeded` — ID возврата ≠ ID платежа (ревью P1 #4).
+ *
+ * Порядок доверия: body даёт ТОЛЬКО refund id → `GET /v3/refunds/{id}` даёт
+ * истину (payment_id, сумма, статус) → строка `payments` ищется по
+ * payment_id ИЗ API. Ни payment_id, ни сумма из body не используются —
+ * иначе поддельный POST списывал бы произвольную сумму с чужой оплаты.
+ *
+ * Подписку НЕ отзываем (прежнее продуктовое решение — решает админ вручную);
+ * фиксируем факт и сумму, MRR считает net = amount − refunded_amount.
+ */
+async function handleRefundSucceeded(
+  supabase: ReturnType<typeof createClient>,
+  body: YooKassaWebhookEvent,
+): Promise<Response> {
+  const refundId = body.object?.id;
+  if (!refundId || typeof refundId !== "string") {
+    console.error("Refund webhook without refund id - ignoring");
+    return jsonResponse(200, { success: false, error: "No refund id" });
+  }
+
+  if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
+    // Без credentials верифицировать нечем — fail-closed + ретрай позже.
+    console.error("YooKassa credentials missing - cannot verify refund, asking for retry");
+    return jsonResponse(500, { error: "Verification unavailable" });
+  }
+
+  const verification = await fetchRefundFromYooKassa(refundId);
+  if (!verification.ok) {
+    // Транзиентный сбой API — 500, YooKassa ретраит (до ~24ч).
+    return jsonResponse(500, { error: "Verification unavailable" });
+  }
+  if (verification.notFound || !verification.data) {
+    console.error(`Refund ${refundId} not found in YooKassa - forged webhook`);
+    return jsonResponse(200, { success: false, error: "Validation failed" });
+  }
+
+  const apiRefund = verification.data;
+  if (apiRefund.status !== "succeeded") {
+    // Возврат в обработке/отменён — учитываем только успешные.
+    console.log(`Refund ${refundId} not succeeded (api status=${apiRefund.status}) - ignoring`);
+    return jsonResponse(200, { success: true, message: "Refund not succeeded" });
+  }
+
+  const paymentId = apiRefund.payment_id;
+  if (!paymentId || typeof paymentId !== "string") {
+    console.error(`Refund ${refundId} has no payment_id in API response - ignoring`);
+    return jsonResponse(200, { success: false, error: "Validation failed" });
+  }
+
+  const amount = parseFloat(apiRefund.amount?.value ?? "");
+  if (!Number.isFinite(amount) || amount <= 0 || apiRefund.amount?.currency !== "RUB") {
+    console.error(
+      `Refund ${refundId} has invalid amount (${apiRefund.amount?.value} ${apiRefund.amount?.currency}) - ignoring`,
+    );
+    return jsonResponse(200, { success: false, error: "Validation failed" });
+  }
+
+  // Идемпотентная запись + пересчёт refunded_amount одной транзакцией.
+  const { data, error } = await supabase.rpc("yookassa_record_refund", {
+    p_refund_id: refundId,
+    p_payment_id: paymentId,
+    p_amount: amount,
+    p_status: apiRefund.status,
+    p_webhook: body,
+  });
+  if (error) {
+    // Транзиентный сбой записи — 500, YooKassa ретраит; RPC идемпотентна.
+    console.error("Refund recording RPC failed:", error);
+    return jsonResponse(500, { error: "Refund recording failed" });
+  }
+
+  const result = data as {
+    recorded?: boolean;
+    reason?: string;
+    refunded_amount?: number;
+    fully_refunded?: boolean;
+  } | null;
+
+  if (!result?.recorded) {
+    // Платежа нет в нашей базе — чужой магазин или подделка. Не ретраить.
+    console.error(
+      `Refund ${refundId} not recorded (${result?.reason ?? "unknown"}) for payment ${paymentId}`,
+    );
+    return jsonResponse(200, { success: false, error: "Validation failed" });
+  }
+
+  console.log(
+    `Refund ${refundId} recorded for payment ${paymentId}: refunded_total=${result.refunded_amount}, full=${result.fully_refunded}`,
+  );
+  return jsonResponse(200, { success: true });
 }
 
 Deno.serve(async (req) => {
@@ -129,6 +252,12 @@ Deno.serve(async (req) => {
     console.log("Received YooKassa webhook:", JSON.stringify(body, null, 2));
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // ── Возвраты: object.id = ID ВОЗВРАТА, а не платежа → своя ветка ДО
+    // lookup'а payments (иначе поиск по refund id даёт «not found»).
+    if (body.event === "refund.succeeded") {
+      return await handleRefundSucceeded(supabase, body);
+    }
 
     const paymentId = body.object?.id;
     if (!paymentId || typeof paymentId !== "string") {
@@ -178,12 +307,12 @@ Deno.serve(async (req) => {
         // Транзиентный сбой API — 500, YooKassa ретраит (до ~24ч).
         return jsonResponse(500, { error: "Verification unavailable" });
       }
-      if (verification.notFound || !verification.payment) {
+      if (verification.notFound || !verification.data) {
         console.error(`Payment ${paymentId} not found in YooKassa - forged webhook`);
         return jsonResponse(200, { success: false, error: "Validation failed" });
       }
 
-      const apiPayment = verification.payment;
+      const apiPayment = verification.data;
 
       // Доверяем ТОЛЬКО API: статус + факт оплаты.
       if (apiPayment.status !== "succeeded" || apiPayment.paid !== true) {
@@ -269,11 +398,31 @@ Deno.serve(async (req) => {
       return jsonResponse(200, { success: true });
     }
 
-    // ── Прочие события (canceled/refund): статус + лог, без активации ───────
+    // ── Прочие события (payment.canceled/waiting_for_capture/…) ─────────────
+    // Статус берём ТОЛЬКО из YooKassa API. Раньше писали body.object.status
+    // вслепую — body не подписан, поэтому поддельный `payment.canceled` мог
+    // перевести чужую succeeded-оплату в canceled: искажение MRR + сброс
+    // интро-цены 200₽ (yookassa-create-payment определяет «первый платёж»
+    // отсутствием succeeded-строк). Активации здесь нет по-прежнему.
+    if (!YOOKASSA_SHOP_ID || !YOOKASSA_SECRET_KEY) {
+      console.error("YooKassa credentials missing - cannot verify status, asking for retry");
+      return jsonResponse(500, { error: "Verification unavailable" });
+    }
+
+    const statusVerification = await fetchPaymentFromYooKassa(paymentId);
+    if (!statusVerification.ok) {
+      return jsonResponse(500, { error: "Verification unavailable" });
+    }
+    if (statusVerification.notFound || !statusVerification.data) {
+      console.error(`Payment ${paymentId} not found in YooKassa - forged webhook`);
+      return jsonResponse(200, { success: false, error: "Validation failed" });
+    }
+
+    const verifiedStatus = statusVerification.data.status;
     const { error: updatePaymentError } = await supabase
       .from("payments")
       .update({
-        status: body.object.status,
+        status: verifiedStatus,
         updated_at: new Date().toISOString(),
         webhook_data: body,
       })
@@ -282,10 +431,9 @@ Deno.serve(async (req) => {
       console.error("Failed to update payment status:", updatePaymentError);
     }
 
-    if (body.event === "payment.canceled" || body.event === "refund.succeeded") {
-      console.log(`Payment ${paymentId} was canceled/refunded`);
-      // Note: We don't automatically revoke subscription on refund
-      // This should be handled manually by admin
+    if (verifiedStatus === "canceled") {
+      console.log(`Payment ${paymentId} was canceled (verified via API)`);
+      // Подписку не отзываем автоматически — решает админ вручную.
     }
 
     return jsonResponse(200, { success: true });

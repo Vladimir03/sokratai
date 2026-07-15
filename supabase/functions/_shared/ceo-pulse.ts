@@ -95,9 +95,9 @@ export interface PulsePayload {
     tutorWAU: number;
     newTutors7d: number;
     /**
-     * ₽, integer — Σ последнего succeeded-платежа plan='tutor_ai_start' за
-     * 35 дней. Известное ограничение: возвраты (refund) НЕ вычитаются —
-     * yookassa-webhook пока не обрабатывает refund-события (отдельная задача).
+     * ₽, integer — Σ NET-суммы последнего succeeded-платежа plan='tutor_ai_start'
+     * за 35 дней (net = amount − refunded_amount; возвраты учитываются с
+     * миграции 20260715130000).
      */
     mrr: number;
     weeklyValueTutors: { count: number; names: string[] };
@@ -176,6 +176,8 @@ interface TutorMsgRow {
 interface PaymentRow {
   user_id: string;
   amount: number | string | null;
+  /** Сумма успешных возвратов (миграция 20260715130000); выручка = amount − это. */
+  refunded_amount: number | string | null;
   status: string;
   created_at: string;
 }
@@ -373,7 +375,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       (from, to) =>
         db
           .from("payments")
-          .select("user_id, amount, status, created_at")
+          .select("user_id, amount, refunded_amount, status, created_at")
           .eq("plan", "tutor_ai_start")
           .eq("status", "succeeded")
           .order("id")
@@ -515,7 +517,12 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     paymentsByUserId.set(p.user_id, list);
   }
 
-  /** MRR на момент asOf: Σ суммы ПОСЛЕДНЕГО succeeded-платежа каждого репетитора за 35 дней до asOf. */
+  /**
+   * MRR на момент asOf: Σ NET-суммы ПОСЛЕДНЕГО succeeded-платежа каждого
+   * репетитора за 35 дней до asOf. net = amount − refunded_amount (миграция
+   * 20260715130000): частичный возврат уменьшает вклад, полный — обнуляет
+   * (clamp на 0 — возврат не может уйти в минус по чужим платежам).
+   */
   const mrrAt = (asOf: Date): number => {
     const to = asOf.toISOString();
     const from = new Date(asOf.getTime() - MRR_WINDOW_DAYS * 864e5).toISOString();
@@ -526,7 +533,10 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
         if (p.created_at < from || p.created_at > to) continue;
         if (last == null || p.created_at > last.created_at) last = p;
       }
-      if (last) sum += Number(last.amount ?? 0);
+      if (last) {
+        const net = Number(last.amount ?? 0) - Number(last.refunded_amount ?? 0);
+        sum += Math.max(net, 0);
+      }
     }
     return Math.round(sum);
   };

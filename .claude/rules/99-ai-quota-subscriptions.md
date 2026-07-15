@@ -52,6 +52,22 @@ UI: `/admin → вкладка «Тарифы»` (`src/components/admin/AdminTut
 - **Frontend:** `TutorPaymentModal` (`src/components/tutor/TutorPaymentModal.tsx`, зеркало механики студенческого `PaymentModal` — тот НЕ тронут); CTA в `TutorTariffSection` (free/trial/premium-продление) + плашка `TariffNudgeBanner` на Главной (открывает модал сразу). **Успех модал поллит по СВОЕЙ строке `payments.subscription_activated_at` (по `payment_id`, RLS даёт SELECT своих строк), НЕ по `is_premium`** — иначе продлевающий premium-репетитор получал мгновенный ложный success без оплаты (ревью P1-3). Успех → invalidate `['tutor','plan']`. Возврат из redirect-flow → `/tutor/profile?payment=success` (поллинг в `TutorProfile`).
 - **Known drift (follow-up):** `admin_list_tutor_plans.active_students` считает без `archived_at IS NULL` → может расходиться с ценовой вилкой.
 
+### Возвраты YooKassa — `payment_refunds` + `payments.refunded_amount` (2026-07-15, ревью ChatGPT-5.6 P1 #4)
+
+Миграция `20260715130000`. Два money-бага одной природы («body вебхука = источник истины») в `yookassa-webhook`:
+1. **`refund.succeeded` резолвился по `body.object.id`, но там ID ВОЗВРАТА** (платёж — в `object.payment_id`) → возврат падал в «payment not found», оплата навсегда оставалась `succeeded`, возвращённые деньги считались выручкой (MRR Пульса, rule 101).
+2. **Прочие события писали `status: body.object.status` ВСЛЕПУЮ.** Body не подписан → поддельный `payment.canceled` переводил чужую succeeded-оплату в `canceled`: искажение MRR **+ сброс интро-цены 200₽** (`yookassa-create-payment` определяет «первый платёж» отсутствием succeeded-строк → бесконечные 200₽ вместо 1000/2000₽). Теперь статус берётся ТОЛЬКО из `GET /v3/payments/{id}`.
+
+**Инварианты (НЕ откатывать):**
+- **Ветка `refund.succeeded` — ДО lookup'а `payments`** (поиск по refund id даёт «not found»). Порядок доверия: body даёт ТОЛЬКО refund id → `GET /v3/refunds/{id}` (те же shop-credentials) даёт истину → строка `payments` ищется по **`payment_id` ИЗ API**. Ни `payment_id`, ни сумма из body не используются — иначе поддельный POST списывал бы произвольную сумму с чужой оплаты. Чужой/несуществующий возврат → API 404 → 200 без записи.
+- **Возврат = отдельная append-only строка `payment_refunds`** (PK = YooKassa refund id → повторная доставка идемпотентна by construction; частичных возвратов на платёж может быть несколько). Запись — только SECURITY DEFINER RPC `yookassa_record_refund` (service_role, `REVOKE FROM PUBLIC`); RLS без политик → клиенты видят 0 строк.
+- **`payments.refunded_amount` ПЕРЕСЧИТЫВАЕТСЯ из `payment_refunds` внутри RPC под `FOR UPDATE` на платеже, НЕ инкрементится** — дубль вебхука не задваивает. Новый write-path возвратов → через эту RPC.
+- **`payments.status` при возврате НЕ меняется** (частичный возврат ≠ отмена; платёж состоялся). Потребители считают `net = amount − refunded_amount` (`ceo-pulse.ts::mrrAt`). Следствие-решение: полностью возвращённый платёж **всё ещё считается «первым платежом»** в интро-цене 200₽ — смена этого = отдельное продуктовое решение владельца.
+- **Подписка при возврате НЕ отзывается автоматически** (прежнее продуктовое решение — снимает админ через «Тарифы»).
+- Retry-семантика прежняя: транзиентный сбой API/RPC → 500 (YooKassa ретраит до ~24ч); подделка → 200 без записи.
+- **Ops:** магазин обязан быть подписан на `refund.succeeded` в кабинете YooKassa (Настройки → Уведомления). Без подписки код корректен, но события не приходят → возвраты не учитываются молча.
+- **Deploy-порядок:** миграция ПЕРВОЙ — `ceo-pulse.ts::mrrAt` SELECT'ит `refunded_amount`; edge раньше миграции = «column does not exist» → Пульс 500 (класс инцидента rule 45 от 2026-06-08).
+
 ### Round 3 — конверсия (2026-07-02)
 
 - **Нудж об истечении:** edge `tutor-plan-expiry-reminder` (SCHEDULER_SECRET-guard, `verify_jwt=false`, pg_cron через Management API — ops) — premium-репетиторы с `subscription_expires_at` в окне ≤3 дней → каскад telegram (`tutors.telegram_id`) → email (`sendTutorPlanExpiryEmail`, temp-guard). Идемпотентность: `tutor_plan_expiry_reminder_log` UNIQUE `(user_id, expires_at)` (миграция `20260702130000`); продление сдвигает expires_at → новый нудж. Гейт «только tutors-строки» ОБЯЗАТЕЛЕН — premium учеников тоже в profiles.
