@@ -1,0 +1,1 @@
+SELECT vault.create_secret('f78a2dc6cc0fa325317a4bbb0ca6f02d022ed8cc5e458783aec5ed8449475a72', 'SCHEDULER_SECRET');
