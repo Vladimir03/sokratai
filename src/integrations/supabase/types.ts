@@ -4615,6 +4615,16 @@ export type Database = {
         Args: { p_email: string; p_expires_at: string; p_note?: string }
         Returns: Json
       }
+      admin_list_client_errors: {
+        Args: { p_limit?: number }
+        Returns: {
+          actor_user_id: string
+          id: string
+          meta: Json
+          occurred_at: string
+          source: string
+        }[]
+      }
       admin_list_tutor_plans: {
         Args: never
         Returns: {
