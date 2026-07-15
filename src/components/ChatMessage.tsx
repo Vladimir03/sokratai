@@ -1,7 +1,8 @@
 import { memo, lazy, Suspense, useEffect, useState, useMemo, useCallback } from "react";
-import remarkGfm from 'remark-gfm';
+import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { X, Copy, ThumbsUp, ThumbsDown, Check, Clock, CheckCheck, AlertCircle, Brain, RotateCw } from "lucide-react";
 import {
@@ -275,13 +276,15 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               message.role === "user" ? "prose-headings:text-primary-foreground prose-p:text-primary-foreground prose-li:text-primary-foreground prose-strong:text-primary-foreground" : ""
             }`}>
               <Suspense fallback={<div className="animate-pulse">{displayContent}</div>}>
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={markdownComponents}
-                >
-                  {displayContent}
-                </ReactMarkdown>
+                <MarkdownErrorBoundary fallbackText={displayContent}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfmSafe, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                    components={markdownComponents}
+                  >
+                    {displayContent}
+                  </ReactMarkdown>
+                </MarkdownErrorBoundary>
               </Suspense>
             </div>
             {/* Time and status - inside bubble, bottom right - Telegram style */}

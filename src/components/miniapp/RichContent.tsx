@@ -1,8 +1,9 @@
 import { Suspense, lazy, useMemo, useEffect, useState } from 'react';
-import remarkGfm from 'remark-gfm';
+import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Math } from './Math';
+import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 
 const ReactMarkdown = lazy(() => import('react-markdown'));
 
@@ -110,16 +111,18 @@ export function RichContent({ children, className = '', inline = false, style }:
     return (
       <span className={className} style={style}>
         <Suspense fallback={<span>{children}</span>}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
-            components={{
-              ...markdownComponents,
-              p: ({ children }: any) => <>{children}</>, // No <p> wrapper for inline
-            }}
-          >
-            {processedContent}
-          </ReactMarkdown>
+          <MarkdownErrorBoundary fallbackText={processedContent}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfmSafe, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={{
+                ...markdownComponents,
+                p: ({ children }: any) => <>{children}</>, // No <p> wrapper for inline
+              }}
+            >
+              {processedContent}
+            </ReactMarkdown>
+          </MarkdownErrorBoundary>
         </Suspense>
       </span>
     );
@@ -135,13 +138,15 @@ export function RichContent({ children, className = '', inline = false, style }:
           </div>
         }
       >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={markdownComponents}
-        >
-          {processedContent}
-        </ReactMarkdown>
+        <MarkdownErrorBoundary fallbackText={processedContent}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfmSafe, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={markdownComponents}
+          >
+            {processedContent}
+          </ReactMarkdown>
+        </MarkdownErrorBoundary>
       </Suspense>
     </div>
   );

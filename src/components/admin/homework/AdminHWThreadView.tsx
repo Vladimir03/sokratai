@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, lazy, Suspense, Component, type ReactNode } from "react";
 import { format, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
-import remarkGfm from "remark-gfm";
+import remarkGfmSafe from "@/lib/markdown/remarkGfmSafe";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import {
@@ -97,7 +97,7 @@ function RichMarkdown({
     <Suspense fallback={<div className="whitespace-pre-wrap break-words">{text}</div>}>
       <div className="prose prose-sm max-w-none break-words [&_p]:my-1 [&_p]:leading-relaxed [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:text-[0.85em] [&_strong]:font-semibold [&_em]:italic">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
+          remarkPlugins={[remarkGfmSafe, remarkMath]}
           rehypePlugins={[rehypeKatex]}
         >
           {processed}
@@ -198,7 +198,8 @@ function PhotoGallery({ urls }: { urls: string[] }) {
 function isLikelyBroken(msg: AdminThreadMessage): boolean {
   if (!msg.content?.trim() && (msg.image_urls?.length ?? 0) === 0) return true;
   // Несбалансированный одиночный $ (не $$): чётность должна быть чётной для inline math.
-  const inlineDollars = (msg.content.match(/(?<!\$)\$(?!\$)/g) || []).length;
+  // Без lookbehind (rule 80): выкидываем все $$, оставшиеся $ — одиночные.
+  const inlineDollars = (msg.content.replace(/\$\$/g, '').match(/\$/g) || []).length;
   if (inlineDollars % 2 !== 0) return true;
   // Несбалансированный $$.
   const blockDollars = (msg.content.match(/\$\$/g) || []).length;

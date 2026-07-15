@@ -10,7 +10,8 @@
 ## Запрещённые паттерны (ломают Safari/iOS)
 
 ### JavaScript / TypeScript
-- **`RegExp` lookbehind** (`(?<=...)`) — Safari < 16.4 НЕ поддерживает. Используй capturing groups
+- **`RegExp` lookbehind** (`(?<=...)`) — Safari < 16.4 НЕ поддерживает. Используй capturing groups. Vite-таргет `safari15` НЕ спасает: esbuild конвертирует литерал в `new RegExp(...)` → SyntaxError «Invalid regular expression» в рантайме при первом исполнении. **Ловится и в зависимостях**: smoke-check §1 фейлит lookbehind в любом чанке `dist/assets`, §2 — в `src/` (инцидент Глеба 2026-07-15: `remark-gfm` ронял экран задачи у всех учеников на iOS ≤ 16.3).
+- **`remark-gfm` напрямую ЗАПРЕЩЁН** — только `@/lib/markdown/remarkGfmSafe` (тот же GFM без autolink-literal, чей email-регэксп несёт lookbehind и исполняется при каждом рендере ReactMarkdown). Тело ReactMarkdown в чатах оборачивать в `MarkdownErrorBoundary` (plain-text fallback: падает пузырь, не страница).
 - **`structuredClone()`** — Safari < 15.4. Используй `JSON.parse(JSON.stringify(obj))` или lodash `cloneDeep`
 - **`Array.at()`** — Safari < 15.4. Используй `arr[arr.length - 1]` вместо `arr.at(-1)`
 - **`Object.hasOwn()`** — Safari < 15.4. Используй `Object.prototype.hasOwnProperty.call()`

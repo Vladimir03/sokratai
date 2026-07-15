@@ -140,6 +140,27 @@ if (!fs.existsSync(distAssetsDir)) {
   } else {
     warn("react-vendor chunk missing");
   }
+
+  // Lookbehind-регэкспы в ЛЮБОМ собранном чанке — включая приехавшие из
+  // ЗАВИСИМОСТЕЙ. Safari/WebKit < 16.4 кидает SyntaxError «Invalid regular
+  // expression» (esbuild target safari15 конвертирует литералы в new RegExp →
+  // падение в рантайме при рендере). Инцидент Глеба 2026-07-15: remark-gfm →
+  // mdast-util-gfm-autolink-literal ронял экран задачи у всех учеников на
+  // iOS ≤ 16.3. Для gfm использовать @/lib/markdown/remarkGfmSafe. Rule 80.
+  const bundleLookbehindRe = /\(\?<[=!]/;
+  const chunksWithLookbehind = jsFiles.filter((name) =>
+    bundleLookbehindRe.test(readText(path.join(distAssetsDir, name))),
+  );
+  if (chunksWithLookbehind.length > 0) {
+    for (const name of chunksWithLookbehind) {
+      console.error(`  - dist/assets/${name}`);
+    }
+    fail(
+      "regex lookbehind found in built chunks — breaks Safari < 16.4 (rule 80). " +
+        "Источник: src или зависимость (как remark-gfm autolink-literal); для gfm — @/lib/markdown/remarkGfmSafe.",
+    );
+  }
+  ok("no regex lookbehind in built chunks");
 }
 console.log("");
 
@@ -179,6 +200,21 @@ if (filesWithSmallInput.length > 0) {
     console.log(`  - ${rel(filePath)}`);
   }
 }
+
+// Lookbehind в исходниках — ЖЁСТКАЯ ошибка (не warn): Safari < 16.4 не
+// поддерживает (rule 80), а vite-таргет safari15 лишь откладывает падение до
+// рантайма (new RegExp). Инцидент Глеба 2026-07-15.
+const srcLookbehindRe = /\(\?<[=!]/;
+const filesWithLookbehind = textFiles.filter((filePath) =>
+  srcLookbehindRe.test(readText(filePath)),
+);
+if (filesWithLookbehind.length > 0) {
+  for (const filePath of filesWithLookbehind) {
+    console.error(`  - ${rel(filePath)}`);
+  }
+  fail("regex lookbehind (?<= / (?<! found in src — breaks Safari < 16.4 (rule 80)");
+}
+ok("no regex lookbehind in src");
 
 if (compatWarnings === 0) {
   ok("no compatibility warnings detected");

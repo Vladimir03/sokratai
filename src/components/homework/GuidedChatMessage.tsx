@@ -4,11 +4,12 @@
  */
 
 import { memo, lazy, Suspense, useEffect, useState, useMemo } from 'react';
-import remarkGfm from 'remark-gfm';
+import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { AlertTriangle, EyeOff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import sokratChatIcon from '@/assets/sokrat-chat-icon.png';
 
@@ -298,13 +299,15 @@ const GuidedChatMessage = memo(({
     const bubbleBody = (
       <div className="text-sm">
         <Suspense fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
-            components={markdownComponents}
-          >
-            {displayContent}
-          </ReactMarkdown>
+          <MarkdownErrorBoundary fallbackText={displayContent}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfmSafe, remarkMath]}
+              rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+              components={markdownComponents}
+            >
+              {displayContent}
+            </ReactMarkdown>
+          </MarkdownErrorBoundary>
         </Suspense>
         {message.image_url && (
           <ThreadAttachments
@@ -398,13 +401,15 @@ const GuidedChatMessage = memo(({
         <Suspense
           fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}
         >
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
-            components={markdownComponents}
-          >
-            {displayContent}
-          </ReactMarkdown>
+          <MarkdownErrorBoundary fallbackText={displayContent}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfmSafe, remarkMath]}
+              rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+              components={markdownComponents}
+            >
+              {displayContent}
+            </ReactMarkdown>
+          </MarkdownErrorBoundary>
         </Suspense>
         {message.image_url && (
           <ThreadAttachments
@@ -478,13 +483,15 @@ const GuidedChatMessage = memo(({
                   <p className="whitespace-pre-wrap break-words">{displayContent}</p>
                 }
               >
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
-                  components={markdownComponents}
-                >
-                  {displayContent}
-                </ReactMarkdown>
+                <MarkdownErrorBoundary fallbackText={displayContent}>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfmSafe, remarkMath]}
+                    rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                    components={markdownComponents}
+                  >
+                    {displayContent}
+                  </ReactMarkdown>
+                </MarkdownErrorBoundary>
               </Suspense>
               {message.image_url && (
                 <ThreadAttachments
@@ -560,13 +567,15 @@ const GuidedChatMessage = memo(({
               <p className="whitespace-pre-wrap break-words">{displayContent}</p>
             }
           >
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
-              components={markdownComponents}
-            >
-              {displayContent}
-            </ReactMarkdown>
+            <MarkdownErrorBoundary fallbackText={displayContent}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfmSafe, remarkMath]}
+                rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                components={markdownComponents}
+              >
+                {displayContent}
+              </ReactMarkdown>
+            </MarkdownErrorBoundary>
           </Suspense>
           {message.image_url && (
             <ThreadAttachments

@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect } from 'react';
-import remarkGfm from 'remark-gfm';
+import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { cn } from '@/lib/utils';
+import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 
 // Only mounted for KIM 6/10/15/17 (matching tasks). React-markdown + plugins
 // are heavy (~80 KB gz), so this whole module is lazy-imported by MathBlock.
@@ -76,13 +77,15 @@ export function MarkdownTaskText({ text, className }: MarkdownTaskTextProps) {
   return (
     <div className={cn('text-base leading-7 text-slate-800', className)}>
       <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={tableComponents}
-        >
-          {text}
-        </ReactMarkdown>
+        <MarkdownErrorBoundary fallbackText={text}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfmSafe, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
+            components={tableComponents}
+          >
+            {text}
+          </ReactMarkdown>
+        </MarkdownErrorBoundary>
       </Suspense>
     </div>
   );
