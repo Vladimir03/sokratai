@@ -215,6 +215,30 @@ export type Database = {
         }
         Relationships: []
       }
+      ceo_digest_log: {
+        Row: {
+          id: number
+          mode: string
+          outcome: string
+          period_key: string
+          sent_at: string
+        }
+        Insert: {
+          id?: never
+          mode: string
+          outcome?: string
+          period_key: string
+          sent_at?: string
+        }
+        Update: {
+          id?: never
+          mode?: string
+          outcome?: string
+          period_key?: string
+          sent_at?: string
+        }
+        Relationships: []
+      }
       chat_messages: {
         Row: {
           chat_id: string | null
