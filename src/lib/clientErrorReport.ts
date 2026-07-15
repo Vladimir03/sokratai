@@ -20,6 +20,28 @@ const THROTTLE_KEY = 'sokrat-client-error-last';
 
 const sentThisSession = new Set<string>();
 
+// In-memory фолбэк троттлинга: localStorage может быть недоступен именно там,
+// где наблюдаемость нужнее всего (Safari private / restricted webview,
+// ревью 2026-07-15 P2) — его сбой НЕ должен глушить репорт целиком.
+let memLastSentAt = 0;
+
+function readLastSentAt(): number {
+  try {
+    return Number(localStorage.getItem(THROTTLE_KEY) || 0) || memLastSentAt;
+  } catch {
+    return memLastSentAt;
+  }
+}
+
+function writeLastSentAt(ts: number): void {
+  memLastSentAt = ts;
+  try {
+    localStorage.setItem(THROTTLE_KEY, String(ts));
+  } catch {
+    // приватный режим / quota — работаем на in-memory фолбэке
+  }
+}
+
 export type ClientErrorKind = 'screen' | 'markdown_bubble';
 
 export function reportClientError(message: string, kind: ClientErrorKind): void {
@@ -32,9 +54,8 @@ export function reportClientError(message: string, kind: ClientErrorKind): void 
     const dedupeKey = `${kind}:${normalized}`;
     if (sentThisSession.has(dedupeKey)) return;
 
-    const last = Number(localStorage.getItem(THROTTLE_KEY) || 0);
-    if (Date.now() - last < THROTTLE_MS) return;
-    localStorage.setItem(THROTTLE_KEY, String(Date.now()));
+    if (Date.now() - readLastSentAt() < THROTTLE_MS) return;
+    writeLastSentAt(Date.now());
     sentThisSession.add(dedupeKey);
 
     // getSession — локальный кеш, мгновенно (performance.md §2a). user_id
@@ -59,7 +80,11 @@ export function reportClientError(message: string, kind: ClientErrorKind): void 
           keepalive: true,
         }),
       )
-      .catch(() => undefined);
+      .catch(() => {
+        // Сетевой сбой не должен НАВСЕГДА подавлять этот message в сессии
+        // (ревью P2): снимаем дедуп — троттлинг 30с остаётся первой линией.
+        sentThisSession.delete(dedupeKey);
+      });
   } catch {
     // телеметрия никогда не ломает приложение
   }

@@ -56,11 +56,17 @@ export interface AnalyticsEventInput {
   meta?: Record<string, unknown> | null;
 }
 
-/** Записать событие воронки. Fire-and-forget — никогда не бросает. */
+/**
+ * Записать событие воронки. Никогда не бросает; возвращает `true` при
+ * успешном INSERT (ревью 2026-07-15 P2: writer'ам, чья единственная задача —
+ * запись события, напр. edge `client-error-report`, нужен honest-результат
+ * вместо молчаливого проглатывания). Существующие fire-and-forget callsites
+ * игнорируют возврат — совместимо.
+ */
 export async function logAnalyticsEvent(
   db: SupabaseClient,
   input: AnalyticsEventInput,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const { error } = await db.from("analytics_events").insert({
       event_name: input.event_name,
@@ -81,7 +87,9 @@ export async function logAnalyticsEvent(
           error: error.message,
         }),
       );
+      return false;
     }
+    return true;
   } catch (e) {
     console.warn(
       JSON.stringify({
@@ -90,6 +98,7 @@ export async function logAnalyticsEvent(
         error: e instanceof Error ? e.message : String(e),
       }),
     );
+    return false;
   }
 }
 
