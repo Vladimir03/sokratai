@@ -15,6 +15,7 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { sendTutorPlanExpiryEmail } from "../_shared/email-sender.ts";
+import { sendTelegramMessage } from "../_shared/telegram-send.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -23,7 +24,6 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
 
 const REMINDER_WINDOW_DAYS = 3;
 const PROFILE_URL = "https://sokratai.ru/tutor/profile";
@@ -39,37 +39,7 @@ function formatRuDate(iso: string): string {
   return `${d.getDate()} ${RU_MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-// Mirror homework-reminder::sendTelegramMessage (1 retry на 429/5xx).
-async function sendTelegramMessage(chatId: string, text: string): Promise<boolean> {
-  if (!TELEGRAM_BOT_TOKEN) return false;
-  const maxAttempts = 2;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const resp = await fetch(
-        `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-        },
-      );
-      if (resp.ok) return true;
-      const status = resp.status;
-      if (attempt < maxAttempts - 1 && (status === 429 || status >= 500)) {
-        await new Promise((r) => setTimeout(r, 500));
-        continue;
-      }
-      return false;
-    } catch {
-      if (attempt < maxAttempts - 1) {
-        await new Promise((r) => setTimeout(r, 500));
-        continue;
-      }
-      return false;
-    }
-  }
-  return false;
-}
+// sendTelegramMessage извлечён в _shared/telegram-send.ts (Stage 2 CEO-дайджеста).
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {

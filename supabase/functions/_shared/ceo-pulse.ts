@@ -16,6 +16,9 @@
  * tutors.user_id ↔ tutors.id обязателен.
  */
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { computePreFunnel, type PulsePreFunnel } from "./metrika.ts";
+
+export type { PulsePreFunnel };
 
 // ────────────────────────── Types ──────────────────────────
 
@@ -114,6 +117,12 @@ export interface PulsePayload {
   channels: Array<{ kind: PulseChannelKind; label: string; total: number; reachedValue: number; paidEver: number }>;
   atRisk: PulseAtRiskTutor[];
   totals: { tutors: number };
+  /**
+   * Пре-воронка «до регистрации» из Яндекс.Метрики (агрегаты — имён до
+   * регистрации не бывает). available:false = нет METRIKA_API_TOKEN или API
+   * недоступен — блок скрывается, остальной Пульс не страдает.
+   */
+  preFunnel: PulsePreFunnel;
 }
 
 // ────────────────────────── Row shapes ──────────────────────────
@@ -231,7 +240,10 @@ function maxDate(a: string | null, b: string | null): string | null {
   return a >= b ? a : b;
 }
 
-function resolveChannel(profile: ProfileRow | undefined): PulseChannelInfo {
+/** Канал привлечения по атрибуции профиля (экспорт: дневной дайджест метит новичков). */
+export function resolveChannel(
+  profile: Pick<ProfileRow, "registration_source" | "promo_code"> | undefined,
+): PulseChannelInfo {
   // Нет profiles-строки = отсутствие атрибуции, НЕ органика (ревью P1 #8) —
   // иначе дрейф данных систематически «улучшал» бы органический канал.
   if (!profile) {
@@ -273,6 +285,9 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   const d7 = new Date(now.getTime() - 7 * 864e5).toISOString();
   const d14 = new Date(now.getTime() - 14 * 864e5).toISOString();
 
+  // ── 0. Пре-воронка из Метрики — параллельно с DB-агрегацией (fail-safe) ──
+  const preFunnelPromise = computePreFunnel(now);
+
   // ── 1. Загрузка (все потенциально растущие таблицы — с пагинацией) ──
   // Все пагинированные выборки — со СТАБИЛЬНЫМ порядком (created_at, id):
   // offset-страницы без детерминированного order могут дублировать/терять
@@ -304,6 +319,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       channels: [],
       atRisk: [],
       totals: { tutors: 0 },
+      preFunnel: await preFunnelPromise,
     };
   }
 
@@ -758,5 +774,6 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     channels,
     atRisk,
     totals: { tutors: tutors.length },
+    preFunnel: await preFunnelPromise,
   };
 }

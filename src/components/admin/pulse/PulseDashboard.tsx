@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RefreshCw } from "lucide-react";
 import { PulseHeader } from "./PulseHeader";
+import { PulsePreFunnel } from "./PulsePreFunnel";
 import { PulseFunnel } from "./PulseFunnel";
 import { PulseChannels } from "./PulseChannels";
 import { PulseAtRisk } from "./PulseAtRisk";
@@ -95,6 +96,9 @@ export const PulseDashboard = () => {
       ) : data ? (
         <>
           <PulseHeader header={data.header} />
+          {data.preFunnel && (
+            <PulsePreFunnel data={data.preFunnel} newTutors7d={data.header.newTutors7d} />
+          )}
           <PulseFunnel funnel={data.funnel} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <PulseChannels channels={data.channels} />

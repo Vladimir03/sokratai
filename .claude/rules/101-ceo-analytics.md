@@ -36,6 +36,22 @@
 - **Тарифы**: сортировка платящие → триал → остальные (внутри: `active_students DESC`, имя) — **клиентская** (`useMemo` в `AdminTutorPlans`); RPC `admin_list_tutor_plans` (`ORDER BY is_paid ASC`) НЕ трогать (money-adjacent, отдельная миграция ради сортировки не нужна).
 - `fetchAnalytics` гейтится активной вкладкой (`tab === "analytics"`) — Пульс должен открываться мгновенно. Новая тяжёлая вкладка → тот же гейт.
 
+## Пре-воронка «до регистрации» (Яндекс.Метрика, 2026-07-15)
+
+`_shared/metrika.ts::computePreFunnel()` — агрегаты счётчика 105827612 за 7 МСК-дней + дельты: визиты лендинга `/` (ym:pv:users), Σ CTA-целей, открытия формы (`tutor_landing_trial_signup_started`), QR-визиты `/egor`. Вызывается внутри `computePulse` параллельно с DB (fail-safe: нет `METRIKA_API_TOKEN`/API упал → `available:false`, блок скрыт, Пульс жив). UI — `PulsePreFunnel.tsx` над воронкой.
+- **Пре-воронка принципиально АНОНИМНА** (агрегаты) — до регистрации имён не бывает; поимённость начинается со ступени «Регистрация».
+- **Готча Метрики: `reachGoal` с фронта ИГНОРИРУЕТСЯ, пока цель не заведена в интерфейсе** (Цели → JavaScript-событие с тем же идентификатором). Цели резолвятся runtime по именам через Management API; незаведённые → `missingGoals` (UI показывает «клики CTA занижены»), НЕ тихий ноль.
+- **Новый CTA на лендинге** → добавить цель в `tutorLandingAnalytics.ts` И в `CTA_GOAL_NAMES` (`metrika.ts`) И завести в интерфейсе Метрики — три места.
+- Секрет `METRIKA_API_TOKEN` = OAuth-токен Яндекса (право чтения Метрики).
+
+## Stage 2 — Telegram-дайджест (`ceo-telegram-digest`, 2026-07-15)
+
+Edge с guard `SCHEDULER_SECRET` (verbatim `tutor-plan-expiry-reminder`), body `{mode: weekly|daily}`; `verify_jwt=false`. Получатели — секрет `CEO_DIGEST_CHAT_IDS` (comma-separated chat id; получатель ОБЯЗАН хоть раз нажать Start у бота, иначе Telegram 403). Отправка — `_shared/telegram-send.ts` (извлечён из reminder'а; новый потребитель telegram-отправки → импортировать его, не копипастить).
+- **weekly** (cron пн 04:00 UTC = 07:00 МСК): реюз `computePulse` — шапка + пре-воронка + движение воронки за 7д (по `stageDates`, полный список репетиторов = Map из stuck-списков поведенческих ступеней) + топ-3 «кому написать» (at-risk → свежие застрявшие 1–4 с подсказкой `STUCK_HINTS`).
+- **daily** (cron 05:00 UTC = 08:00 МСК): события за 24ч — новые `tutors` (канал через экспортированный `resolveChannel`), оплаты по `payments.subscription_activated_at` (точный момент активации, не created_at), новые триалы владельцев tutors-строк. **Всё пусто → НЕ шлём** (`outcome='empty'`).
+- **Идемпотентность**: `ceo_digest_log` UNIQUE(mode, period_key=МСК-дата), claim-first (upsert ignoreDuplicates → 0 строк = уже обработан); ВСЕ отправки упали → claim снимается + 500 (ручной повтор безопасен). Имена в личку владельцев допустимы (не analytics_events).
+- **Cron — через Lovable Management API, НЕ миграцией** (rule 95). Ручной тест: `curl -X POST .../ceo-telegram-digest -H "Authorization: Bearer $SCHEDULER_SECRET" -d '{"mode":"daily"}'`.
+
 ## При расширении
 
-Новая метрика Пульса → в `computePulse` + оба типа-зеркала + tooltip с формулой. Новый сигнал активации → решить: поведенческий (в 1..6, монотонно) или коммерческий/статусный (независимый счётчик). Любая новая выборка → `fetchAll` + стабильный `.order()`. Новый канал атрибуции → `resolveChannel` (приоритет: referral > egor/promo > utm > web; отсутствие данных = `unknown`). Stage 2 (Telegram-дайджест: `ceo-telegram-digest`, `SCHEDULER_SECRET`, реюз `computePulse`, недельный + дневной-при-событиях) и Stage 3 (рефералка v1 attribution-only: `tutors.referral_code` + `profiles.referred_by_code`, **НЕ переиспользовать `promo_code`** — занят BLINOV_20 + anti-leak) — см. spec.
+Новая метрика Пульса → в `computePulse` + оба типа-зеркала + tooltip с формулой. Новый сигнал активации → решить: поведенческий (в 1..6, монотонно) или коммерческий/статусный (независимый счётчик). Любая новая выборка → `fetchAll` + стабильный `.order()`. Новый канал атрибуции → `resolveChannel` (приоритет: referral > egor/promo > utm > web; отсутствие данных = `unknown`). Новая секция дайджеста → внутрь существующих build*Message (не новый edge). Stage 3 (рефералка v1 attribution-only: `tutors.referral_code` + `profiles.referred_by_code`, **НЕ переиспользовать `promo_code`** — занят BLINOV_20 + anti-leak) — см. spec.

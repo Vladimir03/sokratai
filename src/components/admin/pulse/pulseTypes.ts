@@ -71,6 +71,22 @@ export interface PulseChannelSummary {
   paidEver: number;
 }
 
+/** Пре-воронка «до регистрации» из Яндекс.Метрики — агрегаты, анонимно. */
+export interface PulsePreFunnel {
+  available: boolean;
+  landingVisitors7d: number;
+  ctaClicks7d: number;
+  signupFormOpens7d: number;
+  qrVisits7d: number;
+  deltas: {
+    landingVisitors: number;
+    ctaClicks: number;
+    signupFormOpens: number;
+    qrVisits: number;
+  };
+  missingGoals: string[];
+}
+
 export interface PulsePayload {
   generatedAt: string;
   header: {
@@ -86,4 +102,5 @@ export interface PulsePayload {
   channels: PulseChannelSummary[];
   atRisk: PulseAtRiskTutor[];
   totals: { tutors: number };
+  preFunnel: PulsePreFunnel;
 }
