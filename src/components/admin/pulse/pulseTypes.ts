@@ -4,7 +4,7 @@
  * Deno-модуль нельзя импортировать в клиент). При изменении shape — править ОБА.
  */
 
-export type PulseChannelKind = "egor" | "ref" | "web";
+export type PulseChannelKind = "egor" | "ref" | "web" | "unknown";
 
 export interface PulseChannelInfo {
   kind: PulseChannelKind;
@@ -28,6 +28,7 @@ export interface PulseTutor {
   telegram: string | null;
   channel: PulseChannelInfo;
   registeredAt: string;
+  /** 1..6 — поведенческая стадия; триал/оплата — отдельно (isPaying/isTrial + funnel[6..7]). */
   stage: number;
   stageDates: Partial<Record<PulseStageKey, string | null>>;
   lastActivityAt: string | null;
@@ -39,7 +40,9 @@ export interface PulseTutor {
 export interface PulseStage {
   key: PulseStageKey;
   label: string;
+  /** 1..6 монотонно («достигли ≥ k»); trial/paid — независимые счётчики. */
   reached: number;
+  /** 1..6: застряли ровно здесь; trial: без оплаты; paid: дошедшие. */
   stuck: PulseTutor[];
 }
 
@@ -62,8 +65,10 @@ export interface PulseChannelSummary {
   kind: PulseChannelKind;
   label: string;
   total: number;
-  trials: number;
-  paying: number;
+  /** Исторический факт: ученик хоть раз сдал ДЗ (стадия 6). */
+  reachedValue: number;
+  /** Исторический факт: хоть раз платил (payments; ручные гранты не считаются). */
+  paidEver: number;
 }
 
 export interface PulsePayload {

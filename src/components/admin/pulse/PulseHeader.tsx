@@ -15,10 +15,18 @@ export const PulseHeader = ({ header }: { header: PulsePayload["header"] }) => {
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
       <PulseMetricCard
-        title="MRR"
+        title="MRR (run-rate)"
         value={`${num(header.mrr)} ₽`}
-        sub={deltaSub(header.deltas.mrr, " ₽")}
-        tooltip="Сумма последнего успешного платежа тарифа «AI-старт» каждого репетитора за последние 35 дней. Ручные гранты премиума в MRR не входят (они входят в «Платящие»)."
+        sub={
+          header.deltas.mrr === 0 ? (
+            <span>Δ run-rate: без изменений</span>
+          ) : (
+            <span className={header.deltas.mrr > 0 ? "text-emerald-700" : "text-rose-700"}>
+              Δ run-rate: {header.deltas.mrr > 0 ? "+" : ""}{num(header.deltas.mrr)} ₽
+            </span>
+          )
+        }
+        tooltip="Rolling run-rate: сумма последнего успешного платежа тарифа «AI-старт» каждого репетитора за последние 35 дней (30 дней подписки + 5 дней grace). Δ — сравнение с таким же окном неделю назад, НЕ выручка за неделю. Ручные гранты премиума не входят (они в «Платящие»). Возвраты (refund) пока не вычитаются."
         tone={header.mrr > 0 ? "good" : "default"}
       />
       <PulseMetricCard

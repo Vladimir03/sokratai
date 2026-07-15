@@ -8,7 +8,8 @@ export const PulseChannels = ({ channels }: { channels: PulseChannelSummary[] })
     <CardHeader className="pb-3">
       <CardTitle className="text-base">Каналы привлечения</CardTitle>
       <p className="text-sm text-muted-foreground">
-        Откуда приходят репетиторы и какие каналы доводят до денег.
+        Исторические факты по каждому каналу: сколько пришло, у скольких ученик хоть раз
+        сдал ДЗ, сколько хоть раз платили (ручные гранты не считаются).
       </p>
     </CardHeader>
     <CardContent>
@@ -20,8 +21,8 @@ export const PulseChannels = ({ channels }: { channels: PulseChannelSummary[] })
             <tr className="text-xs uppercase tracking-wide text-muted-foreground border-b border-slate-200">
               <th className="py-2 pr-3 font-medium">Канал</th>
               <th className="py-2 pr-3 font-medium text-right">Всего</th>
-              <th className="py-2 pr-3 font-medium text-right">Триалы</th>
-              <th className="py-2 font-medium text-right">Платят</th>
+              <th className="py-2 pr-3 font-medium text-right">Дошли до ценности</th>
+              <th className="py-2 font-medium text-right">Оплатили</th>
             </tr>
           </thead>
           <tbody>
@@ -31,8 +32,8 @@ export const PulseChannels = ({ channels }: { channels: PulseChannelSummary[] })
                   <ChannelBadge channel={{ kind: c.kind, label: c.label }} />
                 </td>
                 <td className="py-2 pr-3 text-sm tabular-nums text-right">{c.total}</td>
-                <td className="py-2 pr-3 text-sm tabular-nums text-right">{c.trials}</td>
-                <td className="py-2 text-sm tabular-nums text-right font-medium">{c.paying}</td>
+                <td className="py-2 pr-3 text-sm tabular-nums text-right">{c.reachedValue}</td>
+                <td className="py-2 text-sm tabular-nums text-right font-medium">{c.paidEver}</td>
               </tr>
             ))}
           </tbody>

@@ -15,16 +15,27 @@
  * 6. «Сообщений за период» считало и ответы AI (каждое сообщение юзера ×2) —
  *    теперь только сообщения пользователей.
  *
+ * Ревью ChatGPT-5.6 (2026-07-15) — дополнительно исправлено:
+ * 7. Ретеншн/воронка исключают placeholder-учеников, заведённых репетитором
+ *    вручную (registration_source='manual') — их created_at = дата заведения
+ *    карточки, а не начала использования, и они хоронили D1/D7.
+ * 8. Когорта считалась зрелой в ЕЩЁ ИДУЩИЙ целевой день (target == today) —
+ *    теперь `-1` («рано») и для него.
+ * 9. Все календарные бакеты («сегодня», дни графиков, дни ретеншна) — по
+ *    МОСКОВСКОМУ времени (UTC+3, без DST), не UTC: фаундер и все пользователи в РФ.
+ * 10. Пагинация — со стабильным order (offset-страницы без него могут
+ *     дублировать/терять строки); user_roles тоже пагинируется.
+ *
  * Определения метрик (для tooltips фронта — держать в синхроне):
  * - Активность = сообщение пользователя в AI-чате (chat_messages, role='user')
  *   ИЛИ сообщение в треде ДЗ (homework_tutor_thread_messages, role∈{user,tutor},
  *   по author_user_id). Чат репетитор↔ученик пока не учитывается.
- * - WAU — уникальные активные за ISO-неделю (пн–вс); крайние недели диапазона
- *   могут быть неполными.
- * - Ретеншн D1/D3/D7 — активность РОВНО в день N после регистрации (классический
- *   bounded day-N). Дни — по UTC.
- * - Новые за период — все строки profiles, включая учеников, заведённых
- *   репетитором вручную (placeholder-аккаунты) — отдельно не различаются.
+ * - WAU — уникальные активные за ISO-неделю (пн–вс, МСК); крайние недели
+ *   диапазона могут быть неполными.
+ * - Ретеншн D1/D3/D7 — активность РОВНО в день N после регистрации (bounded
+ *   day-N, МСК-дни), только само-зарегистрированные.
+ * - Новые за период — все строки profiles, включая manual-placeholder'ов
+ *   (в графике регистраций они есть; в ретеншне/воронке — нет).
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -35,6 +46,14 @@ const corsHeaders = {
 };
 
 const PAGE = 1000;
+
+/** Москва = UTC+3 круглый год (без DST) — безопасная константа. */
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
+
+/** Календарный день (YYYY-MM-DD) метки времени в московском времени. */
+function mskDay(iso: string): string {
+  return new Date(new Date(iso).getTime() + MSK_OFFSET_MS).toISOString().split("T")[0];
+}
 
 /** PostgREST режет ответ на 1000 строк — читаем до конца пагинацией. */
 async function fetchAll<T>(
@@ -104,6 +123,7 @@ async function fetchActivityInRange(
           .eq("role", "user")
           .gte("created_at", startIso)
           .lte("created_at", endIso)
+          .order("id")
           .range(from, to),
       "chat_messages_range",
     ),
@@ -115,6 +135,7 @@ async function fetchActivityInRange(
           .in("role", ["user", "tutor"])
           .gte("created_at", startIso)
           .lte("created_at", endIso)
+          .order("id")
           .range(from, to),
       "hw_messages_range",
     ),
@@ -185,38 +206,46 @@ serve(async (req) => {
     }
 
     const now = new Date();
-    const endDate = endDateParam ? new Date(endDateParam + "T23:59:59.999Z") : now;
+    // Параметры дат — календарные дни ФАУНДЕРА (МСК): границы суток строим в +03:00
+    const endDate = endDateParam ? new Date(endDateParam + "T23:59:59.999+03:00") : now;
     const startDate = startDateParam
-      ? new Date(startDateParam + "T00:00:00.000Z")
+      ? new Date(startDateParam + "T00:00:00.000+03:00")
       : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // 0. Tutor user IDs
-    const { data: tutorRoles, error: rolesError } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id")
-      .eq("role", "tutor");
-    if (rolesError) throw new Error(`user_roles: ${rolesError.message}`);
-    const tutorSet = new Set((tutorRoles || []).map((r: { user_id: string }) => r.user_id));
+    // 0. Tutor user IDs (пагинировано — >1000 ролей молча теряло бы репетиторов)
+    const tutorRoles = await fetchAll<{ user_id: string }>(
+      (from, to) =>
+        supabaseAdmin
+          .from("user_roles")
+          .select("user_id")
+          .eq("role", "tutor")
+          .order("user_id")
+          .range(from, to),
+      "user_roles",
+    );
+    const tutorSet = new Set(tutorRoles.map((r) => r.user_id));
 
-    // 1. Registrations in range (paginated)
-    const registrations = await fetchAll<{ id: string; created_at: string | null }>(
+    // 1. Registrations in range (paginated; registration_source — для фильтра
+    // manual-placeholder'ов из когорт ретеншна/воронки)
+    const registrations = await fetchAll<{ id: string; created_at: string | null; registration_source: string | null }>(
       (from, to) =>
         supabaseAdmin
           .from("profiles")
-          .select("id, created_at")
+          .select("id, created_at, registration_source")
           .gte("created_at", startDateStr)
           .lte("created_at", endDateStr)
           .order("created_at", { ascending: true })
+          .order("id")
           .range(from, to),
       "profiles_range",
     );
 
     const registrationsByDay: Record<string, { total: number; students: number; tutors: number }> = {};
     registrations.forEach((r) => {
-      const day = r.created_at?.split("T")[0];
+      const day = r.created_at ? mskDay(r.created_at) : null;
       if (day) {
         if (!registrationsByDay[day]) registrationsByDay[day] = { total: 0, students: 0, tutors: 0 };
         registrationsByDay[day].total++;
@@ -234,7 +263,7 @@ serve(async (req) => {
     const messagesByDay: Record<string, number> = {};
     const uniqueUsersByDay: Record<string, Set<string>> = {};
     activityEvents.forEach((ev) => {
-      const day = ev.createdAt.split("T")[0];
+      const day = mskDay(ev.createdAt);
       messagesByDay[day] = (messagesByDay[day] || 0) + 1;
       if (!uniqueUsersByDay[day]) uniqueUsersByDay[day] = new Set();
       uniqueUsersByDay[day].add(ev.userId);
@@ -261,7 +290,10 @@ serve(async (req) => {
 
     // 3–4. Ретеншн когорт + воронка «первое сообщение» — ОДНА all-time выборка
     // активности когортных пользователей (было: N+1 запросов в воронке).
-    const cohortUserIds = registrations.map((r) => r.id);
+    // Manual-placeholder'ы (заведены репетитором) ИСКЛЮЧЕНЫ: их created_at —
+    // дата заведения карточки, не начала использования (ревью P0 #3).
+    const selfRegistered = registrations.filter((r) => r.registration_source !== "manual");
+    const cohortUserIds = selfRegistered.map((r) => r.id);
     const allTimeActivityByUser: Record<string, string[]> = {};
     if (cohortUserIds.length > 0) {
       const [cohortChat, cohortHw] = await Promise.all([
@@ -273,6 +305,7 @@ serve(async (req) => {
               .select("user_id, role, created_at")
               .eq("role", "user")
               .in("user_id", chunk)
+              .order("id")
               .range(from, to),
           "chat_messages_cohort",
         ),
@@ -284,6 +317,7 @@ serve(async (req) => {
               .select("author_user_id, role, created_at")
               .in("role", ["user", "tutor"])
               .in("author_user_id", chunk)
+              .order("id")
               .range(from, to),
           "hw_messages_cohort",
         ),
@@ -297,30 +331,32 @@ serve(async (req) => {
       }
     }
 
-    // Retention: активность РОВНО в день N после регистрации (bounded day-N, UTC)
+    // Retention: активность РОВНО в день N после регистрации (bounded day-N,
+    // МСК-дни; только self-registered). Когорта считается зрелой ТОЛЬКО после
+    // завершения целевого дня (`>=` — ревью P1 #6: день ещё идёт → «рано»).
     const usersByDate: Record<string, string[]> = {};
-    registrations.forEach((r) => {
-      const regDate = r.created_at?.split("T")[0];
+    selfRegistered.forEach((r) => {
+      const regDate = r.created_at ? mskDay(r.created_at) : null;
       if (regDate) {
         (usersByDate[regDate] ||= []).push(r.id);
       }
     });
 
-    const today = new Date(now.toISOString().split("T")[0]);
+    const todayMsk = mskDay(now.toISOString());
     const cohortRetention = Object.entries(usersByDate).map(([regDate, users]) => {
-      const cohortDate = new Date(regDate);
       const cohortSize = users.length;
 
       const calcRetention = (retentionDay: number) => {
-        const targetDate = new Date(cohortDate.getTime() + retentionDay * 24 * 60 * 60 * 1000);
-        if (targetDate > today) {
-          return { retained: -1, rate: -1 }; // Not yet available
+        // Дата-арифметика на UTC-полночи МСК-лейбла — даёт следующий МСК-лейбл
+        const target = new Date(new Date(regDate).getTime() + retentionDay * 24 * 60 * 60 * 1000);
+        const targetDay = target.toISOString().split("T")[0];
+        if (targetDay >= todayMsk) {
+          return { retained: -1, rate: -1 }; // целевой день не завершён — рано
         }
-        const targetDay = targetDate.toISOString().split("T")[0];
         let retained = 0;
         for (const userId of users) {
           const userActivity = allTimeActivityByUser[userId] || [];
-          if (userActivity.some((ts) => ts.split("T")[0] === targetDay)) retained++;
+          if (userActivity.some((ts) => mskDay(ts) === targetDay)) retained++;
         }
         return {
           retained,
@@ -352,7 +388,7 @@ serve(async (req) => {
 
     // 5. Summary stats
     const allProfiles = await fetchAll<{ id: string }>(
-      (from, to) => supabaseAdmin.from("profiles").select("id").range(from, to),
+      (from, to) => supabaseAdmin.from("profiles").select("id").order("id").range(from, to),
       "profiles_all",
     );
     const totalUsers = allProfiles.length;
@@ -366,8 +402,8 @@ serve(async (req) => {
     // Сообщений за период = сообщения ПОЛЬЗОВАТЕЛЕЙ (без ответов AI), оба источника
     const totalMessages = activityEvents.length;
 
-    // Активных сегодня = УНИКАЛЬНЫЕ пользователи с активностью с начала суток (UTC)
-    const todayStartIso = new Date(now.toISOString().split("T")[0]).toISOString();
+    // Активных сегодня = УНИКАЛЬНЫЕ пользователи с активностью с начала МОСКОВСКИХ суток
+    const todayStartIso = new Date(todayMsk + "T00:00:00.000+03:00").toISOString();
     const todayEvents = await fetchActivityInRange(supabaseAdmin, todayStartIso, now.toISOString());
     const activeUsersToday = new Set(todayEvents.map((ev) => ev.userId)).size;
 
@@ -385,6 +421,7 @@ serve(async (req) => {
           supabaseAdmin
             .from("profiles")
             .select("id, subscription_tier, subscription_expires_at, trial_ends_at")
+            .order("id")
             .range(from, to),
         "profiles_segments",
       );
@@ -526,12 +563,14 @@ serve(async (req) => {
 
     const topUsersData = await calculateTopUsers();
 
-    // Prepare chart data - iterate through all days in the range
+    // Prepare chart data — все дни диапазона как МОСКОВСКИЕ календарные лейблы
     const chartDays: string[] = [];
-    const currentDate = new Date(startDate);
-    while (currentDate <= endDate) {
-      chartDays.push(currentDate.toISOString().split("T")[0]);
-      currentDate.setDate(currentDate.getDate() + 1);
+    const startDayMsk = mskDay(startDate.toISOString());
+    const endDayMsk = mskDay(endDate.toISOString());
+    for (const d = new Date(startDayMsk); ; d.setUTCDate(d.getUTCDate() + 1)) {
+      const key = d.toISOString().split("T")[0];
+      if (key > endDayMsk) break;
+      chartDays.push(key);
     }
 
     const registrationsChart = chartDays.map(day => {
@@ -588,7 +627,9 @@ serve(async (req) => {
       wau: wauChart,
       cohortRetention,
       funnel: {
-        registered: newUsers || 0,
+        // Только self-registered — иначе manual-placeholder'ы раздували знаменатель,
+        // а sentFirstMessage считался по очищенной когорте (несопоставимо)
+        registered: selfRegistered.length,
         completedOnboarding: completedOnboarding || 0,
         sentFirstMessage,
       },

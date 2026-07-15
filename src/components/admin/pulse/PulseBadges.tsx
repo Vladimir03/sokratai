@@ -9,6 +9,7 @@ export const ChannelBadge = ({ channel }: { channel: PulseChannelInfo }) => (
       channel.kind === "egor" && "border-amber-200 bg-amber-50 text-amber-900",
       channel.kind === "ref" && "border-sky-200 bg-sky-50 text-sky-900",
       channel.kind === "web" && "border-slate-200 bg-slate-50 text-slate-600",
+      channel.kind === "unknown" && "border-dashed border-slate-300 bg-white text-slate-400",
     )}
   >
     {channel.label}

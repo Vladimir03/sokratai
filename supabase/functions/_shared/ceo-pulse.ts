@@ -19,7 +19,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 // ────────────────────────── Types ──────────────────────────
 
-export type PulseChannelKind = "egor" | "ref" | "web";
+export type PulseChannelKind = "egor" | "ref" | "web" | "unknown";
 
 export interface PulseChannelInfo {
   kind: PulseChannelKind;
@@ -43,7 +43,13 @@ export interface PulseTutor {
   telegram: string | null;
   channel: PulseChannelInfo;
   registeredAt: string;
-  /** 1..8 — максимум достигнутой стадии воронки. */
+  /**
+   * 1..6 — максимум достигнутой ПОВЕДЕНЧЕСКОЙ стадии (регистрация → ученик →
+   * создал ДЗ → отправил → ученик открыл → ученик сдал). Коммерческий статус
+   * (триал/оплата) НАМЕРЕННО не входит (ревью ChatGPT-5.6 P0 #1: триал
+   * выдаётся при регистрации автоматически и перепрыгивал бы воронку) —
+   * он в isPaying/isTrial и в независимых ступенях funnel[6..7].
+   */
   stage: number;
   stageDates: Partial<Record<PulseStageKey, string | null>>;
   lastActivityAt: string | null;
@@ -55,9 +61,16 @@ export interface PulseTutor {
 export interface PulseStage {
   key: PulseStageKey;
   label: string;
-  /** Репетиторов, достигших стадии ≥ k (монотонно убывает). */
+  /**
+   * Поведенческие ступени 1..6: достигли ≥ k (монотонно убывает).
+   * Коммерческие «trial»/«paid»: НЕЗАВИСИМЫЕ счётчики (когда-либо был триал /
+   * когда-либо платил) — монотонность с 1..6 не гарантируется намеренно.
+   */
   reached: number;
-  /** Застряли РОВНО здесь (stage === k) — рабочий список «кому написать». */
+  /**
+   * 1..6: застряли РОВНО здесь (stage === k) — рабочий список «кому написать».
+   * «trial»: в триале, но так и не оплатил. «paid»: дошедшие (платившие).
+   */
   stuck: PulseTutor[];
 }
 
@@ -81,13 +94,23 @@ export interface PulsePayload {
     trialTutors: number;
     tutorWAU: number;
     newTutors7d: number;
-    /** ₽, integer — Σ последнего succeeded-платежа plan='tutor_ai_start' за 35 дней. */
+    /**
+     * ₽, integer — Σ последнего succeeded-платежа plan='tutor_ai_start' за
+     * 35 дней. Известное ограничение: возвраты (refund) НЕ вычитаются —
+     * yookassa-webhook пока не обрабатывает refund-события (отдельная задача).
+     */
     mrr: number;
     weeklyValueTutors: { count: number; names: string[] };
     deltas: { newTutors: number; weeklyValue: number; mrr: number };
   };
   funnel: PulseStage[];
-  channels: Array<{ kind: PulseChannelKind; label: string; total: number; trials: number; paying: number }>;
+  /**
+   * Каналы — ИСТОРИЧЕСКИЕ факты (ревью P0 #2): reachedValue = ученик хоть раз
+   * сдал ДЗ (стадия 6); paidEver = хоть раз платил (payments, ручные гранты
+   * НЕ считаются). Текущий триал как «конверсия канала» не показывается —
+   * триал выдаётся при регистрации автоматически.
+   */
+  channels: Array<{ kind: PulseChannelKind; label: string; total: number; reachedValue: number; paidEver: number }>;
   atRisk: PulseAtRiskTutor[];
   totals: { tutors: number };
 }
@@ -200,24 +223,34 @@ function maxDate(a: string | null, b: string | null): string | null {
 }
 
 function resolveChannel(profile: ProfileRow | undefined): PulseChannelInfo {
-  const source = profile?.registration_source?.trim() ?? "";
-  const promo = profile?.promo_code?.trim() ?? "";
+  // Нет profiles-строки = отсутствие атрибуции, НЕ органика (ревью P1 #8) —
+  // иначе дрейф данных систематически «улучшал» бы органический канал.
+  if (!profile) {
+    return { kind: "unknown", label: "Без атрибуции" };
+  }
+  const source = profile.registration_source?.trim() ?? "";
+  const promo = profile.promo_code?.trim() ?? "";
   if (source === "egor" || promo.toUpperCase() === "BLINOV_20") {
     return { kind: "egor", label: "Егор (QR)" };
   }
-  if (source && source !== "web") {
+  if (source && source !== "web" && source !== "manual") {
     return { kind: "ref", label: `Реф: ${source}` };
   }
   return { kind: "web", label: "Органика" };
 }
 
-const STAGE_LABELS: Array<{ key: PulseStageKey; label: string }> = [
+/** Поведенческие ступени: max-достигнутое (цепочка структурно почти последовательна). */
+const BEHAVIORAL_STAGES: Array<{ key: PulseStageKey; label: string }> = [
   { key: "registered", label: "Регистрация" },
   { key: "student_added", label: "Добавил ученика" },
   { key: "hw_created", label: "Создал ДЗ" },
   { key: "hw_sent", label: "Отправил ДЗ" },
   { key: "student_opened", label: "Ученик открыл" },
   { key: "student_submitted", label: "Ученик сдал" },
+];
+
+/** Коммерческие ступени: независимые счётчики, НЕ входят в max(stage). */
+const COMMERCIAL_STAGES: Array<{ key: PulseStageKey; label: string }> = [
   { key: "trial", label: "Триал" },
   { key: "paid", label: "Оплата" },
 ];
@@ -232,9 +265,17 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   const d14 = new Date(now.getTime() - 14 * 864e5).toISOString();
 
   // ── 1. Загрузка (все потенциально растущие таблицы — с пагинацией) ──
+  // Все пагинированные выборки — со СТАБИЛЬНЫМ порядком (created_at, id):
+  // offset-страницы без детерминированного order могут дублировать/терять
+  // строки на границах (ревью P1 #7).
   const tutors = await fetchAll<TutorRow>(
     (from, to) =>
-      db.from("tutors").select("id, user_id, name, telegram_username, created_at").order("created_at").range(from, to),
+      db
+        .from("tutors")
+        .select("id, user_id, name, telegram_username, created_at")
+        .order("created_at")
+        .order("id")
+        .range(from, to),
     "tutors",
   );
 
@@ -250,7 +291,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
         weeklyValueTutors: { count: 0, names: [] },
         deltas: { newTutors: 0, weeklyValue: 0, mrr: 0 },
       },
-      funnel: STAGE_LABELS.map((s) => ({ ...s, reached: 0, stuck: [] })),
+      funnel: [...BEHAVIORAL_STAGES, ...COMMERCIAL_STAGES].map((s) => ({ ...s, reached: 0, stuck: [] })),
       channels: [],
       atRisk: [],
       totals: { tutors: 0 },
@@ -277,21 +318,31 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
 
   const [tutorStudents, assignments, sas, threads, valueMsgs, tutorMsgs14d, payments, crmRows] = await Promise.all([
     fetchAll<TutorStudentRow>(
-      (from, to) => db.from("tutor_students").select("tutor_id, status, archived_at, created_at").range(from, to),
+      (from, to) =>
+        db.from("tutor_students").select("tutor_id, status, archived_at, created_at").order("id").range(from, to),
       "tutor_students",
     ),
     fetchAll<AssignmentRow>(
-      (from, to) => db.from("homework_tutor_assignments").select("id, tutor_id, created_at").range(from, to),
+      (from, to) =>
+        db.from("homework_tutor_assignments").select("id, tutor_id, created_at").order("id").range(from, to),
       "assignments",
     ),
     fetchAll<SaRow>(
       (from, to) =>
-        db.from("homework_tutor_student_assignments").select("id, assignment_id, notified_at").range(from, to),
+        db
+          .from("homework_tutor_student_assignments")
+          .select("id, assignment_id, notified_at")
+          .order("id")
+          .range(from, to),
       "student_assignments",
     ),
     fetchAll<ThreadRow>(
       (from, to) =>
-        db.from("homework_tutor_threads").select("id, student_assignment_id, status, created_at").range(from, to),
+        db
+          .from("homework_tutor_threads")
+          .select("id, student_assignment_id, status, created_at")
+          .order("id")
+          .range(from, to),
       "threads",
     ),
     // «Ценность» = ученик реально сдал: submission (мобайл/SubmitSheet) ИЛИ
@@ -303,6 +354,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
           .select("thread_id, role, created_at")
           .eq("role", "user")
           .in("message_kind", ["submission", "answer"])
+          .order("id")
           .range(from, to),
       "value_messages",
     ),
@@ -313,6 +365,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
           .select("thread_id, created_at")
           .eq("role", "tutor")
           .gte("created_at", d14)
+          .order("id")
           .range(from, to),
       "tutor_messages_14d",
     ),
@@ -323,12 +376,17 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
           .select("user_id, amount, status, created_at")
           .eq("plan", "tutor_ai_start")
           .eq("status", "succeeded")
+          .order("id")
           .range(from, to),
       "payments",
     ),
     fetchAll<CrmRow>(
       (from, to) =>
-        db.from("tutor_pilot_crm").select("tutor_user_id, willing_to_pay, risk_status, key_pain").range(from, to),
+        db
+          .from("tutor_pilot_crm")
+          .select("tutor_user_id, willing_to_pay, risk_status, key_pain")
+          .order("tutor_user_id")
+          .range(from, to),
       "tutor_pilot_crm",
     ),
   ]);
@@ -474,6 +532,11 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   };
 
   // ── 3. Сборка PulseTutor ──
+  // Исторические коммерческие факты (по tutors.id) — для ступеней «Триал»/«Оплата»
+  // и channel-конверсии: paidEver = реальный платёж (ручные гранты НЕ входят).
+  const trialEverIds = new Set<string>();
+  const paidEverIds = new Set<string>();
+
   const pulseTutors: PulseTutor[] = tutors.map((t) => {
     const profile = profileByUserId.get(t.user_id);
     const a = agg.get(t.user_id);
@@ -498,6 +561,8 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       paid: firstPaidAt,
     };
 
+    // ТОЛЬКО поведенческие шаги (1..6): триал/оплата не входят (ревью P0 #1 —
+    // авто-триал при регистрации перепрыгивал бы всю продуктовую воронку).
     const reachedFlags = [
       true, // 1 регистрация
       a?.studentAddedAt != null,
@@ -505,10 +570,9 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       a?.hwSentAt != null,
       a?.studentOpenedAt != null,
       a?.studentSubmittedAt != null,
-      hasTrial,
-      firstPaidAt != null,
     ];
-    // stage = МАКСИМУМ достигнутого (пропуски ниже не понижают — монотонный funnel)
+    // stage = МАКСИМУМ достигнутого (цепочка 3..6 структурно последовательна;
+    // единственный возможный «пропуск» — создал ДЗ без ученика)
     let stage = 1;
     for (let k = reachedFlags.length - 1; k >= 0; k--) {
       if (reachedFlags[k]) {
@@ -516,6 +580,9 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
         break;
       }
     }
+
+    if (hasTrial) trialEverIds.add(t.id);
+    if (firstPaidAt != null) paidEverIds.add(t.id);
 
     return {
       tutorId: t.id,
@@ -546,24 +613,43 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   const mrrNow = mrrAt(now);
   const mrrPrev = mrrAt(new Date(now.getTime() - 7 * 864e5));
 
-  // ── 5. Воронка ──
+  // ── 5. Воронка: 6 поведенческих (монотонных) + 2 независимые коммерческие ──
   const byRegisteredDesc = (a: PulseTutor, b: PulseTutor) => (a.registeredAt < b.registeredAt ? 1 : -1);
-  const funnel: PulseStage[] = STAGE_LABELS.map((s, idx) => {
+  const funnel: PulseStage[] = BEHAVIORAL_STAGES.map((s, idx) => {
     const k = idx + 1;
     const reached = pulseTutors.filter((t) => t.stage >= k).length;
-    // Для финальной стадии «застрявшие» = дошедшие (платящие) — их и показываем.
     const stuck = pulseTutors.filter((t) => t.stage === k).sort(byRegisteredDesc);
     return { key: s.key, label: s.label, reached, stuck };
   });
+  funnel.push({
+    key: "trial",
+    label: "Триал",
+    reached: trialEverIds.size,
+    // «Застряли на триале» = был триал, но так и не заплатил
+    stuck: pulseTutors
+      .filter((t) => trialEverIds.has(t.tutorId) && !paidEverIds.has(t.tutorId))
+      .sort(byRegisteredDesc),
+  });
+  funnel.push({
+    key: "paid",
+    label: "Оплата",
+    reached: paidEverIds.size,
+    // Дошедшие — когда-либо платившие (не «застрявшие»)
+    stuck: pulseTutors.filter((t) => paidEverIds.has(t.tutorId)).sort(byRegisteredDesc),
+  });
 
-  // ── 6. Каналы ──
-  const channelMap = new Map<string, { kind: PulseChannelKind; label: string; total: number; trials: number; paying: number }>();
+  // ── 6. Каналы: исторические факты (ревью P0 #2) ──
+  const channelMap = new Map<
+    string,
+    { kind: PulseChannelKind; label: string; total: number; reachedValue: number; paidEver: number }
+  >();
   for (const t of pulseTutors) {
     const key = `${t.channel.kind}:${t.channel.label}`;
-    const c = channelMap.get(key) ?? { kind: t.channel.kind, label: t.channel.label, total: 0, trials: 0, paying: 0 };
+    const c = channelMap.get(key) ??
+      { kind: t.channel.kind, label: t.channel.label, total: 0, reachedValue: 0, paidEver: 0 };
     c.total += 1;
-    if (t.isTrial) c.trials += 1;
-    if (t.isPaying) c.paying += 1;
+    if (t.stage >= 6) c.reachedValue += 1; // ученик хоть раз сдал ДЗ
+    if (paidEverIds.has(t.tutorId)) c.paidEver += 1; // реальный платёж, без грантов
     channelMap.set(key, c);
   }
   const channels = Array.from(channelMap.values()).sort((a, b) => b.total - a.total);

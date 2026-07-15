@@ -48,7 +48,7 @@ export const AdminSummaryCards = ({ data }: AdminSummaryCardsProps) => {
     {
       title: "Активных сегодня",
       value: data.activeUsersToday,
-      tooltip: "Уникальные пользователи с сообщением сегодня (UTC) в AI-чате или треде ДЗ.",
+      tooltip: "Уникальные пользователи с сообщением сегодня (по МСК) в AI-чате или треде ДЗ.",
       icon: UserCheck,
       color: "text-orange-500",
       bgColor: "bg-orange-50",

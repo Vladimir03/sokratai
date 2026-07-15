@@ -81,9 +81,11 @@ const Admin = () => {
         return;
       }
 
-      const startDate = dateRange.from.toISOString().split("T")[0];
-      const endDate = dateRange.to.toISOString().split("T")[0];
-      
+      // ЛОКАЛЬНАЯ календарная дата, НЕ toISOString(): в МСК полночь 15-го — это
+      // ещё 14-е по UTC → весь диапазон уезжал на день назад (ревью P1 #5)
+      const startDate = format(dateRange.from, "yyyy-MM-dd");
+      const endDate = format(dateRange.to, "yyyy-MM-dd");
+
       // Use POST method - GET with body is not allowed by browsers
       const { data, error: invokeError } = await supabase.functions.invoke("admin-analytics", {
         body: { startDate, endDate },
