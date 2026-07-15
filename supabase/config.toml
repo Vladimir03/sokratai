@@ -3,9 +3,7 @@ project_id = "vrsseotrfmsxpbciyqzc"
 [functions]
   [functions.admin-analytics]
     verify_jwt = false
-  [functions.admin-business-dashboard]
-    verify_jwt = false
-  [functions.admin-product-discovery]
+  [functions.admin-ceo-dashboard]
     verify_jwt = false
   [functions.assign-tutor-role]
     verify_jwt = false

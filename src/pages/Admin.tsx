@@ -16,14 +16,13 @@ import { AdminLineChart } from "@/components/admin/AdminLineChart";
 import { AdminCRM } from "@/components/admin/AdminCRM";
 import { AdminPayments } from "@/components/admin/AdminPayments";
 import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
-import { AdminMockExams } from "@/components/admin/AdminMockExams";
+import { AdminAiQuality } from "@/components/admin/AdminAiQuality";
 import { AdminTutorPlans } from "@/components/admin/AdminTutorPlans";
 import { AdminClientErrors } from "@/components/admin/AdminClientErrors";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, BookOpen, Target, Compass, FileText, GraduationCap, Wallet, AlertTriangle } from "lucide-react";
-import { BusinessDashboard } from "@/components/admin/business/BusinessDashboard";
-import { ProductDiscoveryDashboard } from "@/components/admin/discovery/ProductDiscoveryDashboard";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, Sparkles, GraduationCap, Wallet, AlertTriangle, HeartPulse } from "lucide-react";
+import { PulseDashboard } from "@/components/admin/pulse/PulseDashboard";
 import { cn } from "@/lib/utils";
 
 interface CohortRetentionData {
@@ -61,6 +60,8 @@ interface AnalyticsData {
 const Admin = () => {
   const navigate = useNavigate();
   const { isAdmin, isLoading: isCheckingAdmin } = useAdminAccess();
+  // Пульс — дефолтная вкладка; «Аналитика» грузится лениво при первом открытии.
+  const [tab, setTab] = useState("pulse");
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -107,10 +108,12 @@ const Admin = () => {
   };
 
   useEffect(() => {
-    if (!isCheckingAdmin && isAdmin) {
+    // Гейт по активной вкладке: раньше аналитика грузилась на mount и
+    // задерживала открытие страницы — Пульс должен открываться мгновенно.
+    if (!isCheckingAdmin && isAdmin && tab === "analytics") {
       fetchAnalytics();
     }
-  }, [isCheckingAdmin, isAdmin, dateRange]);
+  }, [isCheckingAdmin, isAdmin, dateRange, tab]);
 
   if (isCheckingAdmin) {
     return (
@@ -208,35 +211,27 @@ const Admin = () => {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="analytics" className="space-y-6">
+        <Tabs value={tab} onValueChange={setTab} className="space-y-6">
           <TabsList>
+            <TabsTrigger value="pulse" className="flex items-center gap-2">
+              <HeartPulse className="w-4 h-4" />
+              Пульс
+            </TabsTrigger>
             <TabsTrigger value="analytics" className="flex items-center gap-2">
               <BarChart3 className="w-4 h-4" />
               Аналитика
-            </TabsTrigger>
-            <TabsTrigger value="business" className="flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              Бизнес
-            </TabsTrigger>
-            <TabsTrigger value="discovery" className="flex items-center gap-2">
-              <Compass className="w-4 h-4" />
-              Открытия
             </TabsTrigger>
             <TabsTrigger value="crm" className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4" />
               CRM
             </TabsTrigger>
-            <TabsTrigger value="homework" className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4" />
-              ДЗ
-            </TabsTrigger>
-            <TabsTrigger value="mock-exams" className="flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              Пробники
-            </TabsTrigger>
             <TabsTrigger value="tutors" className="flex items-center gap-2">
               <GraduationCap className="w-4 h-4" />
               Репетиторы
+            </TabsTrigger>
+            <TabsTrigger value="ai-quality" className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4" />
+              AI-качество
             </TabsTrigger>
             <TabsTrigger value="tutor-plans" className="flex items-center gap-2">
               <Wallet className="w-4 h-4" />
@@ -251,6 +246,10 @@ const Admin = () => {
               Ошибки
             </TabsTrigger>
           </TabsList>
+
+          <TabsContent value="pulse">
+            <PulseDashboard />
+          </TabsContent>
 
           <TabsContent value="analytics">
             {error && (
@@ -318,24 +317,12 @@ const Admin = () => {
             ) : null}
           </TabsContent>
 
-          <TabsContent value="business">
-            <BusinessDashboard />
-          </TabsContent>
-
-          <TabsContent value="discovery">
-            <ProductDiscoveryDashboard />
-          </TabsContent>
-
           <TabsContent value="crm">
             <AdminCRM />
           </TabsContent>
 
-          <TabsContent value="homework">
-            <AdminHomeworkChats />
-          </TabsContent>
-
-          <TabsContent value="mock-exams">
-            <AdminMockExams startDate={dateRange.from.toISOString()} endDate={dateRange.to.toISOString()} />
+          <TabsContent value="ai-quality">
+            <AdminAiQuality startDate={dateRange.from.toISOString()} endDate={dateRange.to.toISOString()} />
           </TabsContent>
 
           <TabsContent value="tutors">

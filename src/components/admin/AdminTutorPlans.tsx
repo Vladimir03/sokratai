@@ -84,6 +84,9 @@ const TONE_CLASS: Record<"paid" | "trial" | "none", string> = {
   none: "bg-red-100 text-red-900",
 };
 
+/** Платящие первыми, затем триалы, затем остальные (RPC отдаёт наоборот — не трогаем, сортируем на клиенте). */
+const TONE_RANK: Record<"paid" | "trial" | "none", number> = { paid: 0, trial: 1, none: 2 };
+
 export function AdminTutorPlans() {
   const [rows, setRows] = useState<AdminTutorPlanRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -97,6 +100,17 @@ export function AdminTutorPlans() {
   const [revokeTarget, setRevokeTarget] = useState<AdminTutorPlanRow | null>(null);
 
   const today = useMemo(() => startOfToday(), []);
+
+  const sortedRows = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        const rankDiff = TONE_RANK[statusInfo(a).tone] - TONE_RANK[statusInfo(b).tone];
+        if (rankDiff !== 0) return rankDiff;
+        if (a.active_students !== b.active_students) return b.active_students - a.active_students;
+        return (a.name ?? "").localeCompare(b.name ?? "", "ru");
+      }),
+    [rows],
+  );
 
   const fetchRows = useCallback(async () => {
     setIsLoading(true);
@@ -208,7 +222,7 @@ export function AdminTutorPlans() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((row) => {
+              {sortedRows.map((row) => {
                 const st = statusInfo(row);
                 const isPremium = row.subscription_tier === "premium" && st.tone === "paid";
                 return (
