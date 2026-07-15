@@ -152,6 +152,7 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `98-schedule-materials.md` | «Занятия»: lesson materials, anti-leak/FK-drift, group model, one-hop ДЗ, post-login landing |
 | `99-ai-quota-subscriptions.md` | AI daily-message quota (10/50), `get_subscription_status`, paid-tutor boost gate, admin grant-tutor-plan mechanism |
 | `100-tutor-student-chat.md` | Чат репетитор↔ученик: realtime, atomic `tsc_post_message`, SELECT-only RLS, @СократAI, уведомления, PWA-наджи установки |
+| `101-ceo-analytics.md` | CEO-аналитика `/admin`: «Пульс» (воронка активации поимённо, NSM, каналы, MRR run-rate), инварианты расчётов, аудит «Аналитики», МСК-бакеты |
 | `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser |
 
 ---
