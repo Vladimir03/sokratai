@@ -2849,6 +2849,8 @@ export type Database = {
           learning_goal: string | null
           onboarding_completed: boolean | null
           promo_code: string | null
+          referred_at: string | null
+          referred_by_code: string | null
           registration_source: string | null
           subscription_expires_at: string | null
           subscription_tier: string
@@ -2878,6 +2880,8 @@ export type Database = {
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
+          referred_at?: string | null
+          referred_by_code?: string | null
           registration_source?: string | null
           subscription_expires_at?: string | null
           subscription_tier?: string
@@ -2907,6 +2911,8 @@ export type Database = {
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
+          referred_at?: string | null
+          referred_by_code?: string | null
           registration_source?: string | null
           subscription_expires_at?: string | null
           subscription_tier?: string
@@ -4395,6 +4401,7 @@ export type Database = {
           invite_code: string | null
           mini_groups_enabled: boolean
           name: string
+          referral_code: string | null
           report_show_debt_default: boolean
           subjects: string[] | null
           telegram_id: string | null
@@ -4414,6 +4421,7 @@ export type Database = {
           invite_code?: string | null
           mini_groups_enabled?: boolean
           name: string
+          referral_code?: string | null
           report_show_debt_default?: boolean
           subjects?: string[] | null
           telegram_id?: string | null
@@ -4433,6 +4441,7 @@ export type Database = {
           invite_code?: string | null
           mini_groups_enabled?: boolean
           name?: string
+          referral_code?: string | null
           report_show_debt_default?: boolean
           subjects?: string[] | null
           telegram_id?: string | null
@@ -4829,6 +4838,7 @@ export type Database = {
       }
       find_auth_user_id_by_email: { Args: { p_email: string }; Returns: string }
       generate_invite_code: { Args: never; Returns: string }
+      generate_referral_code: { Args: never; Returns: string }
       get_available_booking_slots: {
         Args: { _booking_link: string; _days_ahead?: number }
         Returns: {
