@@ -1,5 +1,6 @@
 /**
  * Custom Yandex ID OAuth flow — Phase 1: init (RU-bypass).
+ * (touch 2026-07-16: редеплой sync-путём — агентский деплой включил JWT-гейт, rule 96 §11a)
  *
  * Russian-law-compliant replacement for Google (law 406-ФЗ / rule 96): Yandex is
  * a Russian information system, so Yandex ID authorization is allowed.
