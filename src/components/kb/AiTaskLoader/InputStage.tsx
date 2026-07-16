@@ -327,7 +327,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       const runChunk = async (idx: number): Promise<{ drafts: ExtractedTask[]; stats: ExtractStats }> => {
         const chunk = chunks[idx];
         const chunkRefs = chunk.entries.map((e) => e.ref);
-        const callExtract = (hintOverride?: string) =>
+        const callExtract = (hintOverride?: string, boost?: boolean) =>
           extractTasks({
             folder_id: folderId,
             subject,
@@ -337,17 +337,18 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
               image_refs: chunkRefs.length > 0 ? chunkRefs : undefined,
             },
             tutor_hint: (hintOverride ?? tutorHint.trim()) || undefined,
+            ...(boost ? { boost: true } : {}),
           });
         let res = await callExtract();
         // Авто-повтор недобора (решение владельца 2026-07-16): текстовый слой
-        // обещает K задач, распознано < 60% → 1 повтор с жёсткой подсказкой;
-        // берём результат с бОльшим числом задач.
+        // обещает K задач, распознано < 60% → 1 повтор с жёсткой подсказкой И
+        // усиленной моделью (boost → edge берёт pro); берём лучший результат.
         if (chunk.expected !== null && res.drafts.length < chunk.expected * SHORTFALL_RATIO) {
           autoRetries += 1;
           try {
             const retryHint =
               `На этих страницах ровно ${chunk.expected} задач — извлеки ВСЕ до единой, не сокращай список. ${tutorHint.trim()}`.slice(0, 500);
-            const retry = await callExtract(retryHint);
+            const retry = await callExtract(retryHint, true);
             if (retry.drafts.length > res.drafts.length) res = retry;
           } catch {
             /* повтор не удался — остаёмся с первым результатом */

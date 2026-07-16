@@ -169,11 +169,16 @@ export async function callLovableJson(
   onUsage?: (usage: LovableUsage | null) => void,
   // W4 (2026-07-16): explicit output cap. Without it the gateway default silently
   // truncated dense-collection extractions (73 tasks → the model emitted 5-7).
+  // `model` overrides LOVABLE_MODEL per call; `fallbackModel` — if the gateway
+  // rejects the override (400/404/422 — unknown/unavailable model string), the
+  // call retries once with the fallback instead of failing (deploy-safe upgrade).
   // Optional — existing callers keep the gateway default.
-  opts?: { maxTokens?: number },
+  opts?: { maxTokens?: number; model?: string; fallbackModel?: string },
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
+
+  let currentModel = opts?.model ?? LOVABLE_MODEL;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
@@ -187,7 +192,7 @@ export async function callLovableJson(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: LOVABLE_MODEL,
+          model: currentModel,
           messages,
           temperature: 0.2,
           stream: false,
@@ -209,6 +214,19 @@ export async function callLovableJson(
       if (!rawContent) throw new Error("Model response is empty");
       return extractJsonObject(rawContent);
     } catch (error) {
+      // Model-fallback: шлюз отверг модель-override (неизвестная строка / модель
+      // недоступна) → один заход на fallback-модели вместо провала вызова.
+      if (
+        error instanceof HttpStatusError &&
+        [400, 404, 422].includes(error.status) &&
+        opts?.fallbackModel &&
+        currentModel !== opts.fallbackModel &&
+        attempt < MAX_RETRIES
+      ) {
+        console.warn(`${telemetryTag}_model_fallback`, { status: error.status });
+        currentModel = opts.fallbackModel;
+        continue;
+      }
       const canRetry = shouldRetry(error) && attempt < MAX_RETRIES;
       if (error instanceof HttpStatusError) {
         // Log only the status — the gateway error body may echo prompt fragments,

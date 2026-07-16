@@ -112,6 +112,12 @@ export interface ExtractInput {
    * (≤500 симв.). Старый edge поле игнорирует — деградация безопасна.
    */
   tutor_hint?: string;
+  /**
+   * W4 model-эскалация (2026-07-16): true на авто-повторе недобора → edge берёт
+   * усиленную модель (gemini-3.1-pro-preview вместо 3.5-flash). Старый edge
+   * поле игнорирует — деградация безопасна.
+   */
+  boost?: boolean;
 }
 
 /** rule 97 flat-shape error carrier — exposes `code` for branching (e.g. INVALID_FOLDER). */

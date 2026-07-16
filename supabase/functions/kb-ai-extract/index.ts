@@ -37,6 +37,17 @@ const MAX_IMAGES = 10; // cost/latency cap per call (mirror client Ctrl+V cap)
 const MAX_TEXT_CHARS = 60_000; // defensive cap on pasted material
 const SIGNED_URL_TTL_SEC = 3600;
 
+// ─── Модели загрузчика (решение владельца 2026-07-16, отдельно от грейдинга) ──
+// Extract/refine — gemini-3.5-flash (vision №1 по Roboflow: точнее bbox рисунков
+// + OCR сканов; ×3 цена от копеечной базы — расход загрузчика ничтожен).
+// Авто-повтор недобора (client шлёт boost:true) — эскалация на pro: сильнее и
+// дешевле, чем pro везде (повторы редки). Обе строки могут быть недоступны в
+// шлюзе → fallback на проверенную базовую (deploy-safe, `_model_fallback` лог).
+// Грейдинг ДЗ НЕ трогаем — там решение «не финализировать до бенчмарка».
+const EXTRACT_MODEL = "google/gemini-3.5-flash";
+const EXTRACT_BOOST_MODEL = "google/gemini-3.1-pro-preview";
+const EXTRACT_FALLBACK_MODEL = "google/gemini-3-flash-preview";
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const VALID_ANSWER_CONFIDENCE = new Set(["high", "medium", "low"]);
@@ -708,6 +719,8 @@ async function runExtraction(
   messages: LovableMessage[],
   // ai-usage-logging: pre-bound onUsage (source='kb_extract'). Undefined = none.
   onUsage?: (usage: TokenUsage | null) => void,
+  // Модель вызова (extract: EXTRACT_MODEL / boost → EXTRACT_BOOST_MODEL).
+  model: string = EXTRACT_MODEL,
 ): Promise<unknown[]> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const attemptMessages = attempt === 0
@@ -725,6 +738,8 @@ async function runExtraction(
       // сборники (73 задачи → модель отдавала 5-7). 16k покрывает ~30-40 задач.
       const obj = await callLovableJson(attemptMessages, "kb_ai_extract", onUsage, {
         maxTokens: 16000,
+        model,
+        fallbackModel: EXTRACT_FALLBACK_MODEL,
       });
       if (Array.isArray(obj.tasks)) return obj.tasks;
       console.warn("kb_ai_extract_schema_invalid", { attempt: attempt + 1, has_tasks: "tasks" in obj });
@@ -891,6 +906,9 @@ async function handleExtract(
   const subject = typeof body.subject === "string" && VALID_SUBJECT.has(body.subject)
     ? body.subject
     : "physics";
+  // W4 model-эскалация: клиент шлёт boost:true на авто-повторе недобора →
+  // усиленная модель. Старый клиент флага не шлёт → базовая (deploy-skew-safe).
+  const boost = body.boost === true;
 
   // Resolve own kb-attachments refs → signed URL → base64 (ordered; index matters).
   const { orderedRefs, imageParts } = await resolveImageParts(db, userId, imageRefsRaw);
@@ -941,7 +959,11 @@ async function handleExtract(
   });
   let rawTasks: unknown[];
   try {
-    rawTasks = await runExtraction(messages, extractUsageLogger);
+    rawTasks = await runExtraction(
+      messages,
+      extractUsageLogger,
+      boost ? EXTRACT_BOOST_MODEL : EXTRACT_MODEL,
+    );
   } catch {
     return jsonError(cors, 502, "EXTRACT_FAILED", "Не удалось распознать задачи. Попробуйте ещё раз или измените материал.");
   }
