@@ -82,6 +82,7 @@ Deno.serve(async (req) => {
   // so the callback can persist it after the redirect. Additive.
   const promo = url.searchParams.get("promo");
   const ref = url.searchParams.get("ref");
+  const rc = url.searchParams.get("rc"); // реферальный код коллеги (Stage 3)
 
   // PKCE — verifier is kept SERVER-SIDE (see below); only the challenge goes to VK.
   const codeVerifier = randomCodeVerifier();
@@ -101,6 +102,7 @@ Deno.serve(async (req) => {
     codeVerifier,
     ...(promo ? { promo } : {}),
     ...(ref ? { ref } : {}),
+    ...(rc ? { rc } : {}),
   });
   if (!stored) {
     return new Response("Не удалось начать вход. Попробуйте ещё раз.", {

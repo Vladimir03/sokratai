@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { PulseStageTutorList } from "./PulseStageTutorList";
-import type { PulseStage, PulseStageKey } from "./pulseTypes";
+import type { PulseStage, PulseStageKey, PulseTutor } from "./pulseTypes";
 
 const COMMERCIAL_KEYS = new Set<PulseStageKey>(["trial", "paid"]);
 
@@ -22,7 +22,13 @@ const expandedTitle = (stage: PulseStage): string => {
  * выдаётся при регистрации автоматически и НЕ означает пройденной активации).
  * Клик по ступени раскрывает поимённый список — кандидатов на личное сообщение.
  */
-export const PulseFunnel = ({ funnel }: { funnel: PulseStage[] }) => {
+export const PulseFunnel = ({
+  funnel,
+  onSetReferrer,
+}: {
+  funnel: PulseStage[];
+  onSetReferrer?: (tutor: PulseTutor) => void;
+}) => {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const total = funnel[0]?.reached ?? 0;
   const selected = funnel.find((s) => s.key === selectedKey) ?? null;
@@ -97,6 +103,7 @@ export const PulseFunnel = ({ funnel }: { funnel: PulseStage[] }) => {
             <PulseStageTutorList
               tutors={selected.stuck}
               emptyText="Никто не застрял на этой ступени — все прошли дальше."
+              onSetReferrer={onSetReferrer}
             />
           </div>
         )}

@@ -8,7 +8,14 @@ import type { PulseTutor } from "./pulseTypes";
 const fmtDate = (iso: string | null | undefined) =>
   iso ? format(parseISO(iso), "d MMM yyyy", { locale: ru }) : "—";
 
-const TutorRow = memo(({ tutor }: { tutor: PulseTutor }) => (
+const TutorRow = memo(
+  ({
+    tutor,
+    onSetReferrer,
+  }: {
+    tutor: PulseTutor;
+    onSetReferrer?: (tutor: PulseTutor) => void;
+  }) => (
   <tr className="border-b border-slate-100 last:border-0">
     <td className="py-2 pr-3">
       <div className="flex items-center gap-2 flex-wrap">
@@ -17,7 +24,19 @@ const TutorRow = memo(({ tutor }: { tutor: PulseTutor }) => (
       </div>
     </td>
     <td className="py-2 pr-3">
-      <ChannelBadge channel={tutor.channel} />
+      {onSetReferrer ? (
+        <button
+          type="button"
+          onClick={() => onSetReferrer(tutor)}
+          title="Кто привёл (ретро-привязка реферера)"
+          className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          style={{ touchAction: "manipulation" }}
+        >
+          <ChannelBadge channel={tutor.channel} />
+        </button>
+      ) : (
+        <ChannelBadge channel={tutor.channel} />
+      )}
     </td>
     <td className="py-2 pr-3 text-sm text-slate-600 tabular-nums whitespace-nowrap">
       {fmtDate(tutor.registeredAt)}
@@ -44,14 +63,24 @@ const TutorRow = memo(({ tutor }: { tutor: PulseTutor }) => (
       )}
     </td>
   </tr>
-));
+  ),
+);
 TutorRow.displayName = "PulseTutorRow";
 
 /**
  * Поимённый список репетиторов ступени воронки — рабочий список
- * «кому написать», а не отчёт.
+ * «кому написать», а не отчёт. Клик по бейджу канала (при onSetReferrer) —
+ * админ ретро-привязка «кто привёл».
  */
-export const PulseStageTutorList = ({ tutors, emptyText }: { tutors: PulseTutor[]; emptyText: string }) => {
+export const PulseStageTutorList = ({
+  tutors,
+  emptyText,
+  onSetReferrer,
+}: {
+  tutors: PulseTutor[];
+  emptyText: string;
+  onSetReferrer?: (tutor: PulseTutor) => void;
+}) => {
   if (tutors.length === 0) {
     return <p className="text-sm text-muted-foreground py-3">{emptyText}</p>;
   }
@@ -70,7 +99,7 @@ export const PulseStageTutorList = ({ tutors, emptyText }: { tutors: PulseTutor[
         </thead>
         <tbody>
           {tutors.map((t) => (
-            <TutorRow key={t.tutorId} tutor={t} />
+            <TutorRow key={t.tutorId} tutor={t} onSetReferrer={onSetReferrer} />
           ))}
         </tbody>
       </table>

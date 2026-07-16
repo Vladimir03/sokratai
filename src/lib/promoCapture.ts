@@ -20,6 +20,8 @@
 const PROMO_KEY = "sokrat-promo";
 const REF_KEY = "sokrat-ref";
 const UTM_KEY = "sokrat-utm";
+/** Реферальный код КОЛЛЕГИ (`?rc=`, Stage 3 рефералки) — `?ref=` занят каналом. */
+const RC_KEY = "sokrat-rc";
 
 const MAX_TOKEN_LEN = 64;
 const MAX_UTM_VALUE_LEN = 128;
@@ -36,6 +38,8 @@ export interface StoredPromo {
   promo: string | null;
   /** Источник (`egor`), если захвачен. */
   ref: string | null;
+  /** Реферальный код коллеги-репетитора (`?rc=`), если захвачен. */
+  rc: string | null;
   /** Собранные `utm_*` параметры, если были. */
   utm: Record<string, string> | null;
 }
@@ -70,6 +74,7 @@ function setIfEmpty(key: string, value: string | null): void {
 export function capturePromoFromUrl(params: URLSearchParams): void {
   setIfEmpty(PROMO_KEY, readToken(params, "promo"));
   setIfEmpty(REF_KEY, readToken(params, "ref"));
+  setIfEmpty(RC_KEY, readToken(params, "rc"));
 
   // Все utm_* собираем в один JSON-объект (значения обрезаем по длине).
   const utm: Record<string, string> = {};
@@ -113,16 +118,18 @@ function parseUtm(raw: string | null): Record<string, string> | null {
 export function getStoredPromo(): StoredPromo {
   let promo: string | null = null;
   let ref: string | null = null;
+  let rc: string | null = null;
   let utm: Record<string, string> | null = null;
   try {
     // Re-санитайз на чтении: localStorage мог быть подправлен вручную.
     promo = sanitizeToken(localStorage.getItem(PROMO_KEY));
     ref = sanitizeToken(localStorage.getItem(REF_KEY));
+    rc = sanitizeToken(localStorage.getItem(RC_KEY));
     utm = parseUtm(localStorage.getItem(UTM_KEY));
   } catch {
     // localStorage недоступен — отдаём то, что распарсили
   }
-  return { promo, ref, utm };
+  return { promo, ref, rc, utm };
 }
 
 /**

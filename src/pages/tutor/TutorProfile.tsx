@@ -12,6 +12,7 @@ import { TutorHelpSection } from '@/components/tutor/profile/TutorHelpSection';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
 import { TutorSupportCard } from '@/components/tutor/profile/TutorSupportCard';
 import { TutorTariffSection } from '@/components/tutor/profile/TutorTariffSection';
+import { TutorReferralSection } from '@/components/tutor/profile/TutorReferralSection';
 import AppNotificationsCard from '@/components/pwa/AppNotificationsCard';
 import type { TutorPlan } from '@/hooks/useTutorPlan';
 import {
@@ -100,6 +101,9 @@ export default function TutorProfile() {
 
           <div className="flex flex-col gap-4 lg:gap-6">
             <TutorTariffSection userId={profile?.user_id} />
+
+            {/* Рефералка v1: «Пригласить коллегу» (Stage 3 CEO-аналитики) */}
+            <TutorReferralSection />
 
             {/* Приложение и уведомления — постоянный вход (PWA-надж, 2026-07-12) */}
             <AppNotificationsCard />

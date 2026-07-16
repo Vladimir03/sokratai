@@ -72,6 +72,8 @@ export default function TutorSignupTrial() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [subject, setSubject] = useState<SubjectValue>("physics");
+  // Реферальный код коллеги (Stage 3): prefill из ?rc= (localStorage), опционален.
+  const [referralCode, setReferralCode] = useState(() => getStoredPromo().rc ?? "");
   const [oferta, setOferta] = useState(false);
   const [loading, setLoading] = useState(false);
   // Экран «подтвердите почту» вместо выброса (тупик #2). null → показываем форму.
@@ -243,6 +245,7 @@ export default function TutorSignupTrial() {
             trial_intent: isTrialIntent,
             ...(promo ? { promo } : {}),
             ...(ref ? { ref } : {}),
+            ...(referralCode.trim() ? { rc: referralCode.trim() } : {}),
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
         },
@@ -805,6 +808,24 @@ export default function TutorSignupTrial() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Реферальный код коллеги (Stage 3): опционально, без валидации-гейта */}
+            <div className="tst-field">
+              <label className="tst-label" htmlFor="tst-referral">
+                Код приглашения от коллеги (по желанию)
+              </label>
+              <input
+                id="tst-referral"
+                type="text"
+                autoComplete="off"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+                disabled={loading}
+                style={inputBaseStyle}
+                className="tst-input"
+                placeholder="Например: KLM4Q2WX"
+              />
             </div>
 
             <button

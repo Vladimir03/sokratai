@@ -1,7 +1,9 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import AudienceRibbon from "@/components/sections/tutor/AudienceRibbon";
 import TutorLandingHeader from "@/components/sections/tutor/TutorLandingHeader";
 import { useDocumentMeta } from "@/lib/useDocumentMeta";
+import { capturePromoFromUrl } from "@/lib/promoCapture";
 
 const TUTOR_LANDING_TITLE =
   "Сократ AI для репетиторов · Проверка ДЗ за 40 минут + сократовский AI-чат для учеников";
@@ -24,6 +26,14 @@ const FinalCTA = lazy(() => import("@/components/sections/tutor/FinalCTA"));
 const Footer = lazy(() => import("@/components/sections/tutor/Footer"));
 
 export default function Index() {
+  const [searchParams] = useSearchParams();
+
+  // Реферальная ссылка коллеги ведёт на корневой лендинг (?rc=CODE) — закрепляем
+  // код в localStorage сразу (зеркало /egor), формы регистрации подхватят.
+  useEffect(() => {
+    capturePromoFromUrl(searchParams);
+  }, [searchParams]);
+
   useDocumentMeta({
     title: TUTOR_LANDING_TITLE,
     description: TUTOR_LANDING_DESCRIPTION,

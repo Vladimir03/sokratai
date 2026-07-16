@@ -150,6 +150,19 @@ export async function persistPromoAttributionAndTrack(
       source: ref ?? null,
     });
   }
+
+  // Реферальный код коллеги (metadata.rc, Stage 3 рефералки — rule 101).
+  // Dynamic import + never-throw: рефералка НЕ имеет права ронять боевую
+  // auth-финализацию (прецедент rule 98 — boot-зависимость от тяжёлого модуля
+  // положила edge на 5 дней). Невалидный/чужой код молча не прикрепляется.
+  if (metadata?.rc != null) {
+    try {
+      const mod = await import("./referral.ts");
+      await mod.attributeReferral(admin, userId, metadata.rc, "signup");
+    } catch (_e) {
+      logAttributionFailure("referral_import");
+    }
+  }
 }
 
 /**

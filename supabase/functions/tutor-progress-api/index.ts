@@ -15,7 +15,7 @@
 // в этот же роутер (TASK-6).
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { logAnalyticsEventOnce } from "../_shared/analytics.ts";
+import { logAnalyticsEvent, logAnalyticsEventOnce } from "../_shared/analytics.ts";
 import { egePrimaryToScaled, ogeMark } from "../_shared/score-scales.ts";
 import {
   BEHIND_GOAL_PCT,
@@ -626,6 +626,21 @@ async function handleTrackEvent(
   cors: Record<string, string>,
 ): Promise<Response> {
   const event = typeof body?.event === "string" ? body.event : "";
+
+  // Рефералка v1: клик «Скопировать» в кабинете (повторы легальны — без дедупа).
+  if (event === "referral_code_copied") {
+    const rawKind = typeof body?.kind === "string" ? body.kind : "";
+    const kind = rawKind === "link" || rawKind === "text" ? rawKind : null;
+    const tutorPkId = await resolveTutorPkId(db, userId);
+    await logAnalyticsEvent(db, {
+      event_name: "referral_code_copied",
+      actor_user_id: userId,
+      tutor_id: tutorPkId,
+      meta: kind ? { kind } : null,
+    });
+    return jsonOk(cors, { ok: true });
+  }
+
   if (event !== "community_cta_clicked") {
     return jsonError(cors, 400, "UNKNOWN_EVENT", "Неизвестное событие.");
   }
@@ -645,6 +660,264 @@ async function handleTrackEvent(
     { tutor_id: tutorPkId },
   );
   return jsonOk(cors, { ok: true });
+}
+
+// ─── Рефералка v1 (Stage 3 CEO-аналитики, rule 101) ───────────────────────────
+
+const REFERRAL_LINK_BASE = "https://sokratai.ru/?rc=";
+const REFERRAL_INVITED_CAP = 200;
+const REFERRAL_CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+/** Мягкий этап активации приглашённого (для списка у реферера). */
+type InvitedStage = "registered" | "working" | "value";
+
+function generateReferralCodeLocal(): string {
+  let out = "";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  for (const b of bytes) out += REFERRAL_CODE_CHARS[b % REFERRAL_CODE_CHARS.length];
+  return out;
+}
+
+/**
+ * GET /referrals — кабинет реферера: свой код + ссылка + кем приглашён +
+ * список приглашённых. ANTI-LEAK: о чужих аккаунтах наружу ТОЛЬКО
+ * name / registered_at / stage / is_paying — ни id, ни email, ни telegram.
+ */
+async function handleGetReferrals(
+  db: SupabaseClient,
+  userId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const { data: me, error: meError } = await db
+    .from("tutors")
+    .select("id, user_id, referral_code")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (meError) {
+    console.error("tutor_progress_api_referrals_me_failed", meError.message);
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить данные. Попробуйте ещё раз.");
+  }
+  if (!me) {
+    return jsonError(cors, 403, "NOT_A_TUTOR", "Реферальная программа доступна репетиторам.");
+  }
+
+  // Ensure-код: legacy-строки с NULL (до миграции DEFAULT) — генерим атомарно
+  // (conditional UPDATE + retry на UNIQUE, зеркало tutor_get_invite_code).
+  let code = typeof me.referral_code === "string" ? me.referral_code : null;
+  for (let attempt = 0; !code && attempt < 3; attempt++) {
+    const candidate = generateReferralCodeLocal();
+    const { data: updated, error: updError } = await db
+      .from("tutors")
+      .update({ referral_code: candidate })
+      .eq("id", me.id)
+      .is("referral_code", null)
+      .select("referral_code");
+    if (!updError && updated && updated.length > 0) {
+      code = updated[0].referral_code as string;
+      break;
+    }
+    if (!updError && (!updated || updated.length === 0)) {
+      // Конкурентный запрос уже записал — перечитываем.
+      const { data: reread } = await db
+        .from("tutors")
+        .select("referral_code")
+        .eq("id", me.id)
+        .maybeSingle();
+      if (typeof reread?.referral_code === "string") code = reread.referral_code;
+      break;
+    }
+    // UNIQUE-коллизия кандидата → следующая попытка.
+  }
+  if (!code) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось получить код. Попробуйте ещё раз.");
+  }
+
+  // Кем приглашён сам (для блока «Вас пригласил»).
+  const { data: myProfile } = await db
+    .from("profiles")
+    .select("referred_by_code")
+    .eq("id", userId)
+    .maybeSingle();
+  let referrerName: string | null = null;
+  const myRefCode =
+    typeof myProfile?.referred_by_code === "string" ? myProfile.referred_by_code : null;
+  if (myRefCode) {
+    const { data: refTutor } = await db
+      .from("tutors")
+      .select("name")
+      .eq("referral_code", myRefCode)
+      .maybeSingle();
+    referrerName = typeof refTutor?.name === "string" ? refTutor.name : null;
+  }
+
+  // Приглашённые: profiles по коду → tutors-строки (только репетиторы).
+  const { data: invitedProfiles, error: invError } = await db
+    .from("profiles")
+    .select("id, subscription_tier, subscription_expires_at")
+    .eq("referred_by_code", code)
+    .limit(REFERRAL_INVITED_CAP);
+  if (invError) {
+    console.error("tutor_progress_api_referrals_invited_failed", invError.message);
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить приглашённых.");
+  }
+  const invitedIds = (invitedProfiles ?? []).map((p) => p.id as string);
+
+  interface InvitedRow {
+    name: string;
+    registered_at: string;
+    stage: InvitedStage;
+    is_paying: boolean;
+  }
+  const invited: InvitedRow[] = [];
+
+  if (invitedIds.length > 0) {
+    const { data: invitedTutors, error: invTutorsError } = await db
+      .from("tutors")
+      .select("id, user_id, name, created_at")
+      .in("user_id", invitedIds);
+    if (invTutorsError) {
+      console.error("tutor_progress_api_referrals_tutors_failed", invTutorsError.message);
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить приглашённых.");
+    }
+    const tutorsList = invitedTutors ?? [];
+    const tutorPkIds = tutorsList.map((t) => t.id as string);
+    const tutorUserIds = tutorsList.map((t) => t.user_id as string);
+
+    // «Работает с учениками» = есть tutor_students (FK → tutors.id, rule 40).
+    const workingPk = new Set<string>();
+    if (tutorPkIds.length > 0) {
+      const { data: tsRows } = await db
+        .from("tutor_students")
+        .select("tutor_id")
+        .in("tutor_id", tutorPkIds);
+      for (const r of tsRows ?? []) workingPk.add(r.tutor_id as string);
+    }
+
+    // «Получает результат» = ученик сдал (submission/answer; фолбэк thread
+    // completed) — мини-версия стадии 6 ceo-pulse, скоуп только приглашённые.
+    const valueUser = new Set<string>();
+    if (tutorUserIds.length > 0) {
+      const { data: asgRows } = await db
+        .from("homework_tutor_assignments")
+        .select("id, tutor_id")
+        .in("tutor_id", tutorUserIds);
+      const asgList = asgRows ?? [];
+      const asgToUser = new Map(asgList.map((a) => [a.id as string, a.tutor_id as string]));
+      const asgIds = [...asgToUser.keys()];
+      if (asgIds.length > 0) {
+        const { data: saRows } = await db
+          .from("homework_tutor_student_assignments")
+          .select("id, assignment_id")
+          .in("assignment_id", asgIds);
+        const saList = saRows ?? [];
+        const saToAsg = new Map(saList.map((s) => [s.id as string, s.assignment_id as string]));
+        const saIds = [...saToAsg.keys()];
+        if (saIds.length > 0) {
+          const { data: thRows } = await db
+            .from("homework_tutor_threads")
+            .select("id, student_assignment_id, status")
+            .in("student_assignment_id", saIds);
+          const thList = thRows ?? [];
+          const thToUser = (threadSaId: string): string | undefined => {
+            const asgId = saToAsg.get(threadSaId);
+            return asgId ? asgToUser.get(asgId) : undefined;
+          };
+          const threadIds: string[] = [];
+          for (const t of thList) {
+            const owner = thToUser(t.student_assignment_id as string);
+            if (!owner) continue;
+            if (t.status === "completed") valueUser.add(owner);
+            threadIds.push(t.id as string);
+          }
+          if (threadIds.length > 0) {
+            const { data: msgRows } = await db
+              .from("homework_tutor_thread_messages")
+              .select("thread_id")
+              .eq("role", "user")
+              .in("message_kind", ["submission", "answer"])
+              .in("thread_id", threadIds)
+              .limit(1000);
+            const thById = new Map(thList.map((t) => [t.id as string, t]));
+            for (const m of msgRows ?? []) {
+              const th = thById.get(m.thread_id as string);
+              const owner = th ? thToUser(th.student_assignment_id as string) : undefined;
+              if (owner) valueUser.add(owner);
+            }
+          }
+        }
+      }
+    }
+
+    // «Платит» = действующий premium (вкл. гранты) ∨ реальный платёж тарифа.
+    const paidUser = new Set<string>();
+    const nowIso = new Date().toISOString();
+    for (const p of invitedProfiles ?? []) {
+      const premiumValid =
+        p.subscription_tier === "premium" &&
+        (p.subscription_expires_at == null || (p.subscription_expires_at as string) > nowIso);
+      if (premiumValid) paidUser.add(p.id as string);
+    }
+    if (tutorUserIds.length > 0) {
+      const { data: payRows } = await db
+        .from("payments")
+        .select("user_id")
+        .in("user_id", tutorUserIds)
+        .eq("plan", "tutor_ai_start")
+        .eq("status", "succeeded");
+      for (const r of payRows ?? []) paidUser.add(r.user_id as string);
+    }
+
+    for (const t of tutorsList) {
+      const uid = t.user_id as string;
+      const pk = t.id as string;
+      const stage: InvitedStage = valueUser.has(uid)
+        ? "value"
+        : workingPk.has(pk)
+          ? "working"
+          : "registered";
+      invited.push({
+        name: typeof t.name === "string" && t.name.trim() ? t.name.trim() : "Репетитор",
+        registered_at: t.created_at as string,
+        stage,
+        is_paying: paidUser.has(uid),
+      });
+    }
+    invited.sort((a, b) => (a.registered_at < b.registered_at ? 1 : -1));
+  }
+
+  return jsonOk(cors, {
+    code,
+    link: `${REFERRAL_LINK_BASE}${code}`,
+    referred_by: { attributed: Boolean(myRefCode), referrer_name: referrerName },
+    invited,
+    invited_total: invited.length,
+  });
+}
+
+/** POST /referrals/claim — новичок вводит код коллеги позже (в профиле). */
+async function handleClaimReferral(
+  db: SupabaseClient,
+  userId: string,
+  body: Record<string, unknown> | null,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const { attributeReferral } = await import("../_shared/referral.ts");
+  const result = await attributeReferral(db, userId, body?.code, "profile");
+  if (result.ok) {
+    return jsonOk(cors, { ok: true, referrer_name: result.referrerName });
+  }
+  switch (result.reason) {
+    case "NO_CODE":
+      return jsonError(cors, 400, "REFERRAL_CODE_INVALID", "Введите код приглашения (например: KLM4Q2WX).");
+    case "NOT_FOUND":
+      return jsonError(cors, 404, "REFERRAL_CODE_NOT_FOUND", "Код не найден — проверьте у коллеги.");
+    case "SELF":
+      return jsonError(cors, 409, "REFERRAL_SELF", "Нельзя указать собственный код.");
+    case "ALREADY_SET":
+      return jsonError(cors, 409, "REFERRAL_ALREADY_SET", "Код уже привязан к вашему аккаунту.");
+    default:
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось привязать код. Попробуйте ещё раз.");
+  }
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -670,10 +943,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const seg = route.segments;
 
-    // POST /track — client funnel beacon (community_cta_clicked)
+    // POST /track — client funnel beacon (community_cta_clicked / referral_code_copied)
     if (seg.length === 1 && seg[0] === "track" && route.method === "POST") {
       const body = await parseJsonBody(req);
       return await handleTrackEvent(db, userId, body, cors);
+    }
+
+    // GET /referrals — кабинет реферера (Stage 3 рефералки)
+    if (seg.length === 1 && seg[0] === "referrals" && route.method === "GET") {
+      return await handleGetReferrals(db, userId, cors);
+    }
+
+    // POST /referrals/claim — новичок вводит код коллеги позже
+    if (
+      seg.length === 2 &&
+      seg[0] === "referrals" &&
+      seg[1] === "claim" &&
+      route.method === "POST"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleClaimReferral(db, userId, body, cors);
     }
 
     // POST /assignments/:id/students/:sid/review-task

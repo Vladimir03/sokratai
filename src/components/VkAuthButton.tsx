@@ -62,9 +62,10 @@ export default function VkAuthButton({
       // QR/referral промо (Егор) → signed state OAuth ТОЛЬКО в tutor-контексте
       // (P1 #5: не ученический вход). Callback пишет promo_code новым репетиторам.
       if (intendedRole === "tutor") {
-        const { promo, ref } = getStoredPromo();
+        const { promo, ref, rc } = getStoredPromo();
         if (promo) initUrl.searchParams.set("promo", promo);
         if (ref) initUrl.searchParams.set("ref", ref);
+        if (rc) initUrl.searchParams.set("rc", rc);
       }
 
       window.location.href = initUrl.toString();

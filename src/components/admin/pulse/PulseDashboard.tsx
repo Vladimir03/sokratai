@@ -11,7 +11,8 @@ import { PulseFunnel } from "./PulseFunnel";
 import { PulseChannels } from "./PulseChannels";
 import { PulseAtRisk } from "./PulseAtRisk";
 import { EditTutorTagsDialog, type TutorTagsValues } from "./EditTutorTagsDialog";
-import type { PulseAtRiskTutor, PulsePayload } from "./pulseTypes";
+import { SetReferrerDialog, type SetReferrerTarget } from "./SetReferrerDialog";
+import type { PulseAtRiskTutor, PulsePayload, PulseTutor } from "./pulseTypes";
 
 /**
  * «Пульс» — CEO-дашборд: шапка здоровья, воронка активации поимённо,
@@ -23,6 +24,7 @@ export const PulseDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<TutorTagsValues | null>(null);
+  const [referrerTarget, setReferrerTarget] = useState<SetReferrerTarget | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -44,6 +46,14 @@ export const PulseDashboard = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const openSetReferrer = (t: PulseTutor) => {
+    setReferrerTarget({
+      userId: t.userId,
+      name: t.name,
+      referredByCode: t.referredByCode ?? null,
+    });
+  };
 
   const openEdit = (t: PulseAtRiskTutor) => {
     setEditTarget({
@@ -99,7 +109,7 @@ export const PulseDashboard = () => {
           {data.preFunnel && (
             <PulsePreFunnel data={data.preFunnel} newTutors7d={data.header.newTutors7d} />
           )}
-          <PulseFunnel funnel={data.funnel} />
+          <PulseFunnel funnel={data.funnel} onSetReferrer={openSetReferrer} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <PulseChannels channels={data.channels} />
             <PulseAtRisk tutors={data.atRisk} onEdit={openEdit} />
@@ -114,6 +124,17 @@ export const PulseDashboard = () => {
           if (!v) setEditTarget(null);
         }}
         initial={editTarget}
+        onSaved={fetchData}
+      />
+
+      <SetReferrerDialog
+        key={`ref-${referrerTarget?.userId ?? "none"}`}
+        open={referrerTarget != null}
+        onOpenChange={(v) => {
+          if (!v) setReferrerTarget(null);
+        }}
+        target={referrerTarget}
+        directory={data?.referralDirectory ?? []}
         onSaved={fetchData}
       />
     </div>

@@ -73,8 +73,8 @@
 - **Дневной** (09:00 МСК): только при событиях (новая регистрация с каналом, оплата тарифа по моменту активации, новый триал). **Пусто → не слать** (тишина = ничего не произошло).
 - Детальные инварианты — rule 101.
 
-**Stage 3 — Рефералка v1, attribution-only (не начат).** `tutors.referral_code` (авто всем + backfill), `profiles.referred_by_code` (first-write-wins), `profiles.utm_source`. **Не переиспользовать `profiles.promo_code`** (занят BLINOV_20 first-write-wins + anti-leak: `promo_code` не возвращается клиенту, а реферальный код обязан быть видим). Захват: `?ref_code=` + поле на регистрации + позже в профиле. Money-путь `yookassa-*` НЕ трогаем — только маркер-комментарий.
-**Будущее (отдельная спека, money-critical):** новичку −15% на первые 2 оплаты, рефереру 10% с его оплат до года.
+**Stage 3 — Рефералка v1, attribution-only (СДЕЛАНО 2026-07-16).** Миграция `20260716120000`: `tutors.referral_code` (авто всем + backfill, UPPERCASE — не путать с ученическим `invite_code`), `profiles.referred_by_code` + `referred_at` (first-write-wins). **`profiles.promo_code` НЕ переиспользован** (занят BLINOV_20 + anti-leak). Захват: `?rc=` на лендинге (`?ref=` занят каналом egor) + опц. поле на обеих регистрациях + OAuth-state (ключ `c`) + позже в профиле (claim). Единый write-path — `_shared/referral.ts::attributeReferral` (signup/profile/admin); кабинет реферера — `GET /referrals` в `tutor-progress-api` (`TutorReferralSection`: код, ссылка, список «имя · этап · платит» — anti-leak whitelist); канал «Реф: {имя}» в Пульсе/дайджесте + `SetReferrerDialog` (админ ретро-привязка, Excel-кейс); надж на Главной + разовый анонс `tutor-referral-announce`. Money-путь `yookassa-*` НЕ тронут. Детальные инварианты — rule 101 «Stage 3». План: `~/.claude/plans/proud-growing-mist.md`.
+**Будущее (отдельная спека, money-critical):** новичку −15% на первые 2 оплаты, рефереру 10% с его оплат до года — в v1 в UI честная строка «привязки засчитываются, бонусы ретроактивно» (`referred_at` фиксирует момент под ретро-начисление).
 
 ---
 

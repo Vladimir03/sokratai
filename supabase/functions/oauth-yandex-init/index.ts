@@ -74,6 +74,7 @@ Deno.serve(async (req) => {
   // derivation. Absent for non-referral logins.
   const promo = url.searchParams.get("promo");
   const ref = url.searchParams.get("ref");
+  const rc = url.searchParams.get("rc"); // реферальный код коллеги (Stage 3)
 
   // Compact payload (short keys, path-only redirect) — mirrors the VK flow;
   // providers may mangle long state values (see oauth-helpers 2026-07-14).
@@ -82,6 +83,7 @@ Deno.serve(async (req) => {
     intendedRole,
     promo,
     ref,
+    rc,
   });
 
   // Budget-enforced signing (≤ MAX_STATE_CHARS) — providers mangle longer states.

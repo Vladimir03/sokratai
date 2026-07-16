@@ -269,3 +269,60 @@ export async function updateStudentTarget(params: {
     { method: 'PATCH', body: JSON.stringify({ target_score: targetScore, track }) },
   );
 }
+
+// ─── Рефералка v1 (Stage 3 CEO-аналитики, rule 101) ─────────────────────────────
+
+export type ReferralInvitedStage = 'registered' | 'working' | 'value';
+
+export interface ReferralInvitedRow {
+  name: string;
+  registered_at: string;
+  stage: ReferralInvitedStage;
+  is_paying: boolean;
+}
+
+export interface ReferralsResponse {
+  code: string;
+  link: string;
+  referred_by: { attributed: boolean; referrer_name: string | null };
+  invited: ReferralInvitedRow[];
+  invited_total: number;
+}
+
+/** Кабинет реферера: код + ссылка + список приглашённых (анти-лик: только имя/дата/этап/платит). */
+export async function getReferrals(): Promise<ReferralsResponse> {
+  return requestTutorProgressApi<ReferralsResponse>('/referrals', { method: 'GET' });
+}
+
+/** Новичок вводит код коллеги позже (пока не привязан). 404/409 — русские фразы rule 97. */
+export async function claimReferralCode(
+  code: string,
+): Promise<{ ok: true; referrer_name: string | null }> {
+  return requestTutorProgressApi('/referrals/claim', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  });
+}
+
+/** Fire-and-forget: клик «Скопировать» в кабинете реферера (повторы легальны). */
+export function trackReferralCodeCopied(kind: 'link' | 'text'): void {
+  void (async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) return;
+      await fetch(`${SUPABASE_URL}/functions/v1/tutor-progress-api/track`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: SUPABASE_KEY,
+        },
+        body: JSON.stringify({ event: 'referral_code_copied', kind }),
+        keepalive: true,
+      });
+    } catch {
+      // best-effort — телеметрия не критична
+    }
+  })();
+}

@@ -47,6 +47,9 @@ const RegisterTutor = () => {
   const [password, setPassword] = useState("");
   // Мягкий дозвон-канал (item 7): необязательно, не блокирует регистрацию.
   const [telegram, setTelegram] = useState("");
+  // Реферальный код коллеги (Stage 3 рефералки): prefill из ?rc= (localStorage),
+  // редактируем, опционален — НЕ блокирует регистрацию.
+  const [referralCode, setReferralCode] = useState(() => getStoredPromo().rc ?? "");
   const [consent, setConsent] = useState(false);
   const [loading, setLoading] = useState(false);
   // Экран «подтвердите почту» вместо выброса (тупик #2). null → показываем форму.
@@ -130,6 +133,7 @@ const RegisterTutor = () => {
             consent_intent: "web-signup-tutor",
             ...(promo ? { promo } : {}),
             ...(ref ? { ref } : {}),
+            ...(referralCode.trim() ? { rc: referralCode.trim() } : {}),
             ...(telegram.trim() ? { telegram: telegram.trim() } : {}),
           },
           emailRedirectTo: `${window.location.origin}/tutor/home`,
@@ -302,6 +306,22 @@ const RegisterTutor = () => {
               <p className="text-xs text-muted-foreground leading-snug">
                 По желанию — будем напоминать про ДЗ и присылать важное. Можно
                 добавить позже в профиле.
+              </p>
+            </div>
+            {/* Реферальный код КОЛЛЕГИ-репетитора (Stage 3): опционально, без
+                валидации-гейта — невалидный код молча не прикрепится на сервере. */}
+            <div className="space-y-1">
+              <Input
+                type="text"
+                autoComplete="off"
+                placeholder="Код приглашения от коллеги (по желанию)"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value)}
+                disabled={loading}
+                style={{ fontSize: 16, touchAction: "manipulation" }}
+              />
+              <p className="text-xs text-muted-foreground leading-snug">
+                Есть код от коллеги-репетитора? Укажите — можно и позже в профиле.
               </p>
             </div>
             {/* Custom-rendered consent checkbox (same `.rtc-consent-checkbox`

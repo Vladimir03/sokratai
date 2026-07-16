@@ -59,6 +59,8 @@ export interface PulseTutor {
   isPaying: boolean;
   isTrial: boolean;
   activeStudents: number;
+  /** Кем приглашён (tutors.referral_code реферера) — для админ ретро-привязки. */
+  referredByCode: string | null;
 }
 
 export interface PulseStage {
@@ -117,6 +119,8 @@ export interface PulsePayload {
   channels: Array<{ kind: PulseChannelKind; label: string; total: number; reachedValue: number; paidEver: number }>;
   atRisk: PulseAtRiskTutor[];
   totals: { tutors: number };
+  /** Справочник код→имя для админ-диалога «Кто привёл» (ретро-привязка). */
+  referralDirectory: Array<{ code: string; name: string }>;
   /**
    * Пре-воронка «до регистрации» из Яндекс.Метрики (агрегаты — имён до
    * регистрации не бывает). available:false = нет METRIKA_API_TOKEN или API
@@ -132,6 +136,7 @@ interface TutorRow {
   user_id: string;
   name: string;
   telegram_username: string | null;
+  referral_code: string | null;
   created_at: string;
 }
 
@@ -143,6 +148,7 @@ interface ProfileRow {
   trial_ends_at: string | null;
   promo_code: string | null;
   registration_source: string | null;
+  referred_by_code: string | null;
   telegram_username: string | null;
 }
 
@@ -240,14 +246,26 @@ function maxDate(a: string | null, b: string | null): string | null {
   return a >= b ? a : b;
 }
 
-/** Канал привлечения по атрибуции профиля (экспорт: дневной дайджест метит новичков). */
+/**
+ * Канал привлечения по атрибуции профиля (экспорт: дневной дайджест метит
+ * новичков). Приоритет: referral (код коллеги) > egor/promo > ref-source > web.
+ * referrerNameByCode — map tutors.referral_code → имя реферера; нерезолвящийся
+ * код (мусор от self-update, rule 101 TODO money-версии) проваливается ниже.
+ */
 export function resolveChannel(
-  profile: Pick<ProfileRow, "registration_source" | "promo_code"> | undefined,
+  profile:
+    | Pick<ProfileRow, "registration_source" | "promo_code" | "referred_by_code">
+    | undefined,
+  referrerNameByCode?: Map<string, string>,
 ): PulseChannelInfo {
   // Нет profiles-строки = отсутствие атрибуции, НЕ органика (ревью P1 #8) —
   // иначе дрейф данных систематически «улучшал» бы органический канал.
   if (!profile) {
     return { kind: "unknown", label: "Без атрибуции" };
+  }
+  const referredBy = profile.referred_by_code?.trim() ?? "";
+  if (referredBy && referrerNameByCode?.has(referredBy)) {
+    return { kind: "ref", label: `Реф: ${referrerNameByCode.get(referredBy)}` };
   }
   const source = profile.registration_source?.trim() ?? "";
   const promo = profile.promo_code?.trim() ?? "";
@@ -296,7 +314,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     (from, to) =>
       db
         .from("tutors")
-        .select("id, user_id, name, telegram_username, created_at")
+        .select("id, user_id, name, telegram_username, referral_code, created_at")
         .order("created_at")
         .order("id")
         .range(from, to),
@@ -319,6 +337,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       channels: [],
       atRisk: [],
       totals: { tutors: 0 },
+      referralDirectory: [],
       preFunnel: await preFunnelPromise,
     };
   }
@@ -333,7 +352,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     const { data, error } = await db
       .from("profiles")
       .select(
-        "id, subscription_tier, subscription_expires_at, trial_started_at, trial_ends_at, promo_code, registration_source, telegram_username",
+        "id, subscription_tier, subscription_expires_at, trial_started_at, trial_ends_at, promo_code, registration_source, referred_by_code, telegram_username",
       )
       .in("id", chunk);
     if (error) throw new Error(`profiles: ${error.message}`);
@@ -597,6 +616,15 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   };
 
   // ── 3. Сборка PulseTutor ──
+  // Справочник реферальных кодов (код → имя) — резолв канала «Реф: Эмилия»
+  // и админ-диалог «Кто привёл». Бесплатно: tutors уже загружены.
+  const referrerNameByCode = new Map<string, string>();
+  for (const t of tutors) {
+    if (typeof t.referral_code === "string" && t.referral_code) {
+      referrerNameByCode.set(t.referral_code, t.name);
+    }
+  }
+
   // Исторические коммерческие факты (по tutors.id) — для ступеней «Триал»/«Оплата»
   // и channel-конверсии: paidEver = реальный платёж (ручные гранты НЕ входят).
   const trialEverIds = new Set<string>();
@@ -654,7 +682,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       userId: t.user_id,
       name: t.name,
       telegram: (t.telegram_username ?? profile?.telegram_username ?? null)?.replace(/^@/, "") ?? null,
-      channel: resolveChannel(profile),
+      channel: resolveChannel(profile, referrerNameByCode),
       registeredAt: t.created_at,
       stage,
       stageDates,
@@ -662,6 +690,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
       isPaying: Boolean(isPaying),
       isTrial,
       activeStudents: a?.activeStudents ?? 0,
+      referredByCode: profile?.referred_by_code ?? null,
     };
   });
 
@@ -774,6 +803,9 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     channels,
     atRisk,
     totals: { tutors: tutors.length },
+    referralDirectory: [...referrerNameByCode.entries()]
+      .map(([code, name]) => ({ code, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru")),
     preFunnel: await preFunnelPromise,
   };
 }

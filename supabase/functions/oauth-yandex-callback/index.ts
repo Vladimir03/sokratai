@@ -110,9 +110,11 @@ Deno.serve(async (req) => {
   }
   const redirectTo = norm.redirectTo;
   const intendedRole = norm.intendedRole;
-  // QR/referral attribution (egor-qr-onboarding), threaded through the state.
+  // QR/referral attribution (egor-qr-onboarding + Stage 3 рефералка),
+  // threaded through the state.
   const promo = norm.promo;
   const ref = norm.ref;
+  const rc = norm.rc;
 
   // ─── 1. Exchange code → Yandex access_token (server-to-server) ───
   const tokenRes = await fetch("https://oauth.yandex.ru/token", {
@@ -180,6 +182,7 @@ Deno.serve(async (req) => {
     signup_source: signupSource,
     ...(promo ? { promo } : {}),
     ...(ref ? { ref } : {}),
+    ...(rc ? { rc } : {}),
   });
   if ("error" in created) {
     return redirectToError(created.error, ERR_EVENT);
@@ -209,7 +212,7 @@ Deno.serve(async (req) => {
   // student OAuth signups — else 'egor' would land on a student profile).
   // Idempotent, best-effort, PII-free. Does not touch role/session logic (rule 96).
   if (created.isNewUser && intendedRole === "tutor") {
-    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref });
+    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref, rc });
   }
 
   // ─── 6. Redirect browser with tokens in URL hash ───

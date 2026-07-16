@@ -139,9 +139,11 @@ Deno.serve(async (req) => {
   const redirectTo = norm.redirectTo;
   const intendedRole = norm.intendedRole;
   const codeVerifier = norm.codeVerifier;
-  // QR/referral attribution (egor-qr-onboarding), threaded through the state.
+  // QR/referral attribution (egor-qr-onboarding + Stage 3 рефералка),
+  // threaded through the state.
   const promo = norm.promo;
   const ref = norm.ref;
+  const rc = norm.rc;
 
   // ─── 1. Exchange code → VK tokens (OAuth 2.1 PKCE, public client) ───
   const tokenRes = await fetch("https://id.vk.com/oauth2/auth", {
@@ -217,6 +219,7 @@ Deno.serve(async (req) => {
     email_synthesized: rawEmail === null,
     ...(promo ? { promo } : {}),
     ...(ref ? { ref } : {}),
+    ...(rc ? { rc } : {}),
   });
   if ("error" in created) {
     return redirectToError(created.error, ERR_EVENT);
@@ -245,7 +248,7 @@ Deno.serve(async (req) => {
   // (P1 #5: not logins nor student OAuth signups — else 'egor' lands on a student
   // profile). Rule 96: additive, does not touch role/session logic. Best-effort.
   if (created.isNewUser && intendedRole === "tutor") {
-    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref });
+    await persistPromoAttributionAndTrack(admin, minted.userId, { promo, ref, rc });
   }
 
   // ─── 6. Redirect browser with tokens in URL hash ───

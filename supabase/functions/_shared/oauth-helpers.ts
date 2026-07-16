@@ -186,6 +186,7 @@ export async function verifyState(
 //   i = intended role: "t" | "s"
 //   v = PKCE code_verifier (VK only, 43 chars)
 //   p / f = promo / ref attribution
+//   c = referral code коллеги (?rc=, Stage 3 рефералки)
 //   t = issuedAt in SECONDS   n = short nonce
 // verifyStateDetailed + normalizeStatePayload accept BOTH formats, so states
 // minted by a not-yet-redeployed init keep working during rollout.
@@ -205,6 +206,7 @@ export function buildCompactStatePayload(input: {
   codeVerifier?: string;
   promo?: string | null;
   ref?: string | null;
+  rc?: string | null;
 }): Record<string, unknown> {
   const u = new URL(input.redirectTo);
   const originIndex = ALLOWED_REDIRECT_ORIGINS.indexOf(`${u.protocol}//${u.host}`);
@@ -223,6 +225,8 @@ export function buildCompactStatePayload(input: {
   // for real promo codes (BLINOV_20) and refs (egor).
   if (input.promo) payload.p = input.promo.slice(0, 32);
   if (input.ref) payload.f = input.ref.slice(0, 32);
+  // Реферальные коды — 8 символов; 16 = запас без угрозы бюджету state.
+  if (input.rc) payload.c = input.rc.slice(0, 16);
   return payload;
 }
 
@@ -240,7 +244,7 @@ export async function signStateBounded(
   let state = await signState(payload, secret);
   if (state.length <= MAX_STATE_CHARS) return state;
 
-  const { p: _p, f: _f, ...withoutAttribution } = payload;
+  const { p: _p, f: _f, c: _c, ...withoutAttribution } = payload;
   state = await signState(withoutAttribution, secret);
   console.warn(
     JSON.stringify({
@@ -326,6 +330,8 @@ export type NormalizedStatePayload = {
   codeVerifier: string | null;
   promo: string | null;
   ref: string | null;
+  /** Реферальный код коллеги (?rc=, Stage 3 рефералки). */
+  rc: string | null;
 };
 
 /** Map a verified state payload (compact OR legacy long-key) to named fields. */
@@ -368,6 +374,12 @@ export function normalizeStatePayload(
         ? parsed.ref
         : typeof parsed.f === "string"
           ? parsed.f
+          : null,
+    rc:
+      typeof parsed.rc === "string"
+        ? parsed.rc
+        : typeof parsed.c === "string"
+          ? parsed.c
           : null,
   };
 }

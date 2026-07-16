@@ -208,27 +208,35 @@ async function collectDailyEvents(
   // Каналы новичков + свежие триалы — один запрос profiles.
   const { data: allTutorIds, error: allTutorsError } = await db
     .from("tutors")
-    .select("user_id, name");
+    .select("user_id, name, referral_code");
   if (allTutorsError) throw new Error(`tutors_all: ${allTutorsError.message}`);
   const tutorNameByUserId = new Map(
     (allTutorIds ?? []).map((t) => [t.user_id as string, (t.name as string) ?? "Без имени"]),
   );
+  // Справочник реферальных кодов — канал «Реф: Эмилия» у новичков (Stage 3).
+  const referrerNameByCode = new Map<string, string>();
+  for (const t of allTutorIds ?? []) {
+    if (typeof t.referral_code === "string" && t.referral_code) {
+      referrerNameByCode.set(t.referral_code, (t.name as string) ?? "Коллега");
+    }
+  }
 
   const profileIds = [
     ...new Set([...newTutorRows.map((t) => t.user_id as string), ...tutorNameByUserId.keys()]),
   ];
-  const profileById = new Map<string, { registration_source: string | null; promo_code: string | null; trial_started_at: string | null }>();
+  const profileById = new Map<string, { registration_source: string | null; promo_code: string | null; referred_by_code: string | null; trial_started_at: string | null }>();
   for (let i = 0; i < profileIds.length; i += 100) {
     const chunk = profileIds.slice(i, i + 100);
     const { data, error } = await db
       .from("profiles")
-      .select("id, registration_source, promo_code, trial_started_at")
+      .select("id, registration_source, promo_code, referred_by_code, trial_started_at")
       .in("id", chunk);
     if (error) throw new Error(`profiles: ${error.message}`);
     for (const p of data ?? []) {
       profileById.set(p.id as string, {
         registration_source: p.registration_source as string | null,
         promo_code: p.promo_code as string | null,
+        referred_by_code: p.referred_by_code as string | null,
         trial_started_at: p.trial_started_at as string | null,
       });
     }
@@ -236,7 +244,7 @@ async function collectDailyEvents(
 
   const newTutors = newTutorRows.map((t) => ({
     name: (t.name as string) ?? "Без имени",
-    channel: resolveChannel(profileById.get(t.user_id as string)).label,
+    channel: resolveChannel(profileById.get(t.user_id as string), referrerNameByCode).label,
   }));
 
   // Оплаты тарифа за 24ч — по факту АКТИВАЦИИ (точный серверный момент).

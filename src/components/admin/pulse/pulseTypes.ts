@@ -35,6 +35,8 @@ export interface PulseTutor {
   isPaying: boolean;
   isTrial: boolean;
   activeStudents: number;
+  /** Кем приглашён (tutors.referral_code реферера); может отсутствовать при deploy-skew. */
+  referredByCode?: string | null;
 }
 
 export interface PulseStage {
@@ -102,5 +104,7 @@ export interface PulsePayload {
   channels: PulseChannelSummary[];
   atRisk: PulseAtRiskTutor[];
   totals: { tutors: number };
+  /** Справочник код→имя для диалога «Кто привёл»; может отсутствовать при deploy-skew. */
+  referralDirectory?: Array<{ code: string; name: string }>;
   preFunnel: PulsePreFunnel;
 }

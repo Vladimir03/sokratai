@@ -15,6 +15,7 @@ import {
 } from '@/components/tutor/home';
 import { StudentsAtRiskBlock } from '@/components/tutor/home/StudentsAtRiskBlock';
 import { TariffNudgeBanner } from '@/components/tutor/home/TariffNudgeBanner';
+import { ReferralNudgeBanner } from '@/components/tutor/home/ReferralNudgeBanner';
 import { ActivationChecklist } from '@/components/tutor/home/ActivationChecklist';
 import { CommunityJoinCard } from '@/components/tutor/home/CommunityJoinCard';
 import NotificationsNudge from '@/components/pwa/NotificationsNudge';
@@ -224,6 +225,14 @@ function TutorHomeContent() {
             {/* Статус тарифа (триал/free) — тихая строка, premium → null.
                 «Подключить» открывает оплату прямо здесь (конверсия). */}
             <TariffNudgeBanner userId={tutor?.user_id} onConnect={handleConnectTariff} />
+
+            {/* Рефералка: надж после первой ценности (ученик сдал/завершил ДЗ).
+                Сигнал — реюз recentDialogs, без новых запросов. Dismiss навсегда. */}
+            <ReferralNudgeBanner
+              hasValueSignal={home.recentDialogs.some(
+                (d) => d.kind === 'submitted' || d.kind === 'completed',
+              )}
+            />
 
             <HomeHeader
               tutorName={tutorName}
