@@ -52,6 +52,15 @@ export interface PdfRenderResult {
   pageCount: number;
   /** Сколько страниц отрендерено (= min(pageCount, maxPages) минус сбойные). */
   renderedPages: number;
+  /**
+   * W4 (2026-07-16): текстовый слой каждой отрендеренной страницы, ВЫРОВНЕН с
+   * `files` по индексу. `null` = скан/пусто. Цифровые PDF (решуЕГЭ и т.п.) несут
+   * точный текст задач — AI-загрузчик шлёт его вместе с картинкой страницы
+   * (полнота распознавания) и считает по нему ожидаемое число задач.
+   * Внутри слов бывают лишние пробелы (перенос-разрывы «Ка мень») — потребители
+   * должны быть к этому терпимы.
+   */
+  pageTexts: (string | null)[];
 }
 
 export interface PdfRenderOptions {
@@ -139,6 +148,7 @@ export async function renderPdfPagesToFiles(
     const pageCount = doc.numPages;
     const pagesToRender = Math.min(pageCount, Math.max(0, opts.maxPages));
     const files: File[] = [];
+    const pageTexts: (string | null)[] = [];
 
     for (let n = 1; n <= pagesToRender; n++) {
       opts.onProgress?.(n - 1, pagesToRender);
@@ -157,6 +167,22 @@ export async function renderPdfPagesToFiles(
         files.push(
           new File([blob], `${baseName}-p${n}.jpg`, { type: 'image/jpeg' }),
         );
+        // W4: текстовый слой страницы — только для УСПЕШНО отрендеренной (массивы
+        // выровнены по индексу). Сбой извлечения текста не валит страницу.
+        let text: string | null = null;
+        try {
+          const tc = await page.getTextContent();
+          const joined = tc.items
+            .map((it) => ('str' in it ? it.str : ''))
+            .join(' ')
+            .replace(/[ \t]{2,}/g, ' ')
+            .trim();
+          // < 40 символов = по сути скан/пустая страница — текст бесполезен.
+          text = joined.length >= 40 ? joined : null;
+        } catch {
+          text = null;
+        }
+        pageTexts.push(text);
       } finally {
         page.cleanup();
       }
@@ -167,7 +193,7 @@ export async function renderPdfPagesToFiles(
       throw new PdfRenderError('Не удалось отрисовать ни одной страницы PDF. Попробуйте другой файл.');
     }
 
-    return { files, pageCount, renderedPages: files.length };
+    return { files, pageCount, renderedPages: files.length, pageTexts };
   } finally {
     void loadingTask.destroy();
   }

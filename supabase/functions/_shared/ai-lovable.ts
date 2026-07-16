@@ -167,6 +167,10 @@ export async function callLovableJson(
   // ai-usage-logging (2026-07-06): fire-and-forget hook invoked with the parsed
   // gateway `usage` on a successful (HTTP 200) response. Observability only.
   onUsage?: (usage: LovableUsage | null) => void,
+  // W4 (2026-07-16): explicit output cap. Without it the gateway default silently
+  // truncated dense-collection extractions (73 tasks → the model emitted 5-7).
+  // Optional — existing callers keep the gateway default.
+  opts?: { maxTokens?: number },
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
@@ -187,6 +191,7 @@ export async function callLovableJson(
           messages,
           temperature: 0.2,
           stream: false,
+          ...(opts?.maxTokens ? { max_tokens: opts.maxTokens } : {}),
         }),
         signal: controller.signal,
       });

@@ -7,7 +7,12 @@ import { InputStage } from '@/components/kb/AiTaskLoader/InputStage';
 import { DraftCard } from '@/components/kb/AiTaskLoader/DraftCard';
 import { DraftTable } from '@/components/kb/AiTaskLoader/DraftTable';
 import { BulkActionsBar } from '@/components/kb/AiTaskLoader/BulkActionsBar';
-import type { CropState, ReviewOverrides, RowStatus } from '@/components/kb/AiTaskLoader/reviewTypes';
+import type {
+  CropState,
+  ExtractCompleteness,
+  ReviewOverrides,
+  RowStatus,
+} from '@/components/kb/AiTaskLoader/reviewTypes';
 import { useCreateTasksBulk, useTopics } from '@/hooks/useKnowledgeBase';
 import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
@@ -134,6 +139,8 @@ function AiTaskLoaderContent() {
   const [removed, setRemoved] = useState<boolean[]>([]);
   const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
   const [stats, setStats] = useState<ExtractStats | null>(null);
+  /** W4: честность о полноте — «Найдено 68 из ~73» + недобранные страницы. */
+  const [completeness, setCompleteness] = useState<ExtractCompleteness | null>(null);
   const [folderId, setFolderId] = useState(initialFolderId);
   const [subject, setSubject] = useState<string>(DEFAULT_KB_SUBJECT);
   const [isSaving, setIsSaving] = useState(false);
@@ -175,6 +182,7 @@ function AiTaskLoaderContent() {
       chosenFolderId: string,
       chosenSubject: string,
       newUploadedRefs: string[],
+      newCompleteness: ExtractCompleteness,
     ) => {
       // Ф0 (волна 2): пре-резолв темы ПРИ ВХОДЕ в ревью — тутор сразу видит,
       // сматчилась ли тема (раньше — невидимый сюрприз на коммите). ЕГЭ/ОГЭ-темы
@@ -216,6 +224,7 @@ function AiTaskLoaderContent() {
       setRemoved(newDrafts.map(() => false));
       setUploadedRefs(newUploadedRefs);
       setStats(newStats);
+      setCompleteness(newCompleteness);
       setFolderId(chosenFolderId);
       setSubject(chosenSubject);
       setExpandedIndex(null);
@@ -594,6 +603,11 @@ function AiTaskLoaderContent() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-semibold text-slate-700">
                 Найдено задач: {visibleCount}
+                {/* W4: ожидание по текстовому слою PDF — показываем, только если оно
+                    не меньше найденного (недооценка счётчика выглядела бы нелепо). */}
+                {completeness?.expectedTotal != null && completeness.expectedTotal >= drafts.length ? (
+                  <span className="font-normal text-slate-500"> из ~{completeness.expectedTotal}</span>
+                ) : null}
                 {stats && stats.low_confidence_answers > 0 ? (
                   <span className="ml-2 font-normal text-amber-700">
                     · {stats.low_confidence_answers} без ответа
@@ -642,6 +656,16 @@ function AiTaskLoaderContent() {
                 </button>
               </div>
             </div>
+
+            {/* W4: недобранные страницы (после авто-повтора) — честное предупреждение. */}
+            {completeness && completeness.shortfalls.length > 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {completeness.shortfalls
+                  .map((s) => `со ${s.pages} распознано ${s.got} из ~${s.expected}`)
+                  .join('; ')}
+                {' '}— проверьте эти страницы и при необходимости загрузите их отдельным заходом.
+              </div>
+            ) : null}
 
             <BulkActionsBar
               selectedCount={selectedCount}

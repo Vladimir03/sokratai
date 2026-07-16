@@ -32,6 +32,10 @@ interface KbAiExtractRunPayload
   lowConfAnswers: number;
   /** W3.1: сколько прогонов-чанков выполнено (большой PDF → авто-прогоны по 10). */
   chunks?: number;
+  /** W4: ожидаемое число задач по маркерам текстового слоя PDF (null = неизвестно). */
+  expected?: number | null;
+  /** W4: сколько чанков авто-повторено из-за недобора (<60% ожидания). */
+  autoRetries?: number;
 }
 
 interface KbAiTasksSavedPayload

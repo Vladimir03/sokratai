@@ -34,3 +34,15 @@ export interface CropState {
 
 /** Per-row статус сохранения (bulk-commit, «Повторить неудачные»). */
 export type RowStatus = 'idle' | 'saved' | 'failed';
+
+/**
+ * W4 (2026-07-16): честность о полноте распознавания. Ожидание считается по
+ * маркерам нумерации текстового слоя цифрового PDF (`countSequentialTaskMarkers`);
+ * null = ожидание неизвестно (сканы/скриншоты/текст без сквозной нумерации).
+ */
+export interface ExtractCompleteness {
+  /** Σ маркеров нумерации по всем страницам (null = неизвестно). */
+  expectedTotal: number | null;
+  /** Чанки, где после авто-повтора распознано меньше ожидаемого. */
+  shortfalls: { pages: string; got: number; expected: number }[];
+}

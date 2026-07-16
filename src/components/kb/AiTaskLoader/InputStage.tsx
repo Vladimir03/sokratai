@@ -13,11 +13,12 @@ import {
 } from '@/lib/kbAiExtractApi';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { loadLastClassification, saveLastSubject } from '@/lib/kbLastClassification';
-import { pluralizeRu } from '@/lib/pluralizeRu';
+import { countSequentialTaskMarkers } from '@/lib/taskMarkers';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 import { SUBJECTS } from '@/types/homework';
+import type { ExtractCompleteness } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { KBFolderTreeNode } from '@/types/kb';
 
 /** Max screenshots per session (mirror edge MAX_IMAGES). */
@@ -25,11 +26,27 @@ const MAX_LOADER_IMAGES = 10;
 
 /**
  * W3.1 (2026-07-12): кап страниц PDF за сессию С УЧЁТОМ очереди. Страницы сверх
- * первых 10 слотов копятся в pdfQueue и распознаются автоматически прогонами
- * по 10 (кап стоимости одного прогона остаётся edge MAX_IMAGES=10; 60 страниц
- * = до 6 AI-вызовов — честный прогресс «Прогон k из m»).
+ * первых 10 слотов копятся в pdfQueue и распознаются автоматически по частям.
  */
 const MAX_PDF_PAGES_TOTAL = 60;
+
+/**
+ * W4 (2026-07-16, репорт физика «73 из 73» + демо химиков): страниц-картинок на
+ * ОДИН AI-вызов. Было 10 → плотный сборник (решуЕГЭ ~15 задач/стр) отправлял до
+ * 150 задач в один вызов, и модель «лениво» отдавала первые 5-7 (вывод такого
+ * объёма физически не помещается). 2 страницы ≈ 15-30 задач ≈ 3-8k output-токенов
+ * — комфортно. Универсально для страниц PDF И ручных скриншотов (химики: «по
+ * одному скриншоту работает» — ровно поэтому).
+ */
+const CHUNK_IMAGES = 2;
+/** Параллельных extract-вызовов (upload-first делает офсеты детерминированными). */
+const EXTRACT_CONCURRENCY = 3;
+/** Хвост текста следующей страницы — для завершения задачи, разрезанной границей. */
+const NEXT_PAGE_TAIL_CHARS = 600;
+/** Распознано < 60% ожидаемого по текстовому слою → авто-повтор чанка (1 раз). */
+const SHORTFALL_RATIO = 0.6;
+/** Кап текста одного вызова (зеркало edge MAX_TEXT_CHARS с запасом). */
+const CHUNK_TEXT_CAP = 59_000;
 
 /** Flatten folder tree into { id, name, depth } for <select> options (mirror CreateTaskModal). */
 function flattenTree(
@@ -55,6 +72,8 @@ interface InputStageProps {
     subject: string,
     /** Волна 2: загруженные refs исходников — контекст refine + orphan-cleanup. */
     uploadedRefs: string[],
+    /** W4: честность о полноте (ожидание по текстовому слою PDF + недоборы). */
+    completeness: ExtractCompleteness,
   ) => void;
 }
 
@@ -76,10 +95,18 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null);
   /** «Загружаем N/M» при аплоаде в storage (UX review P2 — фаза видна отдельно от OCR). */
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
-  /** W3.1: «Прогон k из m» при чанкованном распознавании большого PDF. */
-  const [chunkProgress, setChunkProgress] = useState<{ done: number; total: number } | null>(null);
-  /** W3.1: страницы PDF сверх первых 10 слотов — распознаются авто-прогонами по 10. */
+  /** W4: живой прогресс распознавания — «Страница k из m · найдено N задач» + %. */
+  const [chunkProgress, setChunkProgress] = useState<
+    { pagesDone: number; pagesTotal: number; tasksFound: number } | null
+  >(null);
+  /** W3.1: страницы PDF сверх первых 10 слотов — распознаются авто-чанками. */
   const [pdfQueue, setPdfQueue] = useState<File[]>([]);
+  /**
+   * W4: текстовый слой страницы PDF по File-идентичности (страница-файл → её
+   * текст; ручные скриншоты — без записи). Точный источник условий для AI +
+   * счёт ожидаемого числа задач. Map накапливается за сессию — строки дёшевы.
+   */
+  const pageTextByFileRef = useRef(new Map<File, string | null>());
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   // isRenderingPdf НЕ входит в disabled хука: addFiles сам гейтится на disabled,
@@ -114,10 +141,12 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       // Lazy: pdfjs (~тяжёлый) грузится только при реальном выборе PDF.
       const { renderPdfPagesToFiles, PdfRenderError } = await import('@/lib/pdfToImages');
       try {
-        const { files, pageCount, renderedPages } = await renderPdfPagesToFiles(file, {
+        const { files, pageCount, renderedPages, pageTexts } = await renderPdfPagesToFiles(file, {
           maxPages: queueCapacity,
           onProgress: (done, total) => setPdfProgress({ done, total }),
         });
+        // W4: текстовый слой каждой страницы — по File-идентичности (выровнен с files).
+        files.forEach((f, i) => pageTextByFileRef.current.set(f, pageTexts[i] ?? null));
         const visible = files.slice(0, remainingSlots);
         const queued = files.slice(remainingSlots);
         if (visible.length > 0) imageUpload.addFiles(visible);
@@ -128,7 +157,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           toast.info(`В PDF ${pageCount} стр. — обработаем первые ${renderedPages}. Остальные загрузите отдельным заходом.`);
         } else if (queued.length > 0) {
           toast.success(
-            `Добавлено страниц: ${renderedPages}. ${queued.length} из них в очереди — распознаются автоматически прогонами по ${MAX_LOADER_IMAGES}.`,
+            `Добавлено страниц: ${renderedPages}. ${queued.length} из них в очереди — распознаются автоматически по частям.`,
           );
         } else {
           toast.success(renderedPages === 1 ? 'Страница PDF добавлена' : `Добавлено страниц: ${renderedPages}`);
@@ -188,78 +217,211 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
     if (!canExtract) return;
     setIsExtracting(true);
 
-    // W3.1: чанки — [видимые файлы (+ текст)] + очередь PDF по 10. Текст идёт
-    // ТОЛЬКО в первый чанк (иначе задачи из него продублируются в каждом прогоне).
-    const chunks: File[][] = [];
-    const firstChunk = imageUpload.getNewFiles();
-    if (firstChunk.length > 0 || text.trim().length > 0 || pdfQueue.length === 0) {
-      chunks.push(firstChunk);
-    }
-    for (let i = 0; i < pdfQueue.length; i += MAX_LOADER_IMAGES) {
-      chunks.push(pdfQueue.slice(i, i + MAX_LOADER_IMAGES));
-    }
-
-    const allDrafts: ExtractedTask[] = [];
-    const allRefs: string[] = [];
-    const totals: ExtractStats = { found: 0, low_confidence_answers: 0, unreadable_images: 0 };
-    let completedChunks = 0;
+    // W4 (2026-07-16, «73 из 73»): upload-first → мелкие чанки по CHUNK_IMAGES
+    // страниц → параллельные вызовы → авто-повтор недобора. Порядок файлов:
+    // видимые (скриншоты + первые страницы PDF) + очередь PDF.
+    const allFiles = [...imageUpload.getNewFiles(), ...pdfQueue];
+    const textareaText = text.trim();
+    const allRefs: string[] = []; // ВСЕ успешно загруженные (для cleanup/ревью)
 
     try {
-      for (let c = 0; c < chunks.length; c += 1) {
-        if (chunks.length > 1) setChunkProgress({ done: c, total: chunks.length });
-        const files = chunks[c];
-        const chunkRefs: string[] = [];
-        try {
-          for (const file of files) {
-            setUploadProgress({ done: chunkRefs.length, total: files.length });
-            const res = await uploadKBTaskImage(file);
-            chunkRefs.push(res.storageRef);
+      // ── Фаза 1: залить ВСЕ файлы заранее — офсеты source_image_index каждого
+      // чанка детерминированы → вызовы можно параллелить.
+      interface PageEntry {
+        ref: string;
+        pageText: string | null;
+        /** 1-based глобальный номер страницы (для лейблов «стр. N»). */
+        pageNo: number;
+      }
+      const entries: PageEntry[] = [];
+      const failedUploadPages: number[] = [];
+      for (let i = 0; i < allFiles.length; i += 1) {
+        setUploadProgress({ done: i, total: allFiles.length });
+        const file = allFiles[i];
+        let ref: string | null = null;
+        for (let attempt = 0; attempt < 2 && ref === null; attempt += 1) {
+          try {
+            ref = (await uploadKBTaskImage(file)).storageRef;
+          } catch {
+            /* RU DPI рвёт ~1 из N запросов — второй заход обычно проходит */
           }
-          setUploadProgress(null); // дальше — фаза распознавания этого чанка
+        }
+        if (ref !== null) {
+          allRefs.push(ref);
+          entries.push({ ref, pageText: pageTextByFileRef.current.get(file) ?? null, pageNo: i + 1 });
+        } else {
+          failedUploadPages.push(i + 1);
+        }
+      }
+      setUploadProgress(null);
+      if (allFiles.length > 0 && entries.length === 0) {
+        throw new KbAiExtractApiError('Не удалось загрузить изображения. Проверьте соединение и попробуйте ещё раз.');
+      }
+      if (failedUploadPages.length > 0) {
+        toast.warning(`Не загрузились страницы: ${failedUploadPages.join(', ')} — распознаем без них.`);
+      }
 
-          const chunkText = c === 0 ? text.trim() : '';
-          const { drafts, stats } = await extractTasks({
+      // Ожидаемое число задач по текстовому слою (сквозная нумерация сборника).
+      const expectedPerEntry = countSequentialTaskMarkers(entries.map((e) => e.pageText));
+
+      // ── Фаза 2: чанки по CHUNK_IMAGES страниц.
+      interface Chunk {
+        entries: PageEntry[];
+        /** Офсет первой страницы чанка в entries (= в allRefs). */
+        startIndex: number;
+        /** Σ ожидаемых задач страниц чанка (null = хотя бы одна без ожидания). */
+        expected: number | null;
+        pageLabel: string;
+      }
+      const chunks: Chunk[] = [];
+      if (entries.length === 0) {
+        // Текст без картинок — один вызов.
+        chunks.push({ entries: [], startIndex: 0, expected: null, pageLabel: '' });
+      } else {
+        for (let i = 0; i < entries.length; i += CHUNK_IMAGES) {
+          const chunkEntries = entries.slice(i, i + CHUNK_IMAGES);
+          const exps = chunkEntries.map((_, j) => expectedPerEntry[i + j]);
+          const known = exps.filter((v): v is number => v !== null);
+          const first = chunkEntries[0].pageNo;
+          const last = chunkEntries[chunkEntries.length - 1].pageNo;
+          chunks.push({
+            entries: chunkEntries,
+            startIndex: i,
+            expected: known.length === chunkEntries.length ? known.reduce((a, b) => a + b, 0) : null,
+            pageLabel: first === last ? `стр. ${first}` : `стр. ${first}–${last}`,
+          });
+        }
+      }
+
+      // Текст вызова: textarea → ТОЛЬКО чанк 0 (инвариант W3.1 — иначе задачи из
+      // него дублируются каждым прогоном); текст страниц чанка (точный источник
+      // условий) + хвост следующей страницы (задача, разрезанная границей).
+      const buildChunkText = (chunk: Chunk, chunkIdx: number): string => {
+        const parts: string[] = [];
+        if (chunkIdx === 0 && textareaText) parts.push(textareaText);
+        for (const e of chunk.entries) {
+          if (!e.pageText) continue;
+          parts.push(`— ТЕКСТ СТРАНИЦЫ ${e.pageNo} (извлечён из PDF) —\n${e.pageText}`);
+        }
+        const next = entries[chunk.startIndex + chunk.entries.length];
+        if (next?.pageText && chunk.entries.some((e) => e.pageText)) {
+          parts.push(
+            `— ПРОДОЛЖЕНИЕ (начало следующей страницы; только для завершения последней задачи, новых задач отсюда не начинать) —\n${next.pageText.slice(0, NEXT_PAGE_TAIL_CHARS)}`,
+          );
+        }
+        return parts.join('\n\n').slice(0, CHUNK_TEXT_CAP);
+      };
+
+      // ── Фаза 3: параллельный пул extract-вызовов + живой прогресс.
+      const pagesTotal = entries.length;
+      let pagesDone = 0;
+      let tasksFound = 0;
+      let autoRetries = 0;
+      if (pagesTotal > 0) setChunkProgress({ pagesDone: 0, pagesTotal, tasksFound: 0 });
+
+      type ChunkResult =
+        | { ok: true; drafts: ExtractedTask[]; stats: ExtractStats }
+        | { ok: false; error: unknown };
+      const results: ChunkResult[] = new Array(chunks.length);
+
+      const runChunk = async (idx: number): Promise<{ drafts: ExtractedTask[]; stats: ExtractStats }> => {
+        const chunk = chunks[idx];
+        const chunkRefs = chunk.entries.map((e) => e.ref);
+        const callExtract = (hintOverride?: string) =>
+          extractTasks({
             folder_id: folderId,
             subject,
             material: {
               type: chunkRefs.length > 0 ? 'image' : 'text',
-              text: chunkText || undefined,
+              text: buildChunkText(chunk, idx) || undefined,
               image_refs: chunkRefs.length > 0 ? chunkRefs : undefined,
             },
-            tutor_hint: tutorHint.trim() || undefined,
+            tutor_hint: (hintOverride ?? tutorHint.trim()) || undefined,
           });
-
-          // source_image_index — per-chunk (0-based по успешно приложенным этого
-          // прогона) → нормализуем в ГЛОБАЛЬНУЮ систему координат allRefs. Если в
-          // чанке были сбои инлайна (unreadable), индексы внутри чанка смещены —
-          // обнуляем (refine-контекст лучше пропустить, чем дать чужую страницу).
-          const refOffset = allRefs.length;
-          for (const d of drafts) {
-            if (d.source_image_index !== null) {
-              d.source_image_index =
-                stats.unreadable_images === 0 ? d.source_image_index + refOffset : null;
-            }
+        let res = await callExtract();
+        // Авто-повтор недобора (решение владельца 2026-07-16): текстовый слой
+        // обещает K задач, распознано < 60% → 1 повтор с жёсткой подсказкой;
+        // берём результат с бОльшим числом задач.
+        if (chunk.expected !== null && res.drafts.length < chunk.expected * SHORTFALL_RATIO) {
+          autoRetries += 1;
+          try {
+            const retryHint =
+              `На этих страницах ровно ${chunk.expected} задач — извлеки ВСЕ до единой, не сокращай список. ${tutorHint.trim()}`.slice(0, 500);
+            const retry = await callExtract(retryHint);
+            if (retry.drafts.length > res.drafts.length) res = retry;
+          } catch {
+            /* повтор не удался — остаёмся с первым результатом */
           }
-
-          allRefs.push(...chunkRefs);
-          allDrafts.push(...drafts);
-          totals.found += stats.found;
-          totals.low_confidence_answers += stats.low_confidence_answers;
-          totals.unreadable_images += stats.unreadable_images;
-          completedChunks += 1;
-        } catch (chunkError) {
-          // Залитые файлы СБОЙНОГО чанка никем не референсятся — чистим.
-          for (const ref of chunkRefs) void deleteKBTaskImage(ref);
-          if (allDrafts.length > 0) {
-            // Уже распознанные прогоны не теряем — уходим в ревью с тем, что есть.
-            toast.error(
-              `Прогон ${c + 1} из ${chunks.length} не удался — показываем распознанное. Оставшиеся страницы загрузите отдельным заходом.`,
-            );
-            break;
-          }
-          throw chunkError; // первый же чанк упал → обычный error-путь
         }
+        return res;
+      };
+
+      let nextIdx = 0;
+      const worker = async () => {
+        while (nextIdx < chunks.length) {
+          const idx = nextIdx;
+          nextIdx += 1;
+          try {
+            const res = await runChunk(idx);
+            results[idx] = { ok: true, ...res };
+            tasksFound += res.drafts.length;
+          } catch (error) {
+            results[idx] = { ok: false, error };
+          }
+          pagesDone += chunks[idx].entries.length;
+          if (pagesTotal > 0) setChunkProgress({ pagesDone, pagesTotal, tasksFound });
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(EXTRACT_CONCURRENCY, chunks.length) }, () => worker()),
+      );
+
+      // ── Фаза 4: сборка в порядке чанков.
+      const allDrafts: ExtractedTask[] = [];
+      const totals: ExtractStats = { found: 0, low_confidence_answers: 0, unreadable_images: 0 };
+      const failedChunkLabels: string[] = [];
+      const shortfalls: ExtractCompleteness['shortfalls'] = [];
+      let completedChunks = 0;
+      let firstError: unknown = null;
+
+      results.forEach((r, idx) => {
+        const chunk = chunks[idx];
+        if (!r.ok) {
+          if (chunk.entries.length > 0) failedChunkLabels.push(chunk.pageLabel);
+          if (firstError === null) firstError = r.error;
+          return;
+        }
+        // source_image_index — per-chunk (0-based по приложенным этого вызова) →
+        // глобальная система координат allRefs через фиксированный офсет чанка.
+        // Сбои инлайна внутри чанка смещают индексы → обнуляем (как раньше).
+        for (const d of r.drafts) {
+          if (d.source_image_index !== null) {
+            d.source_image_index =
+              r.stats.unreadable_images === 0 ? d.source_image_index + chunk.startIndex : null;
+          }
+        }
+        allDrafts.push(...r.drafts);
+        totals.found += r.stats.found;
+        totals.low_confidence_answers += r.stats.low_confidence_answers;
+        totals.unreadable_images += r.stats.unreadable_images;
+        completedChunks += 1;
+        if (chunk.expected !== null && r.drafts.length < chunk.expected) {
+          shortfalls.push({ pages: chunk.pageLabel, got: r.drafts.length, expected: chunk.expected });
+        }
+      });
+
+      if (allDrafts.length === 0 && firstError !== null) throw firstError;
+      if (failedChunkLabels.length > 0) {
+        // Blobs сбойных чанков не удаляем: allRefs должен оставаться выровнен с
+        // source_image_index; неиспользованные подчистит orphan-cleanup на commit.
+        toast.error(
+          `Не распознались: ${failedChunkLabels.join(', ')} — показываем остальное. Эти страницы загрузите отдельным заходом.`,
+        );
       }
+
+      const expectedTotal = expectedPerEntry.some((v) => v !== null)
+        ? expectedPerEntry.reduce<number>((a, b) => a + (b ?? 0), 0)
+        : null;
 
       trackKbAiLoaderEvent('kb_ai_extract_run', {
         folderId,
@@ -267,6 +429,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         found: totals.found,
         lowConfAnswers: totals.low_confidence_answers,
         chunks: completedChunks,
+        expected: expectedTotal,
+        autoRetries,
       });
 
       if (allDrafts.length === 0) {
@@ -278,9 +442,9 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       // Персист предмета в last-used (review P2): следующий заход загрузчика/
       // форм/корзины стартует с него — не переключать «Химия» каждый раз.
       saveLastSubject(subject);
-      onExtracted(allDrafts, totals, folderId, subject, allRefs);
+      onExtracted(allDrafts, totals, folderId, subject, allRefs, { expectedTotal, shortfalls });
     } catch (e) {
-      // Refs успешных чанков не будут переиспользованы (retry начинает заново).
+      // Полный провал: залитые blobs никем не референсятся — чистим.
       for (const ref of allRefs) void deleteKBTaskImage(ref);
       toast.error(e instanceof KbAiExtractApiError ? e.message : 'Не удалось распознать задачи. Попробуйте ещё раз.');
     } finally {
@@ -435,14 +599,14 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         </button>
         <p className="mt-1 text-[11px] text-slate-400">
           Первые {MAX_LOADER_IMAGES} страниц появятся выше (лишние можно удалить), остальные
-          распознаются автоматически прогонами по {MAX_LOADER_IMAGES}.
+          распознаются автоматически по частям.
         </p>
         {/* W3.1: очередь страниц сверх первых 10 слотов (авто-прогоны по 10). */}
         {pdfQueue.length > 0 ? (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-socrat-primary/20 bg-socrat-primary-light/50 px-3 py-2">
             <span className="text-xs text-slate-600">
               В очереди ещё <span className="font-semibold">{pdfQueue.length}</span> стр. PDF —
-              распознаются автоматически прогонами по {MAX_LOADER_IMAGES}.
+              распознаются автоматически по частям.
             </span>
             <button
               type="button"
@@ -469,29 +633,38 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         {isExtracting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            {(() => {
-              const chunkPrefix = chunkProgress
-                ? `Прогон ${Math.min(chunkProgress.done + 1, chunkProgress.total)} из ${chunkProgress.total} · `
-                : '';
-              return uploadProgress && uploadProgress.total > 0
-                ? `${chunkPrefix}Загружаем изображения ${Math.min(uploadProgress.done + 1, uploadProgress.total)}/${uploadProgress.total}…`
-                : `${chunkPrefix}Распознаём задачи…`;
-            })()}
+            {uploadProgress && uploadProgress.total > 0
+              ? `Загружаем изображения ${Math.min(uploadProgress.done + 1, uploadProgress.total)}/${uploadProgress.total}…`
+              : chunkProgress
+                ? `Страница ${Math.min(chunkProgress.pagesDone + 1, chunkProgress.pagesTotal)} из ${chunkProgress.pagesTotal} · найдено ${chunkProgress.tasksFound}`
+                : 'Распознаём задачи…'}
           </>
         ) : (
           <>
             <Sparkles className="h-4 w-4" aria-hidden="true" />
-            {pdfQueue.length > 0
-              ? (() => {
-                  const runs =
-                    (imageUpload.files.length > 0 || text.trim().length > 0 ? 1 : 0) +
-                    Math.ceil(pdfQueue.length / MAX_LOADER_IMAGES);
-                  return `Распознать все (${runs} ${pluralizeRu(runs, ['прогон', 'прогона', 'прогонов'])})`;
-                })()
-              : 'Распознать задачи'}
+            {(() => {
+              const pages = imageUpload.files.length + pdfQueue.length;
+              return pages > CHUNK_IMAGES ? `Распознать все (${pages} стр.)` : 'Распознать задачи';
+            })()}
           </>
         )}
       </button>
+      {/* W4: живой прогресс-бар в процентах (фидбэк химиков — «идёт прогресс или нет»). */}
+      {isExtracting && chunkProgress && chunkProgress.pagesTotal > 0 ? (
+        <div className="space-y-1">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-socrat-primary transition-[width] duration-500"
+              style={{
+                width: `${Math.round((chunkProgress.pagesDone / chunkProgress.pagesTotal) * 100)}%`,
+              }}
+            />
+          </div>
+          <p className="text-center text-[11px] text-slate-400">
+            {Math.round((chunkProgress.pagesDone / chunkProgress.pagesTotal) * 100)}% · распознаём по {CHUNK_IMAGES} страницы — так AI находит все задачи
+          </p>
+        </div>
+      ) : null}
       {!canExtract && !isExtracting ? (
         <p className="text-center text-xs text-slate-400">
           {folderId === ''
