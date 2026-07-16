@@ -25,7 +25,10 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 // Класс проблемы — тот же octet-stream, что в rule 95 (SW/DPI).
 import PdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?worker';
 
-pdfjsLib.GlobalWorkerOptions.workerPort = new PdfWorker();
+// Worker — НА ВЫЗОВ, не глобальный (ревью 2026-07-16 P2): pdfjs кеширует один
+// PDFWorker на port, а `loadingTask.destroy()` разбирает общий message-channel —
+// быстрый следующий PDF мог получить обрыв обработки (_pendingDestroy). Свой
+// Worker на рендер + terminate в finally = ноль shared-state между файлами.
 
 /** Целевая ширина страницы в px — читаемо для Gemini-OCR, укладывается в капы. */
 const TARGET_PAGE_WIDTH_PX = 1600;
@@ -57,10 +60,17 @@ export interface PdfRenderResult {
    * `files` по индексу. `null` = скан/пусто. Цифровые PDF (решуЕГЭ и т.п.) несут
    * точный текст задач — AI-загрузчик шлёт его вместе с картинкой страницы
    * (полнота распознавания) и считает по нему ожидаемое число задач.
-   * Внутри слов бывают лишние пробелы (перенос-разрывы «Ка мень») — потребители
-   * должны быть к этому терпимы.
+   * Строки разделены `\n` (hasEOL из pdfjs) — маркеры задач ищутся от начала
+   * строки. Внутри слов бывают лишние пробелы (перенос-разрывы «Ка мень») —
+   * потребители должны быть к этому терпимы.
    */
   pageTexts: (string | null)[];
+  /**
+   * Ревью 2026-07-16 P1: НОМЕР СТРАНИЦЫ PDF каждого файла (1-based, выровнен с
+   * `files`). Сбойная страница пропускается → индекс в files ≠ номер страницы.
+   * Нужен для смежности («ПРОДОЛЖЕНИЕ» — только соседняя страница ТОГО ЖЕ PDF).
+   */
+  pageNumbers: number[];
 }
 
 export interface PdfRenderOptions {
@@ -127,14 +137,29 @@ export async function renderPdfPagesToFiles(
 ): Promise<PdfRenderResult> {
   const baseName = file.name.replace(/\.pdf$/i, '') || 'pdf';
 
-  // v6: destroy() живёт на loading task (чистит document; workerPort — внешний,
-  // pdfjs его не терминейтит, переиспользуется между файлами).
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  // Worker-на-вызов (ревью P2): свой port, terminate в конце — нет shared-state.
+  const port = new PdfWorker();
+  const worker = new pdfjsLib.PDFWorker({ port });
+  const terminateWorker = () => {
+    try {
+      worker.destroy();
+    } catch {
+      /* уже разрушен */
+    }
+    port.terminate();
+  };
+
+  // v6: destroy() живёт на loading task (чистит document).
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(await file.arrayBuffer()),
+    worker,
+  });
   let doc: pdfjsLib.PDFDocumentProxy;
   try {
     doc = await loadingTask.promise;
   } catch (e) {
-    void loadingTask.destroy();
+    await loadingTask.destroy().catch(() => undefined);
+    terminateWorker();
     const name = e instanceof Error ? e.name : '';
     if (name === 'PasswordException') {
       throw new PdfRenderError('PDF защищён паролем — снимите защиту и загрузите снова.');
@@ -149,6 +174,7 @@ export async function renderPdfPagesToFiles(
     const pagesToRender = Math.min(pageCount, Math.max(0, opts.maxPages));
     const files: File[] = [];
     const pageTexts: (string | null)[] = [];
+    const pageNumbers: number[] = [];
 
     for (let n = 1; n <= pagesToRender; n++) {
       opts.onProgress?.(n - 1, pagesToRender);
@@ -167,16 +193,18 @@ export async function renderPdfPagesToFiles(
         files.push(
           new File([blob], `${baseName}-p${n}.jpg`, { type: 'image/jpeg' }),
         );
+        pageNumbers.push(n);
         // W4: текстовый слой страницы — только для УСПЕШНО отрендеренной (массивы
         // выровнены по индексу). Сбой извлечения текста не валит страницу.
+        // hasEOL → '\n' (ревью P1): маркеры задач ищутся от начала строки.
         let text: string | null = null;
         try {
           const tc = await page.getTextContent();
-          const joined = tc.items
-            .map((it) => ('str' in it ? it.str : ''))
-            .join(' ')
-            .replace(/[ \t]{2,}/g, ' ')
-            .trim();
+          let joined = '';
+          for (const it of tc.items) {
+            if ('str' in it) joined += it.str + (it.hasEOL ? '\n' : ' ');
+          }
+          joined = joined.replace(/[ \t]{2,}/g, ' ').trim();
           // < 40 символов = по сути скан/пустая страница — текст бесполезен.
           text = joined.length >= 40 ? joined : null;
         } catch {
@@ -193,8 +221,9 @@ export async function renderPdfPagesToFiles(
       throw new PdfRenderError('Не удалось отрисовать ни одной страницы PDF. Попробуйте другой файл.');
     }
 
-    return { files, pageCount, renderedPages: files.length, pageTexts };
+    return { files, pageCount, renderedPages: files.length, pageTexts, pageNumbers };
   } finally {
-    void loadingTask.destroy();
+    await loadingTask.destroy().catch(() => undefined);
+    terminateWorker();
   }
 }

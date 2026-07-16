@@ -102,11 +102,17 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   /** W3.1: страницы PDF сверх первых 10 слотов — распознаются авто-чанками. */
   const [pdfQueue, setPdfQueue] = useState<File[]>([]);
   /**
-   * W4: текстовый слой страницы PDF по File-идентичности (страница-файл → её
-   * текст; ручные скриншоты — без записи). Точный источник условий для AI +
-   * счёт ожидаемого числа задач. Map накапливается за сессию — строки дёшевы.
+   * W4: мета страницы PDF по File-идентичности (ручные скриншоты — без записи):
+   * текст (точный источник условий + счёт ожидаемых задач) + принадлежность
+   * документу (ревью P1: «ПРОДОЛЖЕНИЕ» — только СОСЕДНЯЯ страница ТОГО ЖЕ PDF,
+   * иначе хвост чужого файла «завершал» бы последнюю задачу). Map накапливается
+   * за сессию — строки дёшевы.
    */
-  const pageTextByFileRef = useRef(new Map<File, string | null>());
+  const pageTextByFileRef = useRef(
+    new Map<File, { text: string | null; docId: number; docPageNo: number }>(),
+  );
+  /** Счётчик загруженных PDF-документов (docId для смежности страниц). */
+  const pdfDocCounterRef = useRef(0);
   const pdfInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
   // isRenderingPdf НЕ входит в disabled хука: addFiles сам гейтится на disabled,
@@ -141,12 +147,21 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       // Lazy: pdfjs (~тяжёлый) грузится только при реальном выборе PDF.
       const { renderPdfPagesToFiles, PdfRenderError } = await import('@/lib/pdfToImages');
       try {
-        const { files, pageCount, renderedPages, pageTexts } = await renderPdfPagesToFiles(file, {
-          maxPages: queueCapacity,
-          onProgress: (done, total) => setPdfProgress({ done, total }),
-        });
-        // W4: текстовый слой каждой страницы — по File-идентичности (выровнен с files).
-        files.forEach((f, i) => pageTextByFileRef.current.set(f, pageTexts[i] ?? null));
+        const { files, pageCount, renderedPages, pageTexts, pageNumbers } =
+          await renderPdfPagesToFiles(file, {
+            maxPages: queueCapacity,
+            onProgress: (done, total) => setPdfProgress({ done, total }),
+          });
+        // W4: мета каждой страницы — по File-идентичности (выровнена с files).
+        // docId/docPageNo — для смежности «ПРОДОЛЖЕНИЯ» (ревью P1).
+        const docId = ++pdfDocCounterRef.current;
+        files.forEach((f, i) =>
+          pageTextByFileRef.current.set(f, {
+            text: pageTexts[i] ?? null,
+            docId,
+            docPageNo: pageNumbers[i] ?? i + 1,
+          }),
+        );
         const visible = files.slice(0, remainingSlots);
         const queued = files.slice(remainingSlots);
         if (visible.length > 0) imageUpload.addFiles(visible);
@@ -232,6 +247,9 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         pageText: string | null;
         /** 1-based глобальный номер страницы (для лейблов «стр. N»). */
         pageNo: number;
+        /** Принадлежность PDF-документу (null = ручной скриншот): смежность
+         *  «ПРОДОЛЖЕНИЯ» — только соседняя страница ТОГО ЖЕ PDF (ревью P1). */
+        doc: { docId: number; docPageNo: number } | null;
       }
       const entries: PageEntry[] = [];
       const failedUploadPages: number[] = [];
@@ -248,7 +266,13 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         }
         if (ref !== null) {
           allRefs.push(ref);
-          entries.push({ ref, pageText: pageTextByFileRef.current.get(file) ?? null, pageNo: i + 1 });
+          const meta = pageTextByFileRef.current.get(file);
+          entries.push({
+            ref,
+            pageText: meta?.text ?? null,
+            pageNo: i + 1,
+            doc: meta ? { docId: meta.docId, docPageNo: meta.docPageNo } : null,
+          });
         } else {
           failedUploadPages.push(i + 1);
         }
@@ -296,20 +320,44 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       // Текст вызова: textarea → ТОЛЬКО чанк 0 (инвариант W3.1 — иначе задачи из
       // него дублируются каждым прогоном); текст страниц чанка (точный источник
       // условий) + хвост следующей страницы (задача, разрезанная границей).
+      // Бюджет БЕЗ слепого slice (ревью P1): textarea пользователя НЕ режем
+      // (переполнение честно отобьёт edge MATERIAL_TOO_LARGE, как раньше);
+      // page-text'ы добавляются целиком, пока влезают (картинка страницы всё
+      // равно приложена — модель прочтёт с неё); ПРОДОЛЖЕНИЕ — только при
+      // остатке бюджета И только СОСЕДНЯЯ страница ТОГО ЖЕ PDF (ревью P1:
+      // хвост другого документа «завершал» бы последнюю задачу чужим текстом).
       const buildChunkText = (chunk: Chunk, chunkIdx: number): string => {
         const parts: string[] = [];
-        if (chunkIdx === 0 && textareaText) parts.push(textareaText);
+        let budget = CHUNK_TEXT_CAP;
+        const pushIfFits = (part: string): boolean => {
+          if (part.length + 2 > budget) return false;
+          parts.push(part);
+          budget -= part.length + 2; // + разделитель '\n\n'
+          return true;
+        };
+        if (chunkIdx === 0 && textareaText) {
+          // Пользовательский ввод всегда целиком (даже сверх бюджета — тогда
+          // edge вернёт явную ошибку, а не молчаливое усечение).
+          parts.push(textareaText);
+          budget -= textareaText.length + 2;
+        }
         for (const e of chunk.entries) {
           if (!e.pageText) continue;
-          parts.push(`— ТЕКСТ СТРАНИЦЫ ${e.pageNo} (извлечён из PDF) —\n${e.pageText}`);
+          pushIfFits(`— ТЕКСТ СТРАНИЦЫ ${e.pageNo} (извлечён из PDF) —\n${e.pageText}`);
         }
+        const lastEntry = chunk.entries[chunk.entries.length - 1];
         const next = entries[chunk.startIndex + chunk.entries.length];
-        if (next?.pageText && chunk.entries.some((e) => e.pageText)) {
-          parts.push(
+        const isAdjacentSameDoc =
+          lastEntry?.doc != null &&
+          next?.doc != null &&
+          next.doc.docId === lastEntry.doc.docId &&
+          next.doc.docPageNo === lastEntry.doc.docPageNo + 1;
+        if (isAdjacentSameDoc && next.pageText && lastEntry.pageText) {
+          pushIfFits(
             `— ПРОДОЛЖЕНИЕ (начало следующей страницы; только для завершения последней задачи, новых задач отсюда не начинать) —\n${next.pageText.slice(0, NEXT_PAGE_TAIL_CHARS)}`,
           );
         }
-        return parts.join('\n\n').slice(0, CHUNK_TEXT_CAP);
+        return parts.join('\n\n');
       };
 
       // ── Фаза 3: параллельный пул extract-вызовов + живой прогресс.
@@ -387,7 +435,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
 
       results.forEach((r, idx) => {
         const chunk = chunks[idx];
-        if (!r.ok) {
+        // === false, не !r.ok: при strictNullChecks:false truthiness не сужает union
+        if (r.ok === false) {
           if (chunk.entries.length > 0) failedChunkLabels.push(chunk.pageLabel);
           if (firstError === null) firstError = r.error;
           return;

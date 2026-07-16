@@ -138,7 +138,6 @@ function AiTaskLoaderContent() {
   // прячет строку из вида и исключает из commit; undo = снять флаг.
   const [removed, setRemoved] = useState<boolean[]>([]);
   const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
-  const [stats, setStats] = useState<ExtractStats | null>(null);
   /** W4: честность о полноте — «Найдено 68 из ~73» + недобранные страницы. */
   const [completeness, setCompleteness] = useState<ExtractCompleteness | null>(null);
   const [folderId, setFolderId] = useState(initialFolderId);
@@ -223,7 +222,6 @@ function AiTaskLoaderContent() {
       setSelected(newDrafts.map((d) => d.fingerprint_match === null));
       setRemoved(newDrafts.map(() => false));
       setUploadedRefs(newUploadedRefs);
-      setStats(newStats);
       setCompleteness(newCompleteness);
       setFolderId(chosenFolderId);
       setSubject(chosenSubject);
@@ -312,9 +310,12 @@ function AiTaskLoaderContent() {
     () => selected.filter((s, i) => s && !removed[i] && rowStatus[i] !== 'saved').length,
     [selected, removed, rowStatus],
   );
+  // Ревью 2026-07-16 P1: удалённые (removed) строки исключаются из ВСЕХ
+  // счётчиков — иначе удалённая failed-строка держала «Повторить неудачные»,
+  // а bulk-бар показывал «из 8» после удаления.
   const failedCount = useMemo(
-    () => rowStatus.filter((s) => s === 'failed').length,
-    [rowStatus],
+    () => rowStatus.filter((s, i) => s === 'failed' && !removed[i]).length,
+    [rowStatus, removed],
   );
   const dupCount = useMemo(
     () => drafts.filter((d, i) => d.fingerprint_match !== null && selected[i] && !removed[i]).length,
@@ -322,6 +323,19 @@ function AiTaskLoaderContent() {
   );
   // Видимые (не удалённые) черновики — для заголовка «Найдено задач».
   const visibleCount = useMemo(() => removed.filter((r) => !r).length, [removed]);
+  // Кандидаты на выбор (видимые несохранённые) — total для bulk-бара и
+  // «Выбрать все». «Без ответа» — live по видимым (правки ответов уменьшают).
+  const eligibleCount = useMemo(
+    () => drafts.filter((_, i) => !removed[i] && rowStatus[i] !== 'saved').length,
+    [drafts, removed, rowStatus],
+  );
+  const lowConfCount = useMemo(
+    () =>
+      drafts.filter(
+        (d, i) => !removed[i] && rowStatus[i] !== 'saved' && (!d.answer || d.answer.trim() === ''),
+      ).length,
+    [drafts, removed, rowStatus],
+  );
 
   // Массовые действия (BulkActionsBar).
   const applyBulk = useCallback(
@@ -543,7 +557,8 @@ function AiTaskLoaderContent() {
         onRefine={handleRefine}
         refining={refiningIndex === index}
         hideSelect={hideSelect}
-        onRemove={removeDraft}
+        // Ревью P2: сохранённой строке (уже в БД) «Удалить» не показываем.
+        onRemove={rowStatus[index] === 'saved' ? undefined : removeDraft}
       />
     ),
     [
@@ -560,6 +575,7 @@ function AiTaskLoaderContent() {
       updateCrop,
       handleRefine,
       refiningIndex,
+      rowStatus,
       removeDraft,
     ],
   );
@@ -608,9 +624,9 @@ function AiTaskLoaderContent() {
                 {completeness?.expectedTotal != null && completeness.expectedTotal >= drafts.length ? (
                   <span className="font-normal text-slate-500"> из ~{completeness.expectedTotal}</span>
                 ) : null}
-                {stats && stats.low_confidence_answers > 0 ? (
+                {lowConfCount > 0 ? (
                   <span className="ml-2 font-normal text-amber-700">
-                    · {stats.low_confidence_answers} без ответа
+                    · {lowConfCount} без ответа
                   </span>
                 ) : null}
               </p>
@@ -669,7 +685,7 @@ function AiTaskLoaderContent() {
 
             <BulkActionsBar
               selectedCount={selectedCount}
-              totalCount={drafts.length}
+              totalCount={eligibleCount}
               dupCount={dupCount}
               disabled={isSaving}
               topics={subjectTopics}
