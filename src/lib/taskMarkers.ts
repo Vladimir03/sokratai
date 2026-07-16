@@ -8,7 +8,7 @@
  *
  * Осторожность против ложных маркеров:
  * - Только «N.» с точкой (внутризадачные списки вариантов — «1)», «2)» — не матчатся)
- *   + форма «Задание N».
+ *   + форма «Задание N» + «[N]» (формат stepenin.ru — варианты химии/биологии).
  * - Принимаем ТОЛЬКО монотонную цепочку: следующий принятый номер = prev+1
  *   (допуск: prev+2 — один пропущенный маркер из-за кривой вёрстки не рвёт цепь).
  * - Цепочка короче 3 → это не сборник, ожидание неизвестно (все null).
@@ -18,6 +18,7 @@
 
 const DOT_MARKER_RE = /(?:^|[\s>])(\d{1,3})\s*\.\s+[А-ЯЁA-Z]/gu;
 const WORD_MARKER_RE = /Задани[ея]\s+№?\s*(\d{1,3})/gu;
+const BRACKET_MARKER_RE = /\[\s*(\d{1,3})\s*\]/gu;
 
 interface Marker {
   page: number;
@@ -34,7 +35,7 @@ export function countSequentialTaskMarkers(pageTexts: (string | null)[]): (numbe
   const markers: Marker[] = [];
   pageTexts.forEach((text, page) => {
     if (!text) return;
-    for (const re of [DOT_MARKER_RE, WORD_MARKER_RE]) {
+    for (const re of [DOT_MARKER_RE, WORD_MARKER_RE, BRACKET_MARKER_RE]) {
       re.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = re.exec(text)) !== null) {
