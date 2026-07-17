@@ -29,18 +29,36 @@ const BRACKET_MARKER_RE = /(?:^|\n)\s*\[\s*(\d{1,3})\s*\]/gu;
 /** Минимальная длина монотонной цепочки, чтобы считать нумерацию сборником. */
 const MIN_CHAIN = 5;
 
+/**
+ * Максимальный номер, при котором сквозная нумерация «похожа на полный вариант
+ * ЕГЭ/ОГЭ» (зеркало edge-normalize kim 1..40). Химия stepenin [1]..[34] = номера
+ * КИМ (подсказка химиков 2026-07-16); решуЕГЭ-подборка 1..73 — НЕ КИМ (>40).
+ */
+const VARIANT_KIM_MAX = 40;
+
 interface Marker {
   page: number;
   num: number;
   pos: number;
 }
 
+export interface TaskMarkerScan {
+  /** Число принятых маркеров на страницу (null = нет текста/цепочка не найдена). */
+  perPage: (number | null)[];
+  /** ПРИНЯТЫЕ номера маркеров по страницам, в порядке документа (null — как выше). */
+  numbersPerPage: (number[] | null)[];
+  /**
+   * Нумерация похожа на полный вариант (старт с 1, максимум ≤ VARIANT_KIM_MAX):
+   * номера маркеров = № КИМ задач → можно детерминированно проставить kim_number.
+   */
+  isVariantNumbering: boolean;
+}
+
 /**
- * Число задач на каждой странице по текстовому слою. `null` = страница без
- * текста ИЛИ сквозная нумерация не обнаружена (ожидание неизвестно).
- * Тексты должны содержать `\n`-переносы строк (pdfToImages hasEOL).
+ * Скан маркеров нумерации по текстовому слою страниц. Тексты должны содержать
+ * `\n`-переносы строк (pdfToImages hasEOL).
  */
-export function countSequentialTaskMarkers(pageTexts: (string | null)[]): (number | null)[] {
+export function scanTaskMarkers(pageTexts: (string | null)[]): TaskMarkerScan {
   // Собираем маркеры всех форм в документном порядке.
   const markers: Marker[] = [];
   pageTexts.forEach((text, page) => {
@@ -57,17 +75,38 @@ export function countSequentialTaskMarkers(pageTexts: (string | null)[]): (numbe
   markers.sort((a, b) => (a.page - b.page) || (a.pos - b.pos));
 
   // Монотонная цепочка: старт с первого маркера (сборник может начинаться не с 1).
-  const acceptedPerPage = new Map<number, number>();
+  const acceptedByPage = new Map<number, number[]>();
   let next: number | null = null;
+  let firstNum: number | null = null;
+  let maxNum = 0;
   let acceptedCount = 0;
   for (const mk of markers) {
     if (next === null || mk.num === next || mk.num === next + 1) {
-      acceptedPerPage.set(mk.page, (acceptedPerPage.get(mk.page) ?? 0) + 1);
+      const list = acceptedByPage.get(mk.page) ?? [];
+      list.push(mk.num);
+      acceptedByPage.set(mk.page, list);
+      if (firstNum === null) firstNum = mk.num;
+      maxNum = mk.num;
       next = mk.num + 1;
       acceptedCount += 1;
     }
   }
 
-  if (acceptedCount < MIN_CHAIN) return pageTexts.map(() => null);
-  return pageTexts.map((text, page) => (text ? acceptedPerPage.get(page) ?? 0 : null));
+  if (acceptedCount < MIN_CHAIN) {
+    return {
+      perPage: pageTexts.map(() => null),
+      numbersPerPage: pageTexts.map(() => null),
+      isVariantNumbering: false,
+    };
+  }
+  return {
+    perPage: pageTexts.map((text, page) => (text ? acceptedByPage.get(page)?.length ?? 0 : null)),
+    numbersPerPage: pageTexts.map((text, page) => (text ? acceptedByPage.get(page) ?? [] : null)),
+    isVariantNumbering: firstNum === 1 && maxNum <= VARIANT_KIM_MAX,
+  };
+}
+
+/** Обратная совместимость: только счёт на страницу. */
+export function countSequentialTaskMarkers(pageTexts: (string | null)[]): (number | null)[] {
+  return scanTaskMarkers(pageTexts).perPage;
 }

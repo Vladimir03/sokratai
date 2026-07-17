@@ -36,6 +36,8 @@ interface KbAiExtractRunPayload
   expected?: number | null;
   /** W4: сколько чанков авто-повторено из-за недобора (<60% ожидания). */
   autoRetries?: number;
+  /** Авто-КИМ полного варианта: скольким задачам № КИМ проставлен из нумерации. */
+  kimAutoFilled?: number;
 }
 
 interface KbAiTasksSavedPayload

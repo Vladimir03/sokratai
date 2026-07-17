@@ -13,7 +13,7 @@ import {
 } from '@/lib/kbAiExtractApi';
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { loadLastClassification, saveLastSubject } from '@/lib/kbLastClassification';
-import { countSequentialTaskMarkers } from '@/lib/taskMarkers';
+import { scanTaskMarkers } from '@/lib/taskMarkers';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
@@ -285,8 +285,11 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         toast.warning(`Не загрузились страницы: ${failedUploadPages.join(', ')} — распознаем без них.`);
       }
 
-      // Ожидаемое число задач по текстовому слою (сквозная нумерация сборника).
-      const expectedPerEntry = countSequentialTaskMarkers(entries.map((e) => e.pageText));
+      // Скан нумерации текстового слоя: ожидаемое число задач + сами НОМЕРА.
+      // Фидбэк химиков (2026-07-16): у полного варианта (stepenin [1]..[34])
+      // сквозная нумерация = № КИМ → проставляем детерминированно.
+      const markerScan = scanTaskMarkers(entries.map((e) => e.pageText));
+      const expectedPerEntry = markerScan.perPage;
 
       // ── Фаза 2: чанки по CHUNK_IMAGES страниц.
       interface Chunk {
@@ -295,23 +298,28 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         startIndex: number;
         /** Σ ожидаемых задач страниц чанка (null = хотя бы одна без ожидания). */
         expected: number | null;
+        /** Номера маркеров страниц чанка по порядку (для авто-КИМ полного
+         *  варианта); null = хотя бы одна страница без надёжной нумерации. */
+        markerNumbers: number[] | null;
         pageLabel: string;
       }
       const chunks: Chunk[] = [];
       if (entries.length === 0) {
         // Текст без картинок — один вызов.
-        chunks.push({ entries: [], startIndex: 0, expected: null, pageLabel: '' });
+        chunks.push({ entries: [], startIndex: 0, expected: null, markerNumbers: null, pageLabel: '' });
       } else {
         for (let i = 0; i < entries.length; i += CHUNK_IMAGES) {
           const chunkEntries = entries.slice(i, i + CHUNK_IMAGES);
           const exps = chunkEntries.map((_, j) => expectedPerEntry[i + j]);
           const known = exps.filter((v): v is number => v !== null);
+          const nums = chunkEntries.map((_, j) => markerScan.numbersPerPage[i + j]);
           const first = chunkEntries[0].pageNo;
           const last = chunkEntries[chunkEntries.length - 1].pageNo;
           chunks.push({
             entries: chunkEntries,
             startIndex: i,
             expected: known.length === chunkEntries.length ? known.reduce((a, b) => a + b, 0) : null,
+            markerNumbers: nums.every((n): n is number[] => n !== null) ? nums.flat() : null,
             pageLabel: first === last ? `стр. ${first}` : `стр. ${first}–${last}`,
           });
         }
@@ -431,6 +439,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       const failedChunkLabels: string[] = [];
       const shortfalls: ExtractCompleteness['shortfalls'] = [];
       let completedChunks = 0;
+      let kimAutoFilled = 0;
       let firstError: unknown = null;
 
       results.forEach((r, idx) => {
@@ -449,6 +458,22 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
             d.source_image_index =
               r.stats.unreadable_images === 0 ? d.source_image_index + chunk.startIndex : null;
           }
+        }
+        // Авто-КИМ из нумерации ПОЛНОГО ВАРИАНТА (фидбэк химиков 2026-07-16:
+        // stepenin [1]..[34] = номера КИМ). Детерминированный zip маркер→задача,
+        // ТОЛЬКО когда число распознанных задач чанка ТОЧНО равно числу маркеров
+        // (иначе сдвиг пронумеровал бы весь чанк неверно — лучше оставить AI).
+        // Маркер ПОБЕЖДАЕТ догадку AI (нумерация сборника достовернее).
+        const markerNums = chunk.markerNumbers;
+        if (
+          markerScan.isVariantNumbering &&
+          markerNums !== null &&
+          r.drafts.length === markerNums.length
+        ) {
+          r.drafts.forEach((d, i) => {
+            d.kim_number = markerNums[i];
+          });
+          kimAutoFilled += r.drafts.length;
         }
         allDrafts.push(...r.drafts);
         totals.found += r.stats.found;
@@ -481,6 +506,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         chunks: completedChunks,
         expected: expectedTotal,
         autoRetries,
+        kimAutoFilled,
       });
 
       if (allDrafts.length === 0) {
