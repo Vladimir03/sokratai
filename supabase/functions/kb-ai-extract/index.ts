@@ -37,15 +37,16 @@ const MAX_IMAGES = 10; // cost/latency cap per call (mirror client Ctrl+V cap)
 const MAX_TEXT_CHARS = 60_000; // defensive cap on pasted material
 const SIGNED_URL_TTL_SEC = 3600;
 
-// ─── Модели загрузчика (решение владельца 2026-07-16, отдельно от грейдинга) ──
-// Extract/refine — gemini-3.5-flash (vision №1 по Roboflow: точнее bbox рисунков
-// + OCR сканов; ×3 цена от копеечной базы — расход загрузчика ничтожен).
-// Авто-повтор недобора (client шлёт boost:true) — эскалация на pro: сильнее и
-// дешевле, чем pro везде (повторы редки). Обе строки могут быть недоступны в
-// шлюзе → fallback на проверенную базовую (deploy-safe, `_model_fallback` лог).
-// Грейдинг ДЗ НЕ трогаем — там решение «не финализировать до бенчмарка».
-const EXTRACT_MODEL = "google/gemini-3.5-flash";
-const EXTRACT_BOOST_MODEL = "google/gemini-3.1-pro-preview";
+// ─── Модели загрузчика ────────────────────────────────────────────────────────
+// ⚠️ ОТКАТ 2026-07-17 (инцидент физика, прод): апгрейд на gemini-3.5-flash /
+// 3.1-pro-preview валил ВСЕ плотные чанки — «думающие» модели не укладывали
+// вывод ~15 задач в 35с таймаут шлюз-клиента (выжил только чанк с 1 задачей).
+// Возвращена проверенная база + поднят per-call timeout (см. вызов ниже).
+// Повторный апгрейд — ТОЛЬКО после верификации латентности новых моделей на
+// реальном плотном чанке (телеметрия kb_ai_extract_retry / _http_error).
+// Инфраструктура эскалации (boost) и fallback сохранены — работают и на базе.
+const EXTRACT_MODEL = "google/gemini-3-flash-preview";
+const EXTRACT_BOOST_MODEL = "google/gemini-3-flash-preview";
 const EXTRACT_FALLBACK_MODEL = "google/gemini-3-flash-preview";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -736,10 +737,15 @@ async function runExtraction(
     try {
       // W4 (2026-07-16): явный output-кап — без него дефолт шлюза обрезал плотные
       // сборники (73 задачи → модель отдавала 5-7). 16k покрывает ~30-40 задач.
+      // timeoutMs 90с (инцидент 2026-07-17): вывод ~15 задач/чанк не влезал в
+      // дефолтные 35с — все плотные чанки таймаутились. Worst-case цепочка
+      // (schema-retry ×2 × gateway-retry ×2 × 90с = 360с) < edge wall-clock 400с.
+      // Типичная латентность не меняется — это потолок.
       const obj = await callLovableJson(attemptMessages, "kb_ai_extract", onUsage, {
         maxTokens: 16000,
         model,
         fallbackModel: EXTRACT_FALLBACK_MODEL,
+        timeoutMs: 90_000,
       });
       if (Array.isArray(obj.tasks)) return obj.tasks;
       console.warn("kb_ai_extract_schema_invalid", { attempt: attempt + 1, has_tasks: "tasks" in obj });

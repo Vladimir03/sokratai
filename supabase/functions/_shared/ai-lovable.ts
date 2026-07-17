@@ -172,17 +172,20 @@ export async function callLovableJson(
   // `model` overrides LOVABLE_MODEL per call; `fallbackModel` — if the gateway
   // rejects the override (400/404/422 — unknown/unavailable model string), the
   // call retries once with the fallback instead of failing (deploy-safe upgrade).
+  // `timeoutMs` — per-call ceiling (инцидент 2026-07-17: дефолт 35с валил
+  // extract-вызовы с крупным выводом ~15 задач — все плотные чанки таймаутились).
   // Optional — existing callers keep the gateway default.
-  opts?: { maxTokens?: number; model?: string; fallbackModel?: string },
+  opts?: { maxTokens?: number; model?: string; fallbackModel?: string; timeoutMs?: number },
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
   let currentModel = opts?.model ?? LOVABLE_MODEL;
+  const timeoutMs = opts?.timeoutMs ?? REQUEST_TIMEOUT_MS;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(LOVABLE_API_URL, {
