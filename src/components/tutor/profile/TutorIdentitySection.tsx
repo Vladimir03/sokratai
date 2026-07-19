@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { AvatarUpload } from '@/components/tutor/profile/AvatarUpload';
+import { AvatarUpload } from '@/components/common/AvatarUpload';
 import {
   useRemoveAvatar,
   useUploadAvatar,

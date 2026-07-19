@@ -7,7 +7,9 @@ import { getAuthErrorMessage, getFunctionsErrorMessage, supabase } from "@/lib/s
 import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import AppNotificationsCard from "@/components/pwa/AppNotificationsCard";
-import { User, Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard, Mail, KeyRound, ShieldCheck } from "lucide-react";
+import { StudentAvatarSection } from "@/components/student/StudentAvatarSection";
+import { UserAvatar } from "@/components/common/UserAvatar";
+import { Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard, Mail, KeyRound, ShieldCheck } from "lucide-react";
 import { z } from "zod";
 import { PageContent } from "@/components/PageContent";
 import { useSubscription } from "@/hooks/useSubscription";
@@ -21,6 +23,8 @@ interface Profile {
   telegram_user_id: number | null;
   telegram_username: string | null;
   registration_source: string | null;
+  avatar_url: string | null;
+  gender: 'male' | 'female' | null;
 }
 
 interface UserStats {
@@ -157,7 +161,7 @@ const Profile = () => {
       // Fetch profile
       const { data: profileData, error: profileError } = await supabase
         .from("profiles")
-        .select("username, telegram_user_id, telegram_username, registration_source")
+        .select("username, telegram_user_id, telegram_username, registration_source, avatar_url, gender")
         .eq("id", user.id)
         .single();
 
@@ -174,7 +178,14 @@ const Profile = () => {
         throw statsError;
       }
 
-      setProfile(profileData);
+      setProfile({
+        ...profileData,
+        // PostgREST отдаёт string — сужаем до валидных значений плейсхолдера.
+        gender:
+          profileData.gender === 'male' || profileData.gender === 'female'
+            ? profileData.gender
+            : null,
+      });
       setStats(statsData || { total_xp: 0, level: 1, current_streak: 0 });
       setNewUsername(profileData.username);
     } catch (error: unknown) {
@@ -482,14 +493,33 @@ const Profile = () => {
               возвращается сюда). Smart-CTA: push / установка PWA. */}
           <AppNotificationsCard />
 
+          {/* Аватар ученика (запрос Елены 2026-07-13) — виден репетитору и
+              группе в чатах/ДЗ. Persist сразу, локальный стейт патчится без
+              refetch. */}
+          <StudentAvatarSection
+            avatarUrl={profile?.avatar_url ?? null}
+            gender={profile?.gender ?? null}
+            name={profile?.username}
+            onAvatarChange={(url) =>
+              setProfile((prev) => (prev ? { ...prev, avatar_url: url } : prev))
+            }
+            onGenderChange={(g) =>
+              setProfile((prev) => (prev ? { ...prev, gender: g } : prev))
+            }
+          />
+
           {/* Main Profile Card */}
           <Card className="bg-slate-800 text-primary-foreground shadow-elegant">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full bg-accent flex items-center justify-center">
-                    <User className="w-10 h-10 text-accent-foreground" />
-                  </div>
+                  <UserAvatar
+                    size="md"
+                    className="h-20 w-20 text-xl"
+                    avatarUrl={profile?.avatar_url ?? null}
+                    gender={profile?.gender ?? null}
+                    name={profile?.username}
+                  />
                   <div>
                     {editing ? (
                       <div className="flex gap-2 items-center">

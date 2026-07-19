@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { format, parseISO } from 'date-fns';
 import { RotateCcw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { splitTextToLinkParts } from '@/lib/chatLinkify';
 import { UserAvatar } from '@/components/common/UserAvatar';
 import { MathText } from '@/components/kb/ui/MathText';
 import { ReadTicks } from '@/components/chat/ReadTicks';
@@ -39,17 +40,42 @@ function authorColorClass(uid: string | null): string {
 // без lookbehind — rule 80).
 const MENTION_SPLIT_RE = /(@\s?(?:сократ\s?ai|sokrat\s?ai))/iu;
 
-function HumanContent({ content }: { content: string }) {
-  const parts = content.split(MENTION_SPLIT_RE);
+function MentionHighlight({ text, keyPrefix }: { text: string; keyPrefix: string }) {
+  const parts = text.split(MENTION_SPLIT_RE);
   return (
-    <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-900">
+    <>
       {parts.map((part, i) =>
         MENTION_SPLIT_RE.test(part) ? (
-          <span key={i} className="font-medium text-accent">
+          <span key={`${keyPrefix}-${i}`} className="font-medium text-accent">
             {part}
           </span>
         ) : (
-          <span key={i}>{part}</span>
+          <span key={`${keyPrefix}-${i}`}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+// Ссылки кликабельны (запрос Елены 2026-07-13): URL → React-<a> (без innerHTML),
+// остальной текст — прежняя подсветка @СократAI. Наш домен — same-tab (PWA),
+// внешние — новая вкладка + noopener (user-pasted контент).
+function HumanContent({ content }: { content: string }) {
+  const parts = splitTextToLinkParts(content);
+  return (
+    <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-900">
+      {parts.map((part, i) =>
+        part.kind === 'link' ? (
+          <a
+            key={i}
+            href={part.href}
+            className="touch-manipulation break-all text-accent underline underline-offset-2"
+            {...(part.internal ? {} : { target: '_blank', rel: 'noopener noreferrer nofollow' })}
+          >
+            {part.text}
+          </a>
+        ) : (
+          <MentionHighlight key={i} keyPrefix={String(i)} text={part.text} />
         ),
       )}
     </p>

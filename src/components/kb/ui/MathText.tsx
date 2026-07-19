@@ -6,6 +6,7 @@
 
 import { Fragment, memo, useEffect, useMemo, type ElementType } from 'react';
 import katex from 'katex';
+import { containsChatUrl, linkifyEscapedHtml } from '@/lib/chatLinkify';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
 
 interface MathTextProps {
@@ -80,8 +81,17 @@ function renderMixedLatexToHtml(text: string, markdownLite = false): string {
         return renderMathSegment(segment);
       }
 
-      const escaped = escapeHtml(segment);
-      return markdownLite ? applyMarkdownLite(escaped) : escaped;
+      let escaped = escapeHtml(segment);
+      if (markdownLite) {
+        // Порядок КРИТИЧЕН: сначала markdownLite (по чистому escaped-тексту),
+        // потом ссылки. URL-класс символов останавливается на «<»/«>» уже
+        // вставленных тегов → linkify не лезет внутрь разметки; обратный
+        // порядок дал бы bold-регэкспу корёжить href с «**» в пути.
+        // Построчно через плейсхолдер — `_` из ___LINEBREAK___ иначе засосало
+        // бы в URL (запрос Елены 2026-07-13, канон — src/lib/chatLinkify.ts).
+        escaped = linkifyEscapedHtml(applyMarkdownLite(escaped), LINEBREAK_PLACEHOLDER);
+      }
+      return escaped;
     })
     .join('');
 
@@ -95,9 +105,10 @@ const MathTextInner = memo(function MathTextInner({
   markdownLite = false,
 }: MathTextProps) {
   const hasMath = text.includes('$') || text.includes('\\(') || text.includes('\\[');
-  // markdownLite с реальной разметкой → HTML-рендерер даже без math (чат-сообщения
-  // короткие, оверхед незаметен); без разметки — прежний zero-overhead путь.
-  const hasLiteMarkdown = markdownLite && (text.includes('**') || text.includes('`'));
+  // markdownLite с реальной разметкой/ссылкой → HTML-рендерер даже без math
+  // (чат-сообщения короткие, оверхед незаметен); иначе — zero-overhead путь.
+  const hasLiteMarkdown = markdownLite &&
+    (text.includes('**') || text.includes('`') || containsChatUrl(text));
 
   // Fast path: no math → plain text, zero KaTeX overhead.
   // Preserve newlines as <br /> (mirror the math path) so multi-line text —

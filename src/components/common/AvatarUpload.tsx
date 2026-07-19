@@ -7,8 +7,11 @@ import { UserAvatar } from '@/components/common/UserAvatar';
 import { usePasteImages } from '@/hooks/usePasteImages';
 
 /**
- * AvatarUpload — file picker + canvas compression + preview for the tutor
- * profile avatar.
+ * AvatarUpload — file picker + canvas compression + preview for profile
+ * avatars. SHARED между репетитором (TutorIdentitySection) и учеником
+ * (StudentAvatarSection) — живёт в components/common (изоляция модулей:
+ * student-страницы не импортят tutor-компоненты). Перенесён из
+ * components/tutor/profile 2026-07-13 (аватарки учеников, запрос Елены).
  *
  * Spec:    docs/delivery/features/tutor-profile/spec.md (v0.2 §5, §6)
  * Tasks:   docs/delivery/features/tutor-profile/tasks.md TASK-4
@@ -37,6 +40,8 @@ export interface AvatarUploadProps {
   isLoading?: boolean;
   gender?: 'male' | 'female' | null;
   name?: string;
+  /** Телеметрия Ctrl+V; default сохраняет исторический tutor-тег. */
+  pasteTelemetryTag?: string;
 }
 
 const MAX_INPUT_BYTES = 10 * 1024 * 1024; // 10 MB hard cap before any work
@@ -56,6 +61,7 @@ export function AvatarUpload({
   isLoading = false,
   gender = null,
   name,
+  pasteTelemetryTag = 'tutor_avatar_paste',
 }: AvatarUploadProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -149,7 +155,7 @@ export function AvatarUpload({
     onImagePasted: async (file: File) => {
       await processFile(file);
     },
-    telemetryTag: 'tutor_avatar_paste',
+    telemetryTag: pasteTelemetryTag,
   });
 
   const handleRemove = async () => {
@@ -196,6 +202,7 @@ export function AvatarUpload({
           disabled={busy}
           aria-label="Загрузить фото профиля"
           className="min-h-[44px] min-w-[160px] gap-2 bg-accent text-white hover:bg-accent/90"
+          style={{ touchAction: 'manipulation' }}
         >
           <Camera className="h-4 w-4" aria-hidden="true" />
           Загрузить фото
@@ -209,6 +216,7 @@ export function AvatarUpload({
             disabled={busy}
             aria-label="Удалить фото профиля"
             className="min-h-[44px] gap-2 text-slate-600 hover:bg-red-50 hover:text-red-600"
+            style={{ touchAction: 'manipulation' }}
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             Удалить
@@ -216,7 +224,9 @@ export function AvatarUpload({
         )}
       </div>
 
-      <p className="text-xs text-muted-foreground">
+      {/* Ctrl+V — desktop-подсказка: на touch-устройствах (ученик с iPhone)
+          скрыта (ревью 5.6 р.3 #7). pointer:fine — Media Queries L4, iOS 9+. */}
+      <p className="hidden text-xs text-muted-foreground [@media(pointer:fine)]:block">
         Или вставь скриншот:{' '}
         <kbd className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">
           Ctrl

@@ -142,6 +142,7 @@ Emoji допустимы ТОЛЬКО в:
 - Error: border-red-500 + text-sm text-red-500 под input
 - **Авто-растущие `<textarea>` (composer'ы, поля длинного текста):** канонический хук `src/hooks/useAutoResizeTextarea.ts` (`ref, value, maxHeight`). `maxHeight` — число или `() => px` (для viewport-cap'а; пересчитывается на `resize`). Cap считать в JS (`window.innerHeight * factor`), **не** `dvh`/`vh` (rule 80, Safari 15.0–15.3). Не плодить локальные копии — `GuidedChatInput.tsx` / `ChatInput.tsx` держат legacy-дубликаты (150px / 96-120px), мигрировать на хук при касании.
 - **Дата/время:** канонический `src/components/ui/date-time-field.tsx` (`DateTimeField`) — календарь (RU) + время шаг 15 мин, drop-in (контракт значения = локальная строка `YYYY-MM-DDTHH:mm`). **Никогда** native `<input type="datetime-local">`/`type="time"` в новом UI — Safari-спиннер + минуты не прокручиваются (rule 80; репорт Елены 2026-07-02). Детали + roster-driven группы → rule 60.
+- **Аватары:** канонический загрузчик — `src/components/common/AvatarUpload.tsx` (SHARED репетитор+ученик, перенесён из `tutor/profile` 2026-07-13; кроп 512×512, JPEG-лестница ≤2МБ, Ctrl+V, decompression-bomb guard) + рендер `src/components/common/UserAvatar.tsx` (фото → пол-плейсхолдер → инициалы). Не плодить локальные аплоадеры; бакет `avatars` (публичный, owner-folder RLS).
 
 ## Конкурентные референсы (вдохновение)
 
