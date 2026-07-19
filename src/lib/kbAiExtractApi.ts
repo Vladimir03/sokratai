@@ -73,6 +73,18 @@ export interface ExtractedTask {
   attachment_ref: string | null;
   /** Non-null when a same-fingerprint task already exists (edge-added; card un-checked by default). */
   fingerprint_match: FingerprintMatch | null;
+  /**
+   * CLIENT-side enrichment (2026-07-17, НЕ с edge): номер задачи в сборниковой
+   * нумерации из маркеров текстового слоя (zip при точном count-совпадении
+   * чанка). Ключ кросс-чанкового мерджа ответов из answers_table.
+   */
+  source_num?: number | null;
+}
+
+/** Строка таблицы ответов сборника (edge-normalized; см. answers_table). */
+export interface AnswersTableEntry {
+  num: number;
+  answer: string;
 }
 
 export interface ExtractStats {
@@ -84,6 +96,12 @@ export interface ExtractStats {
 export interface ExtractResponse {
   drafts: ExtractedTask[];
   stats: ExtractStats;
+  /**
+   * Таблица ответов сборника (2026-07-17): пары «номер задачи → ответ» со
+   * страниц-таблиц (модель НЕ создаёт из них задачи). Optional — старый edge
+   * поля не шлёт (deploy-skew-safe). Мердж по source_num делает InputStage.
+   */
+  answers_table?: AnswersTableEntry[];
 }
 
 export interface ExtractInput {
@@ -153,6 +171,7 @@ export async function extractTasks(input: ExtractInput): Promise<ExtractResponse
   return {
     drafts: Array.isArray(res?.drafts) ? res!.drafts : [],
     stats: res?.stats ?? { found: 0, low_confidence_answers: 0, unreadable_images: 0 },
+    answers_table: Array.isArray(res?.answers_table) ? res!.answers_table : [],
   };
 }
 

@@ -8,6 +8,8 @@ import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import {
   extractTasks,
   KbAiExtractApiError,
+  type AnswersTableEntry,
+  type ExtractResponse,
   type ExtractStats,
   type ExtractedTask,
 } from '@/lib/kbAiExtractApi';
@@ -376,11 +378,11 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       if (pagesTotal > 0) setChunkProgress({ pagesDone: 0, pagesTotal, tasksFound: 0 });
 
       type ChunkResult =
-        | { ok: true; drafts: ExtractedTask[]; stats: ExtractStats }
+        | { ok: true; drafts: ExtractedTask[]; stats: ExtractStats; answers_table?: AnswersTableEntry[] }
         | { ok: false; error: unknown };
       const results: ChunkResult[] = new Array(chunks.length);
 
-      const runChunk = async (idx: number): Promise<{ drafts: ExtractedTask[]; stats: ExtractStats }> => {
+      const runChunk = async (idx: number): Promise<ExtractResponse> => {
         const chunk = chunks[idx];
         const chunkRefs = chunk.entries.map((e) => e.ref);
         const callExtract = (hintOverride?: string, boost?: boolean) =>
@@ -438,6 +440,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       const totals: ExtractStats = { found: 0, low_confidence_answers: 0, unreadable_images: 0 };
       const failedChunkLabels: string[] = [];
       const shortfalls: ExtractCompleteness['shortfalls'] = [];
+      // Кросс-чанковая таблица ответов (2026-07-17): «номер задачи → ответ».
+      const answersByNum = new Map<number, string>();
       let completedChunks = 0;
       let kimAutoFilled = 0;
       let firstError: unknown = null;
@@ -459,21 +463,25 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
               r.stats.unreadable_images === 0 ? d.source_image_index + chunk.startIndex : null;
           }
         }
-        // Авто-КИМ из нумерации ПОЛНОГО ВАРИАНТА (фидбэк химиков 2026-07-16:
-        // stepenin [1]..[34] = номера КИМ). Детерминированный zip маркер→задача,
-        // ТОЛЬКО когда число распознанных задач чанка ТОЧНО равно числу маркеров
-        // (иначе сдвиг пронумеровал бы весь чанк неверно — лучше оставить AI).
-        // Маркер ПОБЕЖДАЕТ догадку AI (нумерация сборника достовернее).
+        // Zip маркер→задача (детерминированный), ТОЛЬКО когда число распознанных
+        // задач чанка ТОЧНО равно числу маркеров (иначе сдвиг пронумеровал бы
+        // весь чанк неверно — лучше оставить AI):
+        // - source_num (номер в сборниковой нумерации) — ВСЕГДА: ключ
+        //   кросс-чанкового мерджа ответов из answers_table (2026-07-17);
+        // - kim_number — только для ПОЛНОГО ВАРИАНТА (фидбэк химиков 2026-07-16:
+        //   stepenin [1]..[34] = номера КИМ; маркер ПОБЕЖДАЕТ догадку AI).
         const markerNums = chunk.markerNumbers;
-        if (
-          markerScan.isVariantNumbering &&
-          markerNums !== null &&
-          r.drafts.length === markerNums.length
-        ) {
+        if (markerNums !== null && r.drafts.length === markerNums.length) {
           r.drafts.forEach((d, i) => {
-            d.kim_number = markerNums[i];
+            d.source_num = markerNums[i];
+            if (markerScan.isVariantNumbering) d.kim_number = markerNums[i];
           });
-          kimAutoFilled += r.drafts.length;
+          if (markerScan.isVariantNumbering) kimAutoFilled += r.drafts.length;
+        }
+        // Таблицы ответов чанков — в общий пул (мердж после полной сборки:
+        // таблица может прийти из чанка ПОСЛЕ задач).
+        for (const entry of r.answers_table ?? []) {
+          if (!answersByNum.has(entry.num)) answersByNum.set(entry.num, entry.answer);
         }
         allDrafts.push(...r.drafts);
         totals.found += r.stats.found;
@@ -484,6 +492,31 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
           shortfalls.push({ pages: chunk.pageLabel, got: r.drafts.length, expected: chunk.expected });
         }
       });
+
+      // Кросс-чанковый мердж ответов (2026-07-17, репорт «ответы только у 31 из
+      // 73»): таблица ответов сборника живёт в СВОЁМ чанке и не видна чанкам с
+      // условиями. Мержим по номеру сборниковой нумерации (source_num из
+      // маркеров). Пустые answer заполняем, непустые НЕ перетираем (ответ из
+      // авторской таблицы — но если модель уже вписала, не спорим).
+      let answersMerged = 0;
+      if (answersByNum.size > 0) {
+        for (const d of allDrafts) {
+          if (d.answer && d.answer.trim() !== '') continue;
+          if (d.source_num == null) continue;
+          const fromTable = answersByNum.get(d.source_num);
+          if (fromTable === undefined) continue;
+          d.answer = fromTable;
+          d.answer_confidence = 'high';
+          d.needs_review_fields = d.needs_review_fields.filter((f) => f !== 'answer');
+          answersMerged += 1;
+        }
+        if (answersMerged > 0) {
+          // Счётчик «без ответа» в totals пересчитается на ревью (live-счёт).
+          totals.low_confidence_answers = allDrafts.filter(
+            (d) => d.answer_confidence === 'low',
+          ).length;
+        }
+      }
 
       if (allDrafts.length === 0 && firstError !== null) throw firstError;
       if (failedChunkLabels.length > 0) {
@@ -507,6 +540,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         expected: expectedTotal,
         autoRetries,
         kimAutoFilled,
+        answersMerged,
       });
 
       if (allDrafts.length === 0) {

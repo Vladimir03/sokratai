@@ -38,6 +38,8 @@ interface KbAiExtractRunPayload
   autoRetries?: number;
   /** Авто-КИМ полного варианта: скольким задачам № КИМ проставлен из нумерации. */
   kimAutoFilled?: number;
+  /** Кросс-чанковый мердж: скольким задачам ответ подставлен из таблицы ответов. */
+  answersMerged?: number;
 }
 
 interface KbAiTasksSavedPayload
