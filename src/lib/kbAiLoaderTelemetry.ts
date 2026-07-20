@@ -22,11 +22,15 @@ type KbAiLoaderEvent =
   | 'kb_ai_tasks_saved'
   | 'kb_ai_pdf_rendered'
   | 'kb_ai_draft_refined'
-  | 'kb_ai_crop_action';
+  | 'kb_ai_crop_action'
+  | 'kb_ai_tasks_added_to_hw'
+  | 'kb_ai_tasks_added_to_mock';
 
 interface KbAiExtractRunPayload
   extends Record<string, string | number | boolean | null | undefined> {
   folderId: string;
+  /** «Один загрузчик — N назначений»: kb = База, hw = ДЗ, mock = пробник. */
+  destination?: 'kb' | 'hw' | 'mock';
   materialType: 'text' | 'image';
   found: number;
   lowConfAnswers: number;
@@ -72,12 +76,23 @@ interface KbAiCropActionPayload
   action: 'edited' | 'full' | 'removed';
 }
 
+/** Фаза 1: commit hw-назначения — задачи добавлены в конструктор ДЗ (path A). */
+interface KbAiTasksAddedToHwPayload
+  extends Record<string, string | number | boolean | null | undefined> {
+  count: number;
+  /** Добавлено без ответа (тутор дозаполнит в карточках конструктора). */
+  noAnswer: number;
+  cropped: number;
+  cropFailed: number;
+}
+
 type KbAiLoaderPayload =
   | KbAiExtractRunPayload
   | KbAiTasksSavedPayload
   | KbAiPdfRenderedPayload
   | KbAiDraftRefinedPayload
-  | KbAiCropActionPayload;
+  | KbAiCropActionPayload
+  | KbAiTasksAddedToHwPayload;
 
 interface DataLayerWindow extends Window {
   dataLayer?: Array<Record<string, unknown>>;
@@ -98,6 +113,8 @@ export function trackKbAiLoaderEvent(event: 'kb_ai_tasks_saved', payload: KbAiTa
 export function trackKbAiLoaderEvent(event: 'kb_ai_pdf_rendered', payload: KbAiPdfRenderedPayload): void;
 export function trackKbAiLoaderEvent(event: 'kb_ai_draft_refined', payload: KbAiDraftRefinedPayload): void;
 export function trackKbAiLoaderEvent(event: 'kb_ai_crop_action', payload: KbAiCropActionPayload): void;
+export function trackKbAiLoaderEvent(event: 'kb_ai_tasks_added_to_hw', payload: KbAiTasksAddedToHwPayload): void;
+export function trackKbAiLoaderEvent(event: 'kb_ai_tasks_added_to_mock', payload: KbAiTasksAddedToHwPayload): void;
 export function trackKbAiLoaderEvent(event: KbAiLoaderEvent, payload: KbAiLoaderPayload): void {
   const safePayload = toSafePayload(payload);
   const timestamp = new Date().toISOString();

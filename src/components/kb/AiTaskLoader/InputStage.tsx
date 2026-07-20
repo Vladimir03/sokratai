@@ -67,6 +67,21 @@ function flattenTree(
 
 interface InputStageProps {
   initialFolderId: string;
+  /**
+   * hw-режим (фаза 1 «один загрузчик — N назначений»): предмет форсится из
+   * конструктора ДЗ (meta.subject) — селектор предмета скрыт, last-used Базы
+   * не загрязняется.
+   */
+  fixedSubject?: string;
+  /**
+   * hw-режим: lazy find-or-create папки «Из ДЗ» вместо селектора папки
+   * (edge-гейт требует folder_id владельца; резолвим в начале handleExtract).
+   */
+  resolveFolderIdLazy?: () => Promise<string>;
+  /** Сигнал занятости для гарда закрытия Sheet-хоста (hw-режим). */
+  onExtractingChange?: (busy: boolean) => void;
+  /** Метка назначения для телеметрии (default: hw при lazy-папке, иначе kb). */
+  telemetryDestination?: 'kb' | 'hw' | 'mock';
   onExtracted: (
     drafts: ExtractedTask[],
     stats: ExtractStats,
@@ -79,13 +94,24 @@ interface InputStageProps {
   ) => void;
 }
 
-export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
-  const { tree, loading: treeLoading } = useFolderTree();
+export function InputStage({
+  initialFolderId,
+  fixedSubject,
+  resolveFolderIdLazy,
+  onExtractingChange,
+  telemetryDestination,
+  onExtracted,
+}: InputStageProps) {
+  const isHw = resolveFolderIdLazy !== undefined;
+  // hw-режим: дерево папок не нужно (папка резолвится лениво) — disabled-query
+  // не фетчится и не focus-рефетчится под high-risk конструктором ДЗ.
+  const { tree, loading: treeLoading } = useFolderTree({ enabled: !isHw });
   // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
   const { data: tutorProfile } = useTutorProfile();
   const [folderId, setFolderId] = useState(initialFolderId);
-  // Дефолт: last-used (серия KB) → профиль репетитора → physics.
+  // Дефолт: форс из конструктора (hw) → last-used (серия KB) → профиль → physics.
   const [subject, setSubject] = useState<string>(() =>
+    fixedSubject ??
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
   );
   const [text, setText] = useState('');
@@ -124,7 +150,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const flatFolders = flattenTree(tree);
   const hasMaterial =
     text.trim().length > 0 || imageUpload.files.length > 0 || pdfQueue.length > 0;
-  const canExtract = folderId !== '' && hasMaterial && !isExtracting && !isRenderingPdf;
+  // hw-режим: папка резолвится лениво в handleExtract — folderId не требуется.
+  const canExtract = (isHw || folderId !== '') && hasMaterial && !isExtracting && !isRenderingPdf;
 
   // PDF → картинки страниц (client-side, pdfjs lazy) → существующий image-пайплайн.
   // W3.1: страницы сверх первых 10 слотов идут в очередь и распознаются
@@ -233,6 +260,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   const handleExtract = async () => {
     if (!canExtract) return;
     setIsExtracting(true);
+    onExtractingChange?.(true);
 
     // W4 (2026-07-16, «73 из 73»): upload-first → мелкие чанки по CHUNK_IMAGES
     // страниц → параллельные вызовы → авто-повтор недобора. Порядок файлов:
@@ -240,8 +268,20 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
     const allFiles = [...imageUpload.getNewFiles(), ...pdfQueue];
     const textareaText = text.trim();
     const allRefs: string[] = []; // ВСЕ успешно загруженные (для cleanup/ревью)
+    // hw-режим: лениво резолвим папку «Из ДЗ» — ДО фазы аплоада (сбой = ничего
+    // не залито, чистый выход с русской фразой через общий catch).
+    let effectiveFolderId = folderId;
 
     try {
+      if (resolveFolderIdLazy) {
+        try {
+          effectiveFolderId = await resolveFolderIdLazy();
+        } catch (e) {
+          throw new KbAiExtractApiError(
+            e instanceof Error ? e.message : 'Не удалось подготовить папку «Из ДЗ».',
+          );
+        }
+      }
       // ── Фаза 1: залить ВСЕ файлы заранее — офсеты source_image_index каждого
       // чанка детерминированы → вызовы можно параллелить.
       interface PageEntry {
@@ -387,7 +427,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         const chunkRefs = chunk.entries.map((e) => e.ref);
         const callExtract = (hintOverride?: string, boost?: boolean) =>
           extractTasks({
-            folder_id: folderId,
+            folder_id: effectiveFolderId,
             subject,
             material: {
               type: chunkRefs.length > 0 ? 'image' : 'text',
@@ -532,7 +572,8 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
         : null;
 
       trackKbAiLoaderEvent('kb_ai_extract_run', {
-        folderId,
+        folderId: effectiveFolderId,
+        destination: telemetryDestination ?? (isHw ? 'hw' : 'kb'),
         materialType: allRefs.length > 0 ? 'image' : 'text',
         found: totals.found,
         lowConfAnswers: totals.low_confidence_answers,
@@ -551,14 +592,16 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       }
       // Персист предмета в last-used (review P2): следующий заход загрузчика/
       // форм/корзины стартует с него — не переключать «Химия» каждый раз.
-      saveLastSubject(subject);
-      onExtracted(allDrafts, totals, folderId, subject, allRefs, { expectedTotal, shortfalls });
+      // hw-режим: предмет форсится конструктором — last-used Базы не трогаем.
+      if (!fixedSubject) saveLastSubject(subject);
+      onExtracted(allDrafts, totals, effectiveFolderId, subject, allRefs, { expectedTotal, shortfalls });
     } catch (e) {
       // Полный провал: залитые blobs никем не референсятся — чистим.
       for (const ref of allRefs) void deleteKBTaskImage(ref);
       toast.error(e instanceof KbAiExtractApiError ? e.message : 'Не удалось распознать задачи. Попробуйте ещё раз.');
     } finally {
       setIsExtracting(false);
+      onExtractingChange?.(false);
       setUploadProgress(null);
       setChunkProgress(null);
     }
@@ -567,51 +610,56 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
   return (
     <div className="space-y-4">
       {/* Предмет — выбирает системный промпт распознавания (физика / обществознание /
-          generic для остальных школьных). Полный словарь SUBJECTS. */}
-      <fieldset>
-        <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
-        <select
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          disabled={isExtracting}
-          className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
-        >
-          {SUBJECTS.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-      </fieldset>
-
-      {/* Folder select */}
-      <fieldset>
-        <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-          Папка для сохранения <span className="text-red-500">*</span>
-        </legend>
-        <div className="relative">
-          <Folder className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-socrat-folder" />
+          generic для остальных школьных). Полный словарь SUBJECTS.
+          hw-режим: предмет форсится из ДЗ — селектор скрыт. */}
+      {fixedSubject === undefined ? (
+        <fieldset>
+          <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
           <select
-            value={folderId}
-            onChange={(e) => setFolderId(e.target.value)}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
             disabled={isExtracting}
-            className="w-full appearance-none rounded-lg border border-socrat-border py-2 pl-8 pr-8 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
+            className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
           >
-            <option value="">Выберите папку…</option>
-            {treeLoading ? (
-              <option disabled>Загрузка…</option>
-            ) : (
-              flatFolders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {'　'.repeat(f.depth)}{f.depth > 0 ? '└ ' : ''}{f.name}
-                </option>
-              ))
-            )}
+            {SUBJECTS.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-        </div>
-        {tree.length === 0 && !treeLoading && (
-          <p className="mt-1 text-xs text-socrat-muted">Нет папок. Создайте папку в «Моя база».</p>
-        )}
-      </fieldset>
+        </fieldset>
+      ) : null}
+
+      {/* Folder select — hw-режим: папка резолвится лениво («Из ДЗ»), селектор скрыт. */}
+      {!isHw ? (
+        <fieldset>
+          <legend className="mb-1.5 text-xs font-semibold text-slate-500">
+            Папка для сохранения <span className="text-red-500">*</span>
+          </legend>
+          <div className="relative">
+            <Folder className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-socrat-folder" />
+            <select
+              value={folderId}
+              onChange={(e) => setFolderId(e.target.value)}
+              disabled={isExtracting}
+              className="w-full appearance-none rounded-lg border border-socrat-border py-2 pl-8 pr-8 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
+            >
+              <option value="">Выберите папку…</option>
+              {treeLoading ? (
+                <option disabled>Загрузка…</option>
+              ) : (
+                flatFolders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {'　'.repeat(f.depth)}{f.depth > 0 ? '└ ' : ''}{f.name}
+                  </option>
+                ))
+              )}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          </div>
+          {tree.length === 0 && !treeLoading && (
+            <p className="mt-1 text-xs text-socrat-muted">Нет папок. Создайте папку в «Моя база».</p>
+          )}
+        </fieldset>
+      ) : null}
 
       {/* Material text — paste screenshots here (Ctrl+V) */}
       <fieldset>
@@ -777,7 +825,7 @@ export function InputStage({ initialFolderId, onExtracted }: InputStageProps) {
       ) : null}
       {!canExtract && !isExtracting ? (
         <p className="text-center text-xs text-slate-400">
-          {folderId === ''
+          {!isHw && folderId === ''
             ? 'Выберите папку для сохранения, чтобы продолжить'
             : 'Добавьте текст задач или хотя бы одно фото'}
         </p>

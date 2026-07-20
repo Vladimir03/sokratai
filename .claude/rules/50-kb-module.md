@@ -260,6 +260,14 @@
 
 **Единый write-path (КРИТИЧНО, rule 40):** edge `kb-ai-extract` **ТОЛЬКО извлекает** черновики (ноль записи в БД); запись — через существующий `insertTask`/`useCreateTask`. НЕ плодить новый `from('kb_tasks').insert` — грепни перед мержем.
 
+### «Один загрузчик — N назначений» — shared `AiTaskLoaderFlow` (unified-ai-loader, 2026-07-20)
+
+Оркестрация загрузчика (input → extract → ревью → commit) вынесена из `AiTaskLoaderPage` в shared **`src/components/kb/AiTaskLoader/AiTaskLoaderFlow.tsx`** с discriminated union **`AiLoaderDestination`** (`reviewTypes.ts`): `kb_folder` (прежний путь Базы — bulk `insertTask` + навигация), `hw_draft` (конструктор ДЗ), `mock_variant` (конструктор варианта пробника, rule 45). Extract-ядро (`kb-ai-extract` + `InputStage` + review-таблица) — общее; отличается только commit-адаптер и (для внешних назначений) `isExternal`: KB-таксономия скрыта (`showTaxonomy`/`showTopicColumn` = false), предмет форсится (`fixedSubject`), папка резолвится лениво (`resolveFolderIdLazy` → `resolveOrCreateHwMirrorFolderId`, папка «Из ДЗ»), дубли default-выбраны, commit уходит `onCommit(items)`-колбэком **БЕЗ записи в БД** (сохранение — существующим write-path конструктора; никаких новых `kb_tasks`/`homework_tutor_tasks`/`mock_exam_variant_tasks` insert из загрузчика).
+- **hw_draft** (`HWAiLoaderSheet` + `aiLoaderMapper.ts`): `ExtractedTask` → `DraftTask` (`kb_task_id`/`task_kind`/`cefr` = **undefined** → авто-зеркало «Из ДЗ», rule 40). Кнопка «Из файла (AI)» в `HWTasksSection`.
+- **mock_variant** (`MockExamAiLoaderSheet` + `variantTaskDraft.ts`, rule 45): `ExtractedTask` → `VariantTaskDraft` (part/check_mode инференс), в state редактора → edge POST.
+- **Sheet-хост (оба)**: синхронный commit (задачи в стейт ДО закрытия) + гард закрытия (busy → блок, ревью → confirm) — урок ревью ChatGPT-5.6 (иначе гонка «Sheet закрылся, задач нет»).
+- **При новом назначении:** новый член union + свой `onCommit`-адаптер + Sheet-хост (зеркало `HWAiLoaderSheet`); НЕ трогать extract-ядро/KB-путь (`isExternal`-ветки байт-в-байт для `kb_folder`). Телеметрия — `kb_ai_tasks_added_to_{hw,mock}` + `destination` в `kb_ai_extract_run`. Build-лог: memory `project_unified_ai_loader_2026_07_20.md`.
+
 **Edge (`supabase/functions/kb-ai-extract/index.ts`, `verify_jwt=true`, service_role внутри):**
 - Ownership: `kb_folders.owner_id === userId` → иначе 403 `INVALID_FOLDER` (rule 97 flat `{error, code}`).
 - Картинки: клиент грузит скриншоты в `kb-attachments` → шлёт `storage://` refs; edge парсит (**own-namespace `{userId}/…` bind**, anti-SSRF) → `createSignedUrl` → `rewriteToDirect` → base64 (`_shared/ai-lovable.ts::inlineImageUrlToBase64`, SVG/size-guard). `storage://` **НИКОГДА** не уходит в AI текстом. Кап **≤10 изображений/вызов** (= единственная защита стоимости в P0; квота — P1, rule 99). Если все картинки отвалились и текста нет → 422 `IMAGES_UNREADABLE` (не звать AI вслепую).

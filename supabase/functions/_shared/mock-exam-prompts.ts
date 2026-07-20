@@ -177,14 +177,62 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ─── Subject helpers (Фаза 2, 2026-07-20) ───────────────────────────────────
+// Локальная карта лейблов (конвенция «mirror locally»: Deno не импортирует
+// src/types/homework.ts; зеркала уже живут в guided_ai.ts и chat/index.ts).
+const SUBJECT_LABELS_MOCK: Record<string, string> = {
+  maths: "Математика",
+  physics: "Физика",
+  informatics: "Информатика",
+  russian: "Русский язык",
+  literature: "Литература",
+  history: "История",
+  social: "Обществознание",
+  english: "Английский язык",
+  french: "Французский язык",
+  spanish: "Испанский язык",
+  chemistry: "Химия",
+  biology: "Биология",
+  geography: "География",
+  other: "Предмет",
+};
+
+function mockSubjectLabel(subject: string | null | undefined): string {
+  return SUBJECT_LABELS_MOCK[subject ?? "physics"] ?? "Предмет";
+}
+
+/** Физика ЕГЭ №21 — качественная задача со спец-рубрикой. Только физика:
+ *  у других предметов КИМ 21 — обычная задача Части 2 (напр. обществознание). */
+function isPhysicsQualitative21(kimNumber: number, subject: string | null | undefined): boolean {
+  return kimNumber === 21 && (subject ?? "physics") === "physics";
+}
+
 // ─── Prompt builders ────────────────────────────────────────────────────────
 
 /**
  * Build Phase 1 ФИПИ-style criteria block. №21 is a qualitative task with a
  * different rubric (3 balls по полноте объяснения) — the spec lives in the
  * 208-page methodichka but Phase 1 captures it in 4 lines.
+ *
+ * Фаза 2 (2026-07-20): subject-гейт — физика получает БАЙТ-В-БАЙТ прежние
+ * блоки (нулевая регрессия пилота); не-физика — нейтральную трактовку
+ * elements_check (frozen JSON-shape I-IV НЕ меняется).
  */
-function buildCriteriaBlock(kimNumber: number, maxScore: number): string {
+function buildCriteriaBlock(kimNumber: number, maxScore: number, subject?: string | null): string {
+  if ((subject ?? "physics") !== "physics") {
+    return [
+      `КРИТЕРИИ ОЦЕНКИ (для №${kimNumber}, 0..${maxScore} баллов):`,
+      "Оценивай по ПОЛНОЙ МЕТОДОЛОГИИ предмета выше — она источник правды для балла.",
+      "Поля elements_check трактуй как обобщённые элементы решения:",
+      "I. Верный метод / подход к решению.",
+      "II. Ход решения / аргументация без существенных ошибок.",
+      "III. Выкладки, примеры или обоснования выполнены корректно.",
+      "IV. Получен верный итоговый ответ / вывод.",
+      "",
+      `Если элемент частично выполнен — отметь false и упомяни в comment_for_tutor. Балл не выше ${maxScore}.`,
+    ].join("\n");
+  }
+
   const isQualitative = kimNumber === 21;
   if (isQualitative) {
     return [
@@ -264,7 +312,8 @@ export function buildMockExamPart2Prompt(
     // как краткая шпаргалка (для № 21 — спец-правило, для № 22-26 — компакт I-IV).
     // Phase 4 не удаляет — frozen JSON output contract `elements_check` остаётся
     // тем же I/II/III/IV, и краткая summary помогает модели выровнять выход.
-    buildCriteriaBlock(input.kim_number, input.max_score),
+    // Фаза 2: subject-гейт внутри — физика байт-в-байт, не-физика — нейтральная трактовка.
+    buildCriteriaBlock(input.kim_number, input.max_score, input.subject),
     "",
     "ВЫЯВЛЕНИЕ ПРОБЛЕМ С ФОТО:",
     "- Если фото нечитаемо, размыто, перевёрнуто, отсутствует решение по этой задаче → suggested_score=null, confidence=low, flags содержит \"photo_unreadable\" или \"photo_off_topic\".",
@@ -429,9 +478,12 @@ function sanitizeFeedback(value: unknown): string {
  */
 export function sanitizeMockExamPart2Draft(
   parsed: Record<string, unknown>,
-  params: { maxScore: number; kimNumber: number },
+  // Фаза 2: optional subject — физ-спец-правило №21 не должно фаериться на
+  // КИМ 21 других предметов (у обществознания №21 — обычная задача Части 2).
+  // Отсутствие subject = физика (backward-compat со старыми call-sites).
+  params: { maxScore: number; kimNumber: number; subject?: string | null },
 ): MockExamPart2Draft {
-  const isQualitative = params.kimNumber === 21;
+  const isQualitative = isPhysicsQualitative21(params.kimNumber, params.subject);
 
   const flags = sanitizeFlags(parsed.flags);
   if (isQualitative && !flags.includes("kim21_qualitative")) {
@@ -494,7 +546,7 @@ export type MockExamFallbackReason =
 
 export function buildFallbackDraft(
   reason: MockExamFallbackReason,
-  params: { maxScore: number; kimNumber: number },
+  params: { maxScore: number; kimNumber: number; subject?: string | null },
 ): MockExamPart2Draft {
   const flagsByReason: Record<MockExamFallbackReason, string[]> = {
     timeout: ["ai_timeout", "ambiguous_grading"],
@@ -520,7 +572,7 @@ export function buildFallbackDraft(
   };
 
   const flags = [...flagsByReason[reason]];
-  if (params.kimNumber === 21) flags.unshift("kim21_qualitative");
+  if (isPhysicsQualitative21(params.kimNumber, params.subject)) flags.unshift("kim21_qualitative");
 
   return {
     suggested_score: null,
@@ -562,6 +614,9 @@ export interface BulkAssignmentTaskMeta {
 export function buildBulkAssignmentPrompt(
   tasksMeta: BulkAssignmentTaskMeta[],
   bulkPhotoDataUrls: string[],
+  // Фаза 2 (2026-07-20): предмет варианта. Отсутствие = физика — вводная строка
+  // и пример JSON для физики остаются БАЙТ-В-БАЙТ прежними (нулевая регрессия).
+  subject?: string | null,
 ): LovableMessage[] {
   const tasksSummary = tasksMeta
     .map((task) => {
@@ -574,8 +629,23 @@ export function buildBulkAssignmentPrompt(
     .map((_, i) => `Фото ${i} (индекс ${i})`)
     .join(", ");
 
+  const effSubject = subject ?? "physics";
+  const kims = tasksMeta.map((t) => t.kim_number);
+  const kimRangeLabel = kims.length > 0
+    ? `№ ${Math.min(...kims)}-${Math.max(...kims)}`
+    : "Части 2";
+  const introLine = effSubject === "physics"
+    ? "Ты — эксперт ЕГЭ по физике. Ученик сдал пробник и приложил пакет фотографий рукописных решений Часть 2 (задачи № 21-26)."
+    : `Ты — эксперт-экзаменатор по предмету «${mockSubjectLabel(effSubject)}». Ученик сдал пробник и приложил пакет фотографий рукописных решений Части 2 (задачи ${kimRangeLabel}).`;
+  const hintLine = effSubject === "physics"
+    ? "- Опирайся на: (a) номер задачи на странице — ученики часто пишут «№21», «к задаче 22», (b) тематика решения — формулы / физические законы / тип расчёта, (c) ссылку на условие."
+    : "- Опирайся на: (a) номер задачи на странице — ученики часто пишут номер, (b) тематика решения и его форма (расчёт / текст / аргументация), (c) ссылку на условие.";
+  // Пример JSON — из фактических КИМ задач (для физики 21-26 → те же строки).
+  const jsonExampleKims = (kims.length > 0 ? kims : [21, 22, 23, 24, 25, 26])
+    .map((kim) => `  "${kim}": [<photo_index>, ...],`);
+
   const systemContent = [
-    "Ты — эксперт ЕГЭ по физике. Ученик сдал пробник и приложил пакет фотографий рукописных решений Часть 2 (задачи № 21-26).",
+    introLine,
     "Твоя задача: посмотреть на каждое фото и сопоставить его с задачей.",
     "",
     "СПИСОК ЗАДАЧ:",
@@ -586,17 +656,12 @@ export function buildBulkAssignmentPrompt(
     "ПРАВИЛА:",
     "- Каждое фото может быть привязано к одной или нескольким задачам (если на странице 2+ задачи).",
     "- Если фото нерелевантно (например, чистая страница, или лист условий, или мусор) — отнеси его в 'unassigned'.",
-    "- Опирайся на: (a) номер задачи на странице — ученики часто пишут «№21», «к задаче 22», (b) тематика решения — формулы / физические законы / тип расчёта, (c) ссылку на условие.",
+    hintLine,
     "- Если сомневаешься — отнеси в задачу с наибольшим content overlap, либо в 'unassigned'.",
     "",
     "Верни ТОЛЬКО валидный JSON без markdown-обёрток и лишнего текста:",
     "{",
-    "  \"21\": [<photo_index>, ...],",
-    "  \"22\": [<photo_index>, ...],",
-    "  \"23\": [<photo_index>, ...],",
-    "  \"24\": [<photo_index>, ...],",
-    "  \"25\": [<photo_index>, ...],",
-    "  \"26\": [<photo_index>, ...],",
+    ...jsonExampleKims,
     "  \"unassigned\": [<photo_index>, ...]",
     "}",
     "Все индексы — 0-based, без дублирования внутри одного ключа.",

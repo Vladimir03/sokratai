@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useState, useCallback, useMemo, useRef, memo, lazy, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
-import { Plus, Library } from 'lucide-react';
+import { Plus, Library, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { deleteTutorHomeworkTaskImage } from '@/lib/tutorHomeworkApi';
 import type { KBTask } from '@/types/kb';
@@ -13,6 +13,7 @@ import {
   MAX_RUBRIC_IMAGES,
 } from '@/lib/attachmentRefs';
 import { KBPickerSheet } from '@/components/tutor/KBPickerSheet';
+import { HWAiLoaderSheet } from './HWAiLoaderSheet';
 import { HWTaskCard } from './HWTaskCard';
 import { type DraftTask, computeTaskContentFingerprint, createEmptyTask, generateUUID, isCriteriaEligibleTask, revokeObjectUrl } from './types';
 
@@ -255,6 +256,12 @@ export interface HWTasksSectionProps {
    * (CEFR) selector. On for foreign-language subjects (french/english/spanish).
    */
   cefrLevelEnabled?: boolean;
+  /**
+   * Фаза 1 «один загрузчик — N назначений» (2026-07-20): предмет ДЗ
+   * (meta.subject) для кнопки «Из файла (AI)» — shared AI-загрузчик в Sheet,
+   * задачи ложатся в конструктор как DraftTask[] (path A, без новых write-path).
+   */
+  aiLoaderSubject?: string;
 }
 
 export function HWTasksSection({
@@ -270,8 +277,10 @@ export function HWTasksSection({
   onRequestPushToKB,
   voiceSpeakingEnabled = false,
   cefrLevelEnabled = false,
+  aiLoaderSubject,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
+  const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
   const [saveToKbTask, setSaveToKbTask] = useState<DraftTask | null>(null);
 
   const handleRequestSaveToKB = useCallback(
@@ -345,6 +354,58 @@ export function HWTasksSection({
       );
     },
     [tasks, onChange],
+  );
+
+  // Фаза 1 «один загрузчик — N назначений»: приём задач из AI-загрузчика.
+  // СИНХРОННЫЙ insert (ревью ChatGPT-5.6 P1): HWAiLoaderSheet закрывается сразу
+  // после этого колбэка, поэтому задачи ОБЯЗАНЫ попасть в стейт до закрытия —
+  // иначе окно «Sheet закрылся, тутор жмёт Сохранить, а задач ещё нет» (раньше
+  // здесь был `await` резолва signed-URL перед onChange). Превью первой картинки
+  // дорезолвим best-effort ПОСЛЕ и функционально смержим по localId (галерея
+  // HWTaskCard всё равно резолвит по task_image_path — превью лишь ускоряет
+  // первый рендер). Дедуп по kb_task_id тут не нужен: у AI-задач его нет.
+  const handleAddFromAiLoader = useCallback(
+    (newDrafts: DraftTask[]) => {
+      if (newDrafts.length === 0) return;
+
+      onChange((prev) => [...prev.filter((t) => !isEmptyTask(t)), ...newDrafts]);
+
+      toast.success(
+        newDrafts.length === 1
+          ? 'Задача добавлена в ДЗ'
+          : `Добавлено задач: ${newDrafts.length}`,
+      );
+      const noAnswer = newDrafts.filter((d) => !d.correct_answer.trim()).length;
+      if (noAnswer > 0) {
+        toast.info(
+          `${noAnswer} без ответа — заполните в карточках, чтобы работала авто-проверка.`,
+        );
+      }
+
+      // Best-effort превью: не блокирует добавление и не роняет unhandled
+      // rejection (каждый резолв в своём try/catch). Мерж по localId — только
+      // если превью ещё не проставлено (тутор мог заменить картинку вручную).
+      void Promise.all(
+        newDrafts.map(async (draft) => {
+          const firstRef = parseAttachmentUrls(draft.task_image_path)[0];
+          if (!firstRef) return;
+          try {
+            const url = await getKBImageSignedUrl(firstRef);
+            if (!url) return;
+            onChange((prev) =>
+              prev.map((t) =>
+                t.localId === draft.localId && !t.task_image_preview_url
+                  ? { ...t, task_image_preview_url: url }
+                  : t,
+              ),
+            );
+          } catch {
+            /* превью необязательно — галерея HWTaskCard резолвит сама */
+          }
+        }),
+      );
+    },
+    [onChange],
   );
 
   const addedKbTaskIds = useMemo(
@@ -432,19 +493,30 @@ export function HWTasksSection({
           Нельзя добавлять или удалять задачи — ученики уже отправили ответы.
         </p>
       )}
-      <div className="flex gap-2">
-        <Button variant="outline" onClick={handleAdd} className="gap-2 flex-1" disabled={disableTaskAdd}>
+      {/* Структурный breakpoint md: (rule 10 UI parity) — 3 кнопки в ряд на
+          desktop, столбиком на mobile. */}
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+        <Button variant="outline" onClick={handleAdd} className="gap-2" disabled={disableTaskAdd}>
           <Plus className="h-4 w-4" />
           Добавить задачу
         </Button>
         <Button
           variant="outline"
           onClick={() => setKbPickerOpen(true)}
-          className="gap-2 flex-1"
+          className="gap-2"
           disabled={disableTaskAdd}
         >
           <Library className="h-4 w-4" />
           Добавить из базы
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setAiLoaderOpen(true)}
+          className="gap-2"
+          disabled={disableTaskAdd}
+        >
+          <Sparkles className="h-4 w-4" />
+          Из файла (AI)
         </Button>
       </div>
       <KBPickerSheet
@@ -453,6 +525,12 @@ export function HWTasksSection({
         onAddTasks={handleAddFromKB}
         addedKbTaskIds={addedKbTaskIds}
         topicHint={topicHint}
+      />
+      <HWAiLoaderSheet
+        open={aiLoaderOpen}
+        onOpenChange={setAiLoaderOpen}
+        subject={aiLoaderSubject || 'physics'}
+        onAddTasks={handleAddFromAiLoader}
       />
 
       {/* Per-task save-to-KB dialog (homework-reuse-v1 TASK-5, AC-13). Mounted

@@ -2209,6 +2209,7 @@ function TutorHomeworkCreateContent() {
             onRequestPushToKB={isEditMode ? handleRequestPushToKB : undefined}
             voiceSpeakingEnabled={voiceSpeakingEnabled}
             cefrLevelEnabled={['french', 'english', 'spanish'].includes(meta.subject)}
+            aiLoaderSubject={meta.subject || 'physics'}
           />
         </section>
 

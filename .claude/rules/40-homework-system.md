@@ -1417,6 +1417,8 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 
 8. **Speaking type-селектор (только при `feature_voice_speaking_enabled`):** выбрать «Тип ответа: Устный ответ (монолог)» → «Формат проверки» скрывается → save → reload `/edit` → тип **сохранён** как «Устный» (round-trip через `handleGetAssignment` task_kind SELECT). Переключить обратно на «Письменный» → save → verify `task_kind` derive'ится из check_format. Без флага — селектора нет (не показывать всем).
 
+9. **«Из файла (AI)» — shared AI-загрузчик (unified-ai-loader, 2026-07-20):** кнопка `Из файла (AI)` в ряду задач → Sheet с загрузчиком → PDF/фото/текст → ревью → «Добавить N задач в ДЗ» → задачи в конструкторе (с check_format/КИМ/баллом). Save → reload → verify снимок + авто-зеркало «Из ДЗ» в Базе. **Tab-switch (P0):** добавить AI-задачи → уйти на другую вкладку 31с+ → вернуться → задачи на месте. Гард закрытия Sheet: закрыть во время распознавания — блок; закрыть с непустым ревью — confirm.
+
 **При расширении constructor'а:**
 - Любая новая `useQuery` в TutorHomeworkCreate / TutorMockExamCreate / new write-form page → **ОБЯЗАТЕЛЬНО** `{ refetchOnWindowFocus: false, staleTime: 10 * 60 * 1000 }`. Иначе smoke check Section 8 (`scripts/smoke-check.mjs`) fail'нит. (Root cause tab-switch bug: default `refetchOnWindowFocus: true` triggered refetch для `editQuery`, новый `existingAssignment` reference → race с prefill effect → overwrite unsaved tasks.)
 - Любое изменение `editPrefilledRef` / `editInitialSnapshot` / reset effect ordering — повторно run QA checklist (чувствительный класс bug'ов).

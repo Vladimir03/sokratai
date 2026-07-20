@@ -410,3 +410,91 @@ export async function listMockExamInviteLinks(
   );
   return resp.items ?? [];
 }
+
+// ─── Фаза 2 (2026-07-20): CRUD личных вариантов ──────────────────────────────
+// «Один загрузчик — N назначений»: репетитор создаёт СВОЙ вариант (с нуля /
+// дублированием каталожного / из AI-загрузки). Записи — только через edge
+// (единственный write-path); чтения списка/prefill — PostgREST под RLS
+// «каталог ∪ мои» (см. useMockExamVariants).
+
+/** Режимы авто-проверки Части 1 (mirror mock-exam-part1-checker). */
+export type MockExamPart1CheckMode =
+  | 'strict'
+  | 'ordered'
+  | 'unordered'
+  | 'multi_choice'
+  | 'task20'
+  | 'pair';
+
+/** Задача варианта в write-payload (order_num назначает сервер по порядку). */
+export interface MockExamVariantTaskInput {
+  kim_number: number;
+  part: 1 | 2;
+  task_text: string;
+  /** Dual-format storage:// ref(ы); kb-attachments (own) или каталожный бакет. */
+  task_image_url: string | null;
+  correct_answer: string | null;
+  /** Часть 1 — режим чекера; Часть 2 — игнорируется (сервер форсит 'manual'). */
+  check_mode: MockExamPart1CheckMode | 'manual' | null;
+  max_score: number;
+  solution_text: string | null;
+  solution_image_urls: string | null;
+  topic: string | null;
+}
+
+export interface CreateMockExamVariantPayload {
+  title: string;
+  subject: string;
+  exam: 'ege' | 'oge';
+  duration_minutes: number;
+  tasks: MockExamVariantTaskInput[];
+}
+
+export async function createMockExamVariant(
+  payload: CreateMockExamVariantPayload,
+): Promise<{ variant_id: string }> {
+  return requestTutorMockExamApi('/variants', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateMockExamVariantMeta(
+  variantId: string,
+  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes'>>,
+): Promise<{ updated: true }> {
+  return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function replaceMockExamVariantTasks(
+  variantId: string,
+  tasks: MockExamVariantTaskInput[],
+  // Ревью 5.6 P1 #4: мета едет ВМЕСТЕ с задачами — сервер сохраняет всё одной
+  // транзакцией (RPC), «предмет сменился, задачи не доехали» невозможен.
+  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes'>>,
+): Promise<{ updated: true; task_count: number; total_max_score: number }> {
+  return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/tasks`, {
+    method: 'PUT',
+    body: JSON.stringify({ tasks, ...(meta ?? {}) }),
+  });
+}
+
+/** Копия каталожного ИЛИ своего варианта → новый личный (запрос Елены/Ульяны). */
+export async function duplicateMockExamVariant(
+  variantId: string,
+): Promise<{ variant_id: string }> {
+  return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/duplicate`, {
+    method: 'POST',
+  });
+}
+
+export async function deleteMockExamVariant(
+  variantId: string,
+): Promise<{ deleted: true }> {
+  return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}`, {
+    method: 'DELETE',
+  });
+}

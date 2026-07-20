@@ -393,7 +393,7 @@ function useKBQuery<TData>({
 }
 
 /** All user's folders as a recursive tree */
-export function useFolderTree() {
+export function useFolderTree(options?: { enabled?: boolean }) {
   const queryKey = useMemo(() => ['tutor', 'kb', 'folder-tree'] as const, []);
 
   const query = useQuery<KBFolderTreeNode[], unknown>({
@@ -402,6 +402,9 @@ export function useFolderTree() {
       const folders = await withTutorTimeout(queryKey, fetchAllFolders());
       return buildTree(folders);
     },
+    // hw-режим AI-загрузчика (Sheet под конструктором ДЗ): папка не выбирается →
+    // запрос выключен, чтобы не тащить focus-рефетчи под high-risk конструктор.
+    enabled: options?.enabled ?? true,
     staleTime: TUTOR_STALE_TIME_MS,
     gcTime: TUTOR_GC_TIME_MS,
     retry: createTutorRetry(queryKey),

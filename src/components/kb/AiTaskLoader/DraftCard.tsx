@@ -48,6 +48,12 @@ interface DraftCardProps {
   hideSelect?: boolean;
   /** Удалить черновик из списка (только в режиме карточек — в таблице ✕ в строке). */
   onRemove?: (index: number) => void;
+  /**
+   * hw-режим загрузчика (default true): скрыть Тему/Подтему/Источник в блоке
+   * «Классификация» — KB-таксономия не нужна при добавлении в ДЗ (Экзамен/КИМ/
+   * Балл остаются: едут в снимок и авто-балл ФИПИ).
+   */
+  showTaxonomy?: boolean;
 }
 
 const CONFIDENCE_META: Record<
@@ -146,6 +152,7 @@ function DraftCardComponent({
   refining,
   hideSelect,
   onRemove,
+  showTaxonomy = true,
 }: DraftCardProps) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
@@ -417,60 +424,64 @@ function DraftCardComponent({
               />
             </div>
           </div>
-          <div>
-            <label className={LEGEND_CLASS}>Тема</label>
-            <select
-              value={override.topicId ?? ''}
-              onChange={(e) =>
-                onOverrideChange(index, { topicId: e.target.value || null, subtopicId: null })
-              }
-              disabled={disabled}
-              className={SELECT_CLASS}
-            >
-              <option value="">Не выбрана</option>
-              {topicOptions.map((t) => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-            {!override.topicId && draft.topic_suggestion ? (
-              <p className="mt-1 text-[11px] text-amber-700">
-                AI предложил: «{draft.topic_suggestion}» — такой темы нет в вашей таксономии.
-              </p>
-            ) : null}
-          </div>
-          {override.topicId ? (
-            <div>
-              <label className={LEGEND_CLASS}>Подтема</label>
-              <select
-                value={override.subtopicId ?? ''}
-                onChange={(e) => onOverrideChange(index, { subtopicId: e.target.value || null })}
-                disabled={disabled}
-                className={SELECT_CLASS}
-              >
-                <option value="">Не выбрана</option>
-                {subtopics.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
+          {showTaxonomy ? (
+            <>
+              <div>
+                <label className={LEGEND_CLASS}>Тема</label>
+                <select
+                  value={override.topicId ?? ''}
+                  onChange={(e) =>
+                    onOverrideChange(index, { topicId: e.target.value || null, subtopicId: null })
+                  }
+                  disabled={disabled}
+                  className={SELECT_CLASS}
+                >
+                  <option value="">Не выбрана</option>
+                  {topicOptions.map((t) => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+                {!override.topicId && draft.topic_suggestion ? (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    AI предложил: «{draft.topic_suggestion}» — такой темы нет в вашей таксономии.
+                  </p>
+                ) : null}
+              </div>
+              {override.topicId ? (
+                <div>
+                  <label className={LEGEND_CLASS}>Подтема</label>
+                  <select
+                    value={override.subtopicId ?? ''}
+                    onChange={(e) => onOverrideChange(index, { subtopicId: e.target.value || null })}
+                    disabled={disabled}
+                    className={SELECT_CLASS}
+                  >
+                    <option value="">Не выбрана</option>
+                    {subtopics.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+              <div>
+                <label className={LEGEND_CLASS}>Источник</label>
+                <input
+                  type="text"
+                  value={override.sourceLabel}
+                  onChange={(e) => onOverrideChange(index, { sourceLabel: e.target.value })}
+                  disabled={disabled}
+                  list={`kb-sources-${index}`}
+                  placeholder="ФИПИ, Решу ЕГЭ, учебник…"
+                  className={INPUT_CLASS}
+                />
+                <datalist id={`kb-sources-${index}`}>
+                  {sources.map((s) => (
+                    <option key={s.id} value={s.name} />
+                  ))}
+                </datalist>
+              </div>
+            </>
           ) : null}
-          <div>
-            <label className={LEGEND_CLASS}>Источник</label>
-            <input
-              type="text"
-              value={override.sourceLabel}
-              onChange={(e) => onOverrideChange(index, { sourceLabel: e.target.value })}
-              disabled={disabled}
-              list={`kb-sources-${index}`}
-              placeholder="ФИПИ, Решу ЕГЭ, учебник…"
-              className={INPUT_CLASS}
-            />
-            <datalist id={`kb-sources-${index}`}>
-              {sources.map((s) => (
-                <option key={s.id} value={s.name} />
-              ))}
-            </datalist>
-          </div>
         </div>
       ) : null}
 

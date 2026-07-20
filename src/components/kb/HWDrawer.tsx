@@ -22,6 +22,11 @@ import {
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
 import { useHWDraftStore, useHWTaskCount } from '@/stores/hwDraftStore';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { useTutor } from '@/hooks/useTutor';
+import {
+  hwDraftToVariantTaskDraft,
+  writeVariantPrefill,
+} from '@/components/tutor/mock-exams/variantTaskDraft';
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { supabase } from '@/lib/supabaseClient';
@@ -209,6 +214,10 @@ export function HWDrawer({
 }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // Фаза 2: «Создать пробник» из корзины — только при включённом флаге пробников
+  // (кэшированный useTutor; без флага кнопка скрыта, редактор всё равно за гейтом).
+  const { tutor } = useTutor();
+  const mockExamsEnabled = Boolean(tutor?.feature_mock_exams_enabled);
   const { tasks, removeTask, updateSnapshot, clearDraft } = useHWDraftStore();
   // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
   const { data: tutorProfile } = useTutorProfile();
@@ -410,6 +419,20 @@ export function HWDrawer({
     navigate('/tutor/knowledge');
   };
 
+  // Фаза 2, пуш 3 (2026-07-20): корзина → конструктор варианта пробника.
+  // НЕ прямой insert (единственный write-path — edge POST из редактора):
+  // черновики уезжают prefill'ом через sessionStorage. Корзину НЕ чистим —
+  // тутор может из тех же задач собрать ещё и ДЗ.
+  const handleCreateMockVariant = () => {
+    if (tasks.length === 0) return;
+    writeVariantPrefill({
+      subject,
+      drafts: tasks.map((t) => hwDraftToVariantTaskDraft(t, subject)),
+    });
+    onOpenChange(false);
+    navigate('/tutor/mock-exams/variants/new?from=cart');
+  };
+
   const taskCountLabel = (count: number) => {
     if (count === 1) return '1 задача';
     if (count >= 2 && count <= 4) return `${count} задачи`;
@@ -516,6 +539,23 @@ export function HWDrawer({
           >
             {submitting ? 'Сохранение...' : 'Создать черновик ДЗ'}
           </button>
+          {/* Secondary CTA (rule 90: один primary — «Создать черновик ДЗ»).
+              Задачи корзины уезжают prefill'ом в конструктор варианта. */}
+          {mockExamsEnabled ? (
+            <button
+              type="button"
+              onClick={handleCreateMockVariant}
+              disabled={tasks.length === 0 || submitting}
+              className={cn(
+                'w-full rounded-xl border border-socrat-border bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors',
+                tasks.length > 0 && !submitting
+                  ? 'hover:border-socrat-primary/40 hover:text-socrat-primary'
+                  : 'cursor-not-allowed opacity-50',
+              )}
+            >
+              Создать пробник из этих задач
+            </button>
+          ) : null}
         </div>
       </SheetContent>
     </Sheet>

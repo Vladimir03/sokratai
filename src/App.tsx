@@ -71,6 +71,7 @@ const TutorHomeworkPreview = lazy(() => import("./pages/tutor/TutorHomeworkPrevi
 const TutorHomeworkTemplates = lazy(() => import("./pages/tutor/TutorHomeworkTemplates"));
 const TutorMockExams = lazy(() => import("./pages/tutor/mock-exams/TutorMockExams"));
 const TutorMockExamCreate = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamCreate"));
+const TutorMockExamVariantEditor = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamVariantEditor"));
 const TutorMockExamDetail = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamDetail"));
 const TutorMockExamReview = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamReview"));
 const TutorProfile = lazy(() => import("./pages/tutor/TutorProfile"));
@@ -449,6 +450,9 @@ const App = () => (
               <Route path="homework/:id" element={<TutorHomeworkDetail />} />
               <Route path="homework" element={<TutorHomework />} />
               <Route path="mock-exams/new" element={<TutorMockExamCreate />} />
+              {/* Фаза 2 (2026-07-20): конструктор своих вариантов пробника */}
+              <Route path="mock-exams/variants/new" element={<TutorMockExamVariantEditor />} />
+              <Route path="mock-exams/variants/:id/edit" element={<TutorMockExamVariantEditor />} />
               <Route path="mock-exams/:id/review/:studentId" element={<TutorMockExamReview />} />
               <Route path="mock-exams/:id" element={<TutorMockExamDetail />} />
               <Route path="mock-exams" element={<TutorMockExams />} />

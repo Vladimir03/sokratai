@@ -47,6 +47,31 @@ const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.ru";
 
 const VALID_MODES = ["blank", "form", "manual_entry"] as const;
+
+// ─── Фаза 2 (2026-07-20): репетиторские варианты ────────────────────────────
+// Канонический словарь предметов — зеркало src/types/homework.ts SUBJECTS
+// (Deno не импортирует фронт-типы; синхронизация вручную, как SUBJECT_LABELS).
+const VALID_VARIANT_SUBJECTS = new Set([
+  "maths", "physics", "informatics",
+  "russian", "literature", "history", "social",
+  "english", "french", "spanish",
+  "chemistry", "biology", "geography", "other",
+]);
+// Часть 1 — режимы детерминированного чекера (без 'manual' — тот для Части 2).
+const VALID_PART1_CHECK_MODES = new Set([
+  "strict", "ordered", "unordered", "multi_choice", "task20", "pair",
+]);
+const VARIANT_TASKS_MAX = 60;
+const VARIANT_TITLE_MAX = 200;
+const VARIANT_TASK_TEXT_MAX = 8000;
+const VARIANT_ANSWER_MAX = 500;
+const VARIANT_SOLUTION_MAX = 12000;
+const VARIANT_DURATION_MAX_MIN = 600;
+// Бакеты, из которых личный вариант может ссылаться на картинки:
+// kb-attachments — клиентские загрузки (строго own-namespace {userId}/...),
+// mock-exam-variant-tasks — каталожный контент (копии при duplicate).
+const VARIANT_IMAGE_BUCKETS = new Set(["kb-attachments", "mock-exam-variant-tasks"]);
+
 const SLUG_RE = /^[a-z0-9]{8}$/i;
 const SLUG_MAX_RETRIES = 5;
 const SLUG_EXPIRY_MAX_DAYS = 365;
@@ -287,20 +312,34 @@ interface VariantRow {
   part1_max: number;
   part2_max: number;
   task_count: number;
+  /** Фаза 2: NULL = каталожный; non-NULL = личный вариант репетитора. */
+  owner_id: string | null;
+  /** Канонический id предмета; NULL у легаси-строк → читатели берут 'physics'. */
+  subject: string | null;
 }
 
 async function getVariantOrThrow(
   db: SupabaseClient,
   variantId: string,
   cors: Record<string, string>,
+  // Фаза 2 (2026-07-20): гейт «каталожный ИЛИ мой». До появления личных
+  // вариантов дыры не было (все варианты каталожные); теперь без гейта
+  // репетитор мог бы назначить ЧУЖОЙ личный вариант по угаданному UUID.
+  tutorUserId: string,
 ): Promise<VariantRow | Response> {
+  if (!isUUID(variantId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid variant ID");
+  }
   const { data, error } = await db
     .from("mock_exam_variants")
-    .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count")
+    .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, subject")
     .eq("id", variantId)
     .maybeSingle();
   if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to load variant");
-  if (!data) return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  // Чужой личный вариант → 404 (не палим существование), как и несуществующий.
+  if (!data || (data.owner_id !== null && data.owner_id !== tutorUserId)) {
+    return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  }
   return data as VariantRow;
 }
 
@@ -744,7 +783,7 @@ async function handleCreateAssignment(
   if (b.variant_title) {
     return jsonError(cors, 400, "VALIDATION", "variant_title must be null for blank/form");
   }
-  const variantOrErr = await getVariantOrThrow(db, b.variant_id as string, cors);
+  const variantOrErr = await getVariantOrThrow(db, b.variant_id as string, cors, tutorUserId);
   if (variantOrErr instanceof Response) return variantOrErr;
 
   if (b.deadline !== undefined && b.deadline !== null && !isISODate(b.deadline)) {
@@ -3548,6 +3587,609 @@ async function handleDeleteAttempt(
   });
 }
 
+// ─── Фаза 2 (2026-07-20): CRUD личных вариантов ─────────────────────────────
+// «Один загрузчик — N назначений», пуш 1. Репетитор создаёт СВОЙ вариант
+// (с нуля / дублированием каталожного); все записи в mock_exam_variants /
+// mock_exam_variant_tasks идут ТОЛЬКО здесь (единственный write-path — урок
+// rule 40; клиентских write-политик нет). Чтения — клиентский PostgREST под
+// RLS «каталог ∪ мои» (миграция 20260720150000).
+//
+// Защиты: каталожный (owner_id IS NULL) → 403 CATALOG_READONLY на правки;
+// чужой личный → 404 (не палим существование); «вариант в работе» (есть
+// назначения) → 409 VARIANT_IN_USE на контент-правки — детерминизм чекера и
+// «что видел ученик = что проверялось» важнее удобства; UI предлагает копию.
+
+interface VariantTaskInput {
+  kim_number: number;
+  part: 1 | 2;
+  order_num: number;
+  task_text: string;
+  task_image_url: string | null;
+  correct_answer: string | null;
+  check_mode: string;
+  max_score: number;
+  solution_text: string | null;
+  solution_image_urls: string | null;
+  topic: string | null;
+}
+
+/** Валидация dual-format image-поля: только storage:// из белого списка бакетов.
+ *  Own-namespace НЕ требуем: легитимные refs бывают чужого namespace —
+ *  каталожные KB-задачи (blobs модераторов в kb-attachments) через корзину
+ *  «Создать пробник» и копии каталожных вариантов (mock-exam-variant-tasks).
+ *  Оба бакета содержат только платформенный контент, читаемый репетитору;
+ *  SSRF невозможен (storage-ref, не URL); path traversal режет parseStorageRef.
+ *  Ревью 5.6 P1 #7: капы — maxRefs (student result подписывает КАЖДЫЙ ref через
+ *  Promise.all) + длина serialized-строки (анти-мусор в TEXT-колонке).
+ *  Known debt: blob шарится с KB-задачей — удаление её из Базы убьёт картинку
+ *  пробника (server-side blob-copy — отложенный шаг). */
+const VARIANT_IMAGE_FIELD_MAX_CHARS = 4000;
+
+function validateVariantImageField(
+  raw: unknown,
+  maxRefs: number,
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, message: "ссылка на изображение должна быть строкой" };
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true, value: null };
+  if (trimmed.length > VARIANT_IMAGE_FIELD_MAX_CHARS) {
+    return { ok: false, message: "слишком длинная ссылка на изображения" };
+  }
+  const refs = parseAttachmentUrls(trimmed);
+  if (refs.length === 0) {
+    return { ok: false, message: "некорректная ссылка на изображение" };
+  }
+  if (refs.length > maxRefs) {
+    return { ok: false, message: `не больше ${maxRefs} фото` };
+  }
+  for (const ref of refs) {
+    const parsed = parseStorageRef(ref);
+    if (!parsed || !VARIANT_IMAGE_BUCKETS.has(parsed.bucket)) {
+      return { ok: false, message: "изображение должно быть загружено через Сократ (storage://)" };
+    }
+  }
+  return { ok: true, value: trimmed };
+}
+
+/** Маппинг RAISE-кодов вариант-RPC → HTTP (rule 97: русские фразы). */
+function mapVariantRpcError(
+  message: string | undefined,
+  cors: Record<string, string>,
+): Response | null {
+  const msg = message ?? "";
+  if (msg.includes("VARIANT_IN_USE")) {
+    return jsonError(cors, 409, "VARIANT_IN_USE",
+      "Вариант уже назначен ученикам — состав и параметры менять нельзя (ученики должны видеть то, что проверялось). Создайте копию.");
+  }
+  if (msg.includes("VARIANT_NOT_FOUND")) {
+    return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  }
+  return null;
+}
+
+/** Бизнес-валидация задач варианта. order_num назначает сервер (index+1). */
+function validateVariantTasksPayload(
+  rawTasks: unknown,
+):
+  | { ok: true; tasks: VariantTaskInput[]; part1Max: number; part2Max: number; totalMax: number }
+  | { ok: false; message: string } {
+  if (!Array.isArray(rawTasks) || rawTasks.length === 0) {
+    return { ok: false, message: "Добавьте хотя бы одну задачу" };
+  }
+  if (rawTasks.length > VARIANT_TASKS_MAX) {
+    return { ok: false, message: `Слишком много задач (максимум ${VARIANT_TASKS_MAX})` };
+  }
+  const tasks: VariantTaskInput[] = [];
+  const seenKims = new Set<number>();
+  let part1Max = 0;
+  let part2Max = 0;
+  for (let i = 0; i < rawTasks.length; i++) {
+    const t = rawTasks[i];
+    const label = `Задача ${i + 1}`;
+    if (!t || typeof t !== "object" || Array.isArray(t)) {
+      return { ok: false, message: `${label}: неверный формат` };
+    }
+    const row = t as Record<string, unknown>;
+
+    const part = row.part;
+    if (part !== 1 && part !== 2) {
+      return { ok: false, message: `${label}: укажите часть (1 или 2)` };
+    }
+
+    const kim = row.kim_number;
+    if (!isPositiveInt(kim) || kim > 99) {
+      return { ok: false, message: `${label}: № КИМ должен быть целым числом 1–99` };
+    }
+    if (seenKims.has(kim)) {
+      return { ok: false, message: `№ КИМ ${kim} повторяется — номера в варианте должны быть уникальны` };
+    }
+    seenKims.add(kim);
+
+    // Капы — канон homework (MAX_TASK_IMAGES=5 / MAX_SOLUTION_IMAGES=5).
+    const imageCheck = validateVariantImageField(row.task_image_url, 5);
+    if (!imageCheck.ok) return { ok: false, message: `${label}: ${imageCheck.message}` };
+    const solutionImagesCheck = validateVariantImageField(row.solution_image_urls, 5);
+    if (!solutionImagesCheck.ok) return { ok: false, message: `${label}: ${solutionImagesCheck.message}` };
+
+    const taskTextRaw = typeof row.task_text === "string" ? row.task_text.trim() : "";
+    if (taskTextRaw.length > VARIANT_TASK_TEXT_MAX) {
+      return { ok: false, message: `${label}: условие слишком длинное (максимум ${VARIANT_TASK_TEXT_MAX} символов)` };
+    }
+    if (!taskTextRaw && !imageCheck.value) {
+      return { ok: false, message: `${label}: добавьте текст условия или фото` };
+    }
+    // Image-only задача — конвенция KB/ДЗ: плейсхолдер вместо пустого текста
+    // (task_text NOT NULL в схеме; плейсхолдер понимают карточки и AI-пути).
+    const taskText = taskTextRaw || "[Задача на фото]";
+
+    const answerRaw = typeof row.correct_answer === "string" ? row.correct_answer.trim() : "";
+    if (answerRaw.length > VARIANT_ANSWER_MAX) {
+      return { ok: false, message: `${label}: ответ слишком длинный (максимум ${VARIANT_ANSWER_MAX} символов)` };
+    }
+
+    let checkMode: string;
+    if (part === 1) {
+      const cm = row.check_mode;
+      if (typeof cm !== "string" || !VALID_PART1_CHECK_MODES.has(cm)) {
+        return { ok: false, message: `${label}: для Части 1 выберите режим проверки ответа` };
+      }
+      checkMode = cm;
+      if (!answerRaw) {
+        return { ok: false, message: `${label}: для Части 1 обязателен правильный ответ (авто-проверка)` };
+      }
+    } else {
+      // Часть 2 — всегда ручная/AI-проверка; клиентское значение игнорируем.
+      checkMode = "manual";
+    }
+
+    const maxScore = row.max_score;
+    if (!isPositiveInt(maxScore) || maxScore > 25) {
+      return { ok: false, message: `${label}: макс. балл должен быть целым числом 1–25` };
+    }
+
+    const solutionText = typeof row.solution_text === "string" ? row.solution_text.trim() : "";
+    if (solutionText.length > VARIANT_SOLUTION_MAX) {
+      return { ok: false, message: `${label}: эталонное решение слишком длинное` };
+    }
+    const topic = typeof row.topic === "string" ? row.topic.trim().slice(0, 200) : "";
+
+    if (part === 1) part1Max += maxScore;
+    else part2Max += maxScore;
+
+    tasks.push({
+      kim_number: kim,
+      part,
+      order_num: i + 1,
+      task_text: taskText,
+      task_image_url: imageCheck.value,
+      correct_answer: answerRaw || null,
+      check_mode: checkMode,
+      max_score: maxScore,
+      solution_text: solutionText || null,
+      solution_image_urls: solutionImagesCheck.value,
+      topic: topic || null,
+    });
+  }
+  return { ok: true, tasks, part1Max, part2Max, totalMax: part1Max + part2Max };
+}
+
+/** exam_type: физика пишется ЛЕГАСИ-значениями (гейт getEgePhysicsBenchmarks). */
+function resolveVariantExamType(subject: string, exam: "ege" | "oge"): string {
+  return subject === "physics" ? `${exam}_physics` : exam;
+}
+
+function variantExamFromExamType(examType: string): "ege" | "oge" {
+  return examType.startsWith("oge") ? "oge" : "ege";
+}
+
+/** Личный вариант текущего репетитора: каталожный → 403, чужой → 404. */
+async function getOwnedPersonalVariantOrThrow(
+  db: SupabaseClient,
+  variantId: string,
+  tutorUserId: string,
+  cors: Record<string, string>,
+): Promise<Record<string, unknown> | Response> {
+  if (!isUUID(variantId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid variant ID");
+  }
+  const { data, error } = await db
+    .from("mock_exam_variants")
+    .select("*")
+    .eq("id", variantId)
+    .maybeSingle();
+  if (error) return jsonError(cors, 500, "DB_ERROR", "Failed to load variant");
+  if (!data || (data.owner_id !== null && data.owner_id !== tutorUserId)) {
+    return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  }
+  if (data.owner_id === null) {
+    return jsonError(cors, 403, "CATALOG_READONLY",
+      "Каталожный вариант нельзя изменить — создайте копию («Дублировать») и правьте её.");
+  }
+  return data as Record<string, unknown>;
+}
+
+/** «Вариант в работе» = есть хотя бы одно назначение (attempts создаются при назначении). */
+async function variantHasAssignments(
+  db: SupabaseClient,
+  variantId: string,
+): Promise<boolean | null> {
+  const { data, error } = await db
+    .from("mock_exam_assignments")
+    .select("id")
+    .eq("variant_id", variantId)
+    .limit(1);
+  if (error) {
+    console.error("mock_exam_variant_inuse_check_failed", { error: error.message });
+    return null;
+  }
+  return (data ?? []).length > 0;
+}
+
+// POST /variants — создать личный вариант (мета + задачи одним телом).
+async function handleCreateVariant(
+  db: SupabaseClient,
+  tutorUserId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  const title = typeof b.title === "string" ? b.title.trim() : "";
+  if (!title || title.length > VARIANT_TITLE_MAX) {
+    return jsonError(cors, 400, "VALIDATION", "Укажите название варианта (до 200 символов)");
+  }
+  const subject = typeof b.subject === "string" ? b.subject : "";
+  if (!VALID_VARIANT_SUBJECTS.has(subject)) {
+    return jsonError(cors, 400, "VALIDATION", "Укажите предмет варианта");
+  }
+  const exam = b.exam;
+  if (exam !== "ege" && exam !== "oge") {
+    return jsonError(cors, 400, "VALIDATION", "Укажите экзамен (ЕГЭ или ОГЭ)");
+  }
+  const duration = b.duration_minutes;
+  if (!isPositiveInt(duration) || duration > VARIANT_DURATION_MAX_MIN) {
+    return jsonError(cors, 400, "VALIDATION", `Длительность — целое число минут (1–${VARIANT_DURATION_MAX_MIN})`);
+  }
+
+  const tasksCheck = validateVariantTasksPayload(b.tasks);
+  if (!tasksCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", tasksCheck.message);
+  }
+
+  // Ревью 5.6 P1 #5: мета + задачи ОДНОЙ транзакцией (RPC) — двухфазный
+  // insert с best-effort rollback-delete мог оставить назначаемый «пустой»
+  // вариант с ненулевыми тоталами.
+  const { data: createdId, error: createErr } = await db.rpc(
+    "mock_exam_variant_create_with_tasks",
+    {
+      _meta: {
+        title,
+        exam_type: resolveVariantExamType(subject, exam),
+        source: "tutor",
+        source_attribution: null,
+        duration_minutes: duration,
+        created_by: tutorUserId,
+        owner_id: tutorUserId,
+        subject,
+        variant_pdf_url: null,
+      },
+      _tasks: tasksCheck.tasks,
+    },
+  );
+  if (createErr || !createdId) {
+    console.error("mock_exam_variant_create_failed", { error: createErr?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось создать вариант. Попробуйте ещё раз.");
+  }
+  const variantId = createdId as string;
+
+  console.log("mock_exam_variant_created", {
+    variant_id: variantId,
+    task_count: tasksCheck.tasks.length,
+    subject,
+  });
+  return jsonOk(cors, { variant_id: variantId }, 201);
+}
+
+// PATCH /variants/:id — мета личного варианта. title — всегда; subject/exam/
+// duration — только пока вариант не «в работе».
+async function handleUpdateVariantMeta(
+  db: SupabaseClient,
+  tutorUserId: string,
+  variantId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const variantOrErr = await getOwnedPersonalVariantOrThrow(db, variantId, tutorUserId, cors);
+  if (variantOrErr instanceof Response) return variantOrErr;
+  const variant = variantOrErr;
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+
+  // Жёсткий whitelist ключей (урок PATCH /templates, rule 40): неизвестный
+  // ключ → 400, а не silent ignore.
+  const ALLOWED = new Set(["title", "subject", "exam", "duration_minutes"]);
+  const unknownKey = Object.keys(b).find((k) => !ALLOWED.has(k));
+  if (unknownKey !== undefined) {
+    return jsonError(cors, 400, "VALIDATION", `Неизвестное поле: ${unknownKey}`);
+  }
+  if (Object.keys(b).length === 0) {
+    return jsonError(cors, 400, "VALIDATION", "Нет полей для обновления");
+  }
+
+  const patch: Record<string, unknown> = {};
+
+  if (b.title !== undefined) {
+    const title = typeof b.title === "string" ? b.title.trim() : "";
+    if (!title || title.length > VARIANT_TITLE_MAX) {
+      return jsonError(cors, 400, "VALIDATION", "Название — непустая строка до 200 символов");
+    }
+    patch.title = title;
+  }
+
+  const touchesContentMeta =
+    b.subject !== undefined || b.exam !== undefined || b.duration_minutes !== undefined;
+
+  if (touchesContentMeta) {
+    // Ревью 5.6 P1 #3: content-мета — через ту же RPC (_tasks NULL = meta-only):
+    // FOR UPDATE + in-use гард в одной транзакции (никакого TOCTOU-окна между
+    // pre-check и UPDATE). Дружелюбный pre-check — для быстрого 409.
+    const inUse = await variantHasAssignments(db, variantId);
+    if (inUse === null) return jsonError(cors, 500, "DB_ERROR", "Failed to check variant usage");
+    if (inUse) {
+      return jsonError(cors, 409, "VARIANT_IN_USE",
+        "Вариант уже назначен ученикам — предмет, экзамен и длительность менять нельзя. Создайте копию.");
+    }
+
+    let subject = (variant.subject as string | null) ?? "physics";
+    if (b.subject !== undefined) {
+      if (typeof b.subject !== "string" || !VALID_VARIANT_SUBJECTS.has(b.subject)) {
+        return jsonError(cors, 400, "VALIDATION", "Неверный предмет");
+      }
+      subject = b.subject;
+    }
+    let exam = variantExamFromExamType(variant.exam_type as string);
+    if (b.exam !== undefined) {
+      if (b.exam !== "ege" && b.exam !== "oge") {
+        return jsonError(cors, 400, "VALIDATION", "Экзамен — ege или oge");
+      }
+      exam = b.exam;
+    }
+    let duration: number | null = null;
+    if (b.duration_minutes !== undefined) {
+      if (!isPositiveInt(b.duration_minutes) || b.duration_minutes > VARIANT_DURATION_MAX_MIN) {
+        return jsonError(cors, 400, "VALIDATION", `Длительность — целое число минут (1–${VARIANT_DURATION_MAX_MIN})`);
+      }
+      duration = b.duration_minutes;
+    }
+
+    const { error: rpcErr } = await db.rpc("mock_exam_variant_replace_tasks", {
+      _variant_id: variantId,
+      _tasks: null,
+      _title: (patch.title as string | undefined) ?? null,
+      _subject: b.subject !== undefined ? subject : null,
+      // exam_type пересчитывается при любой смене subject/exam (легаси-гейт физики).
+      _exam_type: resolveVariantExamType(subject, exam),
+      _duration_minutes: duration,
+    });
+    if (rpcErr) {
+      const mapped = mapVariantRpcError(rpcErr.message, cors);
+      if (mapped) return mapped;
+      console.error("mock_exam_variant_update_failed", { error: rpcErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить изменения. Попробуйте ещё раз.");
+    }
+    return jsonOk(cors, { updated: true });
+  }
+
+  // Title-only (разрешён и для назначенного варианта) — прямой UPDATE.
+  const { error: updErr } = await db
+    .from("mock_exam_variants")
+    .update(patch)
+    .eq("id", variantId);
+  if (updErr) {
+    console.error("mock_exam_variant_update_failed", { error: updErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить изменения. Попробуйте ещё раз.");
+  }
+  return jsonOk(cors, { updated: true });
+}
+
+// PUT /variants/:id/tasks — атомарное сохранение контента: задачи + опц. мета
+// (ревью 5.6 P1 #4: PATCH меты и PUT задач по отдельности оставляли вариант
+// частично изменённым — «предмет сменился, задачи не доехали» грейдился бы не
+// той рубрикой). Редактор шлёт всё одним вызовом; RPC — одна транзакция с
+// FOR UPDATE + in-use гардом (P1 #3 TOCTOU: pre-check здесь — только для
+// быстрого дружелюбного 409, авторитет — гард ВНУТРИ RPC).
+async function handleReplaceVariantTasks(
+  db: SupabaseClient,
+  tutorUserId: string,
+  variantId: string,
+  body: unknown,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const variantOrErr = await getOwnedPersonalVariantOrThrow(db, variantId, tutorUserId, cors);
+  if (variantOrErr instanceof Response) return variantOrErr;
+  const variant = variantOrErr;
+
+  const inUse = await variantHasAssignments(db, variantId);
+  if (inUse === null) return jsonError(cors, 500, "DB_ERROR", "Failed to check variant usage");
+  if (inUse) {
+    return jsonError(cors, 409, "VARIANT_IN_USE",
+      "Вариант уже назначен ученикам — состав задач менять нельзя (ученики должны видеть то, что проверялось). Создайте копию.");
+  }
+
+  if (!body || typeof body !== "object") {
+    return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
+  }
+  const b = body as Record<string, unknown>;
+  const tasksCheck = validateVariantTasksPayload(b.tasks);
+  if (!tasksCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", tasksCheck.message);
+  }
+
+  // Опциональная мета (редактор шлёт полный набор; отсутствие поля = не менять).
+  let metaTitle: string | null = null;
+  if (b.title !== undefined) {
+    const title = typeof b.title === "string" ? b.title.trim() : "";
+    if (!title || title.length > VARIANT_TITLE_MAX) {
+      return jsonError(cors, 400, "VALIDATION", "Название — непустая строка до 200 символов");
+    }
+    metaTitle = title;
+  }
+  let metaSubject: string | null = null;
+  if (b.subject !== undefined) {
+    if (typeof b.subject !== "string" || !VALID_VARIANT_SUBJECTS.has(b.subject)) {
+      return jsonError(cors, 400, "VALIDATION", "Неверный предмет");
+    }
+    metaSubject = b.subject;
+  }
+  let metaExam: "ege" | "oge" | null = null;
+  if (b.exam !== undefined) {
+    if (b.exam !== "ege" && b.exam !== "oge") {
+      return jsonError(cors, 400, "VALIDATION", "Экзамен — ege или oge");
+    }
+    metaExam = b.exam;
+  }
+  let metaDuration: number | null = null;
+  if (b.duration_minutes !== undefined) {
+    if (!isPositiveInt(b.duration_minutes) || b.duration_minutes > VARIANT_DURATION_MAX_MIN) {
+      return jsonError(cors, 400, "VALIDATION", `Длительность — целое число минут (1–${VARIANT_DURATION_MAX_MIN})`);
+    }
+    metaDuration = b.duration_minutes;
+  }
+  // exam_type пересчитывается из ФИНАЛЬНЫХ subject+exam (легаси-гейт физики).
+  let metaExamType: string | null = null;
+  if (metaSubject !== null || metaExam !== null) {
+    const effSubject = metaSubject ?? ((variant.subject as string | null) ?? "physics");
+    const effExam = metaExam ?? variantExamFromExamType(variant.exam_type as string);
+    metaExamType = resolveVariantExamType(effSubject, effExam);
+  }
+
+  const { error: rpcErr } = await db.rpc("mock_exam_variant_replace_tasks", {
+    _variant_id: variantId,
+    _tasks: tasksCheck.tasks,
+    _title: metaTitle,
+    _subject: metaSubject,
+    _exam_type: metaExamType,
+    _duration_minutes: metaDuration,
+  });
+  if (rpcErr) {
+    const mapped = mapVariantRpcError(rpcErr.message, cors);
+    if (mapped) return mapped;
+    console.error("mock_exam_variant_replace_failed", { error: rpcErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить задачи. Попробуйте ещё раз.");
+  }
+  return jsonOk(cors, {
+    updated: true,
+    task_count: tasksCheck.tasks.length,
+    total_max_score: tasksCheck.totalMax,
+  });
+}
+
+// POST /variants/:id/duplicate — копия каталожного ИЛИ своего варианта.
+// Закрывает запрос Елены/Ульяны: дубль → замена задач → назначение.
+async function handleDuplicateVariant(
+  db: SupabaseClient,
+  tutorUserId: string,
+  variantId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(variantId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Invalid variant ID");
+  }
+  const { data: source, error: srcErr } = await db
+    .from("mock_exam_variants")
+    .select("*")
+    .eq("id", variantId)
+    .maybeSingle();
+  if (srcErr) return jsonError(cors, 500, "DB_ERROR", "Failed to load variant");
+  if (!source || (source.owner_id !== null && source.owner_id !== tutorUserId)) {
+    return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  }
+
+  const { data: sourceTasks, error: tasksErr } = await db
+    .from("mock_exam_variant_tasks")
+    .select("kim_number, part, order_num, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic")
+    .eq("variant_id", variantId)
+    .order("order_num", { ascending: true });
+  if (tasksErr || !sourceTasks || sourceTasks.length === 0) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load variant tasks");
+  }
+
+  const copyTitle = `Копия — ${source.title as string}`.slice(0, VARIANT_TITLE_MAX);
+  // Ревью 5.6 P1 #5: копия создаётся ОДНОЙ транзакцией (мета + задачи).
+  // Задачи копируются со ссылками на ТЕ ЖЕ storage-объекты (blob-copy —
+  // отложенный шаг; каталожный бакет read-only для клиента).
+  const { data: createdId, error: createErr } = await db.rpc(
+    "mock_exam_variant_create_with_tasks",
+    {
+      _meta: {
+        title: copyTitle,
+        exam_type: source.exam_type,
+        source: "tutor",
+        // Провенанс контента сохраняем (копия каталожного = контент Егора/ФИПИ).
+        source_attribution: source.source_attribution ?? null,
+        duration_minutes: source.duration_minutes,
+        created_by: tutorUserId,
+        owner_id: tutorUserId,
+        subject: (source.subject as string | null) ?? "physics",
+        // PDF условий НЕ копируем: после замены задач он стал бы враньём.
+        variant_pdf_url: null,
+      },
+      _tasks: sourceTasks,
+    },
+  );
+  if (createErr || !createdId) {
+    console.error("mock_exam_variant_duplicate_failed", { error: createErr?.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось создать копию. Попробуйте ещё раз.");
+  }
+  const newVariantId = createdId as string;
+
+  console.log("mock_exam_variant_duplicated", {
+    source_variant_id: variantId,
+    variant_id: newVariantId,
+    source_is_catalog: source.owner_id === null,
+  });
+  return jsonOk(cors, { variant_id: newVariantId }, 201);
+}
+
+// DELETE /variants/:id — только личный, не назначенный.
+async function handleDeleteVariant(
+  db: SupabaseClient,
+  tutorUserId: string,
+  variantId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const variantOrErr = await getOwnedPersonalVariantOrThrow(db, variantId, tutorUserId, cors);
+  if (variantOrErr instanceof Response) return variantOrErr;
+
+  const inUse = await variantHasAssignments(db, variantId);
+  if (inUse === null) return jsonError(cors, 500, "DB_ERROR", "Failed to check variant usage");
+  if (inUse) {
+    return jsonError(cors, 409, "VARIANT_IN_USE",
+      "Вариант уже назначен ученикам — удалить нельзя (история результатов сломается). Сначала удалите назначения.");
+  }
+
+  // Storage-блобы НЕ трогаем: kb-attachments может шариться с задачами Базы
+  // (KB storage-protection триггер — backstop), каталожный бакет — не наш.
+  const { error: delErr } = await db
+    .from("mock_exam_variants")
+    .delete()
+    .eq("id", variantId);
+  if (delErr) {
+    // FK RESTRICT от mock_exam_assignments — backstop при гонке с назначением.
+    console.error("mock_exam_variant_delete_failed", { error: delErr.message });
+    return jsonError(cors, 409, "VARIANT_IN_USE",
+      "Вариант уже назначен ученикам — удалить нельзя.");
+  }
+  return jsonOk(cors, { deleted: true });
+}
+
 // ─── Server ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -3726,6 +4368,43 @@ Deno.serve(async (req: Request): Promise<Response> => {
       seg[2] === "regrade-part2" && route.method === "POST"
     ) {
       return await handleRegradePart2(db, userId, seg[1], cors);
+    }
+
+    // ── Фаза 2 (2026-07-20): CRUD личных вариантов ──
+    // Чтения (список/prefill) — клиентский PostgREST под RLS «каталог ∪ мои».
+
+    // POST /variants — создать личный вариант (мета + задачи одним телом)
+    if (seg.length === 1 && seg[0] === "variants" && route.method === "POST") {
+      const body = await parseJsonBody(req);
+      return await handleCreateVariant(db, userId, body, cors);
+    }
+
+    // PATCH /variants/:id — мета (title всегда; subject/exam/duration — пока не в работе)
+    if (seg.length === 2 && seg[0] === "variants" && route.method === "PATCH") {
+      const body = await parseJsonBody(req);
+      return await handleUpdateVariantMeta(db, userId, seg[1], body, cors);
+    }
+
+    // DELETE /variants/:id — только личный, не назначенный
+    if (seg.length === 2 && seg[0] === "variants" && route.method === "DELETE") {
+      return await handleDeleteVariant(db, userId, seg[1], cors);
+    }
+
+    // PUT /variants/:id/tasks — полная замена задач (атомарная RPC)
+    if (
+      seg.length === 3 && seg[0] === "variants" &&
+      seg[2] === "tasks" && route.method === "PUT"
+    ) {
+      const body = await parseJsonBody(req);
+      return await handleReplaceVariantTasks(db, userId, seg[1], body, cors);
+    }
+
+    // POST /variants/:id/duplicate — копия каталожного или своего
+    if (
+      seg.length === 3 && seg[0] === "variants" &&
+      seg[2] === "duplicate" && route.method === "POST"
+    ) {
+      return await handleDuplicateVariant(db, userId, seg[1], cors);
     }
 
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);

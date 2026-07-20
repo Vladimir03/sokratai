@@ -27,6 +27,8 @@ interface BulkActionsBarProps {
   onSelectAll: () => void;
   onDeselectAll: () => void;
   onDeselectDups: () => void;
+  /** hw-режим загрузчика: скрыть Тему/Подтему/Источник (default true — KB как раньше). */
+  showTaxonomy?: boolean;
 }
 
 export function BulkActionsBar({
@@ -39,6 +41,7 @@ export function BulkActionsBar({
   onSelectAll,
   onDeselectAll,
   onDeselectDups,
+  showTaxonomy = true,
 }: BulkActionsBarProps) {
   const [topicId, setTopicId] = useState(KEEP);
   const [subtopicId, setSubtopicId] = useState(KEEP);
@@ -103,24 +106,26 @@ export function BulkActionsBar({
 
       <span className="mx-1 hidden h-5 w-px bg-socrat-border sm:block" aria-hidden="true" />
 
-      <select
-        value={topicId}
-        disabled={disabled}
-        onChange={(e) => {
-          setTopicId(e.target.value);
-          setSubtopicId(KEEP);
-        }}
-        className={SELECT_CLASS}
-        aria-label="Тема для выбранных"
-      >
-        <option value={KEEP}>Тема: не менять</option>
-        <option value="">Тема: убрать</option>
-        {topicOptions.map((t) => (
-          <option key={t.id} value={t.id}>{t.name}</option>
-        ))}
-      </select>
+      {showTaxonomy ? (
+        <select
+          value={topicId}
+          disabled={disabled}
+          onChange={(e) => {
+            setTopicId(e.target.value);
+            setSubtopicId(KEEP);
+          }}
+          className={SELECT_CLASS}
+          aria-label="Тема для выбранных"
+        >
+          <option value={KEEP}>Тема: не менять</option>
+          <option value="">Тема: убрать</option>
+          {topicOptions.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+      ) : null}
 
-      {topicId !== KEEP && topicId !== '' ? (
+      {showTaxonomy && topicId !== KEEP && topicId !== '' ? (
         <select
           value={subtopicId}
           disabled={disabled}
@@ -149,21 +154,25 @@ export function BulkActionsBar({
         <option value="oge">ОГЭ</option>
       </select>
 
-      <input
-        type="text"
-        value={sourceLabel}
-        disabled={disabled}
-        onChange={(e) => setSourceLabel(e.target.value)}
-        list="kb-bulk-sources"
-        placeholder="Источник: не менять"
-        className={cn(SELECT_CLASS, 'w-44')}
-        aria-label="Источник для выбранных"
-      />
-      <datalist id="kb-bulk-sources">
-        {sources.map((s) => (
-          <option key={s.id} value={s.name} />
-        ))}
-      </datalist>
+      {showTaxonomy ? (
+        <>
+          <input
+            type="text"
+            value={sourceLabel}
+            disabled={disabled}
+            onChange={(e) => setSourceLabel(e.target.value)}
+            list="kb-bulk-sources"
+            placeholder="Источник: не менять"
+            className={cn(SELECT_CLASS, 'w-44')}
+            aria-label="Источник для выбранных"
+          />
+          <datalist id="kb-bulk-sources">
+            {sources.map((s) => (
+              <option key={s.id} value={s.name} />
+            ))}
+          </datalist>
+        </>
+      ) : null}
 
       <button
         type="button"

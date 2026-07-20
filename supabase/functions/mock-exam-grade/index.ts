@@ -576,24 +576,34 @@ function classifyError(error: unknown): MockExamFallbackReason {
   return "gateway_error";
 }
 
+// Фаза 2 (2026-07-20): предмет/экзамен варианта — резолвится ОДИН раз в
+// handleGrade из mock_exam_variants (subject ?? 'physics') и прокидывается в
+// оба grade-пути. До этого 'physics'/'ege' были захардкожены (variant-1 пилот).
+interface VariantSubjectCtx {
+  subject: string;
+  examType: "ege" | "oge";
+}
+
 async function gradePart2Task(
   db: SupabaseClient,
   task: VariantTaskRow,
   solution: SolutionRow,
   attemptId: string,
+  subjectCtx: VariantSubjectCtx,
   // ai-usage-logging (2026-07-06): source='mock_grade'. Undefined = no logging.
   onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<GradeOutcome> {
   const start = Date.now();
   const kimNumber = task.kim_number;
   const maxScore = task.max_score;
+  const { subject } = subjectCtx;
 
   // Parse student photo refs. photo_url may be a single storage:// ref OR a
   // JSON array (бланк-режим может позволять несколько фото на задачу).
   const photoRefs = parsePhotoUrls(solution.photo_url);
 
   if (photoRefs.length === 0) {
-    const fallback = buildFallbackDraft("no_photo", { maxScore, kimNumber });
+    const fallback = buildFallbackDraft("no_photo", { maxScore, kimNumber, subject });
     return {
       kim_number: kimNumber,
       draft: fallback,
@@ -615,7 +625,7 @@ async function gradePart2Task(
 
   if (studentPhotoDataUrls.length === 0) {
     // We had refs but couldn't inline them — fail closed instead of guessing.
-    const fallback = buildFallbackDraft("image_inline_failed", { maxScore, kimNumber });
+    const fallback = buildFallbackDraft("image_inline_failed", { maxScore, kimNumber, subject });
     console.warn(JSON.stringify({
       event: "mock_exam_grade_inline_all_failed",
       attempt_id: attemptId,
@@ -638,17 +648,16 @@ async function gradePart2Task(
     solution_text: task.solution_text,
     task_image_data_urls: taskImageDataUrls,
     student_photo_data_urls: studentPhotoDataUrls,
-    // Phase 4 (2026-05-15) — subject-rubric integration. Hardcoded `physics + ege`
-    // для mock-exams-v1 variant-1 (физика ЕГЭ). Когда добавится математический /
-    // химический пробник — extend mock_exam_variants schema с `subject` колонкой +
-    // pass из БД. См. .claude/rules/45-mock-exams.md «Mock-exams subject-rubric integration».
-    subject: "physics",
-    exam_type: "ege",
+    // Фаза 2 (2026-07-20): предмет/экзамен из mock_exam_variants (раньше
+    // хардкод physics+ege). resolveSubjectRubric внутри промпта отдаёт
+    // subject-aware методологию; физика — байт-в-байт прежний промпт.
+    subject: subjectCtx.subject,
+    exam_type: subjectCtx.examType,
   });
 
   try {
     const parsed = await callLovableJson(messages, "mock_exam_grade", { onUsage });
-    const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber });
+    const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber, subject });
     return {
       kim_number: kimNumber,
       draft,
@@ -666,7 +675,7 @@ async function gradePart2Task(
     }));
     return {
       kim_number: kimNumber,
-      draft: buildFallbackDraft(reason, { maxScore, kimNumber }),
+      draft: buildFallbackDraft(reason, { maxScore, kimNumber, subject }),
       used_fallback: reason,
       latency_ms: Date.now() - start,
     };
@@ -687,17 +696,19 @@ async function gradePart2TaskBulk(
   attemptId: string,
   assignedPhotoDataUrls: string[],
   assignedPhotoIndices: number[],
+  subjectCtx: VariantSubjectCtx,
   // ai-usage-logging (2026-07-06): source='mock_grade'. Undefined = no logging.
   onUsage?: (usage: TokenUsage | null) => void,
 ): Promise<GradeOutcome> {
   const start = Date.now();
   const kimNumber = task.kim_number;
   const maxScore = task.max_score;
+  const { subject } = subjectCtx;
 
   if (assignedPhotoDataUrls.length === 0) {
     // AI assignment didn't link any photo (или photos failed to inline).
     // Tutor увидит warning + manual override через select dropdown.
-    const fallback = buildFallbackDraft("no_photo", { maxScore, kimNumber });
+    const fallback = buildFallbackDraft("no_photo", { maxScore, kimNumber, subject });
     return {
       kim_number: kimNumber,
       draft: { ...fallback, assigned_photo_indices: assignedPhotoIndices },
@@ -722,13 +733,14 @@ async function gradePart2TaskBulk(
     solution_text: task.solution_text,
     task_image_data_urls: taskImageDataUrls,
     student_photo_data_urls: assignedPhotoDataUrls.slice(0, MAX_STUDENT_PHOTOS_PER_TASK),
-    subject: "physics",
-    exam_type: "ege",
+    // Фаза 2 (2026-07-20): предмет/экзамен из mock_exam_variants (раньше хардкод).
+    subject: subjectCtx.subject,
+    exam_type: subjectCtx.examType,
   });
 
   try {
     const parsed = await callLovableJson(messages, "mock_exam_grade_bulk", { onUsage });
-    const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber });
+    const draft = sanitizeMockExamPart2Draft(parsed, { maxScore, kimNumber, subject });
     return {
       kim_number: kimNumber,
       // Phase 6: persist photo assignment в ai_draft_json для tutor UI.
@@ -749,7 +761,7 @@ async function gradePart2TaskBulk(
     return {
       kim_number: kimNumber,
       draft: {
-        ...buildFallbackDraft(reason, { maxScore, kimNumber }),
+        ...buildFallbackDraft(reason, { maxScore, kimNumber, subject }),
         assigned_photo_indices: assignedPhotoIndices,
       },
       used_fallback: reason,
@@ -1358,6 +1370,31 @@ async function handleGrade(
     );
   }
 
+  // Фаза 2 (2026-07-20): предмет/экзамен варианта → subject-aware грейдинг
+  // Части 2 (раньше хардкод physics+ege). Легаси-строка с subject NULL →
+  // physics (единственный легальный фолбэк). Ревью 5.6 P1 #6: сбой ЧТЕНИЯ —
+  // fail-closed retryable-ошибкой (молчаливая деградация к физике грейдила бы
+  // не-физический вариант физической рубрикой и сохраняла неверный черновик).
+  // Мы ещё ДО CAS-claim'а — 500 безопасен, ретрай перезапустит грейд.
+  const { data: variantMeta, error: variantMetaErr } = await db
+    .from("mock_exam_variants")
+    .select("subject, exam_type")
+    .eq("id", assignmentRow.variant_id)
+    .maybeSingle();
+  if (variantMetaErr || !variantMeta) {
+    console.error(JSON.stringify({
+      event: "mock_exam_grade_variant_meta_failed",
+      attempt_id: attemptId,
+      error: variantMetaErr?.message ?? "variant row missing",
+    }));
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load variant subject");
+  }
+  const rawExamType = (variantMeta.exam_type as string | null) ?? "ege_physics";
+  const subjectCtx: VariantSubjectCtx = {
+    subject: (variantMeta.subject as string | null) ?? "physics",
+    examType: rawExamType.startsWith("oge") ? "oge" : "ege",
+  };
+
   // State machine: only run when submitted (start) or already ai_checking
   // (idempotent retry — defensive). Refuse already-graded attempts.
   if (attemptRow.status === "approved") {
@@ -1613,7 +1650,7 @@ async function handleGrade(
               task_text_preview: task?.task_text ?? "",
             };
           });
-          const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos);
+          const assignMessages = buildBulkAssignmentPrompt(tasksMeta, inlinedBulkPhotos, subjectCtx.subject);
           // P1 (mock-exam-grading-v2): Pass-1 router может транзиентно упасть
           // (битый JSON модели). Полагаемся на ВНУТРЕННИЙ ретрай callLovableJson
           // (35с timeout + 1 retry) — внешний ретрай убран, иначе суммарный
@@ -1743,11 +1780,12 @@ async function handleGrade(
             attemptId,
             assignedPhotos,
             assignedIndices,
+            subjectCtx,
             gradeUsageLogger,
           );
         }
         // Legacy per-kim path (Egor's pilot attempts).
-        return await gradePart2Task(db, task, solution, attemptId, gradeUsageLogger);
+        return await gradePart2Task(db, task, solution, attemptId, subjectCtx, gradeUsageLogger);
       } catch (err) {
         console.error("mock_exam_grade_unexpected_error", {
           attempt_id: attemptId,
@@ -1759,6 +1797,7 @@ async function handleGrade(
           draft: buildFallbackDraft("gateway_error", {
             maxScore: task.max_score,
             kimNumber: kim,
+            subject: subjectCtx.subject,
           }),
           used_fallback: "gateway_error" as MockExamFallbackReason,
           latency_ms: 0,

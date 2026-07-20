@@ -80,13 +80,29 @@ export interface UploadKBImageResult {
   objectPath: string;
 }
 
+/**
+ * Safari-safe object id (rule 80): `crypto.randomUUID` требует Safari 15.4+ и
+ * HTTPS — у части учеников iPhone на iOS 15.0–15.3 (наш baseline). Зеркало
+ * канонического паттерна (`tutorProfileApi.ts::generateAvatarObjectId`).
+ */
+function generateKbObjectId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // Fall through — очень старый Safari / locked-down WebView бросает.
+    }
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export async function uploadKBTaskImage(file: File): Promise<UploadKBImageResult> {
   const { data: sessionData } = await supabase.auth.getSession();
   const userId = sessionData?.session?.user?.id;
   if (!userId) throw new Error('Нет активной сессии');
 
   const ext = generateFileExt(file);
-  const uuid = crypto.randomUUID();
+  const uuid = generateKbObjectId();
   const primaryPath = `${userId}/${uuid}.${ext}`;
 
   // Try primary bucket

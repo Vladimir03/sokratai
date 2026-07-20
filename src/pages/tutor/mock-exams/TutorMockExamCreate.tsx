@@ -17,17 +17,20 @@
 //   • text-base (16px) на all inputs (iOS Safari auto-zoom prevention)
 //   • Mobile-responsive (375px+): action bar collapses, recipient list scrolls
 
-import { memo, useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { parseISO, isValid } from 'date-fns';
 import { toast } from 'sonner';
 import {
   ArrowLeft,
   Check,
+  Copy,
   Eye,
   GraduationCap,
   Link2,
   Loader2,
+  Pencil,
+  Plus,
   Users,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
@@ -44,70 +47,62 @@ import { LeadLinkSuccessDialog } from '@/components/tutor/mock-exams/LeadLinkSuc
 import {
   createMockExamAssignment,
   createMockExamInviteLink,
+  duplicateMockExamVariant,
   MockExamApiError,
 } from '@/lib/mockExamApi';
 import { useTutorStudents, useTutor, useTutorGroups } from '@/hooks/useTutor';
+import {
+  MOCK_EXAM_VARIANTS_KEY,
+  useMockExamVariants,
+  type MockExamVariantSummary,
+} from '@/hooks/useMockExamVariants';
+import { useQueryClient } from '@tanstack/react-query';
 import type { TutorStudentWithProfile } from '@/types/tutor';
 import type { MockExamMode } from '@/types/mockExam';
+import { getSubjectLabel } from '@/types/homework';
 import { cn } from '@/lib/utils';
 
-// ─── Variant catalogue (Phase 1: hardcoded) ──────────────────────────────────
-// Источник: supabase/seed/mock_exams_variant_1.sql §1. variant_id фиксирован
-// uuid5 namespace `00000000-0000-0000-0000-000000005ec0`. Когда ландят
-// ещё варианты — заменить на API fetch.
+// ─── Variant catalogue (Фаза 2, 2026-07-20: динамический) ────────────────────
+// Хардкод VARIANT_LIBRARY заменён на useMockExamVariants (PostgREST под RLS
+// «каталог ∪ мои», миграция 20260720170000). Репетитор видит две группы:
+// «Мои варианты» (owner_id = я; Редактировать / Дублировать) и «Каталог»
+// (Дублировать / Превью). ФИПИ-заглушка осталась статикой.
 
-const VARIANT_LIBRARY = [
-  {
-    id: '36cebc45-e2e8-5603-a753-01c818bba131',
-    title: 'Тренировочный 1 (физика ЕГЭ-2026)',
-    attribution: 'Источник: репетитор Егор Блинов',
-    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
-    isAvailable: true,
-    badge: 'Рекомендуем',
-  },
-  {
-    // uuid5 namespace 00000000-0000-0000-0000-000000005ec0,
-    // key "mock-exam-variant-2-egor-physics-2026" (см. scripts/build-mock-exam-seed.py).
-    // Источник: supabase/seed/mock_exams_variant_2.sql §1.
-    id: 'b3d8a2f2-c831-5b85-976f-fe50ba64d393',
-    title: 'Тренировочный 2 (физика ЕГЭ-2026)',
-    attribution: 'Источник: репетитор Егор Блинов',
-    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
-    isAvailable: true,
-    badge: 'Новый',
-  },
-  {
-    // uuid5(NS, "mock-exam-variant-5-egor-physics-2026").
-    // Микс: Часть 1 из Варианта 4, №21/22/24 из Варианта 2, №23 из Варианта 4,
-    // №25 из присланного скриншота, №26 из Варианта 1.
-    id: '03660fb4-5247-5376-a0e9-2eb5faae844e',
-    title: 'Тренировочный 5 (физика ЕГЭ-2026)',
-    attribution: 'Источник: репетитор Егор Блинов',
-    meta: '26 заданий · макс. 45 баллов · 3 ч 55 мин',
-    isAvailable: true,
-    badge: 'Новый',
-  },
-  {
-    id: 'fipi-demo-2026-placeholder',
-    title: 'Демоверсия ФИПИ-2026',
-    attribution: 'Источник: ФИПИ',
-    meta: 'Добавим после Phase 2',
-    isAvailable: false,
-    badge: 'скоро',
-  },
-] as const;
+const DEFAULT_TITLE = 'Пробник';
 
-const DEFAULT_VARIANT_ID = VARIANT_LIBRARY[0].id;
+const FIPI_PLACEHOLDER = {
+  id: 'fipi-demo-2026-placeholder',
+  title: 'Демоверсия ФИПИ-2026',
+  attribution: 'Источник: ФИПИ',
+  meta: 'Добавим позже',
+  isAvailable: false,
+  badge: 'скоро',
+} as const;
 
-// Дефолтный заголовок пробника = «Пробник <короткое имя варианта>».
-// Используется при выборе варианта, пока репетитор сам не отредактировал поле.
-const VARIANT_DEFAULT_TITLES: Record<string, string> = {
-  '36cebc45-e2e8-5603-a753-01c818bba131': 'Пробник Тренировочный 1',
-  'b3d8a2f2-c831-5b85-976f-fe50ba64d393': 'Пробник Тренировочный 2',
-  '03660fb4-5247-5376-a0e9-2eb5faae844e': 'Пробник Тренировочный 5',
-};
-const DEFAULT_TITLE = VARIANT_DEFAULT_TITLES[DEFAULT_VARIANT_ID] ?? 'Пробник';
-const DEFAULT_TITLE_VALUES = new Set(Object.values(VARIANT_DEFAULT_TITLES));
+function formatVariantDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} мин`;
+  return m === 0 ? `${h} ч` : `${h} ч ${m} мин`;
+}
+
+function formatVariantMeta(v: MockExamVariantSummary): string {
+  return `${v.task_count} заданий · макс. ${v.total_max_score} баллов · ${formatVariantDuration(v.duration_minutes)}`;
+}
+
+function variantAttribution(v: MockExamVariantSummary): string {
+  const subjectLabel = getSubjectLabel(v.subject ?? 'physics');
+  const examLabel = v.exam_type.startsWith('oge') ? 'ОГЭ' : 'ЕГЭ';
+  const source = v.owner_id !== null
+    ? 'Ваш вариант'
+    : v.source_attribution ?? 'Каталог Сократа';
+  return `${subjectLabel} · ${examLabel} · ${source}`;
+}
+
+/** Дефолтный заголовок пробника для выбранного варианта. */
+function variantDefaultTitle(v: MockExamVariantSummary | undefined): string {
+  return v ? `Пробник ${v.title}`.slice(0, 200) : DEFAULT_TITLE;
+}
 const DURATION_HINT = 'Стандартный пробник занимает 3 ч 55 мин';
 
 // ─── Mode options ────────────────────────────────────────────────────────────
@@ -221,6 +216,8 @@ interface VariantCardProps {
   isSelected: boolean;
   onSelect?: () => void;
   onPreview?: () => void;
+  /** Фаза 2: действия карточки (Редактировать/Дублировать) — ряд с превью. */
+  actions?: React.ReactNode;
 }
 
 const VariantCard = memo(function VariantCard({
@@ -232,6 +229,7 @@ const VariantCard = memo(function VariantCard({
   isSelected,
   onSelect,
   onPreview,
+  actions,
 }: VariantCardProps) {
   const selectable = isAvailable && !isSelected && Boolean(onSelect);
   return (
@@ -296,19 +294,25 @@ const VariantCard = memo(function VariantCard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">{attribution}</p>
           <p className="text-xs text-muted-foreground/80 mt-0.5">{meta}</p>
-          {isAvailable && onPreview ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onPreview();
-              }}
-              className="mt-2 inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-accent/40 hover:text-accent dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-              aria-label="Посмотреть условия задач этого варианта"
+          {isAvailable && (onPreview || actions) ? (
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
             >
-              <Eye className="h-3.5 w-3.5" aria-hidden="true" />
-              Посмотреть условия задач
-            </button>
+              {onPreview ? (
+                <button
+                  type="button"
+                  onClick={onPreview}
+                  className="inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-accent/40 hover:text-accent dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                  aria-label="Посмотреть условия задач этого варианта"
+                >
+                  <Eye className="h-3.5 w-3.5" aria-hidden="true" />
+                  Посмотреть условия задач
+                </button>
+              ) : null}
+              {actions}
+            </div>
           ) : null}
         </div>
         {isSelected && isAvailable && (
@@ -463,18 +467,32 @@ const RecipientRow = memo(function RecipientRow({
 
 function TutorMockExamCreateContent() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
 
   const { tutor } = useTutor();
   const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
   const { students, loading: studentsLoading } = useTutorStudents();
   const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
+  // Фаза 2: варианты из БД (каталог ∪ мои) вместо хардкода.
+  const {
+    variants,
+    loading: variantsLoading,
+    error: variantsError,
+    refetch: refetchVariants,
+  } = useMockExamVariants();
 
-  const [variantId, setVariantId] = useState<string>(DEFAULT_VARIANT_ID);
+  // `?variant=` — deep-link из редактора варианта («Создать вариант» → сразу
+  // выбран в списке). Пустая строка = ждём авто-выбор после загрузки списка.
+  const [variantId, setVariantId] = useState<string>(() => searchParams.get('variant') ?? '');
   // TASK-11: mode чooser скрыт. Default 'form' — пробник создаётся в нейтральном
   // режиме, ученик выбирает blank/form сам на taking page. Tutor НЕ навязывает.
   // assignment.mode остаётся в схеме для manual_entry flow + backward compat.
   const [mode] = useState<Exclude<MockExamMode, 'manual_entry'>>('form');
   const [title, setTitle] = useState(DEFAULT_TITLE);
+  // Текущий АВТО-заголовок: если поле всё ещё равно ему (тутор не правил) —
+  // смена варианта подставляет новый дефолт (замена прежнего DEFAULT_TITLE_VALUES).
+  const autoTitleRef = useRef<string>(DEFAULT_TITLE);
   const [deadlineInput, setDeadlineInput] = useState('');
   const [createLeadLink, setCreateLeadLink] = useState(false);
   // AC-P10 Phase 2 (PAUSE-7, 2026-05-25): default execution mode для new attempts.
@@ -498,20 +516,60 @@ function TutorMockExamCreateContent() {
   // FIX-2: variant preview drawer.
   const [previewVariantId, setPreviewVariantId] = useState<string | null>(null);
 
-  // Выбор варианта (V2+). Если репетитор не редактировал заголовок вручную
-  // (он всё ещё равен дефолту какого-то варианта) — подставляем дефолтный
-  // заголовок выбранного варианта. Иначе оставляем кастомный заголовок.
-  const handleSelectVariant = useCallback((nextId: string) => {
-    setVariantId(nextId);
-    const nextDefaultTitle = VARIANT_DEFAULT_TITLES[nextId];
-    if (nextDefaultTitle) {
-      setTitle((prev) =>
-        DEFAULT_TITLE_VALUES.has(prev.trim()) || prev.trim() === ''
-          ? nextDefaultTitle
-          : prev,
-      );
-    }
+  // Выбор варианта. Если репетитор не редактировал заголовок вручную (поле всё
+  // ещё равно текущему авто-заголовку) — подставляем дефолт нового варианта.
+  const applyAutoTitle = useCallback((variant: MockExamVariantSummary | undefined) => {
+    const nextDefault = variantDefaultTitle(variant);
+    setTitle((prev) =>
+      prev.trim() === autoTitleRef.current || prev.trim() === '' ? nextDefault : prev,
+    );
+    autoTitleRef.current = nextDefault;
   }, []);
+
+  const handleSelectVariant = useCallback(
+    (nextId: string) => {
+      setVariantId(nextId);
+      applyAutoTitle(variants.find((v) => v.id === nextId));
+    },
+    [variants, applyAutoTitle],
+  );
+
+  // Авто-выбор после загрузки списка (один раз): `?variant=` из редактора →
+  // иначе первый каталожный → иначе первый. Set-once ref — НЕ клоббер
+  // (конвенция конструкторов: никаких эффектов, перетирающих выбор тутора).
+  const autoSelectedRef = useRef(false);
+  useEffect(() => {
+    if (autoSelectedRef.current || variantsLoading || variants.length === 0) return;
+    autoSelectedRef.current = true;
+    const requested = variantId ? variants.find((v) => v.id === variantId) : undefined;
+    if (requested) {
+      applyAutoTitle(requested);
+      return;
+    }
+    const first = variants.find((v) => v.owner_id === null) ?? variants[0];
+    setVariantId(first.id);
+    applyAutoTitle(first);
+  }, [variantsLoading, variants, variantId, applyAutoTitle]);
+
+  // Дублировать вариант (каталожный или свой) → сразу в редактор копии.
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const handleDuplicateVariant = useCallback(
+    async (id: string) => {
+      if (duplicatingId) return;
+      setDuplicatingId(id);
+      try {
+        const res = await duplicateMockExamVariant(id);
+        void queryClient.invalidateQueries({ queryKey: MOCK_EXAM_VARIANTS_KEY });
+        toast.success('Копия создана — правьте её свободно');
+        navigate(`/tutor/mock-exams/variants/${res.variant_id}/edit`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Не удалось создать копию');
+      } finally {
+        setDuplicatingId(null);
+      }
+    },
+    [duplicatingId, queryClient, navigate],
+  );
 
   // FIX-4a: lead-link success dialog. После создания пробника+invite-link мы
   // навигируем на detail только когда репетитор закроет модалку (или нажмёт
@@ -693,34 +751,107 @@ function TutorMockExamCreateContent() {
         </p>
       </div>
 
-      {/* Шаг 1 — Вариант */}
+      {/* Шаг 1 — Вариант (Фаза 2: динамический — «Мои» + «Каталог») */}
       <StepSection index={1} title="Вариант">
-        <div className="space-y-2">
-          {VARIANT_LIBRARY.map((variant) => (
-            <VariantCard
-              key={variant.id}
-              title={variant.title}
-              attribution={variant.attribution}
-              meta={variant.meta}
-              badge={variant.badge}
-              isAvailable={variant.isAvailable}
-              isSelected={variantId === variant.id}
-              onSelect={
-                variant.isAvailable
-                  ? () => handleSelectVariant(variant.id)
-                  : undefined
-              }
-              onPreview={
-                variant.isAvailable
-                  ? () => setPreviewVariantId(variant.id)
-                  : undefined
-              }
-            />
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground/80 pt-1">
-          Скоро здесь появятся «Из моей базы знаний» и «Создать вручную».
-        </p>
+        {variantsLoading ? (
+          <div className="space-y-2">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-24 w-full" />
+          </div>
+        ) : variantsError && variants.length === 0 ? (
+          // Ревью 5.6 P2 #9: ошибка загрузки НЕ маскируется под пустой каталог —
+          // нейтральный текст (rule 95: без обвинения сети) + повтор.
+          <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center">
+            <p className="text-sm text-muted-foreground">
+              Не удалось загрузить варианты. Попробуйте ещё раз.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => void refetchVariants()}>
+              Повторить
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {(() => {
+              const myVariants = variants.filter((v) => v.owner_id !== null);
+              const catalogVariants = variants.filter((v) => v.owner_id === null);
+              const renderVariant = (variant: MockExamVariantSummary, isMine: boolean) => (
+                <VariantCard
+                  key={variant.id}
+                  title={variant.title}
+                  attribution={variantAttribution(variant)}
+                  meta={formatVariantMeta(variant)}
+                  badge={isMine ? 'Мой' : 'Каталог'}
+                  isAvailable
+                  isSelected={variantId === variant.id}
+                  onSelect={() => handleSelectVariant(variant.id)}
+                  onPreview={() => setPreviewVariantId(variant.id)}
+                  actions={
+                    <>
+                      {isMine ? (
+                        <Link
+                          to={`/tutor/mock-exams/variants/${variant.id}/edit`}
+                          className="inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-accent/40 hover:text-accent dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                          Редактировать
+                        </Link>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={duplicatingId !== null}
+                        onClick={() => void handleDuplicateVariant(variant.id)}
+                        className="inline-flex min-h-9 touch-manipulation items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                        aria-label="Создать редактируемую копию варианта"
+                      >
+                        {duplicatingId === variant.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                        )}
+                        Дублировать
+                      </button>
+                    </>
+                  }
+                />
+              );
+              return (
+                <>
+                  {myVariants.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Мои варианты
+                      </p>
+                      {myVariants.map((v) => renderVariant(v, true))}
+                    </div>
+                  ) : null}
+                  <div className="space-y-2">
+                    {myVariants.length > 0 ? (
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        Каталог
+                      </p>
+                    ) : null}
+                    {catalogVariants.map((v) => renderVariant(v, false))}
+                    <VariantCard
+                      title={FIPI_PLACEHOLDER.title}
+                      attribution={FIPI_PLACEHOLDER.attribution}
+                      meta={FIPI_PLACEHOLDER.meta}
+                      badge={FIPI_PLACEHOLDER.badge}
+                      isAvailable={FIPI_PLACEHOLDER.isAvailable}
+                      isSelected={false}
+                    />
+                  </div>
+                </>
+              );
+            })()}
+            <Link
+              to="/tutor/mock-exams/variants/new"
+              className="flex min-h-11 touch-manipulation items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-white px-4 py-3 text-sm font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Создать свой вариант
+            </Link>
+          </div>
+        )}
       </StepSection>
 
       {/* Шаг 2 — Режим прохождения СКРЫТ (TASK-11): ученик выбирает способ ответа

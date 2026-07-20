@@ -34,6 +34,8 @@ interface DraftRowProps {
   subject: string;
   topics: KBTopicWithCounts[];
   disabled: boolean;
+  /** hw-режим загрузчика: колонка «Тема» скрыта (KB-таксономия не нужна в ДЗ). */
+  showTopicColumn: boolean;
   onToggleSelect: (i: number) => void;
   onToggleExpand: (i: number) => void;
   onRemove: (i: number) => void;
@@ -52,6 +54,7 @@ const DraftRow = memo(function DraftRow({
   subject,
   topics,
   disabled,
+  showTopicColumn,
   onToggleSelect,
   onToggleExpand,
   onRemove,
@@ -161,23 +164,25 @@ const DraftRow = memo(function DraftRow({
             aria-label={`Балл задачи ${index + 1}`}
           />
         </td>
-        {/* Тема */}
-        <td className="px-1.5 py-2">
-          <select
-            value={override.topicId ?? ''}
-            disabled={disabled}
-            onChange={(e) =>
-              onChangeOverride(index, { topicId: e.target.value || null, subtopicId: null })
-            }
-            className={cn(CELL_INPUT_CLASS, topicUnmatched && 'border-amber-300 bg-amber-50/40')}
-            aria-label={`Тема задачи ${index + 1}`}
-          >
-            <option value="">{topicUnmatched ? `AI: «${draft.topic_suggestion}»` : 'Не выбрана'}</option>
-            {topicOptions.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-        </td>
+        {/* Тема (скрыта в hw-режиме) */}
+        {showTopicColumn ? (
+          <td className="px-1.5 py-2">
+            <select
+              value={override.topicId ?? ''}
+              disabled={disabled}
+              onChange={(e) =>
+                onChangeOverride(index, { topicId: e.target.value || null, subtopicId: null })
+              }
+              className={cn(CELL_INPUT_CLASS, topicUnmatched && 'border-amber-300 bg-amber-50/40')}
+              aria-label={`Тема задачи ${index + 1}`}
+            >
+              <option value="">{topicUnmatched ? `AI: «${draft.topic_suggestion}»` : 'Не выбрана'}</option>
+              {topicOptions.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </td>
+        ) : null}
         {/* Статус */}
         <td className="px-1.5 py-2.5">
           <span className="flex flex-wrap items-center gap-1">
@@ -271,6 +276,8 @@ interface DraftTableProps {
   onChangeOverride: (i: number, patch: Partial<ReviewOverrides>) => void;
   /** Expand-row content (DraftCard) — рендерит родитель. */
   renderExpanded: (i: number) => React.ReactNode;
+  /** hw-режим загрузчика: колонка «Тема» скрыта (default true — KB как раньше). */
+  showTopicColumn?: boolean;
 }
 
 export function DraftTable({
@@ -290,7 +297,11 @@ export function DraftTable({
   onChangeDraft,
   onChangeOverride,
   renderExpanded,
+  showTopicColumn = true,
 }: DraftTableProps) {
+  const headLabels = showTopicColumn
+    ? ['', '№', 'Условие', 'Ответ', 'Экзамен', 'КИМ', 'Балл', 'Тема', 'Статус', '']
+    : ['', '№', 'Условие', 'Ответ', 'Экзамен', 'КИМ', 'Балл', 'Статус', ''];
   return (
     // Свой вертикальный вьюпорт (ревью P2): `overflow-x-auto` делал контейнер
     // вертикальным scroll-блоком нулевой прокрутки → sticky-заголовок уезжал со
@@ -309,22 +320,20 @@ export function DraftTable({
           <col style={{ width: '90px' }} />
           <col style={{ width: '70px' }} />
           <col style={{ width: '80px' }} />
-          <col style={{ width: '190px' }} />
+          {showTopicColumn ? <col style={{ width: '190px' }} /> : null}
           <col style={{ width: '130px' }} />
           <col style={{ width: '68px' }} />
         </colgroup>
         <thead>
           <tr>
-            {['', '№', 'Условие', 'Ответ', 'Экзамен', 'КИМ', 'Балл', 'Тема', 'Статус', ''].map(
-              (label, i) => (
-                <th
-                  key={i}
-                  className="sticky top-0 z-10 border-b border-socrat-border bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500"
-                >
-                  {label}
-                </th>
-              ),
-            )}
+            {headLabels.map((label, i) => (
+              <th
+                key={i}
+                className="sticky top-0 z-10 border-b border-socrat-border bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                {label}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -342,6 +351,7 @@ export function DraftTable({
                 subject={subject}
                 topics={topics}
                 disabled={disabled}
+                showTopicColumn={showTopicColumn}
                 onToggleSelect={onToggleSelect}
                 onToggleExpand={onToggleExpand}
                 onRemove={onRemove}
@@ -365,7 +375,10 @@ function FragmentRow(props: DraftRowProps & { renderExpanded: (i: number) => Rea
       <DraftRow {...rowProps} />
       {props.expanded ? (
         <tr>
-          <td colSpan={10} className="border-b border-socrat-border/60 bg-socrat-surface/40 p-3">
+          <td
+            colSpan={props.showTopicColumn ? 10 : 9}
+            className="border-b border-socrat-border/60 bg-socrat-surface/40 p-3"
+          >
             {renderExpanded(props.index)}
           </td>
         </tr>
