@@ -2846,6 +2846,7 @@ export type Database = {
           last_diagnostic_score: number | null
           last_sign_in_at: string | null
           last_streak_update: string | null
+          learner_type: string | null
           learning_goal: string | null
           onboarding_completed: boolean | null
           promo_code: string | null
@@ -2877,6 +2878,7 @@ export type Database = {
           last_diagnostic_score?: number | null
           last_sign_in_at?: string | null
           last_streak_update?: string | null
+          learner_type?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
@@ -2908,6 +2910,7 @@ export type Database = {
           last_diagnostic_score?: number | null
           last_sign_in_at?: string | null
           last_streak_update?: string | null
+          learner_type?: string | null
           learning_goal?: string | null
           onboarding_completed?: boolean | null
           promo_code?: string | null
@@ -4874,6 +4877,7 @@ export type Database = {
           tutor_telegram_id: string
         }[]
       }
+      get_student_onboarding_context: { Args: never; Returns: Json }
       get_students_contact_info: {
         Args: { student_ids: string[] }
         Returns: {
