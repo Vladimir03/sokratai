@@ -439,28 +439,51 @@ Deno.serve(async (req) => {
     // Step 3: Create user if not found
     if (!studentId) {
       // Короткий уникальный логин, если репетитор не задал email (Егор 2026-07-20).
-      // Pre-check уникальности → сгенерированный email не уйдёт в email_exists-ветку
-      // ниже (та трактует совпадение как «уже зарегистрирован» = чужой аккаунт).
-      const userEmail = email || (await generateUniqueShortTempEmail(supabaseAdmin));
+      const emailWasGenerated = !email;
+      let userEmail = email || (await generateUniqueShortTempEmail(supabaseAdmin));
       const randomPassword = generatePassword();
       isNewUser = true;
       loginEmail = userEmail;
       plainPassword = randomPassword;
 
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      let { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: userEmail,
         email_confirm: true,
         password: randomPassword,
         user_metadata: { username: name },
       });
 
+      // TOCTOU-гард (P2 ревью 5.6): для СГЕНЕРИРОВАННОГО email коллизия в узком
+      // окне между pre-check и createUser НЕ должна уходить в re-resolve ниже —
+      // иначе привязали бы репетитора к ЧУЖОМУ аккаунту (cross-tenant). Вместо
+      // этого регенерируем адрес и пробуем снова (тьютор-заданный email — прежний
+      // путь re-resolve). Коллизия ~3.6×10⁻¹¹, но failure-mode тяжёлый.
+      if ((authError || !authData?.user) && emailWasGenerated) {
+        const collided =
+          (authError as any)?.code === "email_exists" ||
+          authError?.message?.includes("already been registered");
+        for (let retry = 0; collided && retry < 3 && (authError || !authData?.user); retry++) {
+          userEmail = await generateUniqueShortTempEmail(supabaseAdmin);
+          loginEmail = userEmail;
+          ({ data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+            email: userEmail,
+            email_confirm: true,
+            password: randomPassword,
+            user_metadata: { username: name },
+          }));
+        }
+      }
+
       if (authError || !authData.user) {
         const alreadyRegistered =
           (authError as any)?.code === "email_exists" ||
           authError?.message?.includes("already been registered");
 
-        if (alreadyRegistered) {
-          console.log("Auth user already exists for email:", userEmail);
+        // Re-resolve на существующий аккаунт — ТОЛЬКО для тьютор-заданного email
+        // (сгенерированный сюда не дойдёт: его коллизия обработана регенерацией
+        // выше, а исчерпание ретраев — это уже не «чужой аккаунт», а инфраструктура).
+        if (alreadyRegistered && !emailWasGenerated) {
+          console.log("Auth user already exists for tutor-provided email");
           // Race or stale lookup: re-resolve via SECURITY DEFINER RPC.
           const { data: raceId } = await supabaseAdmin
             .rpc("find_auth_user_id_by_email", { p_email: userEmail });

@@ -63,6 +63,11 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
   const [selectedGoal, setSelectedGoal] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Гард от двойного тапа (P1 ревью 5.6): два тапа за 250 мс инкрементили stepIdx
+  // дважды → пропуск шага / currentStep=undefined (модалка залипала). Пока идёт
+  // переход — новые тапы игнорируются; сбрасывается на смене шага.
+  const [advancing, setAdvancing] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [startedAt] = useState(new Date().toISOString());
 
   // Загрузка контекста при открытии.
@@ -110,53 +115,77 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
   const finalize = async (patch: Record<string, unknown>) => {
     if (!userId) return;
     setIsSubmitting(true);
-    try {
-      await supabase
-        .from("profiles")
-        .update({ ...patch, onboarding_completed: true } as never)
-        .eq("id", userId);
+    setSaveError(null);
 
-      await supabase.from("onboarding_analytics").insert({
-        user_id: userId,
-        source: "web",
-        grade: (patch.grade as number | null) ?? ctx?.grade ?? null,
-        subject: (patch.difficult_subject as string | null) ?? ctx?.difficult_subject ?? null,
-        goal: (patch.learning_goal as string | null) ?? ctx?.learning_goal ?? null,
-        started_at: startedAt,
-        completed_at: new Date().toISOString(),
-      } as never);
-
-      onComplete();
-    } catch (error) {
-      console.error("Error saving onboarding:", error);
-    } finally {
+    // Supabase возвращает { error }, а НЕ бросает (P1 ревью 5.6: try/catch тут не
+    // ловил). Сбой профильного апдейта → НЕ завершаем онбординг и НЕ пишем
+    // аналитику (иначе deploy-skew/сеть/RLS → ответы потеряны, onboarding_completed
+    // не проставлен, модалка вернётся). Аналитика — best-effort.
+    const { error: updErr } = await supabase
+      .from("profiles")
+      .update({ ...patch, onboarding_completed: true } as never)
+      .eq("id", userId);
+    if (updErr) {
+      console.error(JSON.stringify({ event: "onboarding_profile_update_failed", error: updErr.message }));
+      setSaveError("Не удалось сохранить. Проверь интернет и попробуй ещё раз.");
       setIsSubmitting(false);
+      setAdvancing(false);
+      return;
     }
+
+    const { error: aErr } = await supabase.from("onboarding_analytics").insert({
+      user_id: userId,
+      source: "web",
+      grade: (patch.grade as number | null) ?? ctx?.grade ?? null,
+      subject: (patch.difficult_subject as string | null) ?? ctx?.difficult_subject ?? null,
+      goal: (patch.learning_goal as string | null) ?? ctx?.learning_goal ?? null,
+      started_at: startedAt,
+      completed_at: new Date().toISOString(),
+    } as never);
+    if (aErr) console.warn(JSON.stringify({ event: "onboarding_analytics_failed", error: aErr.message }));
+
+    onComplete();
+    setIsSubmitting(false);
   };
 
-  const advance = () => setStepIdx((i) => i + 1);
   const isLast = stepIdx >= steps.length - 1;
 
+  // Абсолютный переход на следующий шаг (НЕ инкремент — иначе двойной тап +2).
+  const goToNextStep = () => {
+    setAdvancing(true);
+    const target = stepIdx + 1;
+    setTimeout(() => {
+      setStepIdx(target);
+      setAdvancing(false);
+    }, 250);
+  };
+
   const handleLevelPick = (kind: "school" | "adult", grade?: number) => {
+    if (advancing || isSubmitting) return;
     setLearnerType(kind);
     setSelectedGrade(kind === "school" ? (grade ?? null) : null);
     if (isLast) {
+      setAdvancing(true);
       void finalize(buildPatchWith({ level: { kind, grade } }));
     } else {
-      setTimeout(advance, 250);
+      goToNextStep();
     }
   };
 
   const handleSubjectPick = (subject: string) => {
+    if (advancing || isSubmitting) return;
     setSelectedSubject(subject);
     if (isLast) {
+      setAdvancing(true);
       void finalize(buildPatchWith({ subject }));
     } else {
-      setTimeout(advance, 250);
+      goToNextStep();
     }
   };
 
   const handleGoalPick = (goal: string) => {
+    if (advancing || isSubmitting) return;
+    setAdvancing(true);
     setSelectedGoal(goal);
     void finalize(buildPatchWith({ goal }));
   };
@@ -189,7 +218,7 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
   }) => (
     <button
       onClick={onClick}
-      disabled={isSubmitting}
+      disabled={isSubmitting || advancing}
       style={{ touchAction: "manipulation" }}
       className={cn(
         "flex items-center gap-3 p-4 rounded-xl border-2 transition-colors w-full text-left min-h-[44px]",
@@ -231,6 +260,12 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
           <>
             <ProgressDots />
 
+            {saveError && (
+              <p className="mb-3 rounded-lg bg-destructive/10 px-3 py-2 text-center text-sm text-destructive">
+                {saveError}
+              </p>
+            )}
+
             {currentStep === "level" && (
               <div className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-200">
                 <div className="text-center mb-6">
@@ -244,7 +279,7 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
                     <button
                       key={g}
                       onClick={() => handleLevelPick("school", g)}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || advancing}
                       style={{ touchAction: "manipulation" }}
                       className={cn(
                         "flex items-center justify-center rounded-xl border-2 py-3 text-sm font-medium transition-colors min-h-[44px]",
@@ -257,7 +292,7 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
                 </div>
                 <button
                   onClick={() => handleLevelPick("adult")}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || advancing}
                   style={{ touchAction: "manipulation" }}
                   className={cn(
                     "flex items-center justify-center gap-2 rounded-xl border-2 py-3 w-full text-sm font-medium transition-colors min-h-[44px]",

@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
     // клиент держит мёртвые токены и разлогинивается на первом edge-запросе
     // (баг «вылет на выборе класса», Егор 2026-07-20). Клиент делает setSession.
     // Fail-soft: null → клиент останется на старой (как до фикса).
-    const session = await mintFreshSession(admin, SUPABASE_URL, SUPABASE_ANON_KEY, targetEmail);
+    const session = await mintFreshSession(admin, SUPABASE_URL, SUPABASE_ANON_KEY, targetEmail, user.id);
 
     return json({ ok: true, email: targetEmail, session });
   } catch (e) {

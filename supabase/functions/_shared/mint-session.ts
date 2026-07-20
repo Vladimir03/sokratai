@@ -18,14 +18,21 @@ export interface MintedSession {
  *
  * Fail-soft: любой сбой → null (клиент остаётся на старой сессии — не хуже, чем
  * без фикса; логируем PII-free).
+ *
+ * `expectedUserId` ОБЯЗАТЕЛЕН (P2 ревью 5.6): при конкурентной смене email
+ * (A→B параллельно со сменой пароля по устаревшему снимку A) магиклинк по A мог
+ * бы, в теории, попасть на чужой аккаунт, которому A уже переприсвоили. Сверяем
+ * `verifyData.user.id === expectedUserId` — иначе НЕ отдаём сессию.
  */
 export async function mintFreshSession(
   admin: ReturnType<typeof createClient>,
   supabaseUrl: string,
   anonKey: string,
   email: string,
+  expectedUserId: string,
 ): Promise<MintedSession | null> {
   try {
+    if (!email || !expectedUserId) return null;
     const { data: linkData, error: genErr } = await admin.auth.admin.generateLink({
       type: "magiclink",
       email,
@@ -44,6 +51,11 @@ export async function mintFreshSession(
     });
     if (verifyErr || !verifyData?.session) {
       console.error(JSON.stringify({ event: "mint_session_verify_failed", error: verifyErr?.message ?? "no_session" }));
+      return null;
+    }
+    // Идентити-гард: сминченная сессия ОБЯЗАНА принадлежать тому же user.id.
+    if (verifyData.user?.id !== expectedUserId) {
+      console.error(JSON.stringify({ event: "mint_session_identity_mismatch" }));
       return null;
     }
     return {

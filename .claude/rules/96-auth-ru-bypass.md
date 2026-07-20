@@ -406,6 +406,16 @@ deriveIntendedRole path-guard, findOrCreateUser, mintSession, assignTutorRoleIfN
 - **`email-verify`** — `ALLOWED_TYPES = {signup, magiclink, recovery}` (обязан совпадать с `REWRITE_TYPES` хука). Для `recovery`: role/consent-финализация **пропускается** (существующий аккаунт; фатальный `role_failed` не должен ронять сброс), fallback redirect = `/reset-password`.
 - **`ResetPassword.tsx`** — 3-state gate `checking|ready|invalid`: **НЕ полагаться на `PASSWORD_RECOVERY`** (событие стреляет при парсе hash ДО маунта lazy-страницы); любая сессия → форма, `INITIAL_SESSION` без сессии → карточка «ссылка истекла» + CTA `/forgot-password`; читает `?email_verify_error=` через `readAuthRedirectError`. После смены пароля — `signOut()` → `/login`.
 
+## Смена пароля отзывает сессию → минтить свежую (КРИТИЧНО, 2026-07-20)
+
+**Инвариант: любой `admin.updateUserById({password})` для ЗАЛОГИНЕННОГО пользователя ОБЯЗАН вернуть свежую сессию, а клиент — `setSession`.** GoTrue при смене пароля **удаляет ВСЕ session-строки**; access-token несёт `session_id` → мгновенно мёртв на GoTrue-валидирующих endpoint'ах (edge, `/auth/v1/user`), хотя PostgREST (только подпись+exp) ещё живёт. Симптом: ученик разлогинивается на СЛЕДУЮЩЕМ edge-запросе после регистрации/смены пароля (репорт Егора: «вылет на выборе класса»; клик по классу = 0 сетевых, просто экран поверх гонки 401→refresh-fail→signOut). ВПН — регулятор таймингов, не причина.
+
+- **Канон — `_shared/mint-session.ts::mintFreshSession(admin, url, anonKey, email, expectedUserId)`**: `generateLink(magiclink)` → `verifyOtp` (паттерн `student-claim`) + **identity-гард `verifyData.user.id === expectedUserId`** (P2 ревью 5.6: конкурентная смена email могла бы отдать чужую сессию → при mismatch возвращаем null). Fail-soft: null → клиент на старой (не хуже).
+- **Клиент ОБЯЗАН `setSession`** из ответа (`StudentClaimPage.handleRegister`, `Profile.tsx` смена пароля). Без этого фикс не работает — держит мёртвые токены.
+- **`student-account` перечитывает АКТУАЛЬНЫЙ email** (`getUserById(user.id)`) перед минтом (снимок `user.email` мог устареть при гонке смены email).
+- **Покрыто:** `student-register`, `student-account/update-password`. **Латентно так же (follow-up):** `tutor-account` (пароль репетитора), `tutor-manual-add-student` `reset-student-password` (кикает ученика с его устройства) — тот же `mintFreshSession`-паттерн при доработке.
+- **Deploy:** `student-account` ОБЯЗАН быть в deploy-workflow (был пропущен — P1 ревью; фронт ждёт `data.session`, старый edge вернул бы только `{success:true}` → разлогин остаётся).
+
 ## Инвайт залогиненного ученика — one-click claim (2026-07-14)
 
 `InvitePage` (`/invite/:code`) на маунте проверяет `getSession()` + best-effort `rpc('is_tutor')`: сессия ученика → карточка «Присоединиться к репетитору {имя}» (прямой `claimInvite`, `already_linked` = успех); сессия репетитора → предупреждение + «Выйти» (авто-claim для tutor запрещён). Ветки «email уже зарегистрирован» ОБЯЗАНЫ сохранять `pending_invite_code` в localStorage + переключать на login-режим — иначе привязка теряется навсегда (баг 2026-07-14: QR-инвайт зарегистрированного ученика молча не привязывал).

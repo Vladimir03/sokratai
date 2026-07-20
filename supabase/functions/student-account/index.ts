@@ -135,7 +135,13 @@ Deno.serve(async (req) => {
       // Смена пароля отозвала все сессии ученика (GoTrue) → минтим свежую, иначе
       // ученик разлогинится на следующем edge-запросе (тот же класс бага, что и
       // student-register — фикс 2026-07-20). Клиент делает setSession.
-      const session = await mintFreshSession(supabaseAdmin, SUPABASE_URL, SUPABASE_ANON_KEY, user.email ?? "");
+      // Перечитываем АКТУАЛЬНЫЙ email по user.id (P2 ревью 5.6: конкурентная смена
+      // email могла сделать снимок `user.email` устаревшим) + identity-гард внутри.
+      const { data: freshUser } = await supabaseAdmin.auth.admin.getUserById(user.id);
+      const currentEmail = freshUser?.user?.email ?? user.email ?? "";
+      const session = await mintFreshSession(
+        supabaseAdmin, SUPABASE_URL, SUPABASE_ANON_KEY, currentEmail, user.id,
+      );
 
       return jsonResponse(200, { success: true, session });
     }
