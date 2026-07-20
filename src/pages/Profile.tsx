@@ -413,7 +413,7 @@ const Profile = () => {
     try {
       setSavingPassword(true);
 
-      const { error } = await supabase.functions.invoke("student-account", {
+      const { data, error } = await supabase.functions.invoke("student-account", {
         body: {
           action: "update-password",
           password: newPassword,
@@ -422,6 +422,16 @@ const Profile = () => {
 
       if (error) {
         throw error;
+      }
+
+      // Смена пароля отозвала старую сессию (GoTrue) — ставим свежую, иначе
+      // ученик разлогинится на следующем запросе (фикс 2026-07-20).
+      const session = (data as { session?: { access_token: string; refresh_token: string } })?.session;
+      if (session?.access_token && session?.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
       }
 
       setNewPassword("");

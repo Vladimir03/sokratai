@@ -18,6 +18,7 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { logAnalyticsEventOnce } from "../_shared/analytics.ts";
+import { mintFreshSession } from "../_shared/mint-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -208,7 +209,13 @@ Deno.serve(async (req) => {
       { student_id: user.id },
     );
 
-    return json({ ok: true, email: targetEmail });
+    // Смена пароля отозвала ВСЕ сессии ученика (GoTrue) → минтим свежую, иначе
+    // клиент держит мёртвые токены и разлогинивается на первом edge-запросе
+    // (баг «вылет на выборе класса», Егор 2026-07-20). Клиент делает setSession.
+    // Fail-soft: null → клиент останется на старой (как до фикса).
+    const session = await mintFreshSession(admin, SUPABASE_URL, SUPABASE_ANON_KEY, targetEmail);
+
+    return json({ ok: true, email: targetEmail, session });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(JSON.stringify({ event: "student_register_error", error: msg }));

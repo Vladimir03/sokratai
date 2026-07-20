@@ -44,8 +44,15 @@ export async function claimStudentByToken(token: string, channel = 'link'): Prom
   return data as ClaimResult;
 }
 
+export interface RegisterStudentResult {
+  ok: boolean;
+  email: string;
+  /** Свежая сессия (смена пароля отозвала старую) — клиент ОБЯЗАН setSession. */
+  session?: { access_token: string; refresh_token: string; expires_in: number } | null;
+}
+
 /** POST student-register — доустановка email+пароля поверх claim-сессии. */
-export async function registerStudent(email: string, password: string): Promise<{ ok: boolean; email: string }> {
+export async function registerStudent(email: string, password: string): Promise<RegisterStudentResult> {
   const { data, error } = await supabase.functions.invoke('student-register', {
     body: { email, password },
   });
@@ -53,7 +60,7 @@ export async function registerStudent(email: string, password: string): Promise<
     const { message, code } = await extractEdgeFunctionError(error, data, 'Не удалось сохранить доступ');
     throwWithCode(message, code);
   }
-  return data as { ok: boolean; email: string };
+  return data as RegisterStudentResult;
 }
 
 /** POST student-otp-request — RU-safe magic-link на email (нейтральный ответ). */

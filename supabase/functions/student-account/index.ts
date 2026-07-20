@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { mintFreshSession } from "../_shared/mint-session.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -131,7 +132,12 @@ Deno.serve(async (req) => {
         return jsonResponse(500, { error: updatePasswordError.message || "Failed to update password" });
       }
 
-      return jsonResponse(200, { success: true });
+      // Смена пароля отозвала все сессии ученика (GoTrue) → минтим свежую, иначе
+      // ученик разлогинится на следующем edge-запросе (тот же класс бага, что и
+      // student-register — фикс 2026-07-20). Клиент делает setSession.
+      const session = await mintFreshSession(supabaseAdmin, SUPABASE_URL, SUPABASE_ANON_KEY, user.email ?? "");
+
+      return jsonResponse(200, { success: true, session });
     }
 
     return jsonResponse(400, { error: "Unknown action" });

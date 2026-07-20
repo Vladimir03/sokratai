@@ -115,7 +115,15 @@ export default function StudentClaimPage() {
     setErrorMsg('');
     setSubmitting(true);
     try {
-      await registerStudent(email.trim(), password);
+      const res = await registerStudent(email.trim(), password);
+      // Смена пароля отозвала старую сессию — ставим свежую, иначе ученик
+      // разлогинится на следующем экране (баг «вылет на выборе класса»).
+      if (res.session?.access_token && res.session?.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: res.session.access_token,
+          refresh_token: res.session.refresh_token,
+        });
+      }
       goToTask();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Не удалось сохранить доступ.');
