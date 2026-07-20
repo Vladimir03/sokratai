@@ -2540,10 +2540,12 @@ export type Database = {
           duration_minutes: number
           exam_type: string
           id: string
+          owner_id: string | null
           part1_max: number
           part2_max: number
           source: string
           source_attribution: string | null
+          subject: string | null
           task_count: number
           title: string
           total_max_score: number
@@ -2555,10 +2557,12 @@ export type Database = {
           duration_minutes: number
           exam_type?: string
           id?: string
+          owner_id?: string | null
           part1_max: number
           part2_max: number
           source: string
           source_attribution?: string | null
+          subject?: string | null
           task_count: number
           title: string
           total_max_score: number
@@ -2570,10 +2574,12 @@ export type Database = {
           duration_minutes?: number
           exam_type?: string
           id?: string
+          owner_id?: string | null
           part1_max?: number
           part2_max?: number
           source?: string
           source_attribution?: string | null
+          subject?: string | null
           task_count?: number
           title?: string
           total_max_score?: number
@@ -5049,6 +5055,10 @@ export type Database = {
         Args: { _assignment_id: string }
         Returns: boolean
       }
+      is_student_assigned_to_mock_variant: {
+        Args: { _variant_id: string }
+        Returns: boolean
+      }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
       kb_folder_owned_by: {
@@ -5187,6 +5197,25 @@ export type Database = {
       mock_exam_resync_attempt_totals: {
         Args: { _attempt_id: string }
         Returns: undefined
+      }
+      mock_exam_variant_create_with_tasks: {
+        Args: { _meta: Json; _tasks: Json }
+        Returns: string
+      }
+      mock_exam_variant_replace_tasks: {
+        Args: {
+          _duration_minutes?: number
+          _exam_type?: string
+          _subject?: string
+          _tasks: Json
+          _title?: string
+          _variant_id: string
+        }
+        Returns: undefined
+      }
+      mock_exam_variant_usable_by: {
+        Args: { _user_id: string; _variant_id: string }
+        Returns: boolean
       }
       move_to_dlq: {
         Args: {
