@@ -160,6 +160,17 @@ Deno.serve(async (req) => {
       return json({ code: "REGISTER_FAILED", error: "Не удалось сохранить доступ. Попробуй ещё раз." }, 500);
     }
 
+    // «Код умирает» (№43, 2026-07-20): аккаунт зарегистрирован → все claim-коды
+    // ученика гаснут (по всем связкам tutor_students). Non-fatal: авторитетный
+    // backstop — гейт «зарегистрирован» в student-claim/RPC.
+    const { error: killErr } = await admin
+      .from("tutor_students")
+      .update({ claim_token: null })
+      .eq("student_id", user.id);
+    if (killErr) {
+      console.error(JSON.stringify({ event: "student_register_token_kill_failed", error: killErr.message }));
+    }
+
     // Профиль: пометить источник регистрации (best-effort).
     await admin
       .from("profiles")

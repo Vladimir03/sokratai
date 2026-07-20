@@ -170,6 +170,17 @@ Deno.serve(async (req) => {
       return json({ code: "SET_PASSWORD_FAILED", error: "Не удалось сохранить пароль. Запроси новую ссылку командой /parol." }, 500);
     }
 
+    // «Код умирает» (№43, 2026-07-20): аккаунт получил реальный email+пароль →
+    // все claim-коды ученика гаснут (зеркало student-register). Non-fatal:
+    // backstop — гейт «зарегистрирован» в student-claim/RPC.
+    const { error: killErr } = await admin
+      .from("tutor_students")
+      .update({ claim_token: null })
+      .eq("student_id", userId);
+    if (killErr) {
+      console.error(JSON.stringify({ event: "set_password_token_kill_failed", error: killErr.message }));
+    }
+
     console.warn(
       JSON.stringify({
         event: "set_password_succeeded",

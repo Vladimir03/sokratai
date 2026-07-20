@@ -3333,16 +3333,21 @@ async function handleConnectStudentByEmail(
   }
 
   // P0 (review round 2, defense-in-depth): connect-email — тоже token-gen путь
-  // + смена email. НЕ трогать уже активный аккаунт (last_sign_in_at) — иначе
+  // + смена email. НЕ трогать уже заходивший аккаунт (last_sign_in_at) — иначе
   // репетитор мог бы сменить email зарегистрированному ученику + сгенерить claim
   // (impersonation). UI и так не показывает гейт активным, но API-путь закрываем.
+  // ⚠ НАМЕРЕННО строже гейта «зарегистрирован» из student-claim/RPC (2026-07-20,
+  // №43): этот хендлер СТАВИТ реальный email и шлёт письмо с claim-ссылкой —
+  // для заходившего ученика такая ссылка сразу упёрлась бы в registered-гейт
+  // student-claim (реальный email + вход) = мёртвая ссылка в письме. Заходивший
+  // незарегистрированный подключается многоразовым КОДОМ (ConnectStudentSheet).
   const { data: connAuthU, error: connAuthErr } = await db.auth.admin.getUserById(studentId);
   if (connAuthErr || !connAuthU?.user) {
     // Auth-gate → fail-closed (review round-3 P2): не менять email вслепую при сбое.
     return jsonError(cors, 503, "ACCOUNT_LOOKUP_FAILED", "Не удалось проверить ученика. Попробуйте ещё раз через минуту.");
   }
   if (connAuthU.user.last_sign_in_at) {
-    return jsonError(cors, 409, "STUDENT_ALREADY_ACTIVE", "Ученик уже подключён и активен — приглашение не нужно.");
+    return jsonError(cors, 409, "STUDENT_ALREADY_ACTIVE", "Ученик уже заходил в Сократ — отправь ему код для входа (кнопка «Подключить» на карточке ученика).");
   }
 
   // Collision: email уже у другого аккаунта.
