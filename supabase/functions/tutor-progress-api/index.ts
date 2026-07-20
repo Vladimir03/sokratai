@@ -617,7 +617,8 @@ async function handleUpdateTarget(
 /**
  * POST /track — client funnel beacon (QR-онбординг, item 6). Клиент шлёт клик по
  * community-CTA; сервер пишет analytics_events. Whitelist имени события: клиент
- * НЕ может вписать произвольное (CHECK-таблицы). Дедуп once-per-tutor. PII-free.
+ * НЕ может вписать произвольное (CHECK-таблицы). Дедуп once-per-tutor-per-channel.
+ * PII-free.
  */
 async function handleTrackEvent(
   db: SupabaseClient,
@@ -648,6 +649,10 @@ async function handleTrackEvent(
   const channel = rawChannel === "telegram" || rawChannel === "vk" ? rawChannel : null;
 
   const tutorPkId = await resolveTutorPkId(db, userId);
+  // Дедуп once-per-tutor-PER-CHANNEL (фикс 2026-07-20): раньше ключом был один
+  // `tutor_id` — репетитор кликнул Telegram, и его последующий клик по VK молча
+  // терялся, разбивка «какой канал заходит» была недостижима. При невалидном
+  // channel остаёмся на старом ключе, иначе каждый кривой запрос писал бы строку.
   await logAnalyticsEventOnce(
     db,
     {
@@ -657,7 +662,7 @@ async function handleTrackEvent(
       source: channel,
       meta: channel ? { channel } : null,
     },
-    { tutor_id: tutorPkId },
+    channel ? { tutor_id: tutorPkId, source: channel } : { tutor_id: tutorPkId },
   );
   return jsonOk(cors, { ok: true });
 }

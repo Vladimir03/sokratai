@@ -2,11 +2,21 @@ import { Send } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import sokratLogo from "@/assets/sokrat-logo.png";
+import {
+  trackTutorLandingGoal,
+  type TutorLandingGoal,
+} from "@/lib/tutorLandingAnalytics";
+import {
+  SOKRAT_COMMUNITY_TELEGRAM_URL,
+  SOKRAT_COMMUNITY_VK_URL,
+} from "@/lib/tutorPlanCopy";
 
 type FooterLink = {
   label: string;
   href: string;
   kind: "internal" | "external" | "hash" | "mailto" | "placeholder";
+  /** Цель Метрики на клик. Задаётся только там, где клик считаем в пре-воронке. */
+  goal?: TutorLandingGoal;
 };
 
 const PRODUCT_LINKS: FooterLink[] = [
@@ -39,6 +49,20 @@ const COMPANY_LINKS: FooterLink[] = [
     href: "https://t.me/sokrat_rep",
     kind: "external",
   },
+  // Чаты сообщества ≠ «Канал Егора» выше: там анонсы, здесь общение
+  // репетиторов. Формулировки намеренно разведены, ссылки — из констант.
+  {
+    label: "Чат репетиторов в Telegram",
+    href: SOKRAT_COMMUNITY_TELEGRAM_URL,
+    kind: "external",
+    goal: "tutor_landing_community_tg_click",
+  },
+  {
+    label: "Чат репетиторов в VK",
+    href: SOKRAT_COMMUNITY_VK_URL,
+    kind: "external",
+    goal: "tutor_landing_community_vk_click",
+  },
 ];
 
 const LEGAL_LINKS: FooterLink[] = [
@@ -66,9 +90,12 @@ function FooterLinkItem({ link }: { link: FooterLink }) {
     "text-sm transition-colors hover:text-white focus-visible:outline-none focus-visible:underline";
   const style = { color: "var(--sokrat-fg-on-dark-dim)" } as const;
 
+  const { goal } = link;
+  const onClick = goal ? () => trackTutorLandingGoal(goal) : undefined;
+
   if (link.kind === "internal") {
     return (
-      <Link to={link.href} className={className} style={style}>
+      <Link to={link.href} className={className} style={style} onClick={onClick}>
         {link.label}
       </Link>
     );
@@ -80,7 +107,13 @@ function FooterLinkItem({ link }: { link: FooterLink }) {
       : {};
 
   return (
-    <a href={link.href} className={className} style={style} {...extraProps}>
+    <a
+      href={link.href}
+      className={className}
+      style={style}
+      onClick={onClick}
+      {...extraProps}
+    >
       {link.label}
     </a>
   );

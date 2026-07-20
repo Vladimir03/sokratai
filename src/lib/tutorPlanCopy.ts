@@ -14,12 +14,21 @@
 export const TUTOR_SUPPORT_TELEGRAM_URL = 'https://t.me/Analyst_Vladimir';
 
 /**
- * Сообщество репетиторов (community-CTA после первого «вау», фича
- * egor-qr-onboarding). Единственный источник ссылок — не хардкодить инлайн.
- *  - Telegram — чат/канал репетиторов Сократа (та же ручка, что на лендинге).
- *  - VK — чат репетиторов (инвайт-ссылка).
+ * Сообщество репетиторов — ЧАТ, не канал. Единственный источник ссылок,
+ * инлайн-хардкод запрещён. Потребители: CommunityJoinCard (/tutor/home),
+ * SocialProof + Footer (лендинг).
+ *
+ * ⚠️ НЕ путать с «Каналом Егора» (`https://t.me/sokrat_rep` БЕЗ `/16`) — тот
+ * живёт инлайн в 5 местах лендинга (Hero, ProductTour3, SocialProof.FOUNDERS,
+ * FinalCTA, Footer) и это ДРУГАЯ сущность: канал с анонсами, а не общение
+ * репетиторов. До 2026-07-20 здесь стояла ручка канала — кнопка «Чат в
+ * Telegram» уводила в анонсы (репорт владельца).
+ *
+ *  - Telegram — пост №16 в канале, внутри invite-ссылка на чат (вход в 2 клика;
+ *    прямого invite нет, поэтому в UI пишем «Сообщество в Telegram», не «Чат»).
+ *  - VK — прямая инвайт-ссылка в чат.
  */
-export const SOKRAT_COMMUNITY_TELEGRAM_URL = 'https://t.me/sokrat_rep';
+export const SOKRAT_COMMUNITY_TELEGRAM_URL = 'https://t.me/sokrat_rep/16';
 export const SOKRAT_COMMUNITY_VK_URL =
   'https://vk.me/join/WooW6wjwjhNwG7R0rzmKxpEBunNfHq1C3QQ=';
 

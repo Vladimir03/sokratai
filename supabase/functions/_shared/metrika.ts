@@ -29,6 +29,13 @@ const CTA_GOAL_NAMES = [
   "tutor_landing_cta_trial_hero",
   "tutor_landing_cta_trial_pricing",
   "tutor_landing_cta_trial_final",
+  // Мягкие (не-триальные) CTA. tg_channel_click существовал в
+  // tutorLandingAnalytics.ts с самого начала, но сюда не попал — клики по
+  // «Канал Егора» с 5 мест лендинга молча выпадали из ctaClicks7d (фикс
+  // 2026-07-20). community_* — новые, вход в чат репетиторов.
+  "tutor_landing_tg_channel_click",
+  "tutor_landing_community_tg_click",
+  "tutor_landing_community_vk_click",
 ];
 const SIGNUP_FORM_GOAL_NAME = "tutor_landing_trial_signup_started";
 

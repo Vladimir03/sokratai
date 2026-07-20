@@ -113,7 +113,10 @@ export async function logAnalyticsEventOnce(
   db: SupabaseClient,
   input: AnalyticsEventInput,
   scope: Partial<
-    Pick<AnalyticsEventInput, "tutor_id" | "student_id" | "tutor_student_id" | "assignment_id">
+    Pick<
+      AnalyticsEventInput,
+      "tutor_id" | "student_id" | "tutor_student_id" | "assignment_id" | "source"
+    >
   >,
 ): Promise<void> {
   try {

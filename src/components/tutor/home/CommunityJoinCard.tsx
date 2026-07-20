@@ -60,7 +60,7 @@ export function CommunityJoinCard() {
           className="inline-flex min-h-[36px] items-center gap-2 rounded-lg border border-socrat-telegram/40 bg-white px-3.5 text-sm font-semibold text-socrat-telegram transition-colors hover:bg-socrat-telegram/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-telegram/40"
         >
           <Send className="h-4 w-4" aria-hidden="true" />
-          Чат в Telegram
+          Сообщество в Telegram
         </a>
         <a
           href={SOKRAT_COMMUNITY_VK_URL}

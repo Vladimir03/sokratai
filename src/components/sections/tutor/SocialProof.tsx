@@ -1,7 +1,11 @@
-import { Play, Maximize2, X } from "lucide-react";
+import { Play, Maximize2, MessageCircle, Send, Users, X } from "lucide-react";
 import { useState, useEffect } from "react";
 
 import { trackTutorLandingGoal } from "@/lib/tutorLandingAnalytics";
+import {
+  SOKRAT_COMMUNITY_TELEGRAM_URL,
+  SOKRAT_COMMUNITY_VK_URL,
+} from "@/lib/tutorPlanCopy";
 import founderEgorImg from "@/assets/founder-egor.webp";
 import founderVladimirImg from "@/assets/founder-vladimir.webp";
 
@@ -110,6 +114,14 @@ export default function SocialProof() {
         .sokrat.sokrat-marketing .sp-your-case-banner-body {
           font-size: 14px; color: var(--sokrat-fg2); margin: 0;
         }
+        .sokrat.sokrat-marketing .sp-community-title {
+          font-size: 18px; color: var(--sokrat-green-800);
+          margin-bottom: 6px; font-weight: 600;
+        }
+        .sokrat.sokrat-marketing .sp-community-body {
+          font-size: 14px; line-height: 1.5;
+          color: var(--sokrat-fg2); margin: 0;
+        }
       `}</style>
 
       <div className="mx-auto max-w-[960px] px-4 md:px-8">
@@ -138,6 +150,13 @@ export default function SocialProof() {
           <CaseVideoCard videoSrc={TESTIMONIAL_VIDEO_SRC} />
           <CaseEgorCard />
         </div>
+
+        {/*
+          Сообщество — продолжение доказательства: сразу после живых кейсов
+          показываем, где эти репетиторы общаются. Идёт ПЕРЕД «Ваш кейс?»,
+          потому что тот баннер — уже просьба к читателю, а не proof.
+        */}
+        <CommunityBanner />
 
         {/* CTA для новых кейсов — отдельным slim-banner ниже сетки. */}
         <CaseYourCaseBanner />
@@ -440,6 +459,95 @@ function CaseElenaCard() {
         Отзыв в Telegram, май&nbsp;2026.
       </p>
     </article>
+  );
+}
+
+/**
+ * Community-CTA сообщества репетиторов (TG + VK).
+ *
+ * Визуально НАМЕРЕННО отличается от соседнего CaseYourCaseBanner: тот —
+ * dashed-рамка на прозрачном фоне, этот — solid tinted. Два одинаковых
+ * баннера подряд читались бы как дубль.
+ *
+ * Обе кнопки outline, filled запрещён (rule 90): primary-CTA лендинга —
+ * «7 дней бесплатно» в Hero / Pricing / FinalCTA, сообщество с ним не
+ * конкурирует. Ссылки — из констант, инлайн-хардкод запрещён: `t.me/sokrat_rep`
+ * БЕЗ `/16` — это канал Егора (другая сущность, см. tutorPlanCopy.ts).
+ */
+function CommunityBanner() {
+  return (
+    <article
+      className="mt-6 md:mt-8 flex flex-col gap-4 rounded-[14px] p-5 md:flex-row md:items-center md:justify-between md:p-6"
+      style={{
+        backgroundColor: "var(--sokrat-green-50)",
+        border: "1px solid var(--sokrat-green-200)",
+      }}
+    >
+      <div className="flex items-start gap-3 md:max-w-[58%]">
+        <span
+          className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-full sm:flex"
+          style={{
+            backgroundColor: "var(--sokrat-green-100)",
+            color: "var(--sokrat-green-700)",
+          }}
+          aria-hidden="true"
+        >
+          <Users className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <h3 className="sp-community-title">Репетиторы Сократа — рядом</h3>
+          <p className="sp-community-body">
+            Живой чат: обмен опытом, разбор сложных случаев и прямая линия с
+            командой. Заглядывайте — здесь подскажут.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 md:shrink-0">
+        <CommunityLink
+          href={SOKRAT_COMMUNITY_TELEGRAM_URL}
+          goal="tutor_landing_community_tg_click"
+          icon={<Send className="h-4 w-4" aria-hidden="true" />}
+          label="Чат в Telegram"
+        />
+        <CommunityLink
+          href={SOKRAT_COMMUNITY_VK_URL}
+          goal="tutor_landing_community_vk_click"
+          icon={<MessageCircle className="h-4 w-4" aria-hidden="true" />}
+          label="Чат в VK"
+        />
+      </div>
+    </article>
+  );
+}
+
+function CommunityLink({
+  href,
+  goal,
+  icon,
+  label,
+}: {
+  href: string;
+  goal: "tutor_landing_community_tg_click" | "tutor_landing_community_vk_click";
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={() => trackTutorLandingGoal(goal)}
+      style={{
+        color: "var(--sokrat-green-700)",
+        borderColor: "var(--sokrat-green-700)",
+        backgroundColor: "var(--sokrat-surface)",
+        touchAction: "manipulation",
+      }}
+      className="inline-flex min-h-[44px] items-center gap-2 rounded-md border-2 px-4 text-sm font-semibold transition-colors hover:bg-[color:var(--sokrat-green-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+    >
+      {icon}
+      {label}
+    </a>
   );
 }
 
