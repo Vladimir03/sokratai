@@ -32,6 +32,7 @@ import CriteriaBreakdownTable, {
 import PhysicsFlowchartTrace from '@/components/homework/PhysicsFlowchartTrace';
 import { EditScoreDialog } from '@/components/tutor/results/EditScoreDialog';
 import { reviewTask } from '@/lib/tutorProgressApi';
+import { isTaskScoreReviewed } from '@/lib/homeworkReview';
 import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { supabase } from '@/lib/supabaseClient';
@@ -732,7 +733,7 @@ export function GuidedThreadViewer({
                           ручная правка
                         </span>
                       ) : null}
-                      {selectedTaskState?.tutor_reviewed_at != null ? (
+                      {selectedTaskState != null && isTaskScoreReviewed(selectedTaskState) ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">
                           <BadgeCheck className="h-3 w-3" />
                           Проверено
@@ -749,8 +750,12 @@ export function GuidedThreadViewer({
                           <Pencil className="h-3 w-3 md:mr-1" />
                           <span className="hidden md:inline">Изменить балл</span>
                         </Button>
-                        {selectedTaskState?.tutor_reviewed_at == null
-                          && selectedTaskState?.ai_score != null ? (
+                        {/* force-close = проверено (2026-07-20): кнопка скрыта и для
+                            force-закрытых задач — иначе чип «Проверено» и кнопка
+                            рендерились бы одновременно. Гейт ai_score сохранён. */}
+                        {selectedTaskState != null
+                          && !isTaskScoreReviewed(selectedTaskState)
+                          && selectedTaskState.ai_score != null ? (
                           <Button
                             size="sm"
                             className="h-7 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700 touch-manipulation"

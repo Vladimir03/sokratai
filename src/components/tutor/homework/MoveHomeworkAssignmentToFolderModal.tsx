@@ -1,9 +1,10 @@
-// Перемещение ДЗ в папку. Плоский список папок + «Без папки» (флэт — не дерево).
-// Запрос Елены (2026-06-17).
-import { useEffect, useState, type ReactNode } from 'react';
+// Перемещение ДЗ в папку. Дерево папок с отступами (вложенность 2026-07-20,
+// зеркало KB MoveToFolderModal) + «Без папки». Запрос Елены (2026-06-17).
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { X, Folder, Inbox, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { useHomeworkFolders, useMoveAssignmentToFolder } from '@/hooks/useHomeworkFolders';
+import { flattenTreeWithDepth } from '@/lib/homeworkFolderTree';
 import { cn } from '@/lib/utils';
 
 interface MoveHomeworkAssignmentToFolderModalProps {
@@ -17,9 +18,10 @@ export function MoveHomeworkAssignmentToFolderModal({
   assignment,
   onClose,
 }: MoveHomeworkAssignmentToFolderModalProps) {
-  const { folders, loading } = useHomeworkFolders();
+  const { folders, tree, loading } = useHomeworkFolders();
   const move = useMoveAssignmentToFolder();
   const [selectedId, setSelectedId] = useState<string>(assignment.folder_id ?? NO_FOLDER);
+  const flatTree = useMemo(() => flattenTreeWithDepth(tree), [tree]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -80,11 +82,12 @@ export function MoveHomeworkAssignmentToFolderModal({
               Папок пока нет. Создайте папку на странице «Домашние задания».
             </p>
           ) : (
-            folders.map((f) => (
+            flatTree.map(({ folder: f, depth }) => (
               <FolderRow
                 key={f.id}
                 icon={<Folder className="h-4 w-4 text-socrat-folder" />}
                 label={f.name}
+                depth={depth}
                 selected={selectedId === f.id}
                 isCurrent={currentId === f.id}
                 onClick={() => setSelectedId(f.id)}
@@ -124,22 +127,25 @@ function FolderRow({
   selected,
   isCurrent,
   onClick,
+  depth = 0,
 }: {
   icon: ReactNode;
   label: string;
   selected: boolean;
   isCurrent: boolean;
   onClick: () => void;
+  /** Отступ вложенности (зеркало KB MoveToFolderModal: 14 + depth*20). */
+  depth?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm transition-colors',
+        'flex w-full items-center gap-2.5 rounded-lg py-2.5 pr-3 text-left text-sm transition-colors',
         selected ? 'bg-socrat-primary-light text-slate-950' : 'hover:bg-socrat-surface',
       )}
-      style={{ touchAction: 'manipulation' }}
+      style={{ touchAction: 'manipulation', paddingLeft: 12 + depth * 20 }}
     >
       <span className="shrink-0">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>

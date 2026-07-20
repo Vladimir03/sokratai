@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Folder, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { Folder, ChevronRight, FolderInput, Pencil, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 
@@ -13,6 +13,8 @@ interface FolderCardProps {
   onClick: () => void;
   onRename?: () => void;
   onDelete?: () => void;
+  /** Перенос папки к другому родителю (вложенные папки ДЗ, 2026-07-20). KB не передаёт. */
+  onMove?: () => void;
   /**
    * Слово для счётчика элементов (3 формы для pluralizeRu). Default — задачи (KB).
    * Папки ДЗ передают ['задание','задания','заданий'].
@@ -32,11 +34,12 @@ export const FolderCard = memo(function FolderCard({
   onClick,
   onRename,
   onDelete,
+  onMove,
   taskWord = ['задача', 'задачи', 'задач'],
   showChildCount = true,
 }: FolderCardProps) {
   const hasCounts = (showChildCount && childCount !== null) || taskCount !== null;
-  const hasActions = Boolean(onRename || onDelete);
+  const hasActions = Boolean(onRename || onDelete || onMove);
 
   return (
     <div
@@ -76,6 +79,17 @@ export const FolderCard = memo(function FolderCard({
               aria-label="Переименовать папку"
             >
               <Pencil className="h-4 w-4" />
+            </button>
+          ) : null}
+          {onMove ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onMove(); }}
+              onKeyDown={(e) => e.stopPropagation()}
+              className="rounded-lg p-1.5 text-slate-400 transition-colors duration-200 hover:bg-slate-100 hover:text-socrat-primary touch-action-manipulation"
+              aria-label="Переместить папку"
+            >
+              <FolderInput className="h-4 w-4" />
             </button>
           ) : null}
           {onDelete ? (

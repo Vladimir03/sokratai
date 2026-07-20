@@ -19,14 +19,16 @@ import {
   createHomeworkFolder,
   renameHomeworkFolder,
   deleteHomeworkFolder,
+  moveHomeworkFolder,
   type HomeworkFolder,
 } from '@/lib/tutorHomeworkFoldersApi';
+import { buildHomeworkFolderTree, type HomeworkFolderTreeNode } from '@/lib/homeworkFolderTree';
 import { updateTutorHomeworkAssignment } from '@/lib/tutorHomeworkApi';
 
 const FOLDERS_KEY = ['tutor', 'homework', 'folders'] as const;
 const ASSIGNMENTS_KEY = ['tutor', 'homework', 'assignments'] as const;
 
-/** Список папок ДЗ репетитора (плоский). */
+/** Список папок ДЗ репетитора (плоский + derived дерево — вложенность 2026-07-20). */
 export function useHomeworkFolders() {
   const queryKey = useMemo(() => FOLDERS_KEY, []);
 
@@ -43,8 +45,19 @@ export function useHomeworkFolders() {
     refetchOnReconnect: true,
   });
 
+  const folders = useMemo(() => query.data ?? [], [query.data]);
+  const tree = useMemo<HomeworkFolderTreeNode[]>(
+    () => buildHomeworkFolderTree(folders),
+    [folders],
+  );
+  const rootFolders = useMemo(() => folders.filter((f) => !f.parent_id), [folders]);
+  const byId = useMemo(() => new Map(folders.map((f) => [f.id, f])), [folders]);
+
   return {
-    folders: query.data ?? [],
+    folders,
+    tree,
+    rootFolders,
+    byId,
     loading: query.isLoading,
     error: query.error ? toTutorErrorMessage('Не удалось загрузить папки', query.error) : null,
     refetch: () => { void query.refetch(); },
@@ -64,7 +77,11 @@ function invalidateFolders(queryClient: ReturnType<typeof useQueryClient>) {
 export function useCreateHomeworkFolder() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => createHomeworkFolder(name),
+    // string (legacy) или {name, parentId} — подпапки (2026-07-20).
+    mutationFn: (input: string | { name: string; parentId?: string | null }) =>
+      typeof input === 'string'
+        ? createHomeworkFolder(input)
+        : createHomeworkFolder(input.name, input.parentId ?? null),
     onSuccess: (folder) => {
       // Seed кэша созданной папкой ДО refetch (code review P2): навигация на
       // /tutor/homework/folder/:id сразу находит папку, без флэша «папка не найдена».
@@ -90,6 +107,19 @@ export function useDeleteHomeworkFolder() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (folderId: string) => deleteHomeworkFolder(folderId),
+    onSuccess: () => invalidateFolders(queryClient),
+  });
+}
+
+/**
+ * Перенос ПАПКИ к новому родителю (parentId = null → корень). Циклы режутся
+ * клиентским гардом (collectDescendantIds) + триггером hw_folder_parent_guard.
+ */
+export function useMoveHomeworkFolder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: { folderId: string; parentId: string | null }) =>
+      moveHomeworkFolder(params.folderId, params.parentId),
     onSuccess: () => invalidateFolders(queryClient),
   });
 }

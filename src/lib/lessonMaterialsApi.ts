@@ -122,16 +122,24 @@ export async function uploadLessonPdf(
   }
 }
 
+/** Result of attaching a homework_ref: attach = assign (2026-07-20) — the edge
+ * auto-assigns lesson students missing from the homework and reports their ids.
+ * `assigned_student_ids` is absent on an old (pre-fix) edge → undefined. */
+export interface AttachHomeworkResult {
+  material: LessonMaterial;
+  assigned_student_ids?: string[];
+}
+
 /** POST /lessons/:lessonId/materials { kind: 'homework_ref', homework_assignment_id } */
 export async function attachHomework(
   lessonId: string,
   assignmentId: string,
-): Promise<LessonMaterial> {
-  const res = await invokeLessonMaterials<{ material: LessonMaterial }>(
+): Promise<AttachHomeworkResult> {
+  const res = await invokeLessonMaterials<AttachHomeworkResult>(
     `/lessons/${encodeURIComponent(lessonId)}/materials`,
     { method: 'POST', body: { kind: 'homework_ref', homework_assignment_id: assignmentId } },
   );
-  return res.material;
+  return res;
 }
 
 /** DELETE /materials/:id */

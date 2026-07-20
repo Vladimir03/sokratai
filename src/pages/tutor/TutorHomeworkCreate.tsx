@@ -72,6 +72,7 @@ import { HWExpandedParams } from '@/components/tutor/homework-create/HWExpandedP
 import { HWTasksSection } from '@/components/tutor/homework-create/HWTasksSection';
 import { useTutorVoiceSpeakingFeatureFlag } from '@/hooks/useTutorVoiceSpeakingFeatureFlag';
 import { useHomeworkFolders } from '@/hooks/useHomeworkFolders';
+import { flattenTreeWithDepth } from '@/lib/homeworkFolderTree';
 import { HWMaterialsSection } from '@/components/tutor/homework-create/HWMaterialsSection';
 import { HWAssignSection } from '@/components/tutor/homework-create/HWAssignSection';
 import { AddStudentDialog } from '@/components/tutor/AddStudentDialog';
@@ -551,7 +552,12 @@ function TutorHomeworkCreateContent() {
   const [createFolderId, setCreateFolderId] = useState<string | null>(
     () => searchParams.get('folder') || null,
   );
-  const { folders: homeworkFolders } = useHomeworkFolders();
+  const { tree: homeworkFolderTree } = useHomeworkFolders();
+  // Вложенные папки (2026-07-20): options с «— »-отступами по глубине.
+  const homeworkFolderOptions = useMemo(
+    () => flattenTreeWithDepth(homeworkFolderTree),
+    [homeworkFolderTree],
+  );
 
   // ── Deferred image deletes (edit mode: only delete after successful save) ──
   const deferredImageDeletesRef = useRef<string[]>([]);
@@ -2140,8 +2146,8 @@ function TutorHomeworkCreateContent() {
               style={{ fontSize: '16px', touchAction: 'manipulation' }}
             >
               <option value="">Без папки</option>
-              {homeworkFolders.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
+              {homeworkFolderOptions.map(({ folder: f, depth }) => (
+                <option key={f.id} value={f.id}>{'— '.repeat(depth) + f.name}</option>
               ))}
             </select>
             <p className="text-xs text-muted-foreground">

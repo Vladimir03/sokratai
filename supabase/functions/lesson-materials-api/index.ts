@@ -266,6 +266,9 @@ async function handleCreateMaterial(
   lessonId: string,
   body: Record<string, unknown> | null,
   cors: Record<string, string>,
+  // Исходный Bearer пользователя — форвардится в homework-api при авто-назначении
+  // ДЗ ученикам занятия (attach = assign). Не логировать.
+  authHeader: string,
 ): Promise<Response> {
   if (!UUID_RE.test(lessonId)) {
     return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор занятия.");
@@ -337,28 +340,28 @@ async function handleCreateMaterial(
       return jsonError(cors, 403, "INVALID_HOMEWORK_REF", "Это ДЗ нельзя привязать к занятию.");
     }
     // (c) anti cross-student: assignment must be assigned to a student of this lesson.
+    // Fail-closed на сбое запроса участников (ревью ChatGPT-5.6 P1, 2026-07-20):
+    // молча проигнорированная ошибка давала ЧАСТИЧНОЕ назначение (legacy-группа
+    // с заполненным student_id → назначили бы только его, остальные без ДЗ и
+    // без видимости homework_ref при успешном тосте у репетитора).
     const studentSet = new Set<string>();
     if (lesson.student_id) studentSet.add(lesson.student_id);
-    const { data: parts } = await db
+    const { data: parts, error: partsError } = await db
       .from("tutor_lesson_participants")
       .select("student_id")
       .eq("lesson_id", lessonId);
+    if (partsError) {
+      console.error("lesson_materials_api_db_error", { route: "POST materials", step: "participants_lookup", error: partsError.message });
+      return jsonError(cors, 503, "RECIPIENTS_LOOKUP_FAILED", "Не удалось определить учеников занятия. Попробуйте ещё раз.");
+    }
     for (const p of parts ?? []) {
       if (p.student_id) studentSet.add(p.student_id as string);
     }
     if (studentSet.size === 0) {
       return jsonError(cors, 403, "INVALID_HOMEWORK_REF", "Это ДЗ нельзя привязать к занятию.");
     }
-    const { data: match } = await db
-      .from("homework_tutor_student_assignments")
-      .select("id")
-      .eq("assignment_id", hwId)
-      .in("student_id", [...studentSet])
-      .limit(1);
-    if (!match || match.length === 0) {
-      return jsonError(cors, 403, "INVALID_HOMEWORK_REF", "Это ДЗ не назначено ученику этого занятия.");
-    }
     // Несколько ДЗ на урок (2026-06-17): мягкий кап (раньше был жёсткий 1:1).
+    // Проверяется ДО авто-назначения — не создавать назначения, если attach всё равно отвергнется.
     // Гард от дубля (одно ДЗ дважды) — уникальный индекс uq_tlm_one_hw_pair_per_lesson,
     // ловится как 23505 в insertMaterial → HW_REF_DUPLICATE.
     const { count } = await db
@@ -369,10 +372,57 @@ async function handleCreateMaterial(
     if ((count ?? 0) >= MAX_HOMEWORK_REFS) {
       return jsonError(cors, 409, "LIMIT_REACHED", `Можно привязать не более ${MAX_HOMEWORK_REFS} домашних заданий.`);
     }
+    // Attach = assign (запрос Егора, 2026-07-20): вместо отказа для ненавязанного ДЗ
+    // авто-назначаем всех учеников занятия, у кого его нет. Единственный assign-write-path
+    // остаётся в homework-api (rule 40) — переиспользуем его роут server-side с форвардом
+    // пользовательского JWT (homework-api сам резолвит тутора через GoTrue). notify:false —
+    // ученика уведомит общий дайджест материалов при закрытии панели, без двойного пуша.
+    const students = [...studentSet];
+    const { data: assignedRows, error: assignedErr } = await db
+      .from("homework_tutor_student_assignments")
+      .select("student_id")
+      .eq("assignment_id", hwId)
+      .in("student_id", students);
+    if (assignedErr) {
+      console.error("lesson_materials_api_db_error", { route: "POST materials", step: "hw_assigned_lookup", error: assignedErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить назначения ДЗ.");
+    }
+    const assignedSet = new Set((assignedRows ?? []).map((r) => r.student_id as string));
+    const missing = students.filter((id) => !assignedSet.has(id));
+    if (missing.length > 0) {
+      let assignResp: Response;
+      try {
+        assignResp = await fetch(
+          `${SUPABASE_URL}/functions/v1/homework-api/assignments/${hwId}/assign-students`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: authHeader,
+              apikey: SUPABASE_ANON_KEY,
+            },
+            body: JSON.stringify({ student_ids: missing, notify: false }),
+          },
+        );
+      } catch (e) {
+        console.error("lesson_materials_hw_assign_failed", { network: true, message: e instanceof Error ? e.message : String(e) });
+        return jsonError(cors, 502, "ASSIGN_FAILED", "Не удалось назначить ДЗ ученикам занятия. Попробуйте ещё раз.");
+      }
+      if (!assignResp.ok) {
+        console.error("lesson_materials_hw_assign_failed", { status: assignResp.status });
+        return jsonError(cors, 502, "ASSIGN_FAILED", "Не удалось назначить ДЗ ученикам занятия. Попробуйте ещё раз.");
+      }
+      console.log("lesson_materials_hw_auto_assign", {
+        lesson_id: lessonId,
+        assignment_id: hwId,
+        assigned_count: missing.length,
+      });
+    }
     return await insertMaterial(
       db,
       { ...baseRow, material_kind: "homework_ref", url: null, homework_assignment_id: hwId },
       cors,
+      missing.length > 0 ? { assigned_student_ids: missing } : undefined,
     );
   }
 
@@ -383,6 +433,9 @@ async function insertMaterial(
   db: SupabaseClient,
   row: Record<string, unknown>,
   cors: Record<string, string>,
+  // Дополнительные поля 201-ответа (additive; старый клиент игнорирует) —
+  // напр. assigned_student_ids после авто-назначения homework_ref.
+  extra?: Record<string, unknown>,
 ): Promise<Response> {
   const { data, error } = await db
     .from("tutor_lesson_materials")
@@ -407,7 +460,7 @@ async function insertMaterial(
     lesson_id: row.lesson_id,
     kind: row.material_kind,
   });
-  return jsonOk(cors, { material: data }, 201);
+  return jsonOk(cors, { material: data, ...(extra ?? {}) }, 201);
 }
 
 async function handleDeleteMaterial(
@@ -713,7 +766,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // POST /lessons/:lessonId/materials
     if (seg.length === 3 && seg[0] === "lessons" && seg[2] === "materials" && route.method === "POST") {
       const body = await parseJsonBody(req);
-      return await handleCreateMaterial(db, tutorPkId, userId, seg[1], body, cors);
+      return await handleCreateMaterial(
+        db,
+        tutorPkId,
+        userId,
+        seg[1],
+        body,
+        cors,
+        req.headers.get("Authorization") ?? "",
+      );
     }
 
     // DELETE /materials/:id

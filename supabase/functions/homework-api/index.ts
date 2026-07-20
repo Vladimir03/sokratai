@@ -1571,7 +1571,7 @@ async function handleListAssignments(
       // contribute 0/max to the average, matching handleGetResults behaviour).
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status, tutor_reviewed_at")
+        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status, tutor_reviewed_at, tutor_force_completed_at")
         .in("thread_id", threadIds);
 
       // Fetch max_score from tasks for guided assignments
@@ -1591,10 +1591,13 @@ async function handleListAssignments(
           (totalMaxByAssignment[t.assignment_id] ?? 0) + (t.max_score ?? 1);
       }
 
-      // Множество подтверждённых задач (tutor_reviewed_at != null) на каждый тред.
+      // Множество подтверждённых задач на каждый тред. «Проверено» =
+      // tutor_reviewed_at ИЛИ tutor_force_completed_at (force-close = решение
+      // репетитора, 2026-07-20) — Deno-зеркало isTaskScoreReviewed
+      // (src/lib/homeworkReview.ts).
       const reviewedTasksByThread: Record<string, Set<string>> = {};
       for (const ts of taskStates ?? []) {
-        if (ts.tutor_reviewed_at != null) {
+        if (ts.tutor_reviewed_at != null || ts.tutor_force_completed_at != null) {
           const tid = ts.thread_id as string;
           if (!reviewedTasksByThread[tid]) reviewedTasksByThread[tid] = new Set();
           reviewedTasksByThread[tid].add(ts.task_id as string);
@@ -3376,7 +3379,8 @@ async function handleConnectStudentByEmail(
     return jsonError(cors, 500, "UPDATE_FAILED", "Не удалось сохранить email. Попробуйте ещё раз.");
   }
 
-  // Claim-токен (генерим-если-NULL; одноразовость гарантирует student-claim).
+  // Claim-токен (генерим-если-NULL; с 2026-07-20 МНОГОРАЗОВЫЙ до регистрации —
+  // rule 96; legacy 32-hex формат здесь валиден, student-claim принимает оба).
   let token = (link.claim_token as string | null) ?? null;
   let generated = false;
   if (!token) {

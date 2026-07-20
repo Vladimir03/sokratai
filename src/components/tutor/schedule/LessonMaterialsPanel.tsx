@@ -44,6 +44,8 @@ import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { getSubjectLabel } from '@/types/homework';
 import { listTutorHomeworkAssignments } from '@/lib/tutorHomeworkApi';
 import { useHomeworkFolders } from '@/hooks/useHomeworkFolders';
+import { collectDescendantIds, flattenTreeWithDepth } from '@/lib/homeworkFolderTree';
+import { useTutorStudents } from '@/hooks/useTutor';
 import type { TutorLessonWithStudent } from '@/types/tutor';
 import {
   addRecording,
@@ -278,9 +280,21 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
     const [pickerOpen, setPickerOpen] = useState(false);
     const [attachingId, setAttachingId] = useState<string | null>(null);
     // Фильтр пикера по папкам (синергия #1↔#2, запрос Елены 2026-06-17):
-    // 'all' | '__none__' (без папки) | folderId.
+    // 'all' | '__none__' (без папки) | folderId. Вложенность (2026-07-20):
+    // options с отступами, фильтр SUBTREE-inclusive (папка = её поддерево).
     const [pickerFolderId, setPickerFolderId] = useState<string>('all');
-    const { folders: homeworkFolders } = useHomeworkFolders();
+    const { folders: homeworkFolders, tree: homeworkFolderTree } = useHomeworkFolders();
+    const folderOptions = useMemo(
+      () => flattenTreeWithDepth(homeworkFolderTree),
+      [homeworkFolderTree],
+    );
+    const pickerFolderSubtree = useMemo(
+      () =>
+        pickerFolderId === 'all' || pickerFolderId === '__none__'
+          ? null
+          : collectDescendantIds(homeworkFolders, pickerFolderId),
+      [pickerFolderId, homeworkFolders],
+    );
 
     const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -296,13 +310,113 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       for (const a of assignmentsQuery.data ?? []) map.set(a.id, a.title);
       return map;
     }, [assignmentsQuery.data]);
-    // Список пикера, отфильтрованный по выбранной папке.
+    // Список пикера, отфильтрованный по выбранной папке (папка = subtree).
     const pickerAssignments = useMemo(() => {
       const all = assignmentsQuery.data ?? [];
       if (pickerFolderId === 'all') return all;
       if (pickerFolderId === '__none__') return all.filter((a) => !a.folder_id);
-      return all.filter((a) => a.folder_id === pickerFolderId);
-    }, [assignmentsQuery.data, pickerFolderId]);
+      return all.filter((a) => a.folder_id && pickerFolderSubtree?.has(a.folder_id));
+    }, [assignmentsQuery.data, pickerFolderId, pickerFolderSubtree]);
+
+    // ── Attach = assign (запрос Егора, 2026-07-20) ──────────────────────────────
+    // Прикрепление ДЗ к занятию авто-назначает недостающих учеников (edge).
+    // Здесь — best-effort подсказка «будет назначено {имя}» на карточках пикера:
+    // сбой любого из запросов просто прячет подсказку, attach работает всё равно.
+    // Fail-closed резолв получателей остаётся ТОЛЬКО в handleCreateHomework.
+    const lessonStudentsQuery = useQuery({
+      queryKey: ['tutor', 'lesson-students', lessonId],
+      queryFn: async () => {
+        const ids = new Set<string>();
+        if (lesson.student_id) ids.add(lesson.student_id);
+        // Группа (unified: student_id IS NULL) — участники из junction (mirror handleCreateHomework).
+        if (!lesson.student_id || lesson.group_session_id) {
+          const { data, error } = await supabase
+            .from('tutor_lesson_participants')
+            .select('student_id')
+            .eq('lesson_id', lessonId);
+          if (error) throw error;
+          for (const p of data ?? []) {
+            if (p.student_id) ids.add(p.student_id);
+          }
+        }
+        return [...ids];
+      },
+      enabled: active && pickerOpen,
+      refetchOnWindowFocus: false,
+    });
+    const lessonStudentIds = useMemo(
+      () => lessonStudentsQuery.data ?? [],
+      [lessonStudentsQuery.data],
+    );
+
+    // Кто из учеников занятия уже назначен на какие ДЗ (RLS: tutor видит свои
+    // назначения — policy «HW tutor student assignments select by owner»).
+    // Ids в ключе — как pdfSignedQuery (поздняя загрузка участников меняет ключ).
+    const assignedMapQuery = useQuery({
+      queryKey: ['tutor', 'hw-assigned-map', lessonId, lessonStudentIds],
+      queryFn: async () => {
+        const { data, error } = await supabase
+          .from('homework_tutor_student_assignments')
+          .select('assignment_id, student_id')
+          .in('student_id', lessonStudentIds);
+        if (error) throw error;
+        return (data ?? []) as { assignment_id: string; student_id: string }[];
+      },
+      enabled: active && pickerOpen && lessonStudentIds.length > 0,
+      refetchOnWindowFocus: false,
+    });
+    const assignedByAssignment = useMemo(() => {
+      const map = new Map<string, Set<string>>();
+      for (const row of assignedMapQuery.data ?? []) {
+        let set = map.get(row.assignment_id);
+        if (!set) {
+          set = new Set();
+          map.set(row.assignment_id, set);
+        }
+        set.add(row.student_id);
+      }
+      return map;
+    }, [assignedMapQuery.data]);
+
+    // Имена учеников — из общего кэша ['tutor','students'] (schedule уже грузит);
+    // индивидуальное занятие имеет fallback из самой строки занятия.
+    const { students: tutorStudents } = useTutorStudents();
+    const nameByStudentId = useMemo(() => {
+      const map = new Map<string, string>();
+      for (const s of tutorStudents) {
+        const name =
+          s.display_name?.trim() || s.profiles?.full_name?.trim() || s.profiles?.username?.trim();
+        if (name) map.set(s.student_id, name);
+      }
+      if (lesson.student_id && !map.has(lesson.student_id)) {
+        const fallback =
+          lesson.tutor_students?.profiles?.username ?? lesson.profiles?.username ?? null;
+        if (fallback) map.set(lesson.student_id, fallback);
+      }
+      return map;
+    }, [tutorStudents, lesson]);
+
+    /** Ученики занятия, которых авто-назначит attach этого ДЗ (пусто = подсказка не нужна). */
+    const missingIdsFor = useCallback(
+      (assignmentId: string): string[] => {
+        if (lessonStudentIds.length === 0 || assignedMapQuery.data === undefined) return [];
+        const assigned = assignedByAssignment.get(assignmentId);
+        return lessonStudentIds.filter((id) => !assigned?.has(id));
+      },
+      [lessonStudentIds, assignedMapQuery.data, assignedByAssignment],
+    );
+
+    const assignHintText = useCallback(
+      (missingIds: string[]): string => {
+        const names = missingIds
+          .map((id) => nameByStudentId.get(id))
+          .filter(Boolean) as string[];
+        return names.length > 0
+          ? `будет назначено: ${names.join(', ')}`
+          : 'будет назначено ученикам занятия';
+      },
+      [nameByStudentId],
+    );
 
     const invalidate = useCallback(
       () => queryClient.invalidateQueries({ queryKey: ['tutor', 'lesson-materials', lessonId] }),
@@ -433,15 +547,34 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       async (assignmentId: string) => {
         setAttachingId(assignmentId);
         try {
-          await attachHomework(lessonId, assignmentId);
+          const res = await attachHomework(lessonId, assignmentId);
           materialsAddedRef.current = true;
           // Несколько ДЗ на урок: пикер НЕ закрываем — можно привязать ещё.
           // Новая строка появится над пикером после invalidate().
           await invalidate();
-          toast.success('ДЗ привязано к занятию');
+          // Attach = assign: edge сообщает, кого авто-назначил (старый edge — undefined).
+          const assignedIds = res.assigned_student_ids ?? [];
+          if (assignedIds.length > 0) {
+            const names = assignedIds
+              .map((id) => nameByStudentId.get(id))
+              .filter(Boolean) as string[];
+            toast.success(
+              names.length > 0
+                ? `ДЗ привязано и назначено: ${names.join(', ')}`
+                : 'ДЗ привязано и назначено ученикам занятия',
+            );
+            // Назначения изменились → освежить подсказки пикера и списки ДЗ.
+            void queryClient.invalidateQueries({ queryKey: ['tutor', 'hw-assigned-map', lessonId] });
+            void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'assignments'] });
+            void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'detail', assignmentId] });
+          } else {
+            toast.success('ДЗ привязано к занятию');
+          }
         } catch (err) {
           if (err instanceof LessonMaterialsApiError && err.code === 'INVALID_HOMEWORK_REF') {
-            toast.error('Это ДЗ не назначено ученику этого занятия');
+            // После attach=assign этот код остаётся для ownership-отказа / занятия
+            // без учеников / старого edge (deploy-skew).
+            toast.error('Это ДЗ нельзя привязать к занятию');
           } else if (
             err instanceof LessonMaterialsApiError &&
             (err.code === 'HW_REF_DUPLICATE' || err.code === 'HW_REF_EXISTS')
@@ -456,7 +589,7 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
           setAttachingId(null);
         }
       },
-      [lessonId, invalidate],
+      [lessonId, invalidate, queryClient, nameByStudentId],
     );
 
     const handleDelete = useCallback(
@@ -698,8 +831,8 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
                 >
                   <option value="all">Все папки</option>
                   <option value="__none__">Без папки</option>
-                  {homeworkFolders.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
+                  {folderOptions.map(({ folder: f, depth }) => (
+                    <option key={f.id} value={f.id}>{'— '.repeat(depth) + f.name}</option>
                   ))}
                 </select>
               )}
@@ -718,6 +851,8 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
                 ) : (
                   pickerAssignments.map((a) => {
                     const already = attachedAssignmentIds.has(a.id);
+                    // Attach = assign: кого авто-назначит привязка этого ДЗ.
+                    const missingIds = already ? [] : missingIdsFor(a.id);
                     return (
                       <button
                         key={a.id}
@@ -739,6 +874,9 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-slate-900">{a.title}</p>
                           <p className="truncate text-xs text-slate-500">{getSubjectLabel(a.subject as string)}</p>
+                          {missingIds.length > 0 && (
+                            <p className="truncate text-xs text-slate-400">{assignHintText(missingIds)}</p>
+                          )}
                         </div>
                         {already && <span className="shrink-0 text-xs text-slate-400">Привязано</span>}
                       </button>

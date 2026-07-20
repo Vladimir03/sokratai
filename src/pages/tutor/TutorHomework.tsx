@@ -8,7 +8,17 @@ import { useTutor, useTutorGroups } from '@/hooks/useTutor';
 import {
   useHomeworkFolders,
   useDeleteHomeworkFolder,
+  useMoveAssignmentToFolder,
+  useMoveHomeworkFolder,
 } from '@/hooks/useHomeworkFolders';
+import {
+  collectDescendantIds,
+  countDirectChildren,
+  recursiveAssignmentCounts,
+} from '@/lib/homeworkFolderTree';
+import type { HomeworkFolder } from '@/lib/tutorHomeworkFoldersApi';
+import { HwDraggable, HwFolderDropZone } from '@/components/tutor/homework/homeworkDnd';
+import { MoveHomeworkFolderModal } from '@/components/tutor/homework/MoveHomeworkFolderModal';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -47,14 +57,17 @@ function TutorHomeworkContent() {
   const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
   const { groups, loading: groupsLoading } = useTutorGroups(miniGroupsEnabled);
 
-  // Папки ДЗ (homework_folders) — запрос Елены 2026-06-17.
-  const { folders } = useHomeworkFolders();
+  // Папки ДЗ (homework_folders) — запрос Елены 2026-06-17; вложенность 2026-07-20.
+  const { folders, rootFolders } = useHomeworkFolders();
   const deleteFolder = useDeleteHomeworkFolder();
+  const moveAssignment = useMoveAssignmentToFolder();
+  const moveFolder = useMoveHomeworkFolder();
 
   // Модалки папок / перемещения.
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<{ id: string; name: string } | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string } | null>(null);
+  const [movingFolder, setMovingFolder] = useState<HomeworkFolder | null>(null);
   const [movingAssignment, setMovingAssignment] = useState<TutorHomeworkAssignmentListItem | null>(null);
 
   const {
@@ -84,17 +97,18 @@ function TutorHomeworkContent() {
 
   // Клиентский split: «без папки» (folder_id == null) + счётчики по папкам.
   // Счётчики отражают текущий статус/группа-фильтр (на дефолте «Все» = полные).
+  // Вложенность (2026-07-20): счётчик заданий РЕКУРСИВНЫЙ (папка + поддерево),
+  // подпапки — ПРЯМЫЕ (семантика KB, rule 50). Клиентский дерайв — осознанно
+  // (см. homeworkFolderTree.ts, assignments уже загружены целиком).
   const unfiledAssignments = useMemo(
     () => sortedAssignments.filter((a) => !a.folder_id),
     [sortedAssignments],
   );
-  const folderCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const a of assignments) {
-      if (a.folder_id) map.set(a.folder_id, (map.get(a.folder_id) ?? 0) + 1);
-    }
-    return map;
-  }, [assignments]);
+  const folderCounts = useMemo(
+    () => recursiveAssignmentCounts(folders, assignments),
+    [folders, assignments],
+  );
+  const childCounts = useMemo(() => countDirectChildren(folders), [folders]);
 
   const hasData = assignments.length > 0;
   const showSkeleton = loading && !hasData && !error;
@@ -123,6 +137,48 @@ function TutorHomeworkContent() {
       },
     });
   }, [deletingFolder, deleteFolder]);
+
+  // Subtree-счётчики для диалога удаления (подпапки удаляются, задания — в «Без папки»).
+  const deletingSubtree = useMemo(() => {
+    if (!deletingFolder) return { subfolderCount: 0, assignmentCount: 0 };
+    const ids = collectDescendantIds(folders, deletingFolder.id);
+    return {
+      subfolderCount: ids.size - 1,
+      assignmentCount: assignments.filter((a) => a.folder_id && ids.has(a.folder_id)).length,
+    };
+  }, [deletingFolder, folders, assignments]);
+
+  // DnD (desktop-энхансмент, 2026-07-20): дроп ДЗ/папки на карточку папки.
+  const handleDropAssignment = useCallback(
+    (assignmentId: string, targetFolderId: string | null) => {
+      const a = assignments.find((x) => x.id === assignmentId);
+      if (a && (a.folder_id ?? null) === targetFolderId) return;
+      moveAssignment.mutate(
+        { assignmentId, folderId: targetFolderId },
+        {
+          onSuccess: () =>
+            toast.success(targetFolderId ? 'ДЗ перемещено в папку' : 'ДЗ убрано из папки'),
+          onError: () => toast.error('Не удалось переместить ДЗ'),
+        },
+      );
+    },
+    [assignments, moveAssignment],
+  );
+  const handleDropFolder = useCallback(
+    (folderId: string, targetFolderId: string | null) => {
+      const f = folders.find((x) => x.id === folderId);
+      if (f && (f.parent_id ?? null) === targetFolderId) return;
+      moveFolder.mutate(
+        { folderId, parentId: targetFolderId },
+        {
+          onSuccess: () => toast.success('Папка перемещена'),
+          onError: (err) =>
+            toast.error(err instanceof Error && err.message ? err.message : 'Не удалось переместить папку'),
+        },
+      );
+    },
+    [folders, moveFolder],
+  );
 
   const hasFolders = folders.length > 0;
 
@@ -232,22 +288,34 @@ function TutorHomeworkContent() {
         </div>
       </div>
 
-      {/* Папки (если есть) */}
+      {/* Папки: только КОРНЕВЫЕ (вложенность 2026-07-20 — подпапки внутри).
+          Карточка = drop-зона (ДЗ → в папку, папка → подпапка) + draggable. */}
       {hasFolders && (
         <section className="space-y-2.5">
           <h2 className="text-sm font-semibold text-muted-foreground">Папки</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {folders.map((f) => (
-              <FolderCard
+            {rootFolders.map((f) => (
+              <HwFolderDropZone
                 key={f.id}
-                folder={{ id: f.id, name: f.name }}
-                taskCount={folderCounts.get(f.id) ?? 0}
-                taskWord={ASSIGNMENT_WORD}
-                showChildCount={false}
-                onClick={() => navigate(`/tutor/homework/folder/${f.id}`)}
-                onRename={() => setRenamingFolder({ id: f.id, name: f.name })}
-                onDelete={() => setDeletingFolder({ id: f.id, name: f.name })}
-              />
+                folderId={f.id}
+                folders={folders}
+                onDropAssignment={handleDropAssignment}
+                onDropFolder={handleDropFolder}
+              >
+                <HwDraggable payload={{ type: 'folder', id: f.id }}>
+                  <FolderCard
+                    folder={{ id: f.id, name: f.name }}
+                    childCount={childCounts.get(f.id) ?? 0}
+                    taskCount={folderCounts.get(f.id) ?? 0}
+                    taskWord={ASSIGNMENT_WORD}
+                    showChildCount={true}
+                    onClick={() => navigate(`/tutor/homework/folder/${f.id}`)}
+                    onRename={() => setRenamingFolder({ id: f.id, name: f.name })}
+                    onMove={() => setMovingFolder(f)}
+                    onDelete={() => setDeletingFolder({ id: f.id, name: f.name })}
+                  />
+                </HwDraggable>
+              </HwFolderDropZone>
             ))}
           </div>
         </section>
@@ -266,11 +334,12 @@ function TutorHomeworkContent() {
           {unfiledAssignments.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {unfiledAssignments.map((item) => (
-                <AssignmentCard
-                  key={item.id}
-                  item={item}
-                  onMoveToFolder={setMovingAssignment}
-                />
+                <HwDraggable key={item.id} payload={{ type: 'assignment', id: item.id }}>
+                  <AssignmentCard
+                    item={item}
+                    onMoveToFolder={setMovingAssignment}
+                  />
+                </HwDraggable>
               ))}
             </div>
           ) : hasFolders ? (
@@ -296,10 +365,17 @@ function TutorHomeworkContent() {
       {deletingFolder && (
         <DeleteHomeworkFolderDialog
           folder={deletingFolder}
-          assignmentCount={folderCounts.get(deletingFolder.id) ?? 0}
+          assignmentCount={deletingSubtree.assignmentCount}
+          subfolderCount={deletingSubtree.subfolderCount}
           isPending={deleteFolder.isPending}
           onConfirm={handleDeleteFolder}
           onClose={() => setDeletingFolder(null)}
+        />
+      )}
+      {movingFolder && (
+        <MoveHomeworkFolderModal
+          folder={movingFolder}
+          onClose={() => setMovingFolder(null)}
         />
       )}
       {movingAssignment && (

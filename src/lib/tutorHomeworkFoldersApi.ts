@@ -15,11 +15,24 @@ import { supabase } from '@/lib/supabaseClient';
 export interface HomeworkFolder {
   id: string;
   tutor_id: string;
-  /** Зарезервировано под будущую вложенность; в v1 всегда null (плоские папки). */
+  /** Родительская папка (вложенность включена 2026-07-20; null = корень). */
   parent_id: string | null;
   name: string;
   sort_order: number;
   created_at: string;
+}
+
+/**
+ * PostgREST-ошибки guard-триггера `hw_folder_parent_guard` (миграция
+ * 20260720130000) → русские фразы (rule 97). Триггер — backstop: клиентский
+ * гард (collectDescendantIds) не даёт выбрать цикл в UI.
+ */
+function mapFolderGuardError(error: { message?: string }): Error {
+  const msg = error.message ?? '';
+  if (msg.includes('cycle')) return new Error('Нельзя переместить папку внутрь её же подпапки');
+  if (msg.includes('does not belong')) return new Error('Родительская папка не найдена или недоступна');
+  if (msg.includes('too deep')) return new Error('Слишком глубокая вложенность папок');
+  return new Error(msg || 'Не удалось сохранить папку');
 }
 
 export async function listHomeworkFolders(): Promise<HomeworkFolder[]> {
@@ -36,7 +49,10 @@ export async function listHomeworkFolders(): Promise<HomeworkFolder[]> {
   return (data ?? []) as HomeworkFolder[];
 }
 
-export async function createHomeworkFolder(name: string): Promise<HomeworkFolder> {
+export async function createHomeworkFolder(
+  name: string,
+  parentId: string | null = null,
+): Promise<HomeworkFolder> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error('Нет активной сессии');
 
@@ -45,11 +61,27 @@ export async function createHomeworkFolder(name: string): Promise<HomeworkFolder
 
   const { data, error } = await supabase
     .from('homework_folders')
-    .insert({ name: trimmed, tutor_id: session.user.id })
+    .insert({ name: trimmed, tutor_id: session.user.id, parent_id: parentId })
     .select()
     .single();
-  if (error) throw error;
+  if (error) throw mapFolderGuardError(error);
   return data as HomeworkFolder;
+}
+
+/**
+ * Перенос папки к новому родителю (parentId = null → корень). Прямой PostgREST
+ * под RLS «HW folders update own»; циклы/чужой родитель режет триггер
+ * `hw_folder_parent_guard` (клиентский гард — в MoveHomeworkFolderModal/DnD).
+ */
+export async function moveHomeworkFolder(
+  folderId: string,
+  parentId: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from('homework_folders')
+    .update({ parent_id: parentId })
+    .eq('id', folderId);
+  if (error) throw mapFolderGuardError(error);
 }
 
 export async function renameHomeworkFolder(folderId: string, name: string): Promise<void> {

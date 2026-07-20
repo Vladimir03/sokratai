@@ -540,7 +540,9 @@ export function HeatmapGrid({
                   : totalTimeMinutes !== null
                     ? 'in_progress'
                     : 'not_started';
-                // Отметка «✓ Проверено» — все задачи подтверждены (запрос Елены 2026-06-18).
+                // Отметка «✓ Проверено» — все задачи подтверждены (запрос Елены
+                // 2026-06-18). «Подтверждена» = tutor_reviewed_at ИЛИ force-close
+                // (isTaskScoreReviewed, 2026-07-20 — task_scores несут оба поля).
                 const fullyReviewed =
                   displayStatus === 'completed' &&
                   isStudentWorkFullyReviewed(

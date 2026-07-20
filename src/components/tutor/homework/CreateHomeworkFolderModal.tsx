@@ -9,9 +9,11 @@ interface CreateHomeworkFolderModalProps {
   onClose: () => void;
   /** Опц. колбэк с созданной папкой (например, чтобы сразу перейти в неё). */
   onCreated?: (folder: { id: string; name: string }) => void;
+  /** Родительская папка → создаётся ПОДПАПКА (вложенность, 2026-07-20). */
+  parentId?: string;
 }
 
-export function CreateHomeworkFolderModal({ onClose, onCreated }: CreateHomeworkFolderModalProps) {
+export function CreateHomeworkFolderModal({ onClose, onCreated, parentId }: CreateHomeworkFolderModalProps) {
   const createFolder = useCreateHomeworkFolder();
   const [name, setName] = useState('');
 
@@ -31,14 +33,14 @@ export function CreateHomeworkFolderModal({ onClose, onCreated }: CreateHomework
 
   const handleSave = () => {
     if (!canSave) return;
-    createFolder.mutate(name.trim(), {
+    createFolder.mutate({ name: name.trim(), parentId: parentId ?? null }, {
       onSuccess: (folder) => {
-        toast.success('Папка создана');
+        toast.success(parentId ? 'Подпапка создана' : 'Папка создана');
         onCreated?.(folder);
         onClose();
       },
-      onError: () => {
-        toast.error('Не удалось создать папку');
+      onError: (err) => {
+        toast.error(err instanceof Error && err.message ? err.message : 'Не удалось создать папку');
       },
     });
   };
@@ -49,7 +51,7 @@ export function CreateHomeworkFolderModal({ onClose, onCreated }: CreateHomework
 
       <div className="fixed left-1/2 top-1/2 z-[301] flex w-[calc(100%-2rem)] max-w-[400px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
         <div className="flex items-center justify-between border-b border-socrat-border px-5 py-4">
-          <h3 className="text-base font-semibold">Новая папка</h3>
+          <h3 className="text-base font-semibold">{parentId ? 'Новая подпапка' : 'Новая папка'}</h3>
           <button type="button" onClick={onClose} className="shrink-0 p-1">
             <X className="h-4 w-4 text-muted-foreground" />
           </button>

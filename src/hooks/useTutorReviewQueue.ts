@@ -127,11 +127,13 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
   );
 
   // Step 2: ДЕШЁВЫЙ reviewed-чек по ВСЕМ prefetched тредам (без тяжёлого
-  // getTutorHomeworkResults): состояния задач (tutor_reviewed_at) + список задач ДЗ.
+  // getTutorHomeworkResults): состояния задач (tutor_reviewed_at +
+  // tutor_force_completed_at — force-close считается проверенным, 2026-07-20)
+  // + список задач ДЗ.
   const [statesRes, tasksRes] = await Promise.all([
     supabase
       .from('homework_tutor_task_states')
-      .select('thread_id, task_id, tutor_reviewed_at')
+      .select('thread_id, task_id, tutor_reviewed_at, tutor_force_completed_at')
       .in('thread_id', threadIds),
     supabase
       .from('homework_tutor_tasks')
@@ -153,15 +155,20 @@ async function fetchReviewQueue(): Promise<ReviewItem[]> {
   }
   const taskScoresByThread = new Map<
     string,
-    { task_id: string; tutor_reviewed_at: string | null }[]
+    { task_id: string; tutor_reviewed_at: string | null; tutor_force_completed_at: string | null }[]
   >();
   for (const ts of (statesRes.data ?? []) as {
     thread_id: string;
     task_id: string;
     tutor_reviewed_at: string | null;
+    tutor_force_completed_at: string | null;
   }[]) {
     const list = taskScoresByThread.get(ts.thread_id) ?? [];
-    list.push({ task_id: ts.task_id, tutor_reviewed_at: ts.tutor_reviewed_at });
+    list.push({
+      task_id: ts.task_id,
+      tutor_reviewed_at: ts.tutor_reviewed_at,
+      tutor_force_completed_at: ts.tutor_force_completed_at,
+    });
     taskScoresByThread.set(ts.thread_id, list);
   }
 

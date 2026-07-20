@@ -24,6 +24,7 @@ import {
   type TutorHomeworkResultsPerStudent,
 } from '@/lib/tutorHomeworkApi';
 import { reviewAllAi } from '@/lib/tutorProgressApi';
+import { isTaskScoreReviewed } from '@/lib/homeworkReview';
 import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { useAutoResizeTextarea } from '@/hooks/useAutoResizeTextarea';
@@ -412,7 +413,7 @@ export function StudentDrillDown({
               maxScore={task.max_score}
               hintCount={task.hint_count}
               hasOverride={task.has_override}
-              isReviewed={task.tutor_reviewed_at != null}
+              isReviewed={isTaskScoreReviewed(task)}
               isSelected={selectedTaskId === task.id}
               onSelect={handleSelect}
               onEdit={() => handleEdit(task.id)}

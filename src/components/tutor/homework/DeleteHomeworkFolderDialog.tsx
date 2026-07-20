@@ -8,8 +8,13 @@ import { pluralizeRu } from '@/lib/pluralizeRu';
 
 interface DeleteHomeworkFolderDialogProps {
   folder: { id: string; name: string };
-  /** Сколько заданий сейчас в папке (для текста — они НЕ удалятся, станут «Без папки»). */
+  /**
+   * Сколько заданий в папке И ВО ВСЁМ ПОДДЕРЕВЕ (вложенность 2026-07-20) —
+   * для текста: они НЕ удалятся, станут «Без папки».
+   */
   assignmentCount: number;
+  /** Сколько подпапок в поддереве — они УДАЛЯТСЯ (FK CASCADE). 0 = плоская папка. */
+  subfolderCount?: number;
   onConfirm: () => void;
   onClose: () => void;
   isPending?: boolean;
@@ -18,6 +23,7 @@ interface DeleteHomeworkFolderDialogProps {
 export function DeleteHomeworkFolderDialog({
   folder,
   assignmentCount,
+  subfolderCount = 0,
   onConfirm,
   onClose,
   isPending = false,
@@ -53,13 +59,21 @@ export function DeleteHomeworkFolderDialog({
             </div>
             <div className="min-w-0 text-sm text-slate-700">
               <p>
-                Папка <span className="font-semibold">&laquo;{folder.name}&raquo;</span> будет удалена.
+                Папка <span className="font-semibold">&laquo;{folder.name}&raquo;</span> будет удалена
+                {subfolderCount > 0 ? (
+                  <>
+                    {' '}вместе с {subfolderCount}{' '}
+                    {pluralizeRu(subfolderCount, ['подпапкой', 'подпапками', 'подпапками'])}
+                  </>
+                ) : null}
+                .
               </p>
               <p className="mt-2 text-slate-500">
                 {assignmentCount > 0 ? (
                   <>
-                    {assignmentCount} {pluralizeRu(assignmentCount, ['задание', 'задания', 'заданий'])}{' '}
-                    внутри <span className="font-medium text-slate-700">не удалятся</span> — они станут «Без папки».
+                    {assignmentCount} {pluralizeRu(assignmentCount, ['задание', 'задания', 'заданий'])}
+                    {subfolderCount > 0 ? ' (включая задания в подпапках)' : ' внутри'}{' '}
+                    <span className="font-medium text-slate-700">не удалятся</span> — они станут «Без папки».
                   </>
                 ) : (
                   <>Заданий внутри нет — ничего не потеряется.</>
