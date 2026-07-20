@@ -21,14 +21,16 @@ const METRIKA_COUNTER_ID = 105827612;
 const METRIKA_API_TOKEN = (Deno.env.get("METRIKA_API_TOKEN") ?? "").trim();
 
 /** Идентификаторы JS-событий CTA лендинга (mirror tutorLandingAnalytics.ts). */
+// Только ЖИВЫЕ цели: каждая реально вызывается из src/. Мёртвое имя здесь =
+// вечная строка в missingGoals («⚠ цель не заведена»), которую невозможно
+// погасить — цель никогда не достигается. Аудит 2026-07-20 выкинул legacy
+// cta_hero / cta_pricing / cta_final: их заменили cta_trial_* при внедрении
+// триала, вызовов не осталось, а из этого списка их убрать забыли.
 const CTA_GOAL_NAMES = [
-  "tutor_landing_cta_hero",
-  "tutor_landing_cta_tour1",
-  "tutor_landing_cta_pricing",
-  "tutor_landing_cta_final",
   "tutor_landing_cta_trial_hero",
   "tutor_landing_cta_trial_pricing",
   "tutor_landing_cta_trial_final",
+  "tutor_landing_cta_tour1",
   // Мягкие (не-триальные) CTA. tg_channel_click существовал в
   // tutorLandingAnalytics.ts с самого начала, но сюда не попал — клики по
   // «Канал Егора» с 5 мест лендинга молча выпадали из ctaClicks7d (фикс

@@ -7,10 +7,14 @@ declare global {
 const COUNTER_ID = 105827612;
 
 export type TutorLandingGoal =
-  | "tutor_landing_cta_hero" // existing
+  // ⚠️ DEPRECATED (аудит 2026-07-20): три цели ниже НЕ вызываются нигде —
+  // при внедрении триала их заменили на cta_trial_*. Из CTA_GOAL_NAMES
+  // (metrika.ts) они убраны, поэтому новый вызов с этими именами Пульс
+  // считать НЕ будет. Нужна новая точка замера — заводи новое имя.
+  | "tutor_landing_cta_hero" // deprecated → cta_trial_hero
+  | "tutor_landing_cta_pricing" // deprecated → cta_trial_pricing
+  | "tutor_landing_cta_final" // deprecated → cta_trial_final
   | "tutor_landing_cta_tour1" // existing
-  | "tutor_landing_cta_pricing" // existing
-  | "tutor_landing_cta_final" // existing
   | "tutor_landing_tg_channel_click" // existing
   | "tutor_landing_cta_trial_hero" // P0 — Hero CTA
   | "tutor_landing_cta_trial_pricing" // P0 — Pricing AI-старт CTA
