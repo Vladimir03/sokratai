@@ -71,6 +71,12 @@ export function StudentCredentialsModal({
               {plainPassword}
             </p>
           </div>
+
+          <p className="rounded-lg bg-socrat-surface px-3 py-2 text-sm text-slate-600">
+            Всё уже работает — ученик может ничего не менять. Позже он сам привяжет свою
+            почту, ВК или Телеграм в профиле. Или зайдёт по короткому коду — кнопка «Подключить»
+            на карточке ученика.
+          </p>
         </div>
 
         <DialogFooter className="gap-2 sm:flex-row sm:justify-end">

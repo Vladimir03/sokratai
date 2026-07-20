@@ -19,6 +19,37 @@ function generatePassword(): string {
   return (100000 + (arr[0] % 900000)).toString();
 }
 
+// Короткий логин ученика (запрос Егора 2026-07-20): `s{7}@temp.sokratai.ru`
+// вместо `manual_{uuid}@…` (53 симв., невбиваемый). Алфавит без путающих
+// 0/1/o/i/l. Суффикс @temp.sokratai.ru НЕ трогаем — на него завязаны все
+// `endsWith("@temp.sokratai.ru")` гварды по коду.
+const SHORT_LOGIN_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
+function generateShortTempLocalPart(): string {
+  const arr = new Uint8Array(7);
+  crypto.getRandomValues(arr);
+  let s = "s";
+  for (const b of arr) s += SHORT_LOGIN_ALPHABET[b % SHORT_LOGIN_ALPHABET.length];
+  return s;
+}
+
+/**
+ * Уникальный короткий temp-email. Pre-check через find_auth_user_id_by_email
+ * (регенерация при коллизии) — чтобы случайное совпадение НЕ ушло в
+ * email_exists-ветку createUser, которая трактует его как «уже зарегистрирован»
+ * и привязала бы репетитора к чужому аккаунту. Коллизия ~10⁻⁸, но fail-safe.
+ */
+async function generateUniqueShortTempEmail(
+  admin: ReturnType<typeof createClient>,
+): Promise<string> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = `${generateShortTempLocalPart()}@temp.sokratai.ru`;
+    const { data: taken } = await admin.rpc("find_auth_user_id_by_email", { p_email: candidate });
+    if (!taken) return candidate;
+  }
+  // Крайне маловероятно (5 коллизий подряд) — фолбэк на UUID (уникален гарантированно).
+  return `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+}
+
 function tooLong(value: unknown, max: number): boolean {
   return typeof value === "string" && value.length > max;
 }
@@ -33,7 +64,7 @@ async function createPlaceholderByName(
   tutorId: string,
   name: string,
 ): Promise<{ tutor_student_id: string; student_id: string }> {
-  const userEmail = `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+  const userEmail = await generateUniqueShortTempEmail(admin);
   const { data: authData, error: authError } = await admin.auth.admin.createUser({
     email: userEmail,
     email_confirm: true,
@@ -407,7 +438,10 @@ Deno.serve(async (req) => {
 
     // Step 3: Create user if not found
     if (!studentId) {
-      const userEmail = email || `manual_${crypto.randomUUID()}@temp.sokratai.ru`;
+      // Короткий уникальный логин, если репетитор не задал email (Егор 2026-07-20).
+      // Pre-check уникальности → сгенерированный email не уйдёт в email_exists-ветку
+      // ниже (та трактует совпадение как «уже зарегистрирован» = чужой аккаунт).
+      const userEmail = email || (await generateUniqueShortTempEmail(supabaseAdmin));
       const randomPassword = generatePassword();
       isNewUser = true;
       loginEmail = userEmail;
