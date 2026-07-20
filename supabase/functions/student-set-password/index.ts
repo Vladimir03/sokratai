@@ -171,12 +171,17 @@ Deno.serve(async (req) => {
     }
 
     // «Код умирает» (№43, 2026-07-20): аккаунт получил реальный email+пароль →
-    // все claim-коды ученика гаснут (зеркало student-register). Non-fatal:
-    // backstop — гейт «зарегистрирован» в student-claim/RPC.
-    const { error: killErr } = await admin
-      .from("tutor_students")
-      .update({ claim_token: null })
-      .eq("student_id", userId);
+    // все claim-коды ученика гаснут (зеркало student-register), retry-once на
+    // transient (ревью 5.6 P1 #3). ⚠ ВАЖНО: для ЭТОГО пути registered-гейт
+    // student-claim НЕ backstop — /parol-пользователь мог никогда не входить в
+    // веб (last_sign_in_at NULL), и гейт (real email AND signed_in) его
+    // пропустит. Финальный провал kill = живой код на аккаунте с паролем —
+    // принятый remote-risk (transient DB-сбой сразу после успешного
+    // updateUserById), ловится error-логом ниже (/admin «Ошибки»).
+    let killErr = (await admin.from("tutor_students").update({ claim_token: null }).eq("student_id", userId)).error;
+    if (killErr) {
+      killErr = (await admin.from("tutor_students").update({ claim_token: null }).eq("student_id", userId)).error;
+    }
     if (killErr) {
       console.error(JSON.stringify({ event: "set_password_token_kill_failed", error: killErr.message }));
     }
@@ -190,9 +195,9 @@ Deno.serve(async (req) => {
     );
     return json({ ok: true, email: targetEmail });
   } catch (e) {
-    console.error(
-      JSON.stringify({ event: "set_password_error", error: e instanceof Error ? e.message : String(e) }),
-    );
-    return json({ code: "INTERNAL_ERROR", error: "Внутренняя ошибка. Попробуй ещё раз." }, 500);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(JSON.stringify({ event: "set_password_error", error: msg }));
+    // rule 97: e.message инлайнится в ответ.
+    return json({ code: "INTERNAL_ERROR", error: `Внутренняя ошибка: ${msg}. Попробуй ещё раз.` }, 500);
   }
 });

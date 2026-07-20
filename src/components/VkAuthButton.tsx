@@ -28,6 +28,12 @@ interface VkAuthButtonProps {
   className?: string;
   /** Visible label. Defaults to "Продолжить с VK ID". */
   label?: string;
+  /**
+   * Вызывается СИНХРОННО перед window.location.href — для персиста контекста,
+   * который должен пережить OAuth-редирект (напр. pending_invite_code на
+   * InvitePage, №79). Только по явному клику — НЕ на рендере (ревью 5.6 P1 #4).
+   */
+  onBeforeRedirect?: () => void;
 }
 
 export default function VkAuthButton({
@@ -37,6 +43,7 @@ export default function VkAuthButton({
   enabled = true,
   className,
   label = "Продолжить с VK ID",
+  onBeforeRedirect,
 }: VkAuthButtonProps) {
   const [loading, setLoading] = useState(false);
 
@@ -53,6 +60,7 @@ export default function VkAuthButton({
       );
 
       stashPendingConsent(consentSource);
+      onBeforeRedirect?.();
 
       const absoluteRedirectTo = `${window.location.origin}${redirectPath}`;
       const initUrl = new URL(OAUTH_INIT_URL);

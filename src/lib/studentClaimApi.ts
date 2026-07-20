@@ -31,7 +31,8 @@ function throwWithCode(message: string, code?: string): never {
   throw err;
 }
 
-/** POST student-claim — consume токен, минт сессии, превью первой ДЗ. */
+/** POST student-claim — минт сессии по коду (многоразовый до регистрации,
+ *  №43 2026-07-20; НЕ consume), превью первой ДЗ. */
 export async function claimStudentByToken(token: string, channel = 'link'): Promise<ClaimResult> {
   const { data, error } = await supabase.functions.invoke('student-claim', {
     body: { token, channel },

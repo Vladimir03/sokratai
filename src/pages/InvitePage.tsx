@@ -137,16 +137,14 @@ export default function InvitePage() {
     return () => { cancelled = true; };
   }, [inviteCode]);
 
-  // №79 (2026-07-20): персист инвайта ДО OAuth-редиректа. Кнопки Яндекс/VK
-  // уводят через window.location.href — inline-claim не успевает; после возврата
-  // (#access_token → /student/schedule) AuthGuard зовёт claimPendingInvite() из
-  // localStorage. Идемпотентно: успешный inline-claim/деферред-пути сами чистят
-  // ключ; claim-invite при повторе отвечает already_linked (успех).
-  useEffect(() => {
-    if (sessionChecked && !session && tutor && inviteCode) {
-      localStorage.setItem('pending_invite_code', inviteCode);
-    }
-  }, [sessionChecked, session, tutor, inviteCode]);
+  // №79 (2026-07-20): персист инвайта ТОЛЬКО по клику на OAuth-кнопку
+  // (onBeforeRedirect) — НЕ на рендере (ревью 5.6 P1 #4: просмотр ссылки не
+  // должен превращаться в отложенное принятие приглашения на общем браузере).
+  // После возврата (#access_token → /student/schedule) AuthGuard зовёт
+  // claimPendingInvite() из localStorage; терминальные ошибки чистят ключ.
+  const persistInviteForOAuth = () => {
+    if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -599,10 +597,12 @@ export default function InvitePage() {
             <YandexAuthButton
               redirectPath="/student/schedule"
               consentSource="yandex-oauth-student"
+              onBeforeRedirect={persistInviteForOAuth}
             />
             <VkAuthButton
               redirectPath="/student/schedule"
               consentSource="vk-oauth-student"
+              onBeforeRedirect={persistInviteForOAuth}
             />
             <p className="text-xs text-center text-muted-foreground leading-relaxed">
               Продолжая, вы соглашаетесь с{' '}

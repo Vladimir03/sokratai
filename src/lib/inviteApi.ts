@@ -34,16 +34,20 @@ export async function claimInvite(inviteCode: string): Promise<ClaimInviteResult
 }
 
 /**
- * Returns true if the error is terminal (invalid code, self-link, bad request)
- * and retrying won't help — localStorage should be cleaned.
+ * Returns true if the error is terminal (invalid code, self-link, tutor
+ * account, bad request) and retrying won't help — localStorage should be
+ * cleaned.
  */
 function isTerminalClaimError(error: unknown): boolean {
   // supabase.functions.invoke throws FunctionsHttpError with context.status
   if (error && typeof error === 'object' && 'context' in error) {
     const ctx = (error as { context?: { status?: number } }).context;
     if (ctx && typeof ctx.status === 'number') {
-      // 400 = bad request / self-link, 404 = invalid invite code
-      return ctx.status === 400 || ctx.status === 404;
+      // 400 = bad request / self-link, 404 = invalid invite code,
+      // 403 = TUTOR_ACCOUNT (ревью 5.6 P1 #4: без очистки ключ жил вечно —
+      // тьютор открыл свой инвайт, поймал 403, а позже вошедший на том же
+      // браузере ученик молча забирал этот инвайт).
+      return ctx.status === 400 || ctx.status === 403 || ctx.status === 404;
     }
   }
   return false;

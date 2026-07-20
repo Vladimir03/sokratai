@@ -83,6 +83,11 @@ swap(
   `<meta name="robots" content="noindex">\n    `,
   "canonical",
 );
+// og:url — canonical object-ID по OGP (ревью 5.6 P2 #1): оставить корневой —
+// платформы склеили бы все приглашения с кэшем главной (старое репетиторское
+// превью). Точный per-path URL в статический файл не вписать → УДАЛЯЕМ тег,
+// скрейпер возьмёт request-URL.
+swap(/<meta property="og:url" content="[^"]*"\s*\/>\s*/, "", "og:url");
 
 if (failed) process.exit(1);
 

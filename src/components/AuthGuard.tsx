@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
+import { applyPendingConsent } from "@/lib/consent";
 import Navigation from "./Navigation";
 import OnboardingModal from "./OnboardingModal";
 
@@ -77,6 +78,11 @@ const AuthGuard = ({ children, fullBleed = false }: AuthGuardProps) => {
         claimPendingInvite().catch(() => {
           // Silently ignore — retriable errors stay in localStorage
         });
+        // Flush согласия, stash-нутого перед OAuth-редиректом (ревью 5.6 P1 #5):
+        // возврат Яндекс/VK приземляется на student-поверхности (/student/schedule
+        // и др.), где локального листенера нет — без flush'а consent-audit
+        // оставался пустым. Идемпотентно (no-op без stashed intent), non-blocking.
+        void applyPendingConsent(session.user.id);
       }
 
       // Check onboarding status

@@ -161,12 +161,14 @@ Deno.serve(async (req) => {
     }
 
     // «Код умирает» (№43, 2026-07-20): аккаунт зарегистрирован → все claim-коды
-    // ученика гаснут (по всем связкам tutor_students). Non-fatal: авторитетный
-    // backstop — гейт «зарегистрирован» в student-claim/RPC.
-    const { error: killErr } = await admin
-      .from("tutor_students")
-      .update({ claim_token: null })
-      .eq("student_id", user.id);
+    // ученика гаснут (по всем связкам tutor_students). Retry-once на transient
+    // (ревью 5.6 P1 #3). Non-fatal: для ЭТОГО пути registered-гейт в
+    // student-claim/RPC — реальный backstop (после register у ученика real email
+    // И last_sign_in_at от claim-сессии → минт блокируется даже при живом коде).
+    let killErr = (await admin.from("tutor_students").update({ claim_token: null }).eq("student_id", user.id)).error;
+    if (killErr) {
+      killErr = (await admin.from("tutor_students").update({ claim_token: null }).eq("student_id", user.id)).error;
+    }
     if (killErr) {
       console.error(JSON.stringify({ event: "student_register_token_kill_failed", error: killErr.message }));
     }
@@ -208,7 +210,9 @@ Deno.serve(async (req) => {
 
     return json({ ok: true, email: targetEmail });
   } catch (e) {
-    console.error(JSON.stringify({ event: "student_register_error", error: e instanceof Error ? e.message : String(e) }));
-    return json({ code: "INTERNAL_ERROR", error: "Внутренняя ошибка. Попробуй ещё раз." }, 500);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(JSON.stringify({ event: "student_register_error", error: msg }));
+    // rule 97: e.message инлайнится в ответ.
+    return json({ code: "INTERNAL_ERROR", error: `Внутренняя ошибка: ${msg}. Попробуй ещё раз.` }, 500);
   }
 });

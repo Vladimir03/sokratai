@@ -31,6 +31,13 @@ interface YandexAuthButtonProps {
   className?: string;
   /** Visible label. Defaults to "Продолжить с Яндекс ID". */
   label?: string;
+  /**
+   * Вызывается СИНХРОННО перед window.location.href — для персиста контекста,
+   * который должен пережить OAuth-редирект (напр. pending_invite_code на
+   * InvitePage, №79). Только по явному клику — НЕ на рендере (ревью 5.6 P1 #4:
+   * просмотр страницы не должен превращаться в отложенное действие).
+   */
+  onBeforeRedirect?: () => void;
 }
 
 export default function YandexAuthButton({
@@ -40,6 +47,7 @@ export default function YandexAuthButton({
   enabled = true,
   className,
   label = "Продолжить с Яндекс ID",
+  onBeforeRedirect,
 }: YandexAuthButtonProps) {
   const [loading, setLoading] = useState(false);
 
@@ -56,6 +64,7 @@ export default function YandexAuthButton({
       );
 
       stashPendingConsent(consentSource);
+      onBeforeRedirect?.();
 
       const absoluteRedirectTo = `${window.location.origin}${redirectPath}`;
       const initUrl = new URL(OAUTH_INIT_URL);

@@ -301,6 +301,30 @@ Deno.serve(async (req: Request) => {
       return json({ code: "SESSION_MINT_FAILED", error: "Не удалось войти автоматически. Попробуй ещё раз." }, 500);
     }
 
+    // TOCTOU-гард (ревью ChatGPT-5.6 P1 #2): между lookup и минтом могла
+    // завершиться регистрация (student-register ставит пароль и гасит код) —
+    // без re-check'а мы сминтили бы сессию на уже-зарегистрированный аккаунт
+    // по погашенному коду. Перечитываем НЕПОСРЕДСТВЕННО перед verifyOtp:
+    // (а) код всё ещё живёт и тот же; (б) аккаунт всё ещё не «зарегистрирован».
+    // Микро-окно остаётся (нет транзакции edge↔auth), но сужено с сотен мс до
+    // единиц; password-set дополнительно ревокает refresh-сессии Supabase.
+    const { data: freshLink, error: freshLinkErr } = await admin
+      .from("tutor_students")
+      .select("claim_token")
+      .eq("id", link.id)
+      .maybeSingle();
+    if (freshLinkErr || freshLink?.claim_token !== token) {
+      return json({ code: "TOKEN_USED", error: "Код больше не действует. Если ты уже регистрировался — войди по паролю; иначе попроси у репетитора новый код." }, 410);
+    }
+    const { data: freshUser } = await admin.auth.admin.getUserById(studentId);
+    const freshEmail = (freshUser?.user?.email ?? "").toLowerCase();
+    if (freshUser?.user?.last_sign_in_at && freshEmail && !freshEmail.endsWith(TEMP_EMAIL_SUFFIX)) {
+      return json(
+        { code: "ALREADY_ACTIVE", error: "Этот аккаунт уже зарегистрирован — войди по паролю или запроси ссылку на почту." },
+        403,
+      );
+    }
+
     // Минтим беспарольную сессию (verifyOtp, паттерн email-verify).
     const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -377,7 +401,9 @@ Deno.serve(async (req: Request) => {
       preview,
     });
   } catch (e) {
-    console.error(JSON.stringify({ event: "student_claim_error", error: e instanceof Error ? e.message : String(e) }));
-    return json({ code: "INTERNAL_ERROR", error: "Внутренняя ошибка. Попробуй ещё раз." }, 500);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(JSON.stringify({ event: "student_claim_error", error: msg }));
+    // rule 97: e.message инлайнится в ответ (часто несёт ключевую деталь).
+    return json({ code: "INTERNAL_ERROR", error: `Внутренняя ошибка: ${msg}. Попробуй ещё раз.` }, 500);
   }
 });
