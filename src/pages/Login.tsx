@@ -32,11 +32,15 @@ const Login = () => {
   const [showTelegramHint, setShowTelegramHint] = useState(false);
   const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const redirectErrorShown = useRef(false);
-  // Онбординг v2 (T7) — «войти по коду» (RU-safe magic-link на email).
+  // Онбординг v2 (T7) — «ссылка для входа на почту» (RU-safe magic-link).
   const [otpOpen, setOtpOpen] = useState(false);
   const [otpEmail, setOtpEmail] = useState("");
   const [otpLoading, setOtpLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
+  // №43 (2026-07-20) — вход по коду от репетитора: нормализуем 8-симв. код и
+  // ведём на /c/{код} — StudentClaimPage сам минтит сессию (один claim-surface).
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [codeValue, setCodeValue] = useState("");
 
   // Cleanup telegram timeout on unmount
   useEffect(() => {
@@ -184,6 +188,27 @@ const Login = () => {
     }
   };
 
+  // Код от репетитора (№43): нормализация зеркалит student-claim normalizeToken
+  // (strip дефисов/пробелов; короткий → UPPERCASE; legacy 32-hex → lowercase).
+  // Вставленную целиком ссылку /c/{код} тоже принимаем (берём последний сегмент).
+  const handleCodeSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    let raw = codeValue.trim();
+    const slashIdx = raw.lastIndexOf("/");
+    if (slashIdx >= 0) raw = raw.slice(slashIdx + 1);
+    const stripped = raw.replace(/[\s-]/g, "");
+    if (/^[a-f0-9]{32}$/i.test(stripped)) {
+      navigate(`/c/${stripped.toLowerCase()}`);
+      return;
+    }
+    const up = stripped.toUpperCase();
+    if (!/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(up)) {
+      toast.error("Код — 8 букв и цифр, например A7K2-9MPX. Проверь и попробуй ещё раз.");
+      return;
+    }
+    navigate(`/c/${up}`);
+  };
+
   const handleOtpRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     const value = otpEmail.trim();
@@ -262,7 +287,42 @@ const Login = () => {
             </p>
           </form>
 
-          {/* Онбординг v2 (T7) — вход по коду (magic-link на почту) */}
+          {/* №43 — вход по коду от репетитора (короткий многоразовый claim-код) */}
+          <div className="rounded-lg border border-border p-3">
+            {!codeOpen ? (
+              <button
+                type="button"
+                className="w-full text-sm font-medium text-primary"
+                onClick={() => setCodeOpen(true)}
+                style={{ touchAction: "manipulation" }}
+              >
+                У меня есть код от репетитора
+              </button>
+            ) : (
+              <form onSubmit={handleCodeSubmit} className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Введи код из 8 символов — его даёт репетитор.
+                </p>
+                <Input
+                  type="text"
+                  inputMode="text"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="A7K2-9MPX"
+                  value={codeValue}
+                  onChange={(e) => setCodeValue(e.target.value)}
+                  className="text-base font-mono tracking-widest uppercase"
+                  required
+                />
+                <Button type="submit" variant="outline" className="w-full">
+                  Войти по коду
+                </Button>
+              </form>
+            )}
+          </div>
+
+          {/* Онбординг v2 (T7) — ссылка для входа на почту (magic-link) */}
           <div className="rounded-lg border border-border p-3">
             {!otpOpen ? (
               <button
@@ -275,7 +335,7 @@ const Login = () => {
                 }}
                 style={{ touchAction: "manipulation" }}
               >
-                Войти по коду на почту
+                Прислать ссылку для входа на почту
               </button>
             ) : otpSent ? (
               <p className="text-sm text-muted-foreground text-center">
@@ -300,7 +360,7 @@ const Login = () => {
               </form>
             )}
             <p className="mt-2 text-center text-xs text-muted-foreground">
-              Нет пароля и почты? Попроси у репетитора новую ссылку для входа.
+              Нет пароля и почты? Попроси у репетитора код для входа&nbsp;↑
             </p>
           </div>
 

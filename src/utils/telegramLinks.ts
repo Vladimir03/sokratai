@@ -83,6 +83,22 @@ export const getStudentClaimShareLink = (token: string): string => {
   return `${PRODUCTION_URL}/c/${encodeURIComponent(token)}`;
 };
 
+/**
+ * Короткий claim-код ученика (№43, 2026-07-20): 8 символов из алфавита
+ * referral_code (UPPERCASE, без путающих I/L/O/0/1), минтится RPC
+ * `tutor_ensure_student_claim_token`. Legacy 32-hex токены под этот формат
+ * НЕ подходят (для них показывается только ссылка/QR).
+ */
+const SHORT_CLAIM_CODE_RE = /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/;
+
+export const isShortClaimCode = (token: string): boolean => SHORT_CLAIM_CODE_RE.test(token);
+
+/** Отображение кода репетитору/ученику: `AB2C-D3EF` (сервер дефисы игнорирует). */
+export const formatClaimCode = (token: string): string | null => {
+  if (!isShortClaimCode(token)) return null;
+  return `${token.slice(0, 4)}-${token.slice(4)}`;
+};
+
 export const telegramLinks = {
   headerTry: getTelegramLink('header_try'),
   planFree: getTelegramLink('plan_free'),

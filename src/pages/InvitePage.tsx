@@ -8,6 +8,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { claimInvite } from '@/lib/inviteApi';
+import YandexAuthButton from '@/components/YandexAuthButton';
+import VkAuthButton from '@/components/VkAuthButton';
 import { z } from 'zod';
 
 interface TutorInfo {
@@ -134,6 +136,17 @@ export default function InvitePage() {
     fetchTutor();
     return () => { cancelled = true; };
   }, [inviteCode]);
+
+  // №79 (2026-07-20): персист инвайта ДО OAuth-редиректа. Кнопки Яндекс/VK
+  // уводят через window.location.href — inline-claim не успевает; после возврата
+  // (#access_token → /student/schedule) AuthGuard зовёт claimPendingInvite() из
+  // localStorage. Идемпотентно: успешный inline-claim/деферред-пути сами чистят
+  // ключ; claim-invite при повторе отвечает already_linked (успех).
+  useEffect(() => {
+    if (sessionChecked && !session && tutor && inviteCode) {
+      localStorage.setItem('pending_invite_code', inviteCode);
+    }
+  }, [sessionChecked, session, tutor, inviteCode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -568,6 +581,35 @@ export default function InvitePage() {
               </>
             )}
           </p>
+
+          {/* Divider */}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">или</span>
+            </div>
+          </div>
+
+          {/* №79 (Егор): вход/регистрация через российские сервисы прямо с
+              инвайта. Инвайт-код уже в localStorage (persist-эффект выше) —
+              после OAuth-возврата AuthGuard дозабирает привязку. */}
+          <div className="flex flex-col items-stretch gap-3">
+            <YandexAuthButton
+              redirectPath="/student/schedule"
+              consentSource="yandex-oauth-student"
+            />
+            <VkAuthButton
+              redirectPath="/student/schedule"
+              consentSource="vk-oauth-student"
+            />
+            <p className="text-xs text-center text-muted-foreground leading-relaxed">
+              Продолжая, вы соглашаетесь с{' '}
+              <Link to="/offer" className="underline hover:text-primary">офертой</Link> и{' '}
+              <Link to="/privacy-policy" className="underline hover:text-primary">политикой конфиденциальности</Link>.
+            </p>
+          </div>
 
           {/* Footer */}
           <p className="text-xs text-center text-muted-foreground">

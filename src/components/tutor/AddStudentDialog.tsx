@@ -267,11 +267,12 @@ export function AddStudentDialog({
     }
     // Онбординг v2: плейсхолдер по имени (без реального контакта) — логин/пароль
     // бесполезны (temp-email), поэтому НЕ показываем StudentCredentialsModal.
+    // №43 (2026-07-20): вход плейсхолдера — короткий многоразовый код на карточке.
     if (isPlaceholder || !response.login_email || !response.plain_password) {
       if (!membershipSyncFailed) {
         toast({
           title: 'Ученик добавлен',
-          description: `${studentName} добавлен. Подключите его ссылкой при отправке первой домашки.`,
+          description: `${studentName} добавлен. Код для входа — на карточке ученика, кнопка «Подключить».`,
         });
       }
       finalizeManualAdd(response.tutor_student_id);
@@ -438,8 +439,8 @@ export function AddStudentDialog({
         descParts.length > 0
           ? descParts.join(' · ')
           : isInMiniGroup && selectedGroupId
-            ? 'Добавлены в группу. Подключите каждого ссылкой при первой домашке.'
-            : 'Подключите их ссылкой при отправке первой домашки.';
+            ? 'Добавлены в группу. Код для входа каждого — на карточке ученика («Подключить»).'
+            : 'Код для входа каждого — на карточке ученика, кнопка «Подключить».';
       toast({
         title: `Добавлено ${okN} ${pluralizeRu(okN, ['ученик', 'ученика', 'учеников'])}`,
         description: desc,

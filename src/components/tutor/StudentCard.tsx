@@ -275,11 +275,15 @@ export const StudentCard = memo(function StudentCard({
             </span>
           </div>
 
-          {/* Онбординг v2 (T8): nudge для не подключённого ученика без канала */}
-          {!isActivated && !hasRealEmail && !hasTelegramBot && onConnect && (
+          {/* Онбординг v2 (T8) + №43 (2026-07-20): nudge для ученика без своего
+              канала входа. НЕ гейтится isActivated — заходивший-но-незарегистрированный
+              продолжает входить многоразовым кодом, репетитор должен его видеть. */}
+          {!hasRealEmail && !hasTelegramBot && onConnect && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5">
               <p className="text-xs leading-relaxed text-amber-800">
-                Не подключился. Подключите ссылкой или QR — или добавьте email/Telegram, чтобы ученик мог входить с любого устройства.
+                {isActivated
+                  ? 'Ученик заходил, но ещё не завёл почту и пароль. Код для входа продолжает работать — покажи его, если ученик потерял доступ.'
+                  : 'Не подключился. Подключите кодом, ссылкой или QR — или добавьте email/Telegram, чтобы ученик мог входить с любого устройства.'}
               </p>
               <Button
                 type="button"

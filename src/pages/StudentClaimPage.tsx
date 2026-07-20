@@ -44,7 +44,7 @@ export default function StudentClaimPage() {
 
     (async () => {
       if (!token) {
-        setErrorMsg('Ссылка недействительна. Попроси у репетитора новую.');
+        setErrorMsg('Код или ссылка недействительны. Попроси у репетитора новый код.');
         setStep('error');
         return;
       }
@@ -227,6 +227,19 @@ export default function StudentClaimPage() {
             <p className="text-center text-xs text-muted-foreground">
               Без подтверждения почты — сразу к задаче.
             </p>
+            {/* №43 (решение владельца 2026-07-20): шаг пропускаемый — код
+                многоразовый, доступ не теряется; надж повторится при следующем
+                заходе по коду. */}
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-muted-foreground"
+              disabled={submitting}
+              onClick={goToTask}
+              style={{ touchAction: 'manipulation' }}
+            >
+              Позже — сначала к заданию
+            </Button>
           </form>
         )}
 
@@ -238,7 +251,7 @@ export default function StudentClaimPage() {
               Войти
             </Button>
             <p className="text-xs text-muted-foreground">
-              Нет доступа? Попроси у репетитора новую ссылку для входа.
+              Нет доступа? Попроси у репетитора код для входа.
             </p>
           </div>
         )}

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Copy, Check, Loader2, AlertCircle, RefreshCw, Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabaseClient';
-import { getStudentClaimShareLink } from '@/utils/telegramLinks';
+import { getStudentClaimShareLink, formatClaimCode } from '@/utils/telegramLinks';
 import { connectHomeworkStudentByEmail } from '@/lib/tutorHomeworkApi';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 
@@ -66,12 +66,16 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
   const [tokenError, setTokenError] = useState(false);
   const [tokenErrorMsg, setTokenErrorMsg] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [email, setEmail] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   const current = students[index];
   const claimLink = token ? getStudentClaimShareLink(token) : '';
+  // Короткий 8-симв. код (№43) — показываем крупно; legacy 32-hex → null
+  // (только ссылка/QR, ротация в короткий произойдёт на стороне RPC).
+  const shortCode = token ? formatClaimCode(token) : null;
   const total = students.length;
 
   // Сброс индекса при каждом открытии.
@@ -87,6 +91,7 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
     setTokenError(false);
     setTokenErrorMsg(null);
     setCopied(false);
+    setCodeCopied(false);
     setEmail('');
     setLoadingToken(true);
     (async () => {
@@ -109,7 +114,7 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
           const msg = e instanceof Error ? e.message : String(e ?? '');
           setTokenErrorMsg(
             /STUDENT_ALREADY_ACTIVE/i.test(msg)
-              ? 'Ученик уже подключён и активен — он входит по паролю или по коду на почту. Новая ссылка не нужна.'
+              ? 'Ученик уже зарегистрировался — он входит по паролю или по ссылке на почту. Код больше не нужен.'
               : null,
           );
           setTokenError(true);
@@ -138,6 +143,17 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
       setCopied(true);
       toast({ title: 'Ссылка скопирована', description: 'Отправь её ученику — в любой чат.' });
       setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast({ title: 'Не удалось скопировать', variant: 'destructive' });
+    }
+  };
+
+  const handleCopyCode = async () => {
+    if (!shortCode) return;
+    const ok = await copyText(shortCode);
+    if (ok) {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
     } else {
       toast({ title: 'Не удалось скопировать', variant: 'destructive' });
     }
@@ -186,7 +202,8 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
         <DialogHeader>
           <DialogTitle>Подключить · {current.name}</DialogTitle>
           <DialogDescription>
-            Дальше задания приходят ученику сами — этот экран нужен только для первого подключения.
+            Дальше задания приходят ученику сами. Код и ссылка работают, пока ученик не заведёт
+            свою почту и пароль, — возвращайся сюда, если он потеряет вход.
           </DialogDescription>
         </DialogHeader>
 
@@ -214,6 +231,30 @@ export function ConnectStudentSheet({ open, onOpenChange, assignmentId, students
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            {shortCode && (
+              <button
+                type="button"
+                onClick={handleCopyCode}
+                className="flex min-h-[44px] w-full flex-col items-center gap-1 rounded-lg border border-border bg-socrat-surface px-4 py-3 transition-colors hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-accent/20"
+                style={{ touchAction: 'manipulation' }}
+                aria-label="Скопировать код входа"
+                title="Скопировать код"
+              >
+                <span className="font-mono text-2xl font-semibold tracking-widest text-slate-900 tabular-nums">
+                  {shortCode}
+                </span>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {codeCopied ? <Check className="h-3 w-3" aria-hidden="true" /> : <Copy className="h-3 w-3" aria-hidden="true" />}
+                  {codeCopied ? 'Код скопирован' : 'Код входа — нажми, чтобы скопировать'}
+                </span>
+              </button>
+            )}
+            {shortCode && (
+              <p className="-mt-2 text-center text-xs text-muted-foreground">
+                Продиктуй код — ученик введёт его на sokratai.ru на странице входа.
+              </p>
+            )}
+
             <div className="flex justify-center rounded-lg bg-white p-4">
               <QRCode value={claimLink} size={168} />
             </div>

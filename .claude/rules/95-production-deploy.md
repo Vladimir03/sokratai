@@ -101,6 +101,23 @@ ssh root@185.161.65.182 'cd /opt/sokratai && git log -1 --oneline'
 
 Полный исходник скрипта: при необходимости `cat /usr/local/bin/deploy-sokratai` через SSH.
 
+## OG-варианты `/invite/` и `/c/` — студенческое превью ссылок (№47, 2026-07-20)
+
+Пригласительные ссылки (`sokratai.ru/invite/{code}`, `sokratai.ru/c/{код}`) — SPA-пути; без спец-обработки боты соцсетей скрейпят глобальный OG из `index.html` («инструмент репетитора… 200 ₽») — пугает ученика (репорт Елены, №47).
+
+**Решение — статический файл + nginx (НЕ edge-URL):** postbuild-скрипт `scripts/generate-og-variants.mjs` (хук `postbuild` в `package.json`, работает и на VPS внутри `deploy-sokratai`) копирует `dist/index.html` → `dist/invite-og.html`, меняя title/description/og:*/twitter:* на студенческие («Тебя пригласили в Сократ AI», зеркало `invite-preview`) + `robots noindex`. **Fail-loud:** переделали OG-блок `index.html` так, что маркер не матчится → скрипт валит build (правь регэкспы скрипта синхронно с OG-блоком). Edge-URL в шаринге отвергнут осознанно (rule 96 #11a: агентский деплой Lovable флипает `verify_jwt=true` → 401 на browser-navigation = ученики вообще не могут зайти).
+
+**nginx на VPS (разовый ops-шаг, конфиг НЕ в репо):** в server-блок `sokratai.ru` НАД SPA-fallback `location /`:
+
+```nginx
+# Student-friendly OG для приглашений (№47). Fallback на index.html —
+# безопасен при откате на билд без postbuild-скрипта.
+location ^~ /invite/ { try_files /invite-og.html /index.html; }
+location ^~ /c/      { try_files /invite-og.html /index.html; }
+```
+
+`nginx -t && systemctl reload nginx`. Браузер и бот получают ОДИН файл: боты читают метатеги, браузер грузит тот же SPA (asset-пути абсолютные `/assets/*`), редиректов нет. При пересборке VPS — восстановить эти 2 location из этого файла. Известное ограничение: Telegram кэширует OG per-URL — ранее расшаренные ссылки обновятся при пере-скрейпе (форс — @WebpageBot), новые — сразу.
+
 ## Откат сломанного деплоя
 
 Если после `deploy-sokratai` прод упал:
