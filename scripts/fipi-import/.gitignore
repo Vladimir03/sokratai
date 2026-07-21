@@ -1,0 +1,4 @@
+# Оригиналы картинок ФИПИ (бинарь, copyright-adjacent) — не в git
+out/images/
+# refs.json — runtime-специфичен (uid загрузившего), генерится при каждом прогоне
+out/refs.json

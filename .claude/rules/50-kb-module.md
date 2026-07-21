@@ -313,6 +313,18 @@
 
 **Отложено (осознанно):** сборники/диапазон страниц/Excel(TASK-11)/вход из конструктора(TASK-14); `kb_search` subject-scoping (вернёт все предметы); homework-picker/`PublishFolderModal` темы всех предметов; авто-балл КИМ обществознания (нужна таблица ФИПИ от Милады); языковой промпт (Эмилия); текстовый слой цифровых PDF; единый блок «Материал» в загрузчике (IA). **Готча workflow:** dev-сервер без `@lovable.dev/mcp-js` потрошит `supabase/functions/mcp/index.ts` — перед коммитом `git checkout --` его.
 
+## Массовый импорт задач из ФИПИ → Каталог (пилот 2026-07-21)
+
+Наполнение Банка контентом открытого банка ФИПИ (первая Job репетитора — поиск задач). Пилот: 10 задач стр. 1 ОГЭ-физика в «Черновики для Сократа» Егора на ревью. Скилл `fipi-task-loader` (`.claude/skills/`) — повторяемый конвейер. Build-лог: memory `project_fipi_oge_import_2026_07_21.md`. Артефакты: `scripts/fipi-import/` (НЕ в prod-бандле).
+
+**Конвейер (эталон для масштабирования на стр. 2–151 / другие предметы):**
+- **Парсинг ФИПИ.** Открытый банк = same-origin iframe `#questions_container` (из `bank/questions.php?proj=<GUID>`, windows-1251). Задание: `div.qblock#q{ID}` (условие в `p.MsoNormal`, hidden `input[name=guid]`, `.hint`=тип ответа) + сосед `div#i{ID}` («Свойства задания»: КЭС код+имя, «Номер»). Извлекать через Browser `javascript_tool` внутри iframe. Картинки — прямые URL `oge.fipi.ru/docs/{proj}/questions/{guid}/xs3qstsrc*.{jpg,png,gif}` (`curl` с UA+Referer). **ФИПИ ответов НЕ отдаёт** → решаем сами + пометка «⚠ Проверить модератору» в конце `solution`.
+- **Картинки в storage — НЕ из SQL** (blob отдельно). `scripts/fipi-import/upload-images.mjs` (supabase-js, hardcoded `api.sokratai.ru` RU-bypass, anon key, интерактивный ввод email+пароль). Запускает ВЛАДЕЛЕЦ (пароль агенту не отдаёт). Политика бакета `kb-attachments`: первый сегмент пути = uid загружающего → `{uid}/fipi-oge/p1/`; читается любым authenticated → задачи Егора ссылаются легально. Владелец входит email+паролем (kamchatkinvova@gmail.com); OAuth-без-пароля → нужен иной путь.
+- **Вставка — Lovable MCP `query_database`, НЕ миграция** (contentпилот: лёгкая правка/откат; миграции неизменяемы, на 151 стр. не масштабируются). `id` детерминированные = `uuidv5(NS_DNS, 'sokratai.fipi-oge.'+GUID)` + `ON CONFLICT DO NOTHING` (повторный прогон безопасен, откат = `DELETE ... WHERE folder_id`). `fingerprint` НЕ передаём (вычислится в `kb_publish_task` при переносе Егором в «сократ»). Триггер авто-публикации на INSERT в черновики НЕ срабатывает (`kb_is_in_socrat_tree`=false) даже с `topic_id` → префилл темы безопасен.
+- **Классификация:** `owner_id`=модератор (Егор `a7212758-...`), `exam='oge'`, `source_label='ФИПИ'`; `primary_score` из `PHYSICS_OGE_KIM_SCORES`; № КИМ только где однозначно, иначе NULL; **check_format для ОГЭ ставим ЯВНО** (`inferCheckFormatFromKim` знает лишь ЕГЭ 21–26); задачи-«соответствия» → `short_answer`/`numeric`, ответ = строка цифр.
+- **Превью-гейт ОБЯЗАТЕЛЕН:** HTML-превью всех задач (условие+картинки+ответ+решение+классификация) через Artifact владельцу ДО записи в прод. Билдер из `page1.json`.
+- **MathText markdown-таблицы НЕ рендерит** (rule 80, GFM только в чате) → «соответствия» в `task_text` = структурный текст, таблица только в превью-артефакте.
+
 ## Спецификация
 - Tech spec: docs/delivery/features/kb/kb-tech-spec.md
 - Design ref: docs/discovery/product/kb/kb-design-ref.jsx
