@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, FileText, Folder, Loader2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useFolderTree } from '@/hooks/useFolders';
 import { useImageUpload } from '@/hooks/useImageUpload';
+import { useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
 import { deleteKBTaskImage, uploadKBTaskImage } from '@/lib/kbApi';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import {
@@ -20,8 +21,8 @@ import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 import { SUBJECTS } from '@/types/homework';
-import type { ExtractCompleteness } from '@/components/kb/AiTaskLoader/reviewTypes';
-import type { KBFolderTreeNode } from '@/types/kb';
+import type { BatchClassification, ExtractCompleteness } from '@/components/kb/AiTaskLoader/reviewTypes';
+import type { CatalogFilter, KBFolderTreeNode } from '@/types/kb';
 
 /** Max screenshots per session (mirror edge MAX_IMAGES). */
 const MAX_LOADER_IMAGES = 10;
@@ -49,6 +50,10 @@ const NEXT_PAGE_TAIL_CHARS = 600;
 const SHORTFALL_RATIO = 0.6;
 /** Кап текста одного вызова (зеркало edge MAX_TEXT_CHARS с запасом). */
 const CHUNK_TEXT_CAP = 59_000;
+
+/** Общий класс select'ов каскада «тема по умолчанию» (16px + touch — rule 80/90). */
+const CASCADE_SELECT_CLASS =
+  'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]';
 
 /** Flatten folder tree into { id, name, depth } for <select> options (mirror CreateTaskModal). */
 function flattenTree(
@@ -91,6 +96,8 @@ interface InputStageProps {
     uploadedRefs: string[],
     /** W4: честность о полноте (ожидание по текстовому слою PDF + недоборы). */
     completeness: ExtractCompleteness,
+    /** ВОЛНА 5: тема/тип по умолчанию на весь пакет (пусто для hw/mock). */
+    defaultClassification: BatchClassification,
   ) => void;
 }
 
@@ -109,10 +116,40 @@ export function InputStage({
   // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
   const { data: tutorProfile } = useTutorProfile();
   const [folderId, setFolderId] = useState(initialFolderId);
-  // Дефолт: форс из конструктора (hw) → last-used (серия KB) → профиль → physics.
+  // Дефолт: форс из конструктора (hw) → [один предмет в профиле] → last-used
+  // (серия KB) → профиль → physics.
   const [subject, setSubject] = useState<string>(() =>
     fixedSubject ??
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
+  );
+  // Холодный кэш профиля мог не успеть к useState-init (редко — SideNav держит
+  // тёплым). One-shot ре-дефолт, когда профиль подъехал: ТОЛЬКО если тутор не
+  // трогал селектор и нет last-used (не клоббер выбора — класс багов rule 40).
+  const userTouchedSubjectRef = useRef(false);
+  const subjectAutoSetRef = useRef(false);
+  useEffect(() => {
+    if (subjectAutoSetRef.current) return;
+    if (fixedSubject !== undefined) return; // hw форсит предмет
+    if (userTouchedSubjectRef.current) return; // тутор выбрал вручную
+    if (loadLastClassification().subject) return; // last-used уже решил init
+    const profs = tutorProfile?.subjects;
+    if (!profs || profs.length === 0) return; // ждём профиль
+    subjectAutoSetRef.current = true;
+    setSubject(resolveTutorDefaultSubject(profs, null));
+  }, [tutorProfile, fixedSubject]);
+  // ВОЛНА 5: тема по умолчанию на ВЕСЬ пакет (необязательно) — предмет → тип →
+  // тема → подтема. Применится ко всем задачам (переопределение по одной — в
+  // ревью). Только KB-назначение (fixedSubject === undefined).
+  const [defaultExam, setDefaultExam] = useState<'' | 'ege' | 'oge'>('');
+  const [defaultTopicId, setDefaultTopicId] = useState('');
+  const [defaultSubtopicId, setDefaultSubtopicId] = useState('');
+  const defaultTopicFilter: CatalogFilter | undefined = defaultExam || undefined;
+  const { topics: defaultTopics = [], loading: defaultTopicsLoading } = useTopics(
+    defaultTopicFilter,
+    subject,
+  );
+  const { subtopics: defaultSubtopics = [], loading: defaultSubtopicsLoading } = useSubtopics(
+    defaultTopicId || undefined,
   );
   const [text, setText] = useState('');
   // Свободная подсказка для AI (#45а): «ответы в конце страницы», «все задачи — КИМ 17»…
@@ -594,7 +631,11 @@ export function InputStage({
       // форм/корзины стартует с него — не переключать «Химия» каждый раз.
       // hw-режим: предмет форсится конструктором — last-used Базы не трогаем.
       if (!fixedSubject) saveLastSubject(subject);
-      onExtracted(allDrafts, totals, effectiveFolderId, subject, allRefs, { expectedTotal, shortfalls });
+      onExtracted(allDrafts, totals, effectiveFolderId, subject, allRefs, { expectedTotal, shortfalls }, {
+        exam: defaultExam,
+        topicId: defaultTopicId,
+        subtopicId: defaultSubtopicId,
+      });
     } catch (e) {
       // Полный провал: залитые blobs никем не референсятся — чистим.
       for (const ref of allRefs) void deleteKBTaskImage(ref);
@@ -617,7 +658,12 @@ export function InputStage({
           <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
           <select
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) => {
+              userTouchedSubjectRef.current = true;
+              setSubject(e.target.value);
+              setDefaultTopicId('');
+              setDefaultSubtopicId('');
+            }}
             disabled={isExtracting}
             className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
           >
@@ -625,6 +671,73 @@ export function InputStage({
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
+        </fieldset>
+      ) : null}
+
+      {/* ВОЛНА 5: тема по умолчанию на ВЕСЬ пакет (необязательно) — применится ко
+          всем распознанным задачам, переопределение по одной остаётся в ревью.
+          Только KB-назначение (hw/mock форсят предмет — каскад скрыт). */}
+      {fixedSubject === undefined ? (
+        <fieldset className="rounded-lg border border-dashed border-socrat-border/70 p-3">
+          <legend className="px-1 text-xs font-semibold text-slate-500">
+            Тема по умолчанию{' '}
+            <span className="font-normal text-slate-400">— применится ко всем задачам, необязательно</span>
+          </legend>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Тип</span>
+              <select
+                aria-label="Тип задания по умолчанию"
+                value={defaultExam}
+                onChange={(e) => {
+                  setDefaultExam(e.target.value as '' | 'ege' | 'oge');
+                  setDefaultTopicId('');
+                  setDefaultSubtopicId('');
+                }}
+                disabled={isExtracting}
+                className={CASCADE_SELECT_CLASS}
+              >
+                <option value="">Не указан</option>
+                <option value="ege">ЕГЭ</option>
+                <option value="oge">ОГЭ</option>
+              </select>
+            </div>
+            <div>
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Тема</span>
+              <select
+                aria-label="Тема по умолчанию"
+                value={defaultTopicId}
+                onChange={(e) => {
+                  setDefaultTopicId(e.target.value);
+                  setDefaultSubtopicId('');
+                }}
+                disabled={isExtracting || defaultTopicsLoading}
+                className={CASCADE_SELECT_CLASS}
+              >
+                <option value="">Не выбрана</option>
+                {defaultTopics.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {defaultTopicId ? (
+            <div className="mt-3">
+              <span className="mb-1 block text-[11px] font-medium text-slate-400">Подтема</span>
+              <select
+                aria-label="Подтема по умолчанию"
+                value={defaultSubtopicId}
+                onChange={(e) => setDefaultSubtopicId(e.target.value)}
+                disabled={isExtracting || defaultSubtopicsLoading}
+                className={CASCADE_SELECT_CLASS}
+              >
+                <option value="">Не выбрана</option>
+                {defaultSubtopics.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
         </fieldset>
       ) : null}
 

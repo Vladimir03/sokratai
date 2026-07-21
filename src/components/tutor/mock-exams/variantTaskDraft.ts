@@ -81,6 +81,13 @@ export function inferVariantTaskPart(
 const PHYSICS_EGE_MULTI_CHOICE = new Set([5, 9, 14, 18]);
 const PHYSICS_EGE_ORDERED = new Set([6, 10, 15, 17]);
 
+// Обществознание ЕГЭ Часть 1 (задания 1-16) — критерии ФИПИ (таблица Милады,
+// 2026-07-21). № 6,13,15 — последовательность (порядок важен, 1 ошибка = 1 балл)
+// → ordered; № 2,4,5,7,8,10,11,14,16 — выбор нескольких (порядок неважен, 1 ошибка
+// = 1 балл) → multi_choice; № 1,3,9,12 (1 балл) — точное совпадение → strict.
+const SOCIAL_EGE_ORDERED = new Set([6, 13, 15]);
+const SOCIAL_EGE_MULTI_CHOICE = new Set([2, 4, 5, 7, 8, 10, 11, 14, 16]);
+
 export function inferPart1CheckMode(
   subject: string,
   exam: '' | 'ege' | 'oge' | null,
@@ -90,6 +97,10 @@ export function inferPart1CheckMode(
     if (PHYSICS_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
     if (PHYSICS_EGE_ORDERED.has(kimNumber)) return 'ordered';
     if (kimNumber === 20) return 'task20';
+  }
+  if (subject === 'social' && exam !== 'oge' && kimNumber !== null) {
+    if (SOCIAL_EGE_ORDERED.has(kimNumber)) return 'ordered';
+    if (SOCIAL_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
   }
   return 'strict';
 }

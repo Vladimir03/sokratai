@@ -55,17 +55,32 @@ export function getKimPrimaryScore(
 }
 
 /**
- * Subject-aware обёртка (мультипредметный каталог, 2026-07-06): авто-балл по КИМ —
- * ТОЛЬКО физика (карты ФИПИ физики). Для остальных предметов (обществознание и т.д.)
- * → `null`: балл вводится вручную (locked-решение владельца). `subject` null/undefined
- * трактуется как физика (обратная совместимость — homework-контекст без предмета).
- * Когда появятся карты обществознания — расширяй ЗДЕСЬ (single source of truth).
+ * Обществознание ЕГЭ Часть 1 (задания 1-16) — макс. первичный балл по критериям
+ * ФИПИ (таблица Милады, 2026-07-21). № 1,3,9,12 — 1 балл; остальные 1-16 — 2 балла.
+ * Σ Части 1 = 28 (сверено с максимумом ЕГЭ обществознание 2024). Часть 2 (17-25) —
+ * не здесь (ручной ввод). Частичный балл — забота грейдинга, тут только МАКС.
+ */
+export const SOCIAL_EGE_KIM_SCORES: Record<number, number> = {
+  1: 1, 2: 2, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2,
+  9: 1, 10: 2, 11: 2, 12: 1, 13: 2, 14: 2, 15: 2, 16: 2,
+};
+
+/**
+ * Subject-aware обёртка (мультипредметный каталог, 2026-07-06): авто-балл по КИМ.
+ * Физика ЕГЭ/ОГЭ (карты ФИПИ) + обществознание ЕГЭ Часть 1 (задания 1-16, таблица
+ * Милады 2026-07-21). Остальные предметы → `null`: балл вводится вручную. `subject`
+ * null/undefined трактуется как физика (обратная совместимость — homework без предмета).
+ * Новый предмет с картой баллов — расширяй ЗДЕСЬ (single source of truth).
  */
 export function getKimPrimaryScoreForSubject(
   subject: string | null | undefined,
   exam: ExamType | null | undefined,
   kimNumber: number | null | undefined,
 ): number | null {
+  if (subject === 'social') {
+    if (exam !== 'ege' || kimNumber == null || !Number.isFinite(kimNumber)) return null;
+    return SOCIAL_EGE_KIM_SCORES[kimNumber] ?? null;
+  }
   if (subject != null && subject !== 'physics') return null;
   return getKimPrimaryScore(exam, kimNumber);
 }

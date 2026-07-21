@@ -1,9 +1,12 @@
 /**
  * Дефолт предмета репетитора — single source of truth (2026-07-07).
  *
- * Иерархия (решение владельца): last-used → профиль → 'physics'.
- *  - last-used — сильнейший сигнал («что грузил вчера, то грузишь сегодня»);
- *    сам решает мульти-предметный кейс (профиль с 2+ предметами не решает).
+ * Иерархия (решение владельца): [один предмет в профиле] → last-used → профиль → 'physics'.
+ *  - ОДНО-ПРЕДМЕТНЫЙ профиль (ровно один контент-предмет, напр. модератор
+ *    обществознания) → его предмет ВСЕГДА, ИГНОРИРУЯ last-used (решение владельца
+ *    2026-07-21): тестовая загрузка чужого предмета не должна «залипать» дефолтом.
+ *  - last-used — сильнейший сигнал для МУЛЬТИ-предметных («что грузил вчера, то
+ *    грузишь сегодня»); сам решает кейс профиля с 2+ предметами.
  *  - профиль (`tutors.subjects TEXT[]`, канонические id из SUBJECTS, порядок
  *    массива уже канонический — SubjectsMultiSelect сортирует) — дефолт
  *    ПЕРВОГО раза; 'other' пропускается (не контент-предмет).
@@ -36,20 +39,28 @@ function normalizeSubjectId(raw: unknown): string | null {
 }
 
 /**
- * Дефолт предмета: lastUsed (валидный) → первый контент-предмет профиля → physics.
+ * Дефолт предмета: [один контент-предмет в профиле] → lastUsed (валидный) →
+ * первый контент-предмет профиля → physics.
  * `profileSubjects` может быть undefined (профиль ещё не загружен/нет строки).
  */
 export function resolveTutorDefaultSubject(
   profileSubjects: readonly string[] | null | undefined,
   lastUsed: string | null | undefined,
 ): string {
+  // Уникальные контент-предметы профиля (дедуп, 'other'/legacy нормализуется).
+  const contentSubjects: string[] = [];
+  for (const s of profileSubjects ?? []) {
+    const id = normalizeSubjectId(s);
+    if (id && !contentSubjects.includes(id)) contentSubjects.push(id);
+  }
+
+  // Одно-предметный профиль → его предмет ВСЕГДА (last-used не «залипает»).
+  if (contentSubjects.length === 1) return contentSubjects[0];
+
   const fromLastUsed = normalizeSubjectId(lastUsed);
   if (fromLastUsed) return fromLastUsed;
 
-  for (const s of profileSubjects ?? []) {
-    const id = normalizeSubjectId(s);
-    if (id) return id;
-  }
+  if (contentSubjects.length > 0) return contentSubjects[0];
 
   return DEFAULT_TUTOR_SUBJECT;
 }

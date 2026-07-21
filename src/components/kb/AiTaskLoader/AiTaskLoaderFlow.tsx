@@ -10,6 +10,7 @@ import type {
   AiLoaderCommitItem,
   AiLoaderDestination,
   AiLoaderGuardState,
+  BatchClassification,
   CropState,
   ExtractCompleteness,
   ReviewOverrides,
@@ -215,6 +216,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       chosenSubject: string,
       newUploadedRefs: string[],
       newCompleteness: ExtractCompleteness,
+      defaultClassification: BatchClassification,
     ) => {
       // Ф0 (волна 2): пре-резолв темы ПРИ ВХОДЕ в ревью — тутор сразу видит,
       // сматчилась ли тема (раньше — невидимый сюрприз на коммите). ЕГЭ/ОГЭ-темы
@@ -236,14 +238,22 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         }
         return named.length === 1 ? named[0].id : null;
       };
-      const initialOverrides: ReviewOverrides[] = newDrafts.map((d) => ({
-        topicId: resolveTopicId(d.topic_suggestion, d.exam),
-        subtopicId: null,
-        sourceLabel: d.source_label.trim(),
-        exam: d.exam ?? '',
-        kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
-        primaryScore: d.primary_score !== null ? String(d.primary_score) : '',
-      }));
+      // ВОЛНА 5: явный batch-дефолт (тема/тип, заданные ДО распознавания в
+      // InputStage) ПОБЕЖДАЕТ per-task подсказку AI — тутор задал тему, применяем
+      // ко всем; переопределение по одной остаётся в ревью. Пусто (hw/mock / не
+      // задано) → прежний AI-резолв (поведение байт-в-байт).
+      const batchExam: ExamType | null = defaultClassification.exam || null;
+      const initialOverrides: ReviewOverrides[] = newDrafts.map((d) => {
+        const effExam: ExamType | null = batchExam ?? d.exam;
+        return {
+          topicId: defaultClassification.topicId || resolveTopicId(d.topic_suggestion, effExam),
+          subtopicId: defaultClassification.subtopicId || null,
+          sourceLabel: d.source_label.trim(),
+          exam: defaultClassification.exam || d.exam || '',
+          kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
+          primaryScore: d.primary_score !== null ? String(d.primary_score) : '',
+        };
+      });
 
       setDrafts(newDrafts);
       setOverrides(initialOverrides);
