@@ -2,7 +2,7 @@
  * Мутации модератора каталога — таксономия (темы/подтемы) + публикация папки.
  * Все инвалидируют префикс ['tutor','kb'] (темы, подтемы, счётчики, папки).
  */
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createCatalogSource,
   createCatalogSubtopic,
@@ -13,6 +13,8 @@ import {
   deleteSectionToMyBase,
   deleteTopicToMyBase,
   moveTaskToMyBase,
+  previewDeleteSection,
+  previewDeleteTopic,
   publishFolderToCatalog,
   updateCatalogSource,
   updateCatalogSubtopic,
@@ -22,6 +24,10 @@ import {
   type UpdateTopicInput,
 } from '@/lib/kbModeratorApi';
 import type { CatalogFilter } from '@/types/kb';
+
+export type DeclutterTarget =
+  | { kind: 'topic'; topicId: string }
+  | { kind: 'section'; subject: string; section: string; filter: CatalogFilter };
 
 function useKBInvalidation() {
   const queryClient = useQueryClient();
@@ -130,6 +136,19 @@ export function useDeleteSectionToMyBase() {
     mutationFn: (params: { subject: string; section: string; filter: CatalogFilter; folderId: string | null }) =>
       deleteSectionToMyBase(params.subject, params.section, params.filter, params.folderId),
     onSuccess: () => { void invalidate(); },
+  });
+}
+
+/** Серверный preflight для диалога удаления — точные counts + needs_folder. */
+export function useDeclutterPreview(target: DeclutterTarget) {
+  return useQuery({
+    queryKey: ['tutor', 'kb', 'declutter-preview', target],
+    queryFn: () =>
+      target.kind === 'topic'
+        ? previewDeleteTopic(target.topicId)
+        : previewDeleteSection(target.subject, target.section, target.filter),
+    refetchOnWindowFocus: false,
+    staleTime: 0,
   });
 }
 

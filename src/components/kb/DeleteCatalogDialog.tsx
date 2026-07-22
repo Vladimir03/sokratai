@@ -1,22 +1,20 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 import { cn } from '@/lib/utils';
 import { FolderTreeSelect } from '@/components/kb/FolderPickerModal';
+import { useDeclutterPreview, type DeclutterTarget } from '@/hooks/useModeratorCatalog';
 
 // ВОЛНА 6: подтверждение удаления темы/раздела из каталога с переносом задач в
-// Мою базу. Хром — зеркало DeleteFolderDialog (красный destructive); при наличии
-// задач встроен пикер личной папки (FolderTreeSelect). Пустая тема/раздел →
-// пикер скрыт, onConfirm(null).
+// Мою базу. Хром — зеркало DeleteFolderDialog (красный destructive). Счётчики +
+// needs_folder приходят из СЕРВЕРНОГО preflight (ревью 5.6 P0-2/P1-5): клиентский
+// поиск и каталожный active-only view не искажают scope. При наличии задач —
+// встроенный пикер личной папки; пусто → onConfirm(null).
 
 interface DeleteCatalogDialogProps {
-  /** «тему» | «раздел» — для заголовка. */
   entity: 'тему' | 'раздел';
   name: string;
-  /** Сколько задач будет перенесено в Мою базу. */
-  taskCount: number;
-  /** Доп. счётчик (для раздела — число тем). */
-  topicCount?: number;
+  target: DeclutterTarget;
   isPending?: boolean;
   onConfirm: (folderId: string | null) => void;
   onClose: () => void;
@@ -25,15 +23,17 @@ interface DeleteCatalogDialogProps {
 export function DeleteCatalogDialog({
   entity,
   name,
-  taskCount,
-  topicCount,
+  target,
   isPending = false,
   onConfirm,
   onClose,
 }: DeleteCatalogDialogProps) {
+  const { data: preview, isLoading, error } = useDeclutterPreview(target);
   const [folderId, setFolderId] = useState<string | null>(null);
-  const needsFolder = taskCount > 0;
-  const canConfirm = !isPending && (!needsFolder || folderId !== null);
+  const needsFolder = preview?.needsFolder ?? false;
+  const taskCount = preview?.moveCount ?? 0;
+  const topicCount = preview?.topicCount;
+  const canConfirm = !isPending && !isLoading && !error && (!needsFolder || folderId !== null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -69,35 +69,47 @@ export function DeleteCatalogDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-5 py-4">
-          {topicCount !== undefined && topicCount > 0 ? (
-            <p className="mb-2 text-sm text-slate-600">
-              Будет удалено{' '}
-              <span className="font-semibold">
-                {topicCount} {pluralizeRu(topicCount, ['тема', 'темы', 'тем'])}
-              </span>
-              .
+          {isLoading ? (
+            <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Подсчёт содержимого…
+            </div>
+          ) : error ? (
+            <p className="py-4 text-sm text-red-600">
+              {error instanceof Error ? error.message : 'Не удалось получить сведения'}
             </p>
-          ) : null}
-
-          {needsFolder ? (
-            <>
-              <p className="text-sm text-slate-600">
-                <span className="font-semibold">
-                  {taskCount} {pluralizeRu(taskCount, ['задача', 'задачи', 'задач'])}
-                </span>{' '}
-                {pluralizeRu(taskCount, ['будет перенесена', 'будут перенесены', 'будут перенесены'])} в
-                вашу «Мою базу», из общего каталога {entity === 'тему' ? 'тема исчезнет' : 'раздел исчезнет'}.
-              </p>
-              <p className="mb-1.5 mt-3 text-xs font-semibold text-slate-500">Выберите папку для задач:</p>
-              <div className="max-h-[38vh] overflow-auto rounded-lg border border-socrat-border py-1">
-                <FolderTreeSelect selectedId={folderId} onSelect={setFolderId} />
-              </div>
-            </>
           ) : (
-            <p className="text-sm text-slate-600">
-              {entity === 'тему' ? 'Тема пустая' : 'Раздел пустой'} — {entity === 'тему' ? 'она' : 'он'} будет
-              удалён{entity === 'тему' ? 'а' : ''} из каталога. Отменить нельзя.
-            </p>
+            <>
+              {topicCount !== undefined && topicCount > 0 ? (
+                <p className="mb-2 text-sm text-slate-600">
+                  Будет удалено{' '}
+                  <span className="font-semibold">
+                    {topicCount} {pluralizeRu(topicCount, ['тема', 'темы', 'тем'])}
+                  </span>
+                  .
+                </p>
+              ) : null}
+
+              {needsFolder ? (
+                <>
+                  <p className="text-sm text-slate-600">
+                    <span className="font-semibold">
+                      {taskCount} {pluralizeRu(taskCount, ['задача', 'задачи', 'задач'])}
+                    </span>{' '}
+                    {pluralizeRu(taskCount, ['будет перенесена', 'будут перенесены', 'будут перенесены'])} в
+                    вашу «Мою базу», из общего каталога {entity === 'тему' ? 'тема исчезнет' : 'раздел исчезнет'}.
+                  </p>
+                  <p className="mb-1.5 mt-3 text-xs font-semibold text-slate-500">Выберите папку для задач:</p>
+                  <div className="max-h-[38vh] overflow-auto rounded-lg border border-socrat-border py-1">
+                    <FolderTreeSelect selectedId={folderId} onSelect={setFolderId} />
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-slate-600">
+                  {entity === 'тему' ? 'Тема пустая' : 'Раздел пустой'} — {entity === 'тему' ? 'она' : 'он'} будет
+                  удалён{entity === 'тему' ? 'а' : ''} из каталога. Отменить нельзя.
+                </p>
+              )}
+            </>
           )}
         </div>
 

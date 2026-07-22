@@ -62,27 +62,32 @@ CREATE OR REPLACE FUNCTION public._kb_mod_copy_to_base(
 ) RETURNS TEXT
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
-DECLARE _c public.kb_tasks%ROWTYPE; _src_owner UUID; _tpl TEXT;
+DECLARE _c public.kb_tasks%ROWTYPE; _src_owner UUID; _src_pub UUID; _tpl_count INT;
 BEGIN
   SELECT * INTO _c FROM public.kb_tasks
    WHERE id = p_copy_id AND owner_id IS NULL FOR UPDATE;
   IF NOT FOUND THEN RETURN 'skip'; END IF;              -- уже нет / не каталожная копия
 
-  -- Гард шаблонов (homework_template_tasks.kb_task_id ON DELETE RESTRICT):
-  -- иначе raw FK-violation откатит транзакцию.
-  SELECT string_agg(DISTINCT t.title, ', ') INTO _tpl
-    FROM public.homework_template_tasks htt
-    JOIN public.homework_tutor_templates t ON t.id = htt.template_id
-   WHERE htt.kb_task_id = p_copy_id;
-  IF _tpl IS NOT NULL THEN
-    RAISE EXCEPTION 'Задача используется в шаблонах ДЗ: %. Сначала уберите её из шаблонов.', _tpl;
+  -- Гард шаблонов (homework_template_tasks.kb_task_id ON DELETE RESTRICT): иначе
+  -- raw FK-violation откатит транзакцию. Считаем ТОЛЬКО количество (не имена —
+  -- иначе утечка названий чужих приватных шаблонов модератору, P1-3).
+  SELECT count(DISTINCT htt.template_id) INTO _tpl_count
+    FROM public.homework_template_tasks htt WHERE htt.kb_task_id = p_copy_id;
+  IF _tpl_count > 0 THEN
+    RAISE EXCEPTION 'Задача используется в шаблонах ДЗ (%) — сначала уберите её из шаблонов.', _tpl_count;
   END IF;
 
   IF _c.source_task_id IS NOT NULL THEN
-    SELECT owner_id INTO _src_owner FROM public.kb_tasks WHERE id = _c.source_task_id FOR UPDATE;
+    SELECT owner_id, published_task_id INTO _src_owner, _src_pub
+      FROM public.kb_tasks WHERE id = _c.source_task_id FOR UPDATE;
   END IF;
 
   IF _c.source_task_id IS NOT NULL AND _src_owner = p_caller THEN
+    -- Взаимность ссылки (P1-6): при дрейфе (source указывает на ДРУГУЮ копию или
+    -- NULL) fail-closed — иначе relocate порвал бы чужую публикационную связь.
+    IF _src_pub IS DISTINCT FROM _c.id THEN
+      RAISE EXCEPTION 'Нарушена связь публикации задачи — обратитесь к владельцу';
+    END IF;
     -- OWN SOURCE → relocate (одним UPDATE: folder+topic вместе — space_check)
     UPDATE public.kb_tasks SET
       published_task_id = NULL, folder_id = p_folder,
@@ -164,7 +169,7 @@ CREATE OR REPLACE FUNCTION public.kb_mod_delete_topic_to_my_base(p_topic_id UUID
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
-DECLARE _caller UUID; _subject TEXT; _cid UUID; _moved INT := 0; _left INT;
+DECLARE _caller UUID; _subject TEXT; _cid UUID; _moved INT := 0; _own_moved INT := 0; _left INT;
 BEGIN
   SELECT subject INTO _subject FROM public.kb_topics WHERE id = p_topic_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'Тема не найдена'; END IF;
@@ -198,6 +203,8 @@ BEGIN
       published_task_id = NULL, folder_id = p_folder_id, topic_id = NULL, subtopic_id = NULL,
       moderation_status = 'active', source_label = 'my', updated_at = NOW()
     WHERE owner_id = _caller AND topic_id = p_topic_id;
+    GET DIAGNOSTICS _own_moved = ROW_COUNT;   -- P2-2: свои строки тоже в счётчик moved
+    _moved := _moved + _own_moved;
   END IF;
 
   -- benign: снять тег удаляемой темы с ЛИЧНЫХ задач других туторов (контент цел,
@@ -228,7 +235,10 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 DECLARE _caller UUID; _tid UUID; _n INT := 0; _moved INT := 0; _r JSONB;
 BEGIN
-  IF p_filter NOT IN ('ege', 'oge', 'olympiad') THEN
+  -- P2-1: NULL NOT IN (...) = NULL (не TRUE) → без явной проверки прямой RPC с
+  -- p_filter=NULL тихо вернул бы 0. P0-1: `p_filter::exam_type` бросает enum-error
+  -- при p_filter='olympiad' → сравниваем `exam::text = p_filter` (без каста).
+  IF p_filter IS NULL OR p_filter NOT IN ('ege', 'oge', 'olympiad') THEN
     RAISE EXCEPTION 'Неверный фильтр раздела';
   END IF;
   _caller := public.kb_require_moderator_subject(p_subject);
@@ -239,7 +249,7 @@ BEGIN
     SELECT id FROM public.kb_topics
      WHERE subject = p_subject AND section = p_section
        AND ( (p_filter = 'olympiad' AND kind = 'olympiad')
-             OR (kind = 'exam' AND exam = p_filter::exam_type) )
+             OR (kind = 'exam' AND exam::text = p_filter) )
      ORDER BY id
   LOOP
     _r := public.kb_mod_delete_topic_to_my_base(_tid, p_folder_id);
@@ -294,12 +304,57 @@ BEGIN
 END;
 $$;
 
+-- ── A6. Preflight-превью для диалога удаления (P0-2/P1-5) ──────────────────────
+-- Точные `move_count` + `needs_folder` СЕРВЕРНО: клиентский поиск (сужает витрину)
+-- и каталожный view (только active) не искажают scope. `move_count` считает ВСЕ
+-- каталожные копии (любой статус) + собственные строки caller-а темы/раздела.
+CREATE OR REPLACE FUNCTION public.kb_mod_preview_delete_topic(p_topic_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE _subject TEXT; _caller UUID; _move INT; _has_mat BOOLEAN;
+BEGIN
+  SELECT subject INTO _subject FROM public.kb_topics WHERE id = p_topic_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Тема не найдена'; END IF;
+  _caller := public.kb_require_moderator_subject(COALESCE(_subject, 'physics'));
+  SELECT count(*) INTO _move FROM public.kb_tasks
+   WHERE topic_id = p_topic_id AND (owner_id IS NULL OR owner_id = _caller);
+  SELECT EXISTS (SELECT 1 FROM public.kb_materials WHERE topic_id = p_topic_id) INTO _has_mat;
+  RETURN jsonb_build_object('move_count', _move, 'needs_folder', _move > 0, 'has_materials', _has_mat);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.kb_mod_preview_delete_section(p_subject TEXT, p_section TEXT, p_filter TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE _caller UUID; _tids UUID[]; _topic_count INT; _move INT;
+BEGIN
+  IF p_filter IS NULL OR p_filter NOT IN ('ege', 'oge', 'olympiad') THEN
+    RAISE EXCEPTION 'Неверный фильтр раздела';
+  END IF;
+  _caller := public.kb_require_moderator_subject(p_subject);
+  SELECT array_agg(id) INTO _tids FROM public.kb_topics
+   WHERE subject = p_subject AND section = p_section
+     AND ( (p_filter = 'olympiad' AND kind = 'olympiad') OR (kind = 'exam' AND exam::text = p_filter) );
+  _topic_count := COALESCE(array_length(_tids, 1), 0);
+  SELECT count(*) INTO _move FROM public.kb_tasks
+   WHERE topic_id = ANY(COALESCE(_tids, ARRAY[]::uuid[]))
+     AND (owner_id IS NULL OR owner_id = _caller);
+  RETURN jsonb_build_object('topic_count', _topic_count, 'move_count', _move, 'needs_folder', _move > 0);
+END;
+$$;
+
 -- ── Гранты публичных RPC (роль/предмет проверяются в теле) ─────────────────────
 REVOKE EXECUTE ON FUNCTION public.kb_mod_move_task_to_my_base(UUID, UUID) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.kb_mod_delete_topic_to_my_base(UUID, UUID) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.kb_mod_delete_section_to_my_base(TEXT, TEXT, TEXT, UUID) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.kb_mod_preview_delete_topic(UUID) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.kb_mod_preview_delete_section(TEXT, TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.kb_mod_move_task_to_my_base(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.kb_mod_delete_topic_to_my_base(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.kb_mod_delete_section_to_my_base(TEXT, TEXT, TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.kb_mod_preview_delete_topic(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.kb_mod_preview_delete_section(TEXT, TEXT, TEXT) TO authenticated;
 
 COMMIT;

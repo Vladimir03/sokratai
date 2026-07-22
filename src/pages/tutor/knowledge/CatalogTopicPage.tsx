@@ -18,6 +18,7 @@ import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
+import { useAdminAccess } from '@/hooks/useAdminAccess';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { useDeleteTopicToMyBase, useMoveTaskToMyBase } from '@/hooks/useModeratorCatalog';
 import { FolderPickerModal } from '@/components/kb/FolderPickerModal';
@@ -40,12 +41,17 @@ function CatalogTopicContent() {
   } = useTopic(topicId);
   const { subtopics } = useSubtopics(topicId);
   const { isModerator } = useIsModerator();
+  const { isAdmin } = useAdminAccess();
+  // Модератор ИЛИ владелец (is_admin) читают all-status фетч (у не-модератора он
+  // отдаёт active-only — гард `fetch_catalog_tasks_all` пускает tutor, но
+  // не-active строки видит лишь moderator; для владельца это норм, ошибки нет).
+  const canModerate = isModerator || isAdmin;
   const { tasks: publicTasks, loading: publicLoading, error: publicError, refetch: refetchPublic } = useCatalogTasks(topicId);
-  const { tasks: allTasks, loading: allLoading, error: allError, refetch: refetchAll } = useCatalogTasksAll(topicId, isModerator);
-  const tasks = isModerator ? allTasks : publicTasks;
-  const tasksLoading = isModerator ? allLoading : publicLoading;
-  const tasksError = isModerator ? allError : publicError;
-  const refetchTasks = isModerator ? refetchAll : refetchPublic;
+  const { tasks: allTasks, loading: allLoading, error: allError, refetch: refetchAll } = useCatalogTasksAll(topicId, canModerate);
+  const tasks = canModerate ? allTasks : publicTasks;
+  const tasksLoading = canModerate ? allLoading : publicLoading;
+  const tasksError = canModerate ? allError : publicError;
+  const refetchTasks = canModerate ? refetchAll : refetchPublic;
   const { materials, loading: materialsLoading } = useMaterials(topicId);
 
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
@@ -57,9 +63,11 @@ function CatalogTopicContent() {
   const queryClient = useQueryClient();
 
   // ВОЛНА 6: destructive-действия модератора — только по своим предметам профиля.
+  // Владелец (is_admin) — bypass по любому предмету (зеркало серверного гейта
+  // kb_require_moderator_subject: is_admin проверяется ПЕРВЫМ).
   const { data: tutorProfile } = useTutorProfile();
   const mySubjects = tutorProfile?.subjects ?? [];
-  const canMod = isModerator && !!topic && mySubjects.includes(topic.subject);
+  const canMod = isAdmin || (isModerator && !!topic && mySubjects.includes(topic.subject));
   const [moveTask, setMoveTask] = useState<KBTask | null>(null);
   const [deletingTopic, setDeletingTopic] = useState(false);
   const moveMutation = useMoveTaskToMyBase();
@@ -360,7 +368,7 @@ function CatalogTopicContent() {
           <DeleteCatalogDialog
             entity="тему"
             name={topic.name}
-            taskCount={tasks.length}
+            target={{ kind: 'topic', topicId: topic.id }}
             isPending={deleteTopicMutation.isPending}
             onConfirm={handleConfirmDeleteTopic}
             onClose={() => setDeletingTopic(false)}

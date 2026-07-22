@@ -186,6 +186,46 @@ export async function deleteSectionToMyBase(
   return { moved: (data?.moved ?? 0), topicsDeleted: (data?.topics_deleted ?? 0) };
 }
 
+// ─── Preflight-превью удаления (ревью 5.6 P0-2/P1-5): точные счётчики + needs_folder
+//     СЕРВЕРНО (клиентский поиск/каталожный view не искажают scope).
+
+export interface DeclutterPreview {
+  moveCount: number;
+  needsFolder: boolean;
+  hasMaterials?: boolean;
+  topicCount?: number;
+}
+
+export async function previewDeleteTopic(topicId: string): Promise<DeclutterPreview> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_preview_delete_topic' as never,
+    { p_topic_id: topicId } as never,
+  )) as { data: { move_count?: number; needs_folder?: boolean; has_materials?: boolean } | null; error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось получить сведения о теме');
+  return {
+    moveCount: data?.move_count ?? 0,
+    needsFolder: data?.needs_folder ?? false,
+    hasMaterials: data?.has_materials ?? false,
+  };
+}
+
+export async function previewDeleteSection(
+  subject: string,
+  section: string,
+  filter: CatalogFilter,
+): Promise<DeclutterPreview> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_preview_delete_section' as never,
+    { p_subject: subject, p_section: section, p_filter: filter } as never,
+  )) as { data: { move_count?: number; needs_folder?: boolean; topic_count?: number } | null; error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось получить сведения о разделе');
+  return {
+    moveCount: data?.move_count ?? 0,
+    needsFolder: data?.needs_folder ?? false,
+    topicCount: data?.topic_count ?? 0,
+  };
+}
+
 // ─── Publish folder ─────────────────────────────────────────────────────────
 
 export interface PublishFolderResult {

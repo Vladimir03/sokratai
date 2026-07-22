@@ -18,6 +18,7 @@ import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { KBSearchInput } from '@/components/kb/ui/KBSearchInput';
 import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
 import { useIsModerator } from '@/hooks/useIsModerator';
+import { useAdminAccess } from '@/hooks/useAdminAccess';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { useDeleteSectionToMyBase } from '@/hooks/useModeratorCatalog';
@@ -146,14 +147,17 @@ function CatalogHome({
   const { data: tutorProfile } = useTutorProfile();
   const search = useKBSearch(searchQuery, examFilter);
   const { isModerator } = useIsModerator();
+  const { isAdmin } = useAdminAccess();
 
-  // ВОЛНА 6: удаление раздела — только модератор своего активного предмета.
+  // ВОЛНА 6: удаление раздела — модератор своего активного предмета ИЛИ владелец
+  // (is_admin, bypass по любому предмету — зеркало kb_require_moderator_subject).
   const mySubjects = tutorProfile?.subjects ?? [];
-  const canModerateSubject = isModerator && mySubjects.includes(subject);
+  const canModerateSubject = isAdmin || (isModerator && mySubjects.includes(subject));
   const deleteSectionMutation = useDeleteSectionToMyBase();
-  const [deletingSection, setDeletingSection] = useState<
-    { section: string; taskCount: number; topicCount: number } | null
-  >(null);
+  // Счётчики раздела приходят из СЕРВЕРНОГО preflight (ревью P0-2/P1-5): при
+  // активном поиске список тем клиентски отфильтрован, а RPC удалит ВЕСЬ раздел
+  // → счётчики врали бы. Кнопку удаления при поиске прячем (ниже, !searchQuery).
+  const [deletingSection, setDeletingSection] = useState<{ section: string } | null>(null);
   const handleConfirmDeleteSection = useCallback(
     (folderId: string | null) => {
       if (!deletingSection) return;
@@ -348,16 +352,13 @@ function CatalogHome({
         <section key={section} className="mb-8">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section}</h3>
-            {canModerateSubject ? (
+            {/* Удаление раздела прячем при активном поиске: список тем клиентски
+                отфильтрован, а RPC снесёт ВЕСЬ раздел — избегаем несоответствия
+                (ревью P0-2). Точные счётчики берёт preflight в диалоге. */}
+            {canModerateSubject && !searchQuery.trim() ? (
               <button
                 type="button"
-                onClick={() =>
-                  setDeletingSection({
-                    section,
-                    taskCount: sectionTopics.reduce((a, t) => a + (t.task_count ?? 0), 0),
-                    topicCount: sectionTopics.length,
-                  })
-                }
+                onClick={() => setDeletingSection({ section })}
                 className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-red-500 transition-colors hover:bg-red-50 [touch-action:manipulation]"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -416,8 +417,7 @@ function CatalogHome({
         <DeleteCatalogDialog
           entity="раздел"
           name={deletingSection.section}
-          taskCount={deletingSection.taskCount}
-          topicCount={deletingSection.topicCount}
+          target={{ kind: 'section', subject, section: deletingSection.section, filter: examFilter }}
           isPending={deleteSectionMutation.isPending}
           onConfirm={handleConfirmDeleteSection}
           onClose={() => setDeletingSection(null)}
