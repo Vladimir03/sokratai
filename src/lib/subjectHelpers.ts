@@ -45,3 +45,30 @@ export function isHumanitiesWritingSubject(subject: string | null | undefined): 
   // против case-mismatch (например, если когда-то в БД попадёт «French»).
   return HUMANITIES_WRITING_SUBJECTS.has(subject.trim().toLowerCase());
 }
+
+/**
+ * Дательный падеж предмета («по физике», «по обществознанию»). Полный словарь
+ * SUBJECTS. Общий для витрины Каталога (empty-state) и заголовка пробника
+ * («Пробник ЕГЭ по …»). Неизвестный/пустой предмет → «этому предмету».
+ */
+const SUBJECT_DATIVE: Record<string, string> = {
+  maths: 'математике',
+  physics: 'физике',
+  informatics: 'информатике',
+  russian: 'русскому языку',
+  literature: 'литературе',
+  history: 'истории',
+  social: 'обществознанию',
+  english: 'английскому языку',
+  french: 'французскому языку',
+  spanish: 'испанскому языку',
+  chemistry: 'химии',
+  biology: 'биологии',
+  geography: 'географии',
+  other: 'этому предмету',
+};
+
+export function getSubjectDative(subject: string | null | undefined): string {
+  if (!subject) return 'этому предмету';
+  return SUBJECT_DATIVE[subject.trim().toLowerCase()] ?? 'этому предмету';
+}

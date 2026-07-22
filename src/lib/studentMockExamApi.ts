@@ -99,6 +99,12 @@ export interface StudentMockExamVariantTask {
 export interface StudentMockExamVariantSummary {
   id: string;
   title: string;
+  /**
+   * Предмет варианта (`mock_exam_variants.subject`). NULL/undefined = легаси
+   * физика (deploy-skew-safe: старый edge поле не отдаёт). Управляет заголовком
+   * «Пробник … по {предмету}» и физ-справочником на taking-surface.
+   */
+  subject?: string | null;
   exam_type: MockExamType;
   duration_minutes: number;
   total_max_score: number;

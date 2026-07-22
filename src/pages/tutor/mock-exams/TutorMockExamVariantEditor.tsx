@@ -60,6 +60,7 @@ import { cn } from '@/lib/utils';
 const CHECK_MODE_OPTIONS: { value: string; label: string }[] = [
   { value: 'strict', label: 'Точное совпадение (число / слово)' },
   { value: 'ordered', label: 'Последовательность цифр — порядок важен' },
+  { value: 'ordered_lenient', label: 'Последовательность — 1 ошибка/лишняя позиция = 1 балл' },
   { value: 'unordered', label: 'Набор цифр — порядок неважен' },
   { value: 'multi_choice', label: 'Выбор нескольких (частичный балл за 1 ошибку)' },
   { value: 'task20', label: 'Набор цифр — всё или ничего' },

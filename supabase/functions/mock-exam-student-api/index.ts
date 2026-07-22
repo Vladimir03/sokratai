@@ -328,7 +328,7 @@ async function handleGetStudentAssignment(
   if (assignment.variant_id) {
     const { data: variantRow } = await db
       .from("mock_exam_variants")
-      .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url")
+      .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     variant = variantRow;
@@ -416,6 +416,9 @@ async function handleGetStudentAssignment(
       ? {
         id: variant.id,
         title: variant.title,
+        // Предмет варианта (репорт Милады 2026-07-22: обществознание видело
+        // физ-заголовок/справочник). Легаси NULL → клиент трактует как физику.
+        subject: variant.subject ?? null,
         exam_type: variant.exam_type,
         duration_minutes: variant.duration_minutes,
         total_max_score: variant.total_max_score,
@@ -587,7 +590,7 @@ async function handleGetResult(
     const { data: variantRow } = await db
       .from("mock_exam_variants")
       .select(
-        "id, title, exam_type, duration_minutes, total_max_score, " +
+        "id, title, subject, exam_type, duration_minutes, total_max_score, " +
           "part1_max, part2_max, task_count",
       )
       .eq("id", assignment.variant_id as string)
@@ -870,6 +873,7 @@ async function handleGetResult(
       ? {
         id: variant.id,
         title: variant.title,
+        subject: variant.subject ?? null,
         exam_type: variant.exam_type,
         duration_minutes: variant.duration_minutes,
         total_max_score: variant.total_max_score,

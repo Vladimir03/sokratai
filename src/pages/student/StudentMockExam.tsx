@@ -48,6 +48,7 @@ import {
 } from '@/lib/studentMockExamApi';
 import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
+import { getSubjectDative } from '@/lib/subjectHelpers';
 import { toast } from 'sonner';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
 import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
@@ -179,6 +180,7 @@ function getAnswerHint(mode: MockExamCheckMode | null, kimNumber?: number): stri
   }
   switch (mode) {
     case 'ordered':
+    case 'ordered_lenient':
       return 'Запиши последовательность слитно: 132';
     case 'unordered':
       return 'Можно в любом порядке, слитно: 13';
@@ -196,7 +198,7 @@ function getAnswerHint(mode: MockExamCheckMode | null, kimNumber?: number): stri
 
 function getInputWidth(mode: MockExamCheckMode | null): string {
   if (mode === 'pair') return 'w-full sm:w-80';
-  if (mode === 'ordered' || mode === 'unordered' || mode === 'multi_choice') {
+  if (mode === 'ordered' || mode === 'ordered_lenient' || mode === 'unordered' || mode === 'multi_choice') {
     return 'w-full sm:w-64';
   }
   return 'w-full sm:w-40';
@@ -617,11 +619,57 @@ const ReferencesPanel = memo(function ReferencesPanel() {
 });
 
 /**
+ * Компактная инструкция по записи ответов для НЕ-физических предметов
+ * (репорт Милады 2026-07-22: обществознание видело физический справочник
+ * с константами/плотностями). Физика получает прежний полный `ReferencesPanel`.
+ * Решение владельца: генерик-блок вместо полного скрытия — ученику нужен
+ * формат записи ответов.
+ */
+const GenericAnswerInstructionsPanel = memo(function GenericAnswerInstructionsPanel() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card className="overflow-hidden shadow-none hover:shadow-sm">
+      <button
+        type="button"
+        className="flex min-h-11 w-full touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Как записывать ответы</h2>
+          <p className="text-sm text-slate-500">Формат записи ответов Части 1</p>
+        </div>
+        <ChevronDown className={cn('h-5 w-5 text-slate-500 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 px-4 py-5 text-[15px] leading-relaxed text-slate-700 space-y-2">
+          <p>
+            Ответ — <strong>цифры или слово без пробелов и запятых</strong>. Пример:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">124</code>
+          </p>
+          <p className="text-slate-600">
+            В заданиях на <strong>соответствие</strong> записывай цифры в порядке, соответствующем
+            буквам (А, Б, В…). В заданиях на <strong>выбор нескольких вариантов</strong> порядок цифр
+            не важен.
+          </p>
+          <p className="text-slate-600">
+            Если ответ — число с дробной частью, используй запятую:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">2,5</code>
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+});
+
+/**
  * Info-only banner для blank-режима (TASK-13, 2026-05-14): инструкция +
  * ссылка на PDF бланка. PhotoUploadBox для фото бланка перенесён в секцию
  * «Часть 1» (рядом с инструкцией к Часть 1) — там он семантически логичнее.
+ * `showPdfLink=false` для не-физики (PDF бланка — физический ege-physics-2026).
  */
-function BlankModeBanner({ mode }: { mode: MockExamMode }) {
+function BlankModeBanner({ mode, showPdfLink = true }: { mode: MockExamMode; showPdfLink?: boolean }) {
   if (mode !== 'blank') return null;
 
   return (
@@ -633,18 +681,21 @@ function BlankModeBanner({ mode }: { mode: MockExamMode }) {
             Режим: С бланком
           </div>
           <p>
-            Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк.
-            Фото бланка загрузишь ниже в секции «Часть 1».
+            {showPdfLink
+              ? 'Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк. Фото бланка загрузишь ниже в секции «Часть 1».'
+              : 'Запиши ответы Части 1 ручкой на листе (номер задания → ответ), потом сфотографируй его. Фото загрузишь ниже в секции «Часть 1».'}
           </p>
-          <a
-            href={BLANK_PDF_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 font-medium text-amber-900 underline-offset-4 hover:underline"
-          >
-            <FileText className="h-4 w-4" />
-            Открыть PDF бланка
-          </a>
+          {showPdfLink && (
+            <a
+              href={BLANK_PDF_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 font-medium text-amber-900 underline-offset-4 hover:underline"
+            >
+              <FileText className="h-4 w-4" />
+              Открыть PDF бланка
+            </a>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -1301,6 +1352,13 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
 
   const variantPdfUrl = data.variant?.variant_pdf_url ?? null;
 
+  // Предмет варианта (репорт Милады 2026-07-22): легаси NULL / старый edge без
+  // поля → физика (прежнее поведение байт-в-байт). Управляет eyebrow-заголовком,
+  // справочником (физ-константы только физике) и ссылкой на физ-бланк ФИПИ.
+  const variantSubject = data.variant?.subject ?? 'physics';
+  const isPhysicsVariant = variantSubject === 'physics';
+  const examKindLabel = (data.variant?.exam_type ?? 'ege').startsWith('oge') ? 'ОГЭ' : 'ЕГЭ';
+
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
       <AnswerMethodSelectModal
@@ -1318,7 +1376,9 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           <section className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
-                <p className="text-sm font-semibold uppercase text-slate-500">Пробник ЕГЭ по физике</p>
+                <p className="text-sm font-semibold uppercase text-slate-500">
+                  {`Пробник ${examKindLabel} по ${getSubjectDative(variantSubject)}`}
+                </p>
                 <h1 className="mt-1 text-xl font-semibold leading-tight text-slate-900 sm:text-2xl">
                   {getExamTitle(data)}
                 </h1>
@@ -1379,8 +1439,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           </section>
 
           <div className="space-y-4">
-            {answerMethod === 'blank' && <BlankModeBanner mode="blank" />}
-            <ReferencesPanel />
+            {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsVariant} />}
+            {isPhysicsVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
           </div>
 
           <section className="mt-6 space-y-3">

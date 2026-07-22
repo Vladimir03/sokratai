@@ -257,7 +257,16 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           sourceLabel: d.source_label.trim(),
           exam: defaultClassification.exam || batchTopicExam || d.exam || '',
           kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
-          primaryScore: d.primary_score !== null ? String(d.primary_score) : '',
+          // Балл: если по (предмет, экзамен, КИМ) есть авто-балл ФИПИ — поле сидируем
+          // ПУСТЫМ (placeholder покажет авто, commit применит карту). Сид из AI-догадки
+          // неотличим от ручного ввода и побеждал карту (репорт Милады: КИМ 3 → «2»
+          // вместо 1 по ФИПИ). Смена КИМ в ревью и так сбрасывает балл в ''.
+          primaryScore:
+            getKimPrimaryScoreForSubject(chosenSubject, effExam, d.kim_number) !== null
+              ? ''
+              : d.primary_score !== null
+                ? String(d.primary_score)
+                : '',
         };
       });
 

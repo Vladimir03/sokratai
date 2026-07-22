@@ -82,11 +82,19 @@ const PHYSICS_EGE_MULTI_CHOICE = new Set([5, 9, 14, 18]);
 const PHYSICS_EGE_ORDERED = new Set([6, 10, 15, 17]);
 
 // Обществознание ЕГЭ Часть 1 (задания 1-16) — критерии ФИПИ (таблица Милады,
-// 2026-07-21). № 6,13,15 — последовательность (порядок важен, 1 ошибка = 1 балл)
-// → ordered; № 2,4,5,7,8,10,11,14,16 — выбор нескольких (порядок неважен, 1 ошибка
-// = 1 балл) → multi_choice; № 1,3,9,12 (1 балл) — точное совпадение → strict.
-const SOCIAL_EGE_ORDERED = new Set([6, 13, 15]);
+// 2026-07-21, уточнено 2026-07-22). У КАЖДОГО предмета СВОИ критерии (решение
+// владельца) — карты физики не переиспользовать:
+// • № 6,13,15 — последовательность, порядок важен; 1 ошибка (неверный символ,
+//   ЛИШНЯЯ или НЕДОСТАЮЩАЯ позиция) = 1 балл → ordered_lenient (НЕ физический
+//   ordered: у ФИПИ-физики «символов больше требуемого → 0»);
+// • № 2,4,5,7,8,10,11,14,16 — выбор нескольких, порядок неважен, 1 ошибка = 1 балл
+//   → multi_choice;
+// • № 1,3,9,12 (1 балл) — набор цифр, ПОРЯДОК НЕВАЖЕН, любая ошибка → 0 → task20
+//   (сортировка цифр «23»=«32»; strict здесь давал 0 за верный ответ в другом
+//   порядке — репорт Милады).
+const SOCIAL_EGE_ORDERED_LENIENT = new Set([6, 13, 15]);
 const SOCIAL_EGE_MULTI_CHOICE = new Set([2, 4, 5, 7, 8, 10, 11, 14, 16]);
+const SOCIAL_EGE_DIGIT_SET = new Set([1, 3, 9, 12]);
 
 export function inferPart1CheckMode(
   subject: string,
@@ -101,8 +109,9 @@ export function inferPart1CheckMode(
   // Строго ЕГЭ (симметрично getKimPrimaryScoreForSubject, ревью 5.6 P1): при
   // неуказанном/ОГЭ exam → strict + обычный балл, а не критерии чужого экзамена.
   if (subject === 'social' && exam === 'ege' && kimNumber !== null) {
-    if (SOCIAL_EGE_ORDERED.has(kimNumber)) return 'ordered';
+    if (SOCIAL_EGE_ORDERED_LENIENT.has(kimNumber)) return 'ordered_lenient';
     if (SOCIAL_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
+    if (SOCIAL_EGE_DIGIT_SET.has(kimNumber)) return 'task20';
   }
   return 'strict';
 }

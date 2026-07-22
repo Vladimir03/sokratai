@@ -31,6 +31,8 @@ interface TaskCardProps {
   onMoveToFolder?: () => void;
   onMoveToMyBase?: () => void;
   onReassign?: () => void;
+  /** Hard-delete из каталога (модератор, запрос Милады 2026-07-22). */
+  onDeleteFromCatalog?: () => void;
   className?: string;
 }
 
@@ -53,6 +55,7 @@ export const TaskCard = memo(function TaskCard({
   onMoveToFolder,
   onMoveToMyBase,
   onReassign,
+  onDeleteFromCatalog,
   className,
 }: TaskCardProps) {
   const isHiddenDuplicate = task.moderation_status === 'hidden_duplicate';
@@ -80,6 +83,17 @@ export const TaskCard = memo(function TaskCard({
   }
   if (isModeratable && onReassign) {
     menuItems.push({ key: 'reassign', label: 'Перепривязать источник', icon: RefreshCw, onSelect: onReassign });
+  }
+  // Hard-delete из каталога (запрос Милады 2026-07-22): «не скрыть, а вообще
+  // удалить». Свой исходник удаляется вместе с копией; ветка/гарды — на сервере.
+  if (isModeratable && onDeleteFromCatalog) {
+    menuItems.push({
+      key: 'delete_catalog',
+      label: 'Удалить из каталога',
+      icon: Trash2,
+      destructive: true,
+      onSelect: onDeleteFromCatalog,
+    });
   }
 
   // Resolve attachment_url(s) to signed HTTP URLs

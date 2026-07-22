@@ -421,6 +421,7 @@ export async function listMockExamInviteLinks(
 export type MockExamPart1CheckMode =
   | 'strict'
   | 'ordered'
+  | 'ordered_lenient'
   | 'unordered'
   | 'multi_choice'
   | 'task20'

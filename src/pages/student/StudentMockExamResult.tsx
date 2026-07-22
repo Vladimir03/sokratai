@@ -252,7 +252,16 @@ function Part1Card({
                   // одну ошибку — см. .claude/rules/45-mock-exams.md.
                   const isPartial = hasScore && earned > 0 && earned < row.max_score;
                   return (
-                    <tr key={row.kim_number} className="text-slate-700">
+                    // Цветовая схема Милады (2026-07-22): полный балл — зелёный,
+                    // частичный — оранжевый, 0 — бордовый; мягкий фон строки для
+                    // быстрого сканирования (зеркало тьютор-панели Part1ReviewPanel).
+                    <tr
+                      key={row.kim_number}
+                      className={cn(
+                        'text-slate-700',
+                        isCorrect ? 'bg-emerald-50/60' : isPartial ? 'bg-amber-50/60' : 'bg-rose-50/50',
+                      )}
+                    >
                       <td className="px-3 py-2 font-medium tabular-nums">
                         {row.kim_number}
                       </td>
@@ -310,10 +319,12 @@ function Part1Card({
                       </td>
                       <td
                         className={cn(
-                          'px-3 py-2 text-right tabular-nums',
-                          isPartial
-                            ? 'font-semibold text-amber-700'
-                            : 'text-slate-900',
+                          'px-3 py-2 text-right font-semibold tabular-nums',
+                          isCorrect
+                            ? 'text-emerald-700'
+                            : isPartial
+                              ? 'text-amber-600'
+                              : 'text-rose-700',
                         )}
                       >
                         {earned}/{row.max_score}

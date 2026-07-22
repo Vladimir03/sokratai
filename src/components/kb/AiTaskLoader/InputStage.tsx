@@ -388,25 +388,33 @@ export function InputStage({
         /** Номера маркеров страниц чанка по порядку (для авто-КИМ полного
          *  варианта); null = хотя бы одна страница без надёжной нумерации. */
         markerNumbers: number[] | null;
+        /** «Тип K» каждого маркера (выровнено с markerNumbers; null внутри — у
+         *  маркера нет Типа). РЕШУ ЕГЭ: Тип = явный № КИМ, побеждает всё. */
+        typeNumbers: (number | null)[] | null;
         pageLabel: string;
       }
       const chunks: Chunk[] = [];
       if (entries.length === 0) {
         // Текст без картинок — один вызов.
-        chunks.push({ entries: [], startIndex: 0, expected: null, markerNumbers: null, pageLabel: '' });
+        chunks.push({ entries: [], startIndex: 0, expected: null, markerNumbers: null, typeNumbers: null, pageLabel: '' });
       } else {
         for (let i = 0; i < entries.length; i += CHUNK_IMAGES) {
           const chunkEntries = entries.slice(i, i + CHUNK_IMAGES);
           const exps = chunkEntries.map((_, j) => expectedPerEntry[i + j]);
           const known = exps.filter((v): v is number => v !== null);
           const nums = chunkEntries.map((_, j) => markerScan.numbersPerPage[i + j]);
+          const types = chunkEntries.map((_, j) => markerScan.typeNumbersPerPage[i + j]);
+          const numsReliable = nums.every((n): n is number[] => n !== null);
           const first = chunkEntries[0].pageNo;
           const last = chunkEntries[chunkEntries.length - 1].pageNo;
           chunks.push({
             entries: chunkEntries,
             startIndex: i,
             expected: known.length === chunkEntries.length ? known.reduce((a, b) => a + b, 0) : null,
-            markerNumbers: nums.every((n): n is number[] => n !== null) ? nums.flat() : null,
+            markerNumbers: numsReliable ? nums.flat() : null,
+            typeNumbers: numsReliable
+              ? types.flatMap((t, j) => t ?? nums[j]!.map(() => null))
+              : null,
             pageLabel: first === last ? `стр. ${first}` : `стр. ${first}–${last}`,
           });
         }
@@ -553,15 +561,25 @@ export function InputStage({
         // весь чанк неверно — лучше оставить AI):
         // - source_num (номер в сборниковой нумерации) — ВСЕГДА: ключ
         //   кросс-чанкового мерджа ответов из answers_table (2026-07-17);
-        // - kim_number — только для ПОЛНОГО ВАРИАНТА (фидбэк химиков 2026-07-16:
-        //   stepenin [1]..[34] = номера КИМ; маркер ПОБЕЖДАЕТ догадку AI).
+        // - kim_number: «Тип K» маркера (РЕШУ ЕГЭ, репорт Милады 2026-07-22) —
+        //   явный № КИМ, побеждает всё; иначе для ПОЛНОГО ВАРИАНТА (фидбэк
+        //   химиков 2026-07-16: stepenin [1]..[34] = номера КИМ) — сам маркер.
+        //   Документ с Тип-разметкой = тематическая подборка → порядковый номер
+        //   КИМом НЕ является (hasTypeMarkers гасит variant-эвристику).
         const markerNums = chunk.markerNumbers;
         if (markerNums !== null && r.drafts.length === markerNums.length) {
+          const typeNums = chunk.typeNumbers;
           r.drafts.forEach((d, i) => {
             d.source_num = markerNums[i];
-            if (markerScan.isVariantNumbering) d.kim_number = markerNums[i];
+            const typeKim = typeNums?.[i] ?? null;
+            if (typeKim !== null) {
+              d.kim_number = typeKim;
+              kimAutoFilled += 1;
+            } else if (markerScan.isVariantNumbering && !markerScan.hasTypeMarkers) {
+              d.kim_number = markerNums[i];
+              kimAutoFilled += 1;
+            }
           });
-          if (markerScan.isVariantNumbering) kimAutoFilled += r.drafts.length;
         }
         // Таблицы ответов чанков — в общий пул (мердж после полной сборки:
         // таблица может прийти из чанка ПОСЛЕ задач).

@@ -32,6 +32,7 @@ const {
   numericRoundingMatch,
   gradeMultiChoice,
   gradeOrdered,
+  gradeOrderedLenient,
 } = checker;
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -454,6 +455,84 @@ test("AC-P4 guardrail: partial credit ТОЛЬКО для multi_choice + ordered
     maxScore: 2,
   });
   assert.equal(r3.earnedScore, 0, "task20: no partial credit");
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// ordered_lenient — обществознание ЕГЭ № 6/13/15 (критерии Милады, 2026-07-22):
+// «1 ошибка (неверный символ, ЛИШНЯЯ или НЕДОСТАЮЩАЯ позиция) — 1 балл; две и
+// более — 0; цифры верны, но не в той последовательности — 0». Левенштейн ≤ 1.
+// НЕ физический ordered (там длина ≠ → 0 по ФИПИ-физике).
+// ────────────────────────────────────────────────────────────────────────────
+
+test("ordered_lenient: full credit для exact match", () => {
+  assert.equal(gradeOrderedLenient("22211", "22211", 2), 2);
+  assert.equal(gradeOrderedLenient("2,2,2,1,1", "22211", 2), 2, "separator-agnostic");
+});
+
+test("ordered_lenient: 1 балл за лишнюю/недостающую позицию (скриншот Милады №15)", () => {
+  // Скриншот 4 Милады: correct «22211», student «222111» → должен быть 1 (был 0)
+  assert.equal(gradeOrderedLenient("22211", "222111", 2), 1, "Милада №15: лишняя позиция → 1");
+  assert.equal(gradeOrderedLenient("22211", "2211", 2), 1, "недостающая позиция → 1");
+  assert.equal(gradeOrderedLenient("22211", "22212", 2), 1, "1 неверный символ → 1");
+});
+
+test("ordered_lenient: 0 за 2+ ошибки и транспозицию", () => {
+  assert.equal(gradeOrderedLenient("12345", "13245", 2), 0, "транспозиция (не в той последовательности) → 0");
+  assert.equal(gradeOrderedLenient("22211", "21122", 2), 0, "2+ замен → 0");
+  assert.equal(gradeOrderedLenient("22211", "2221133", 2), 0, "2 лишних позиции → 0");
+  assert.equal(gradeOrderedLenient("22211", "222", 2), 0, "2 недостающих → 0");
+});
+
+test("ordered_lenient: edge cases", () => {
+  assert.equal(gradeOrderedLenient("12", "", 2), 0, "пустой ответ → 0");
+  assert.equal(gradeOrderedLenient("", "12", 2), 0, "пустой эталон → 0");
+  assert.equal(gradeOrderedLenient("12", "13", 1), 0, "нет частичного при maxScore<2");
+});
+
+test("ordered_lenient: dispatch через checkPart1Answer", () => {
+  const r1 = checkPart1Answer({
+    correctAnswer: "22211",
+    studentAnswer: "222111",
+    checkMode: "ordered_lenient",
+    maxScore: 2,
+  });
+  assert.equal(r1.earnedScore, 1, "лишняя позиция → 1 балл");
+  assert.equal(r1.isCorrect, false);
+
+  const r2 = checkPart1Answer({
+    correctAnswer: "33123",
+    studentAnswer: "33123",
+    checkMode: "ordered_lenient",
+    maxScore: 2,
+  });
+  assert.deepEqual(r2, { earnedScore: 2, isCorrect: true });
+});
+
+test("guardrail: физический ordered НЕ изменился (длина ≠ → 0)", () => {
+  assert.equal(gradeOrdered("22211", "222111", 2), 0, "ФИПИ-физика: символов больше → 0");
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// task20 для обществознания № 1/3/9/12 — «набор цифр, порядок неважен, любая
+// ошибка → 0» (скриншот Милады: «32» при верном «23» должен давать полный балл).
+// ────────────────────────────────────────────────────────────────────────────
+
+test("task20 как режим social №1/3/9/12: порядок неважен, всё-или-ничего", () => {
+  // Скриншот 4 Милады, №1: correct «23», student «32» → полный балл (был 0 при strict)
+  assert.deepEqual(
+    checkPart1Answer({ correctAnswer: "23", studentAnswer: "32", checkMode: "task20", maxScore: 1 }),
+    { earnedScore: 1, isCorrect: true },
+  );
+  // Любая ошибка → 0
+  assert.deepEqual(
+    checkPart1Answer({ correctAnswer: "23", studentAnswer: "24", checkMode: "task20", maxScore: 1 }),
+    { earnedScore: 0, isCorrect: false },
+  );
+  // Лишняя цифра → 0 (длина учитывается)
+  assert.deepEqual(
+    checkPart1Answer({ correctAnswer: "23", studentAnswer: "233", checkMode: "task20", maxScore: 1 }),
+    { earnedScore: 0, isCorrect: false },
+  );
 });
 
 test("AC-P4: backward compat — checkMultiChoice/checkOrdered (boolean) still work", () => {

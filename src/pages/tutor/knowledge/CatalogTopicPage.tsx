@@ -20,9 +20,11 @@ import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTop
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { useAdminAccess } from '@/hooks/useAdminAccess';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
-import { useDeleteTopicToMyBase, useMoveTaskToMyBase } from '@/hooks/useModeratorCatalog';
+import { useDeleteCatalogTask, useDeleteTopicToMyBase, useMoveTaskToMyBase } from '@/hooks/useModeratorCatalog';
 import { FolderPickerModal } from '@/components/kb/FolderPickerModal';
 import { DeleteCatalogDialog } from '@/components/kb/DeleteCatalogDialog';
+import { DeleteCatalogTaskDialog } from '@/components/kb/DeleteCatalogTaskDialog';
+import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
@@ -69,8 +71,10 @@ function CatalogTopicContent() {
   const mySubjects = tutorProfile?.subjects ?? [];
   const canMod = isAdmin || (isModerator && !!topic && mySubjects.includes(topic.subject));
   const [moveTask, setMoveTask] = useState<KBTask | null>(null);
+  const [deleteTask, setDeleteTask] = useState<KBTask | null>(null);
   const [deletingTopic, setDeletingTopic] = useState(false);
   const moveMutation = useMoveTaskToMyBase();
+  const deleteTaskMutation = useDeleteCatalogTask();
   const deleteTopicMutation = useDeleteTopicToMyBase();
 
   const isOlympiad = topic?.kind === 'olympiad';
@@ -125,6 +129,21 @@ function CatalogTopicContent() {
     },
     [moveTask, moveMutation],
   );
+
+  const handleConfirmDeleteTask = useCallback(() => {
+    if (!deleteTask) return;
+    deleteTaskMutation.mutate(deleteTask.id, {
+      onSuccess: (result) => {
+        toast.success(
+          result === 'deleted_with_source'
+            ? 'Задача и её исходник удалены'
+            : 'Задача удалена из каталога',
+        );
+        setDeleteTask(null);
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : 'Не удалось удалить задачу'),
+    });
+  }, [deleteTask, deleteTaskMutation]);
 
   const handleConfirmDeleteTopic = useCallback(
     (folderId: string | null) => {
@@ -334,6 +353,7 @@ function CatalogTopicContent() {
                   onAddToHW={() => handleAddToHW(task)}
                   onMoveToMyBase={canMod ? () => setMoveTask(task) : undefined}
                   onReassign={canMod ? () => handleReassign(task) : undefined}
+                  onDeleteFromCatalog={canMod ? () => setDeleteTask(task) : undefined}
                 />
               )}
             />
@@ -361,6 +381,16 @@ function CatalogTopicContent() {
             isPending={moveMutation.isPending}
             onConfirm={handleConfirmMove}
             onClose={() => setMoveTask(null)}
+          />
+        ) : null}
+
+        {deleteTask ? (
+          <DeleteCatalogTaskDialog
+            taskId={deleteTask.id}
+            taskPreviewText={stripLatex(deleteTask.text || '').trim() || 'Задача на фото'}
+            isPending={deleteTaskMutation.isPending}
+            onConfirm={handleConfirmDeleteTask}
+            onClose={() => setDeleteTask(null)}
           />
         ) : null}
 

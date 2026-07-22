@@ -9,10 +9,12 @@ import {
   createCatalogTopic,
   deleteCatalogSource,
   deleteCatalogSubtopic,
+  deleteCatalogTask,
   deleteCatalogTopic,
   deleteSectionToMyBase,
   deleteTopicToMyBase,
   moveTaskToMyBase,
+  previewDeleteCatalogTask,
   previewDeleteSection,
   previewDeleteTopic,
   publishFolderToCatalog,
@@ -147,6 +149,27 @@ export function useDeclutterPreview(target: DeclutterTarget) {
       target.kind === 'topic'
         ? previewDeleteTopic(target.topicId)
         : previewDeleteSection(target.subject, target.section, target.filter),
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+  });
+}
+
+// ─── Hard-delete задачи из каталога (запрос Милады, 2026-07-22) ───────────────
+
+export function useDeleteCatalogTask() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (taskId: string) => deleteCatalogTask(taskId),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+/** Серверный preflight для confirm-диалога удаления задачи: ветка + гард шаблонов. */
+export function useDeleteTaskPreview(taskId: string | null) {
+  return useQuery({
+    queryKey: ['tutor', 'kb', 'delete-task-preview', taskId],
+    queryFn: () => previewDeleteCatalogTask(taskId as string),
+    enabled: taskId !== null,
     refetchOnWindowFocus: false,
     staleTime: 0,
   });

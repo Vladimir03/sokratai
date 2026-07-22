@@ -9,6 +9,9 @@
 // `mock_exam_variant_tasks.check_mode`, миграция 20260508120000):
 //   - strict        — точное совпадение строки (после нормализации)
 //   - ordered       — последовательность через запятую, точный порядок
+//   - ordered_lenient — последовательность, но 1 ошибка = неверный символ ИЛИ
+//                     лишняя/недостающая позиция → 1 балл (Левенштейн ≤ 1;
+//                     обществознание ЕГЭ № 6/13/15, критерии Милады 2026-07-22)
 //   - unordered     — множество без порядка (multiset, дубликаты учитываются)
 //   - multi_choice  — два-три номера верных вариантов из 5, без порядка
 //   - task20        — спец-логика для №20 (число + запас 0.05 для целых, ровное для дробей)
@@ -22,6 +25,7 @@
 export type MockExamCheckMode =
   | 'strict'
   | 'ordered'
+  | 'ordered_lenient'
   | 'unordered'
   | 'multi_choice'
   | 'task20'
@@ -275,6 +279,56 @@ export function gradeOrdered(
 }
 
 /**
+ * Расстояние Левенштейна (вставка/удаление/замена = 1). Строки коротки
+ * (последовательности цифр ≤ ~10 символов) — простой DP без оптимизаций.
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i += 1) {
+    const curr = new Array<number>(n + 1);
+    curr[0] = i;
+    for (let j = 1; j <= n; j += 1) {
+      const substCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + substCost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+/**
+ * Partial credit для ordered_lenient (обществознание ЕГЭ № 6/13/15,
+ * критерии ФИПИ по таблице Милады, 2026-07-22).
+ *
+ * Критерий: «2 балла при полном совпадении. Если в ответе есть одна ошибка
+ * (неверный символ, ЛИШНЯЯ или НЕДОСТАЮЩАЯ позиция) — 1 балл. Две и более
+ * ошибок — 0. Если цифры выбраны верно, но расположены не в той
+ * последовательности — 0.»
+ *
+ * Реализация: расстояние Левенштейна после нормализации разделителей.
+ *   dist 0 → maxScore; dist 1 → 1 (при maxScore ≥ 2); dist ≥ 2 → 0.
+ * Транспозиция двух цифр = dist 2 → 0 (соответствует «не в той
+ * последовательности → 0»). НЕ путать с физическим `ordered` (Hamming,
+ * длина ≠ → 0 — у ФИПИ-физики свой критерий «символов больше требуемого → 0»).
+ */
+export function gradeOrderedLenient(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctClean = normalizeBasic(correct).toLowerCase().replace(/[,;]+/g, '');
+  const studentClean = normalizeBasic(student).toLowerCase().replace(/[,;]+/g, '');
+  if (correctClean.length === 0) return 0;
+  if (studentClean.length === 0) return 0;
+  const dist = levenshteinDistance(correctClean, studentClean);
+  if (dist === 0) return maxScore;
+  if (dist === 1 && maxScore >= 2) return 1;
+  return 0;
+}
+
+/**
  * ЕГЭ физика №20 — «выберите два номера» (множество индексов, порядок НЕ важен):
  * «13»=«31» → полный балл; любой промах хотя бы по одной цифре → 0 (binary).
  * Чувствительно к длине/дубликатам («133»≠«13»). Принимаем строки без
@@ -371,6 +425,10 @@ export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
     }
     case 'ordered': {
       const earned = gradeOrdered(correctAnswer, studentAnswer, maxScore);
+      return { earnedScore: earned, isCorrect: earned === maxScore };
+    }
+    case 'ordered_lenient': {
+      const earned = gradeOrderedLenient(correctAnswer, studentAnswer, maxScore);
       return { earnedScore: earned, isCorrect: earned === maxScore };
     }
     default:

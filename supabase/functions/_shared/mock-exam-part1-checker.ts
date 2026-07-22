@@ -21,7 +21,7 @@
  */
 
 export type CheckMode =
-  | "strict" | "ordered" | "unordered" | "multi_choice"
+  | "strict" | "ordered" | "ordered_lenient" | "unordered" | "multi_choice"
   | "task20" | "pair" | "manual";
 
 export function normalizeBasic(s: string): string {
@@ -158,6 +158,50 @@ export function gradeOrdered(
   return 0;
 }
 
+/**
+ * Расстояние Левенштейна (вставка/удаление/замена = 1). Строки коротки
+ * (последовательности цифр ≤ ~10 символов) — простой DP без оптимизаций.
+ * Mirror frontend canonical `levenshteinDistance`.
+ */
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i += 1) {
+    const curr = new Array<number>(n + 1);
+    curr[0] = i;
+    for (let j = 1; j <= n; j += 1) {
+      const substCost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + substCost);
+    }
+    prev = curr;
+  }
+  return prev[n];
+}
+
+/**
+ * Partial credit для ordered_lenient (обществознание ЕГЭ № 6/13/15, критерии
+ * ФИПИ по таблице Милады 2026-07-22): 1 ошибка = неверный символ ИЛИ лишняя/
+ * недостающая позиция → 1 балл; транспозиция (dist 2) → 0. НЕ физический
+ * `ordered` (там «символов больше требуемого → 0», Hamming).
+ *
+ * Hard invariant (.claude/rules/45-mock-exams.md): mirror frontend `gradeOrderedLenient`.
+ */
+export function gradeOrderedLenient(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctClean = normalizeBasic(correct).toLowerCase().replace(/[,;]+/g, "");
+  const studentClean = normalizeBasic(student).toLowerCase().replace(/[,;]+/g, "");
+  if (correctClean.length === 0) return 0;
+  if (studentClean.length === 0) return 0;
+  const dist = levenshteinDistance(correctClean, studentClean);
+  if (dist === 0) return maxScore;
+  if (dist === 1 && maxScore >= 2) return 1;
+  return 0;
+}
+
 // ЕГЭ физика №20 — «выберите два номера» (множество индексов, порядок НЕ важен):
 // «13»=«31» → полный балл; любой промах хотя бы по одной цифре → 0 (binary).
 // Чувствительно к длине/дубликатам («133»≠«13»). 2026-06-07: было строковое
@@ -233,6 +277,10 @@ export function checkPart1(
   }
   if (checkMode === "ordered") {
     const earned = gradeOrdered(correctAnswer, studentAnswer, maxScore);
+    return { earned, correct: earned === maxScore };
+  }
+  if (checkMode === "ordered_lenient") {
+    const earned = gradeOrderedLenient(correctAnswer, studentAnswer, maxScore);
     return { earned, correct: earned === maxScore };
   }
 

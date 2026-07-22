@@ -226,6 +226,51 @@ export async function previewDeleteSection(
   };
 }
 
+// ─── Hard-delete задачи из каталога (запрос Милады, 2026-07-22) ───────────────
+// own-source → удаляются ОБЕ строки (копия + исходник); orphan/detached → только
+// копия; foreign → сервер блокирует. Превью нужно ДО confirm: клиент не может
+// определить ветку сам (RLS прячет чужие личные строки).
+
+export type DeleteCatalogTaskBranch =
+  | 'own_source'
+  | 'own_source_detached'
+  | 'orphan'
+  | 'foreign'
+  | 'link_broken';
+
+export interface DeleteCatalogTaskPreview {
+  branch: DeleteCatalogTaskBranch;
+  templateCount: number;
+  sourceTemplateCount: number;
+}
+
+export async function previewDeleteCatalogTask(taskId: string): Promise<DeleteCatalogTaskPreview> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_preview_delete_task' as never,
+    { p_task_id: taskId } as never,
+  )) as {
+    data: { branch?: string; template_count?: number; source_template_count?: number } | null;
+    error: { message?: string } | null;
+  };
+  if (error) throw rpcError(error, 'Не удалось получить сведения о задаче');
+  return {
+    branch: (data?.branch ?? 'orphan') as DeleteCatalogTaskBranch,
+    templateCount: data?.template_count ?? 0,
+    sourceTemplateCount: data?.source_template_count ?? 0,
+  };
+}
+
+export async function deleteCatalogTask(
+  taskId: string,
+): Promise<'deleted' | 'deleted_with_source'> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_delete_catalog_task' as never,
+    { p_task_id: taskId } as never,
+  )) as { data: { result?: string } | null; error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось удалить задачу из каталога');
+  return data?.result === 'deleted_with_source' ? 'deleted_with_source' : 'deleted';
+}
+
 // ─── Publish folder ─────────────────────────────────────────────────────────
 
 export interface PublishFolderResult {

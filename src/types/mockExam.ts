@@ -66,6 +66,7 @@ export type MockExamPart2SolutionStatus =
 export type MockExamCheckMode =
   | 'strict'
   | 'ordered'
+  | 'ordered_lenient'
   | 'unordered'
   | 'multi_choice'
   | 'task20'

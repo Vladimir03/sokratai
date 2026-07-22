@@ -160,8 +160,10 @@ function ResultHeader({
 
   return (
     <header className="mb-6">
+      {/* Нейтрально без предмета: пробники мультипредметные (2026-07-22),
+          а public-payload subject не несёт — «по физике» врал обществознанию. */}
       <p className="mb-2 text-xs uppercase tracking-wide text-slate-500">
-        Результат пробника ЕГЭ по физике
+        Результат пробника
       </p>
       <h1 className="text-2xl font-semibold leading-tight text-slate-900 sm:text-3xl">
         {studentName}

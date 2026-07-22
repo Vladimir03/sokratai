@@ -26,6 +26,17 @@ const DOT_MARKER_RE = /(?:^|\n)\s*(\d{1,3})\s*\.\s+[А-ЯЁA-Z]/gu;
 const WORD_MARKER_RE = /Задани[ея]\s+№?\s*(\d{1,3})/gu;
 const BRACKET_MARKER_RE = /(?:^|\n)\s*\[\s*(\d{1,3})\s*\]/gu;
 
+/**
+ * «Тип K» сразу после dot-маркера — формат РЕШУ ЕГЭ: `1. Тип 5 № 13793`, где
+ * «Тип» = номер задания КИМ, а порядковый номер задачи КИМом НЕ является
+ * (репорт Милады 2026-07-22: порядковый затирал правильный КИМ). `(?!\d)` —
+ * «Тип 1990» не матчится; «Типичная…» отпадает сама (после «Тип» не цифра).
+ * Без lookbehind (rule 80).
+ */
+const TYPE_AFTER_MARKER_RE = /^Тип\s*№?\s*(\d{1,2})(?!\d)/u;
+/** Зеркало edge-normalize kim 1..30 — Тип вне диапазона игнорируем. */
+const TYPE_KIM_MAX = 30;
+
 /** Минимальная длина монотонной цепочки, чтобы считать нумерацию сборником. */
 const MIN_CHAIN = 5;
 
@@ -40,6 +51,8 @@ interface Marker {
   page: number;
   num: number;
   pos: number;
+  /** «Тип K» сразу после маркера (РЕШУ ЕГЭ) = явный № КИМ задачи; null — нет. */
+  typeNum: number | null;
 }
 
 export interface TaskMarkerScan {
@@ -47,6 +60,17 @@ export interface TaskMarkerScan {
   perPage: (number | null)[];
   /** ПРИНЯТЫЕ номера маркеров по страницам, в порядке документа (null — как выше). */
   numbersPerPage: (number[] | null)[];
+  /**
+   * «Тип K» каждого принятого маркера (выровнено с numbersPerPage поэлементно;
+   * null внутри массива — у маркера нет Типа). Явный Тип ПОБЕЖДАЕТ и догадку AI,
+   * и variant-numbering-эвристику при простановке kim_number.
+   */
+  typeNumbersPerPage: ((number | null)[] | null)[];
+  /**
+   * В документе есть Тип-разметка (≥2 принятых маркеров с «Тип K»): порядковый
+   * номер задачи заведомо НЕ КИМ → variant-numbering-эвристику не применять.
+   */
+  hasTypeMarkers: boolean;
   /**
    * Нумерация похожа на полный вариант (старт с 1, максимум ≤ VARIANT_KIM_MAX):
    * номера маркеров = № КИМ задач → можно детерминированно проставить kim_number.
@@ -68,41 +92,83 @@ export function scanTaskMarkers(pageTexts: (string | null)[]): TaskMarkerScan {
       let m: RegExpExecArray | null;
       while ((m = re.exec(text)) !== null) {
         const num = parseInt(m[1], 10);
-        if (Number.isFinite(num) && num >= 1) markers.push({ page, num, pos: m.index });
+        if (!Number.isFinite(num) || num < 1) continue;
+        // «Тип K» сразу после dot-маркера (РЕШУ ЕГЭ `1. Тип 5 № 13793`).
+        // DOT_MARKER_RE заканчивается заглавной буквой — она же первая буква
+        // «Тип», поэтому хвост берём с lastIndex-1.
+        let typeNum: number | null = null;
+        if (re === DOT_MARKER_RE) {
+          const tail = text.slice(re.lastIndex - 1, re.lastIndex + 23);
+          const tm = TYPE_AFTER_MARKER_RE.exec(tail);
+          if (tm) {
+            const t = parseInt(tm[1], 10);
+            if (Number.isFinite(t) && t >= 1 && t <= TYPE_KIM_MAX) typeNum = t;
+          }
+        }
+        markers.push({ page, num, pos: m.index, typeNum });
       }
     }
   });
   markers.sort((a, b) => (a.page - b.page) || (a.pos - b.pos));
 
   // Монотонная цепочка: старт с первого маркера (сборник может начинаться не с 1).
-  const acceptedByPage = new Map<number, number[]>();
-  let next: number | null = null;
-  let firstNum: number | null = null;
-  let maxNum = 0;
-  let acceptedCount = 0;
-  for (const mk of markers) {
-    if (next === null || mk.num === next || mk.num === next + 1) {
-      const list = acceptedByPage.get(mk.page) ?? [];
-      list.push(mk.num);
-      acceptedByPage.set(mk.page, list);
-      if (firstNum === null) firstNum = mk.num;
-      maxNum = mk.num;
-      next = mk.num + 1;
-      acceptedCount += 1;
-    }
+  interface Chain {
+    acceptedByPage: Map<number, number[]>;
+    acceptedTypesByPage: Map<number, (number | null)[]>;
+    firstNum: number | null;
+    maxNum: number;
+    acceptedCount: number;
+    acceptedTypeCount: number;
   }
+  const buildChain = (list: Marker[]): Chain => {
+    const acceptedByPage = new Map<number, number[]>();
+    const acceptedTypesByPage = new Map<number, (number | null)[]>();
+    let next: number | null = null;
+    let firstNum: number | null = null;
+    let maxNum = 0;
+    let acceptedCount = 0;
+    let acceptedTypeCount = 0;
+    for (const mk of list) {
+      if (next === null || mk.num === next || mk.num === next + 1) {
+        const nums = acceptedByPage.get(mk.page) ?? [];
+        nums.push(mk.num);
+        acceptedByPage.set(mk.page, nums);
+        const typeList = acceptedTypesByPage.get(mk.page) ?? [];
+        typeList.push(mk.typeNum);
+        acceptedTypesByPage.set(mk.page, typeList);
+        if (mk.typeNum !== null) acceptedTypeCount += 1;
+        if (firstNum === null) firstNum = mk.num;
+        maxNum = mk.num;
+        next = mk.num + 1;
+        acceptedCount += 1;
+      }
+    }
+    return { acceptedByPage, acceptedTypesByPage, firstNum, maxNum, acceptedCount, acceptedTypeCount };
+  };
 
-  if (acceptedCount < MIN_CHAIN) {
+  // Двухпроходная цепочка (репорт Милады 2026-07-22): в обществознании суждения
+  // ВНУТРИ задач нумеруются «1.», «2.» с точками и засоряют общую цепочку
+  // (перехватывают номера настоящих задач, Тип теряется). Тип-маркеры суждения
+  // не несут НИКОГДА → если цепочка только по Тип-маркерам достаточно длинна,
+  // она и есть настоящая разметка задач. Иначе — прежняя цепочка по всем.
+  const typedChain = buildChain(markers.filter((mk) => mk.typeNum !== null));
+  const chain = typedChain.acceptedCount >= MIN_CHAIN ? typedChain : buildChain(markers);
+
+  if (chain.acceptedCount < MIN_CHAIN) {
     return {
       perPage: pageTexts.map(() => null),
       numbersPerPage: pageTexts.map(() => null),
+      typeNumbersPerPage: pageTexts.map(() => null),
+      hasTypeMarkers: false,
       isVariantNumbering: false,
     };
   }
   return {
-    perPage: pageTexts.map((text, page) => (text ? acceptedByPage.get(page)?.length ?? 0 : null)),
-    numbersPerPage: pageTexts.map((text, page) => (text ? acceptedByPage.get(page) ?? [] : null)),
-    isVariantNumbering: firstNum === 1 && maxNum <= VARIANT_KIM_MAX,
+    perPage: pageTexts.map((text, page) => (text ? chain.acceptedByPage.get(page)?.length ?? 0 : null)),
+    numbersPerPage: pageTexts.map((text, page) => (text ? chain.acceptedByPage.get(page) ?? [] : null)),
+    typeNumbersPerPage: pageTexts.map((text, page) => (text ? chain.acceptedTypesByPage.get(page) ?? [] : null)),
+    hasTypeMarkers: chain.acceptedTypeCount >= 2,
+    isVariantNumbering: chain.firstNum === 1 && chain.maxNum <= VARIANT_KIM_MAX,
   };
 }
 

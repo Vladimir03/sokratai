@@ -24,6 +24,7 @@ import { useTopics } from '@/hooks/useKnowledgeBase';
 import { useDeleteSectionToMyBase } from '@/hooks/useModeratorCatalog';
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { pluralizeRu } from '@/lib/pluralizeRu';
+import { getSubjectDative } from '@/lib/subjectHelpers';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { SubjectsNudgeBanner } from '@/components/tutor/SubjectsNudgeBanner';
@@ -37,23 +38,8 @@ import {
 
 type MainTab = 'catalog' | 'mybase';
 
-/** Дательный падеж предмета для empty-state («По физике…»). Полный словарь SUBJECTS. */
-const SUBJECT_DATIVE: Record<string, string> = {
-  maths: 'математике',
-  physics: 'физике',
-  informatics: 'информатике',
-  russian: 'русскому языку',
-  literature: 'литературе',
-  history: 'истории',
-  social: 'обществознанию',
-  english: 'английскому языку',
-  french: 'французскому языку',
-  spanish: 'испанскому языку',
-  chemistry: 'химии',
-  biology: 'биологии',
-  geography: 'географии',
-  other: 'этому предмету',
-};
+// Дательный падеж предмета («По физике…») — shared `getSubjectDative`
+// (`@/lib/subjectHelpers`), реюзается заголовком пробника ученика.
 
 function KnowledgeBaseContent() {
   const navigate = useNavigate();
@@ -386,7 +372,7 @@ function CatalogHome({
           {/* Subject-aware (UX review P3): пустой предмет должен подтверждать,
               ГДЕ пусто, а не звучать как общий пустой каталог. */}
           <p className="text-sm font-semibold text-slate-800">
-            {`По ${SUBJECT_DATIVE[subject] ?? 'этому предмету'} ${
+            {`По ${getSubjectDative(subject)} ${
               examFilter === 'olympiad'
                 ? 'олимпиадных тем пока нет'
                 : `тем ${examFilter === 'oge' ? 'ОГЭ' : 'ЕГЭ'} пока нет`
@@ -394,7 +380,7 @@ function CatalogHome({
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {isModerator
-              ? `Создайте первую тему по ${SUBJECT_DATIVE[subject] ?? 'предмету'} кнопкой «Тема» выше и опубликуйте в неё задачи из своей папки.`
+              ? `Создайте первую тему по ${getSubjectDative(subject)} кнопкой «Тема» выше и опубликуйте в неё задачи из своей папки.`
               : 'Скоро здесь появятся задачи.'}
           </p>
         </div>
