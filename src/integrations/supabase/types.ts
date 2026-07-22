@@ -5069,6 +5069,10 @@ export type Database = {
       }
       is_tutor: { Args: { _user_id: string }; Returns: boolean }
       is_tutor_of_student: { Args: { _student_id: string }; Returns: boolean }
+      kb_ensure_moderator_folders: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
       kb_folder_owned_by: {
         Args: { _folder_id: string; _owner_id: string }
         Returns: boolean
