@@ -17,6 +17,7 @@ import { useDeleteFolder, useFolder } from '@/hooks/useFolders';
 import { useDeleteTask } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { parseAttachmentUrls } from '@/lib/kbApi';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -44,6 +45,15 @@ function FolderContent() {
   const deleteTask = useDeleteTask();
   const deleteFolder = useDeleteFolder();
   const { isModerator } = useIsModerator();
+
+  // ВОЛНА 7 (репорт Светланы): триггер авто-публикации «сократ» МОЛЧА пропускает
+  // задачи без темы (CASE A требует topic_id) — 12 задач «переносились» и не
+  // появлялись в каталоге без какой-либо обратной связи. Баннер делает провал
+  // видимым и ведёт в PublishFolderModal (назначит тему всем задачам папки +
+  // опубликует). Детект корня — точное имя 'сократ' (регистрозависимо, mirror
+  // kb_is_in_socrat_tree, rule 50).
+  const isInSocratTree = breadcrumbs[0]?.name === 'сократ';
+  const topiclessCount = useMemo(() => tasks.filter((t) => !t.topic_id).length, [tasks]);
 
   const handleAddToHW = (task: KBTask) => {
     if (hasTask(task.id)) {
@@ -169,6 +179,27 @@ function FolderContent() {
                   </button>
                 </div>
               </div>
+
+              {isModerator && isInSocratTree && topiclessCount > 0 ? (
+                <div className="flex flex-col gap-3 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-amber-900">
+                    <span className="font-semibold">
+                      {topiclessCount} {pluralizeRu(topiclessCount, ['задача', 'задачи', 'задач'])} без темы
+                    </span>{' '}
+                    — {topiclessCount === 1 ? 'она не публикуется' : 'они не публикуются'} в общий
+                    каталог. Укажите тему, и {topiclessCount === 1 ? 'она попадёт' : 'они попадут'} в
+                    Банк автоматически.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowPublish(true)}
+                    className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-amber-700 [touch-action:manipulation]"
+                  >
+                    <UploadCloud className="h-4 w-4" />
+                    Указать тему и опубликовать
+                  </button>
+                </div>
+              ) : null}
 
               {children.length > 0 ? (
                 <section>
