@@ -4655,6 +4655,14 @@ export type Database = {
         }
         Returns: string
       }
+      _kb_mod_check_target_folder: {
+        Args: { p_caller: string; p_folder: string }
+        Returns: undefined
+      }
+      _kb_mod_copy_to_base: {
+        Args: { p_caller: string; p_copy_id: string; p_folder: string }
+        Returns: string
+      }
       _lesson_effective_costs: {
         Args: { _lesson_id: string }
         Returns: {
@@ -5094,9 +5102,34 @@ export type Database = {
         }
         Returns: string
       }
+      kb_mod_delete_section_to_my_base: {
+        Args: {
+          p_filter: string
+          p_folder_id: string
+          p_section: string
+          p_subject: string
+        }
+        Returns: Json
+      }
       kb_mod_delete_source: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_subtopic: { Args: { p_id: string }; Returns: undefined }
       kb_mod_delete_topic: { Args: { p_id: string }; Returns: undefined }
+      kb_mod_delete_topic_to_my_base: {
+        Args: { p_folder_id: string; p_topic_id: string }
+        Returns: Json
+      }
+      kb_mod_move_task_to_my_base: {
+        Args: { p_folder_id: string; p_task_id: string }
+        Returns: Json
+      }
+      kb_mod_preview_delete_section: {
+        Args: { p_filter: string; p_section: string; p_subject: string }
+        Returns: Json
+      }
+      kb_mod_preview_delete_topic: {
+        Args: { p_topic_id: string }
+        Returns: Json
+      }
       kb_mod_reassign: {
         Args: { p_new_source_task_id: string; p_published_task_id: string }
         Returns: undefined
@@ -5157,6 +5190,10 @@ export type Database = {
           }
         | { Args: { p_source_task_id: string }; Returns: string }
       kb_require_moderator: { Args: never; Returns: string }
+      kb_require_moderator_subject: {
+        Args: { p_subject: string }
+        Returns: string
+      }
       kb_require_tutor_or_moderator: { Args: never; Returns: undefined }
       kb_resync_task: { Args: { p_source_task_id: string }; Returns: undefined }
       kb_search: {
