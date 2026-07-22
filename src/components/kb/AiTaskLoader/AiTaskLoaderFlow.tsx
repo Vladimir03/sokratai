@@ -243,13 +243,19 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       // ко всем; переопределение по одной остаётся в ревью. Пусто (hw/mock / не
       // задано) → прежний AI-резолв (поведение байт-в-байт).
       const batchExam: ExamType | null = defaultClassification.exam || null;
+      // Явная batch-тема несёт СВОЙ exam — он побеждает AI d.exam (для поля exam И
+      // для скоупа резолва), иначе Тип=«Не указан» + тема ОГЭ + AI-ЕГЭ = тихий
+      // mismatch topic_id↔exam (ревью 5.6 P1). `topics` — уже dep этого useCallback.
+      const batchTopicExam: ExamType | null = defaultClassification.topicId
+        ? topics.find((t) => t.id === defaultClassification.topicId)?.exam ?? null
+        : null;
       const initialOverrides: ReviewOverrides[] = newDrafts.map((d) => {
-        const effExam: ExamType | null = batchExam ?? d.exam;
+        const effExam: ExamType | null = batchExam ?? batchTopicExam ?? d.exam;
         return {
           topicId: defaultClassification.topicId || resolveTopicId(d.topic_suggestion, effExam),
           subtopicId: defaultClassification.subtopicId || null,
           sourceLabel: d.source_label.trim(),
-          exam: defaultClassification.exam || d.exam || '',
+          exam: defaultClassification.exam || batchTopicExam || d.exam || '',
           kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
           primaryScore: d.primary_score !== null ? String(d.primary_score) : '',
         };

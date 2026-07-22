@@ -98,7 +98,9 @@ export function inferPart1CheckMode(
     if (PHYSICS_EGE_ORDERED.has(kimNumber)) return 'ordered';
     if (kimNumber === 20) return 'task20';
   }
-  if (subject === 'social' && exam !== 'oge' && kimNumber !== null) {
+  // Строго ЕГЭ (симметрично getKimPrimaryScoreForSubject, ревью 5.6 P1): при
+  // неуказанном/ОГЭ exam → strict + обычный балл, а не критерии чужого экзамена.
+  if (subject === 'social' && exam === 'ege' && kimNumber !== null) {
     if (SOCIAL_EGE_ORDERED.has(kimNumber)) return 'ordered';
     if (SOCIAL_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
   }

@@ -122,21 +122,8 @@ export function InputStage({
     fixedSubject ??
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
   );
-  // Холодный кэш профиля мог не успеть к useState-init (редко — SideNav держит
-  // тёплым). One-shot ре-дефолт, когда профиль подъехал: ТОЛЬКО если тутор не
-  // трогал селектор и нет last-used (не клоббер выбора — класс багов rule 40).
   const userTouchedSubjectRef = useRef(false);
   const subjectAutoSetRef = useRef(false);
-  useEffect(() => {
-    if (subjectAutoSetRef.current) return;
-    if (fixedSubject !== undefined) return; // hw форсит предмет
-    if (userTouchedSubjectRef.current) return; // тутор выбрал вручную
-    if (loadLastClassification().subject) return; // last-used уже решил init
-    const profs = tutorProfile?.subjects;
-    if (!profs || profs.length === 0) return; // ждём профиль
-    subjectAutoSetRef.current = true;
-    setSubject(resolveTutorDefaultSubject(profs, null));
-  }, [tutorProfile, fixedSubject]);
   // ВОЛНА 5: тема по умолчанию на ВЕСЬ пакет (необязательно) — предмет → тип →
   // тема → подтема. Применится ко всем задачам (переопределение по одной — в
   // ревью). Только KB-назначение (fixedSubject === undefined).
@@ -151,6 +138,27 @@ export function InputStage({
   const { subtopics: defaultSubtopics = [], loading: defaultSubtopicsLoading } = useSubtopics(
     defaultTopicId || undefined,
   );
+  // Холодный кэш профиля мог не успеть к useState-init (редко — SideNav держит
+  // тёплым). One-shot ре-дефолт, когда профиль подъехал: через ТОТ ЖЕ хелпер, а не
+  // «есть ли last-used» — одно-предметный профиль обязан ИГНОРИРОВАТЬ last-used
+  // (иначе physics из localStorage залипал бы, ревью 5.6 P1); мульти сохраняет
+  // valid last-used; невалидный (удалённый) id хелпер отбрасывает. Не клоббер
+  // ручного выбора (userTouchedSubjectRef); реальная смена предмета сбрасывает
+  // тему/подтему (иначе UUID темы старого предмета уехал бы во все задачи — P1).
+  useEffect(() => {
+    if (subjectAutoSetRef.current) return;
+    if (fixedSubject !== undefined) return; // hw форсит предмет
+    if (userTouchedSubjectRef.current) return; // тутор выбрал вручную
+    const profs = tutorProfile?.subjects;
+    if (!profs || profs.length === 0) return; // ждём профиль
+    subjectAutoSetRef.current = true;
+    const resolved = resolveTutorDefaultSubject(profs, loadLastClassification().subject ?? null);
+    if (resolved !== subject) {
+      setSubject(resolved);
+      setDefaultTopicId('');
+      setDefaultSubtopicId('');
+    }
+  }, [tutorProfile, fixedSubject, subject]);
   const [text, setText] = useState('');
   // Свободная подсказка для AI (#45а): «ответы в конце страницы», «все задачи — КИМ 17»…
   const [tutorHint, setTutorHint] = useState('');
@@ -716,7 +724,9 @@ export function InputStage({
               >
                 <option value="">Не выбрана</option>
                 {defaultTopics.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                  <option key={t.id} value={t.id}>
+                    {t.name}{!defaultExam && t.exam ? ` · ${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'}` : ''}
+                  </option>
                 ))}
               </select>
             </div>
