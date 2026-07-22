@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo } from 'react';
-import { Check, ChevronDown, Download, EyeOff, FolderInput, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Download, FolderDown, FolderInput, Image, Pencil, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 import { ContextMenu, type ContextMenuItem } from '@/components/kb/ui/ContextMenu';
 import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
@@ -29,7 +29,7 @@ interface TaskCardProps {
   onDelete?: () => void;
   onAiSimilar?: () => void;
   onMoveToFolder?: () => void;
-  onUnpublish?: () => void;
+  onMoveToMyBase?: () => void;
   onReassign?: () => void;
   className?: string;
 }
@@ -51,7 +51,7 @@ export const TaskCard = memo(function TaskCard({
   onDelete,
   onAiSimilar,
   onMoveToFolder,
-  onUnpublish,
+  onMoveToMyBase,
   onReassign,
   className,
 }: TaskCardProps) {
@@ -73,9 +73,10 @@ export const TaskCard = memo(function TaskCard({
   if (isOwn && onDelete) {
     menuItems.push({ key: 'delete', label: 'Удалить', icon: Trash2, destructive: true, onSelect: onDelete });
   }
-  // Moderator actions on catalog tasks
-  if (isModeratable && onUnpublish) {
-    menuItems.push({ key: 'unpublish', label: 'Снять публикацию', icon: EyeOff, destructive: true, onSelect: onUnpublish });
+  // Moderator actions on catalog tasks (ВОЛНА 6: «Снять публикацию» → «Перенести в
+  // Мою базу» — исходник уезжает в личную папку, каталожная копия удаляется).
+  if (isModeratable && onMoveToMyBase) {
+    menuItems.push({ key: 'move_to_base', label: 'Перенести в Мою базу', icon: FolderDown, onSelect: onMoveToMyBase });
   }
   if (isModeratable && onReassign) {
     menuItems.push({ key: 'reassign', label: 'Перепривязать источник', icon: RefreshCw, onSelect: onReassign });

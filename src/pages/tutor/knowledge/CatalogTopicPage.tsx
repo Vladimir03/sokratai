@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil, X } from 'lucide-react';
+import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { CopyToFolderModal } from '@/components/kb/CopyToFolderModal';
@@ -18,8 +18,12 @@ import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { TopicChip } from '@/components/kb/ui/TopicChip';
 import { useCatalogTasks, useCatalogTasksAll, useMaterials, useSubtopics, useTopic } from '@/hooks/useKnowledgeBase';
 import { useIsModerator } from '@/hooks/useIsModerator';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { useDeleteTopicToMyBase, useMoveTaskToMyBase } from '@/hooks/useModeratorCatalog';
+import { FolderPickerModal } from '@/components/kb/FolderPickerModal';
+import { DeleteCatalogDialog } from '@/components/kb/DeleteCatalogDialog';
 import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
-import { kbModUnpublish, kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
+import { kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
 
@@ -51,6 +55,15 @@ function CatalogTopicContent() {
   const [editingTopic, setEditingTopic] = useState(false);
   const { addTask, hasTask } = useHWDraftStore();
   const queryClient = useQueryClient();
+
+  // ВОЛНА 6: destructive-действия модератора — только по своим предметам профиля.
+  const { data: tutorProfile } = useTutorProfile();
+  const mySubjects = tutorProfile?.subjects ?? [];
+  const canMod = isModerator && !!topic && mySubjects.includes(topic.subject);
+  const [moveTask, setMoveTask] = useState<KBTask | null>(null);
+  const [deletingTopic, setDeletingTopic] = useState(false);
+  const moveMutation = useMoveTaskToMyBase();
+  const deleteTopicMutation = useDeleteTopicToMyBase();
 
   const isOlympiad = topic?.kind === 'olympiad';
 
@@ -91,19 +104,36 @@ function CatalogTopicContent() {
     setExpandedTaskId(null);
   }, [topicId]);
 
-  const handleUnpublish = useCallback(
-    async (task: KBTask) => {
-      if (!window.confirm(`Снять публикацию задачи?`)) return;
-      try {
-        await kbModUnpublish(task.id);
-        await queryClient.invalidateQueries({ queryKey: ['tutor', 'kb'] });
-        toast.success('Публикация снята');
-      } catch (err) {
-        console.error('Unpublish failed', err);
-        toast.error('Не удалось снять публикацию');
-      }
+  const handleConfirmMove = useCallback(
+    (folderId: string) => {
+      if (!moveTask) return;
+      moveMutation.mutate(
+        { taskId: moveTask.id, folderId },
+        {
+          onSuccess: () => { toast.success('Задача перенесена в вашу «Мою базу»'); setMoveTask(null); },
+          onError: (err) => toast.error(err instanceof Error ? err.message : 'Не удалось перенести задачу'),
+        },
+      );
     },
-    [queryClient],
+    [moveTask, moveMutation],
+  );
+
+  const handleConfirmDeleteTopic = useCallback(
+    (folderId: string | null) => {
+      if (!topic) return;
+      deleteTopicMutation.mutate(
+        { topicId: topic.id, folderId },
+        {
+          onSuccess: (res) => {
+            toast.success(res.moved > 0 ? `Тема удалена, задач перенесено: ${res.moved}` : 'Тема удалена');
+            setDeletingTopic(false);
+            navigate(-1);
+          },
+          onError: (err) => toast.error(err instanceof Error ? err.message : 'Не удалось удалить тему'),
+        },
+      );
+    },
+    [topic, deleteTopicMutation, navigate],
   );
 
   const handleReassign = useCallback(
@@ -184,6 +214,16 @@ function CatalogTopicContent() {
                         Редактировать тему
                       </button>
                     ) : null}
+                    {canMod ? (
+                      <button
+                        type="button"
+                        onClick={() => setDeletingTopic(true)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1 text-[12px] font-semibold text-red-600 transition-colors hover:border-red-400 hover:bg-red-50 [touch-action:manipulation]"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Удалить тему
+                      </button>
+                    ) : null}
                   </div>
                   <p className="text-sm text-slate-500">
                     {topic.section}
@@ -213,7 +253,7 @@ function CatalogTopicContent() {
           ) : null}
 
           {isModerator && topic ? (
-            <SubtopicManager topicId={topic.id} subtopics={subtopics} />
+            <SubtopicManager topicId={topic.id} subtopics={subtopics} canDelete={canMod} />
           ) : null}
 
           <section>
@@ -284,8 +324,8 @@ function CatalogTopicContent() {
                   onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
                   onCopyToFolder={() => setCopyTask(task)}
                   onAddToHW={() => handleAddToHW(task)}
-                  onUnpublish={() => handleUnpublish(task)}
-                  onReassign={() => handleReassign(task)}
+                  onMoveToMyBase={canMod ? () => setMoveTask(task) : undefined}
+                  onReassign={canMod ? () => handleReassign(task) : undefined}
                 />
               )}
             />
@@ -304,6 +344,28 @@ function CatalogTopicContent() {
         </div>
 
         {copyTask ? <CopyToFolderModal task={copyTask} onClose={() => setCopyTask(null)} /> : null}
+
+        {moveTask ? (
+          <FolderPickerModal
+            title="Перенести в Мою базу"
+            description="Задача уедет в выбранную личную папку, из общего каталога исчезнет."
+            confirmLabel="Перенести"
+            isPending={moveMutation.isPending}
+            onConfirm={handleConfirmMove}
+            onClose={() => setMoveTask(null)}
+          />
+        ) : null}
+
+        {deletingTopic && topic ? (
+          <DeleteCatalogDialog
+            entity="тему"
+            name={topic.name}
+            taskCount={tasks.length}
+            isPending={deleteTopicMutation.isPending}
+            onConfirm={handleConfirmDeleteTopic}
+            onClose={() => setDeletingTopic(false)}
+          />
+        ) : null}
 
         {editingTopic && topic ? (
           <TopicEditorModal

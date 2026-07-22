@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Folder, FolderPlus, LayoutGrid, Plus, Sparkles, Tags } from 'lucide-react';
+import { Folder, FolderPlus, LayoutGrid, Plus, Sparkles, Tags, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { CreateFolderModal } from '@/components/kb/CreateFolderModal';
 import { CreateTaskModal } from '@/components/kb/CreateTaskModal';
+import { DeleteCatalogDialog } from '@/components/kb/DeleteCatalogDialog';
 import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBSearchDropdown } from '@/components/kb/KBSearchDropdown';
@@ -19,6 +20,7 @@ import { useDeleteFolder, useRootFolders } from '@/hooks/useFolders';
 import { useIsModerator } from '@/hooks/useIsModerator';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
+import { useDeleteSectionToMyBase } from '@/hooks/useModeratorCatalog';
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
@@ -144,6 +146,30 @@ function CatalogHome({
   const { data: tutorProfile } = useTutorProfile();
   const search = useKBSearch(searchQuery, examFilter);
   const { isModerator } = useIsModerator();
+
+  // ВОЛНА 6: удаление раздела — только модератор своего активного предмета.
+  const mySubjects = tutorProfile?.subjects ?? [];
+  const canModerateSubject = isModerator && mySubjects.includes(subject);
+  const deleteSectionMutation = useDeleteSectionToMyBase();
+  const [deletingSection, setDeletingSection] = useState<
+    { section: string; taskCount: number; topicCount: number } | null
+  >(null);
+  const handleConfirmDeleteSection = useCallback(
+    (folderId: string | null) => {
+      if (!deletingSection) return;
+      deleteSectionMutation.mutate(
+        { subject, section: deletingSection.section, filter: examFilter, folderId },
+        {
+          onSuccess: (res) => {
+            toast.success(`Раздел удалён · тем ${res.topicsDeleted ?? 0}, задач перенесено ${res.moved}`);
+            setDeletingSection(null);
+          },
+          onError: (err) => toast.error(err instanceof Error ? err.message : 'Не удалось удалить раздел'),
+        },
+      );
+    },
+    [deletingSection, deleteSectionMutation, subject, examFilter],
+  );
 
   // Pills = union(якорные каталожные, предметы существующих тем, предметы
   // репетитора, активный) в каноническом порядке SUBJECTS; неизвестные id
@@ -320,7 +346,25 @@ function CatalogHome({
 
       {!loading && sections.map(([section, sectionTopics]) => (
         <section key={section} className="mb-8">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section}</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{section}</h3>
+            {canModerateSubject ? (
+              <button
+                type="button"
+                onClick={() =>
+                  setDeletingSection({
+                    section,
+                    taskCount: sectionTopics.reduce((a, t) => a + (t.task_count ?? 0), 0),
+                    topicCount: sectionTopics.length,
+                  })
+                }
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold text-red-500 transition-colors hover:bg-red-50 [touch-action:manipulation]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Удалить раздел
+              </button>
+            ) : null}
+          </div>
           <div className="flex flex-col gap-2.5">
             {sectionTopics.map((topic) => (
               <TopicCard key={topic.id} topic={topic} onClick={() => onOpenTopic(topic.id)} />
@@ -366,6 +410,18 @@ function CatalogHome({
 
       {showSources ? (
         <SourcesManager onClose={() => setShowSources(false)} />
+      ) : null}
+
+      {deletingSection ? (
+        <DeleteCatalogDialog
+          entity="раздел"
+          name={deletingSection.section}
+          taskCount={deletingSection.taskCount}
+          topicCount={deletingSection.topicCount}
+          isPending={deleteSectionMutation.isPending}
+          onConfirm={handleConfirmDeleteSection}
+          onClose={() => setDeletingSection(null)}
+        />
       ) : null}
     </div>
   );

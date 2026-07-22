@@ -10,6 +10,9 @@ import {
   deleteCatalogSource,
   deleteCatalogSubtopic,
   deleteCatalogTopic,
+  deleteSectionToMyBase,
+  deleteTopicToMyBase,
+  moveTaskToMyBase,
   publishFolderToCatalog,
   updateCatalogSource,
   updateCatalogSubtopic,
@@ -18,6 +21,7 @@ import {
   type PublishFolderResult,
   type UpdateTopicInput,
 } from '@/lib/kbModeratorApi';
+import type { CatalogFilter } from '@/types/kb';
 
 function useKBInvalidation() {
   const queryClient = useQueryClient();
@@ -96,6 +100,35 @@ export function useDeleteSource() {
   const invalidate = useKBInvalidation();
   return useMutation({
     mutationFn: (id: string) => deleteCatalogSource(id),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+// ─── Declutter каталога (ВОЛНА 6) ─────────────────────────────────────────────
+
+export function useMoveTaskToMyBase() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (params: { taskId: string; folderId: string }) =>
+      moveTaskToMyBase(params.taskId, params.folderId),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+export function useDeleteTopicToMyBase() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (params: { topicId: string; folderId: string | null }) =>
+      deleteTopicToMyBase(params.topicId, params.folderId),
+    onSuccess: () => { void invalidate(); },
+  });
+}
+
+export function useDeleteSectionToMyBase() {
+  const invalidate = useKBInvalidation();
+  return useMutation({
+    mutationFn: (params: { subject: string; section: string; filter: CatalogFilter; folderId: string | null }) =>
+      deleteSectionToMyBase(params.subject, params.section, params.filter, params.folderId),
     onSuccess: () => { void invalidate(); },
   });
 }

@@ -8,7 +8,7 @@
  * Всё через `@/lib/supabaseClient` (хардкод api.sokratai.ru) — RU-safe.
  */
 import { supabase } from '@/lib/supabaseClient';
-import type { ExamType, TopicKind } from '@/types/kb';
+import type { CatalogFilter, ExamType, TopicKind } from '@/types/kb';
 
 function rpcError(error: { message?: string } | null, fallback: string): Error {
   const msg = error?.message?.trim();
@@ -140,6 +140,50 @@ export async function updateCatalogSource(
 export async function deleteCatalogSource(id: string): Promise<void> {
   const { error } = await supabase.rpc('kb_mod_delete_source', { p_id: id });
   if (error) throw rpcError(error, 'Не удалось удалить источник');
+}
+
+// ─── Declutter каталога (ВОЛНА 6): «Перенести в Мою базу» + удаление тем/разделов ─
+// Скоуп по предметам профиля (сервер). RPC ещё не в generated types.ts (Lovable
+// регенерит на применении миграции) → `as never` на границе supabase.rpc
+// (конвенция useSubscription, rule 99). После регена каст безвреден.
+
+export interface DeleteToBaseResult {
+  moved: number;
+  topicsDeleted?: number;
+}
+
+/** Перенести каталожную задачу в личную папку «Моей базы» (копия из каталога удаляется). */
+export async function moveTaskToMyBase(taskId: string, folderId: string): Promise<void> {
+  const { error } = (await supabase.rpc(
+    'kb_mod_move_task_to_my_base' as never,
+    { p_task_id: taskId, p_folder_id: folderId } as never,
+  )) as { error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось перенести задачу в Мою базу');
+}
+
+/** Удалить тему: её задачи переносятся в личную папку, тема удаляется (folderId null для пустой). */
+export async function deleteTopicToMyBase(topicId: string, folderId: string | null): Promise<DeleteToBaseResult> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_delete_topic_to_my_base' as never,
+    { p_topic_id: topicId, p_folder_id: folderId } as never,
+  )) as { data: { moved?: number } | null; error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось удалить тему');
+  return { moved: (data?.moved ?? 0) };
+}
+
+/** Удалить раздел: все его темы (задачи → личная папка), темы удаляются. */
+export async function deleteSectionToMyBase(
+  subject: string,
+  section: string,
+  filter: CatalogFilter,
+  folderId: string | null,
+): Promise<DeleteToBaseResult> {
+  const { data, error } = (await supabase.rpc(
+    'kb_mod_delete_section_to_my_base' as never,
+    { p_subject: subject, p_section: section, p_filter: filter, p_folder_id: folderId } as never,
+  )) as { data: { moved?: number; topics_deleted?: number } | null; error: { message?: string } | null };
+  if (error) throw rpcError(error, 'Не удалось удалить раздел');
+  return { moved: (data?.moved ?? 0), topicsDeleted: (data?.topics_deleted ?? 0) };
 }
 
 // ─── Publish folder ─────────────────────────────────────────────────────────

@@ -11,10 +11,12 @@ import type { KBSubtopic } from '@/types/kb';
 interface SubtopicManagerProps {
   topicId: string;
   subtopics: KBSubtopic[];
+  /** ВОЛНА 6: кнопка удаления подтемы — только если модератор ведёт этот предмет. */
+  canDelete?: boolean;
 }
 
 /** Модераторская панель управления подтемами темы (add / rename / delete). */
-export function SubtopicManager({ topicId, subtopics }: SubtopicManagerProps) {
+export function SubtopicManager({ topicId, subtopics, canDelete = false }: SubtopicManagerProps) {
   const createSubtopic = useCreateSubtopic();
   const updateSubtopic = useUpdateSubtopic();
   const deleteSubtopic = useDeleteSubtopic();
@@ -104,14 +106,16 @@ export function SubtopicManager({ topicId, subtopics }: SubtopicManagerProps) {
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(s)}
-                  className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 [touch-action:manipulation]"
-                  aria-label="Удалить подтему"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {canDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(s)}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 [touch-action:manipulation]"
+                    aria-label="Удалить подтему"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                ) : null}
               </>
             )}
           </div>
