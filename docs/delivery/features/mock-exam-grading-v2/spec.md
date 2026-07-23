@@ -245,3 +245,13 @@ npm run lint && npm run build && npm run smoke-check
 **Решение по дизайну (Vladimir):** «single debounced save+regrade pipeline» — не переносить fire с backend на frontend, а убрать отдельный авто-save и после idle гонять один путь. Variant B (заплатки на fire-and-forget) отклонён: оставлял UX-кейс «B сохранён, но не переоценён».
 
 **Статус:** P0 + P1 реализованы (Variant A), lint/build/smoke-check ✓. Готово к review-раунду 2.
+
+---
+
+## Appendix C — Смежный трек: предметность пробника + критерии Части 1 (2026-07-22…24)
+
+Эта спека покрывает **Часть 2** (photo→KIM harness, физика). **Ортогональный трек** (репорт Милады, обществознание) — критерии **Части 1** и предметность поверхностей пробника. Канон — **rule 45** (секции «`ordered_lenient` + карты режимов ПО ПРЕДМЕТАМ» и «Предметность пробника через ExamProfile registry»); build-лог — memory `project_milada_feedback_2026_07_22.md`. Кратко:
+
+- **Режимы Части 1 — по предметам** (у каждого свои критерии ФИПИ): `ordered_lenient` (2026-07-22) + `multi_choice_strict` (2026-07-23, замена цифры → 0, в отличие от физического `multi_choice`). Реестр `MOCK_EXAM_CHECK_MODES` + parity-гвард (smoke §15). Миграции `20260723100000`, `20260724120000`.
+- **Предметность (ревью ChatGPT-5.6 Tier 1/2, 2026-07-24):** `ExamProfile` registry (`src/lib/examProfiles.ts`) — длительность/граница Ч2/справочник/шкала по ключу `subject:exam`; студенческая поверхность, публичное приглашение, аналитика прогресса и result-бар больше не захардкожены физикой; `subject` NOT NULL. Parity-гвард — `scripts/test-exam-profiles.mjs` (smoke §16).
+- **Инвариант:** новый режим Части 1 → в реестр + все 6 поверхностей + CHECK-миграция; новый предметный элемент поверхности → гейт `getExamProfile(subject, exam)`, не одним предметом.
