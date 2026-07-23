@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AccountSecuritySection } from '@/components/tutor/profile/AccountSecuritySection';
-import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
+import { SubjectsFocusEditor } from '@/components/common/SubjectsFocusEditor';
+import { normalizeExamFocusMap, type ExamFocusValue } from '@/lib/tutorSubjects';
 import { TutorHelpSection } from '@/components/tutor/profile/TutorHelpSection';
 import { TutorIdentitySection } from '@/components/tutor/profile/TutorIdentitySection';
 import { TutorSupportCard } from '@/components/tutor/profile/TutorSupportCard';
@@ -131,12 +132,26 @@ function TutorSubjectsSection({ profile }: TutorSubjectsSectionProps) {
   const savedSubjects = useMemo(() => parseSubjects(savedSubjectsKey), [savedSubjectsKey]);
   const [subjectsDraft, setSubjectsDraft] = useState<string[]>(savedSubjects);
 
+  // Ф3 (2026-07-23): экзамен-фокус пер-предметно — draft поверх сохранённой
+  // JSONB-карты; dirty-check по нормализованному JSON (порядок стабилен).
+  const savedFocusKey = useMemo(
+    () => serializeFocusMap(profile?.exam_focus_by_subject ?? {}),
+    [profile?.exam_focus_by_subject],
+  );
+  const [focusDraft, setFocusDraft] = useState<Record<string, ExamFocusValue[]>>(
+    () => normalizeExamFocusMap(profile?.exam_focus_by_subject ?? {}),
+  );
+
   useEffect(() => {
     setSubjectsDraft(savedSubjects);
   }, [savedSubjects]);
+  useEffect(() => {
+    setFocusDraft(normalizeExamFocusMap(JSON.parse(savedFocusKey)));
+  }, [savedFocusKey]);
 
   const draftSubjectsKey = useMemo(() => serializeSubjects(subjectsDraft), [subjectsDraft]);
-  const isDirty = draftSubjectsKey !== savedSubjectsKey;
+  const draftFocusKey = useMemo(() => serializeFocusMap(focusDraft), [focusDraft]);
+  const isDirty = draftSubjectsKey !== savedSubjectsKey || draftFocusKey !== savedFocusKey;
   const isSaving = upsertMutation.isPending;
   const canSubmit = isDirty && !isSaving;
 
@@ -154,6 +169,7 @@ function TutorSubjectsSection({ profile }: TutorSubjectsSectionProps) {
         name: savedName,
         gender: profile?.gender ?? null,
         subjects: subjectsDraft,
+        exam_focus_by_subject: focusDraft,
       });
       toast.success('Предметы сохранены');
     } catch (err) {
@@ -164,7 +180,12 @@ function TutorSubjectsSection({ profile }: TutorSubjectsSectionProps) {
 
   return (
     <section aria-label="Предметы" className="rounded-lg border border-border bg-card p-4 sm:p-6">
-      <SubjectsMultiSelect value={subjectsDraft} onChange={setSubjectsDraft} />
+      <SubjectsFocusEditor
+        subjects={subjectsDraft}
+        onSubjectsChange={setSubjectsDraft}
+        focusMap={focusDraft}
+        onFocusMapChange={setFocusDraft}
+      />
 
       <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
         <Button
@@ -292,6 +313,17 @@ function WorkModeOption({
 // how subjects are stored in `tutors.subjects` (DB array order is not
 // guaranteed to match SUBJECTS list order). Pair this with the matching
 // canonicalization inside SubjectsMultiSelect.toggleSubject.
+// Ф3: стабильная сериализация фокус-карты для dirty-check (нормализация +
+// сортировка ключей — порядок вставки не создаёт ложный dirty).
+function serializeFocusMap(raw: unknown): string {
+  const normalized = normalizeExamFocusMap(raw);
+  const sorted: Record<string, ExamFocusValue[]> = {};
+  for (const key of Object.keys(normalized).sort()) {
+    sorted[key] = [...normalized[key]].sort();
+  }
+  return JSON.stringify(sorted);
+}
+
 function serializeSubjects(subjects: string[]): string {
   const set = new Set(subjects);
   const canonical = SUBJECTS.filter((subject) => set.has(subject.id)).map(

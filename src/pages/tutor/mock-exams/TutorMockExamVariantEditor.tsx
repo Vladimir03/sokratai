@@ -53,7 +53,13 @@ import {
 } from '@/components/tutor/mock-exams/variantTaskDraft';
 import { MockExamAiLoaderSheet } from '@/components/tutor/mock-exams/MockExamAiLoaderSheet';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
-import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import { getSubjectLabel } from '@/types/homework';
+import { getExamProfile } from '@/lib/examProfiles';
+import {
+  resolveTutorDefaultExamEgeOge,
+  resolveTutorDefaultSubject,
+  saveExamLastUsed,
+} from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 
@@ -368,9 +374,21 @@ function VariantEditorContent() {
     if (!profs || profs.length === 0) return; // ждём профиль
     subjectAutoSetRef.current = true;
     const resolved = resolveTutorDefaultSubject(profs, null);
-    if (resolved !== subject) setSubject(resolved);
+    if (resolved !== subject) {
+      setSubject(resolved);
+      // Ревью P2-4: exam был вычислен для прежнего предмета — пересчитать.
+      setExam(
+        resolveTutorDefaultExamEgeOge(resolved, tutorProfile?.exam_focus_by_subject) ?? 'ege',
+      );
+    }
   }, [tutorProfile, isEditMode, cartPrefill, subject]);
-  const [exam, setExam] = useState<'ege' | 'oge'>('ege');
+  // Ф3 (2026-07-23): дефолт экзамена — из экзамен-фокуса предмета (prefill-only;
+  // непригодный фокус → last-used → 'ege'; edit-prefill перезапишет из
+  // detail.variant.exam_type как раньше).
+  const [exam, setExam] = useState<'ege' | 'oge'>(() => {
+    const s = cartPrefill?.subject ?? resolveTutorDefaultSubject(tutorProfile?.subjects, null);
+    return resolveTutorDefaultExamEgeOge(s, tutorProfile?.exam_focus_by_subject) ?? 'ege';
+  });
   const [durationText, setDurationText] = useState('235');
   const [part1Tasks, setPart1Tasks] = useState<VariantTaskDraft[]>(
     () => cartPrefill?.drafts.filter((d) => d.part === 1) ?? [],
@@ -517,6 +535,8 @@ function VariantEditorContent() {
           duration_minutes: duration,
           tasks: tasksPayload,
         });
+        // Ф3: пер-предметный last-used экзамена (дефолт следующего create).
+        saveExamLastUsed(subject, exam);
         invalidateVariantCaches();
         toast.success('Вариант создан — теперь его можно назначить ученикам');
         navigate(`/tutor/mock-exams/new?variant=${created.variant_id}`, { replace: true });
@@ -713,6 +733,15 @@ function VariantEditorContent() {
               />
             </div>
           </div>
+          {/* Ф6 (2026-07-23): честная пометка вместо тихих дефолтов — для
+              предмета×экзамена нет карты ФИПИ (ExamProfile registry): баллы и
+              режимы проверки Части 1 заполняются вручную. */}
+          {getExamProfile(subject, exam) === null ? (
+            <p className="mt-3 text-xs text-slate-500">
+              Для «{getSubjectLabel(subject)}» ({exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'}) карта
+              баллов и режимов ФИПИ не заведена — баллы и режимы проверки задайте вручную.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 

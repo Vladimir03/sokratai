@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { useKbSources, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
+import { getExamProfile } from '@/lib/examProfiles';
 import { cn } from '@/lib/utils';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
+import { getSubjectLabel } from '@/types/homework';
 import type { CatalogFilter } from '@/types/kb';
 
 /** Тип задания: задаёт фильтр тем + переключает «№ КИМ» ↔ «уровень сложности». */
@@ -246,6 +248,18 @@ export function TaskClassificationFields({
             >
               Сбросить к баллу ФИПИ ({autoScore})
             </button>
+          ) : isExam && kimNum !== null && subject ? (
+            /* Ф6 (2026-07-23, ревью P2-1): честная пометка вместо тихого null.
+               Формулировка различает «карты нет вообще» (предмет без профиля)
+               и «карта есть, но для этого № авто-балла нет» (физика КИМ 27+,
+               social Часть 2 — там ручной ввод by design). */
+            <p className="mt-1 text-xs text-slate-500">
+              {getExamProfile(subject, examForScore)?.kimPrimaryScores == null
+                ? `Балл вручную — карта ФИПИ для «${getSubjectLabel(subject)}» (${
+                    taskType === 'ege' ? 'ЕГЭ' : 'ОГЭ'
+                  }) не заведена.`
+                : `Авто-балла по ФИПИ для № ${kimNum} нет — укажите балл вручную.`}
+            </p>
           ) : null}
         </fieldset>
       )}

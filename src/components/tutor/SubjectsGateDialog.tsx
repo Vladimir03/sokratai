@@ -14,7 +14,8 @@
  * Fail-open: профиль не загружен / ошибка / нет строки → НЕ показывать
  * (ложный гейт на заполненном профиле хуже пропуска — поверхности перепокажут).
  *
- * Фаза 3 добавит сюда чипы экзамен-фокуса под выбранными предметами.
+ * Ф3 (2026-07-23): под выбранными предметами — чипы экзамен-фокуса
+ * (SubjectsFocusEditor); фокус опционален, сохраняется тем же upsert'ом.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
@@ -27,9 +28,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { SubjectsMultiSelect } from '@/components/tutor/profile/SubjectsMultiSelect';
+import { SubjectsFocusEditor } from '@/components/common/SubjectsFocusEditor';
 import { useTutorProfile, useUpsertTutorProfile } from '@/hooks/useTutorProfile';
-import { normalizeContentSubjects } from '@/lib/tutorSubjects';
+import { normalizeContentSubjects, type ExamFocusValue } from '@/lib/tutorSubjects';
 import { postTrackEvent } from '@/lib/tutorProgressApi';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +49,8 @@ export function SubjectsGateDialog() {
   const { data: profile } = useTutorProfile();
   const upsert = useUpsertTutorProfile();
   const [selected, setSelected] = useState<string[]>([]);
+  // Ф3: опц. экзамен-фокус пер-предметно (чипы под выбранными предметами).
+  const [focusMap, setFocusMap] = useState<Record<string, ExamFocusValue[]>>({});
 
   const surface = matchGateSurface(location.pathname);
   const needsSubjects =
@@ -89,7 +92,12 @@ export function SubjectsGateDialog() {
     if (!hasContentSubject || upsert.isPending || !profile) return;
     // Меняем ТОЛЬКО subjects; name/gender передаём текущие (контракт upsert).
     upsert.mutate(
-      { name: profile.name, gender: profile.gender, subjects: selected },
+      {
+        name: profile.name,
+        gender: profile.gender,
+        subjects: selected,
+        exam_focus_by_subject: focusMap,
+      },
       {
         onSuccess: () => {
           toast.success('Предметы сохранены — кабинет настроен под вас');
@@ -123,7 +131,13 @@ export function SubjectsGateDialog() {
           </div>
         </DialogHeader>
 
-        <SubjectsMultiSelect value={selected} onChange={setSelected} hideLabel />
+        <SubjectsFocusEditor
+          subjects={selected}
+          onSubjectsChange={setSelected}
+          focusMap={focusMap}
+          onFocusMapChange={setFocusMap}
+          hideLabel
+        />
 
         {selected.length > 0 && !hasContentSubject ? (
           <p className="text-xs text-amber-600">

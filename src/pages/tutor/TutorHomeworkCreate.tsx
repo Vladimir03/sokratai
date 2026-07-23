@@ -7,7 +7,9 @@ import { TUTOR_PROFILE_CARD_KEY } from '@/hooks/useTutorProfile';
 import type { TutorProfile } from '@/lib/tutorProfileApi';
 import {
   readHwLastSubject,
+  resolveTutorDefaultExamEgeOge,
   resolveTutorDefaultSubject,
+  saveExamLastUsed,
   saveHwLastSubject,
 } from '@/lib/tutorSubjects';
 import { Button } from '@/components/ui/button';
@@ -524,13 +526,23 @@ function TutorHomeworkCreateContent() {
       queryClient.getQueryData<TutorProfile | null>(TUTOR_PROFILE_CARD_KEY)?.subjects,
       readHwLastSubject(),
     ) as MetaState['subject'];
-  const [meta, setMeta] = useState<MetaState>(() => ({
-    title: '',
-    subject: resolveCreateDefaultSubject(),
-    deadline: '',
-    disable_ai_bootstrap: true,
-    exam_type: 'ege',
-  }));
+  // Ф3 (2026-07-23): дефолт exam_type — из экзамен-фокуса предмета (prefill-only,
+  // тот же sync-кэш; непригодный фокус school/olympiad → last-used → 'ege').
+  const resolveCreateDefaultExam = (subjectId: string): 'ege' | 'oge' =>
+    resolveTutorDefaultExamEgeOge(
+      subjectId,
+      queryClient.getQueryData<TutorProfile | null>(TUTOR_PROFILE_CARD_KEY)?.exam_focus_by_subject,
+    ) ?? 'ege';
+  const [meta, setMeta] = useState<MetaState>(() => {
+    const subject = resolveCreateDefaultSubject();
+    return {
+      title: '',
+      subject,
+      deadline: '',
+      disable_ai_bootstrap: true,
+      exam_type: resolveCreateDefaultExam(subject),
+    };
+  });
 
   // ── Tasks ──
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
@@ -1339,6 +1351,10 @@ function TutorHomeworkCreateContent() {
         // last-used предмет конструктора (дефолт следующего create; иерархия
         // last-used → профиль → physics в resolveTutorDefaultSubject).
         saveHwLastSubject(meta.subject);
+        // Ф3: пер-предметный last-used экзамена (дефолт exam_type следующего create).
+        if (meta.exam_type === 'ege' || meta.exam_type === 'oge') {
+          saveExamLastUsed(meta.subject, meta.exam_type);
+        }
         // Ревью-фикс P1 (2026-07-06): авто-зеркало degrade-not-block — но не
         // молча. failed > 0 → нейтральный info (ДЗ выдано успешно; recovery =
         // «Сохранить в мою базу» на карточке задачи в режиме правки).
@@ -1846,7 +1862,10 @@ function TutorHomeworkCreateContent() {
       assignTabInitializedRef.current = true;
     }
 
-    setMeta({ title: '', subject: resolveCreateDefaultSubject(), deadline: '', disable_ai_bootstrap: true, exam_type: 'ege', cefr_level: null, feedback_language: 'auto' });
+    setMeta(() => {
+      const subject = resolveCreateDefaultSubject();
+      return { title: '', subject, deadline: '', disable_ai_bootstrap: true, exam_type: resolveCreateDefaultExam(subject), cefr_level: null, feedback_language: 'auto' };
+    });
     setTasks([createEmptyTask()]);
     setMaterials([]);
     setNotifyEnabled(true);

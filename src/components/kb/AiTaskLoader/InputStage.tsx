@@ -17,7 +17,11 @@ import {
 import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { loadLastClassification, saveLastSubject } from '@/lib/kbLastClassification';
 import { scanTaskMarkers } from '@/lib/taskMarkers';
-import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import {
+  resolveTutorDefaultExamEgeOge,
+  resolveTutorDefaultSubject,
+  saveExamLastUsed,
+} from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
@@ -127,7 +131,16 @@ export function InputStage({
   // ВОЛНА 5: тема по умолчанию на ВЕСЬ пакет (необязательно) — предмет → тип →
   // тема → подтема. Применится ко всем задачам (переопределение по одной — в
   // ревью). Только KB-назначение (fixedSubject === undefined).
-  const [defaultExam, setDefaultExam] = useState<'' | 'ege' | 'oge'>('');
+  // Ф3 (2026-07-23): init «Типа» — из экзамен-фокуса предмета (prefill-only;
+  // непригодный фокус school/olympiad → last-used предмета → '').
+  const [defaultExam, setDefaultExam] = useState<'' | 'ege' | 'oge'>(() => {
+    if (fixedSubject !== undefined) return '';
+    const initialSubject = resolveTutorDefaultSubject(
+      tutorProfile?.subjects,
+      loadLastClassification().subject ?? null,
+    );
+    return resolveTutorDefaultExamEgeOge(initialSubject, tutorProfile?.exam_focus_by_subject) ?? '';
+  });
   const [defaultTopicId, setDefaultTopicId] = useState('');
   const [defaultSubtopicId, setDefaultSubtopicId] = useState('');
   const defaultTopicFilter: CatalogFilter | undefined = defaultExam || undefined;
@@ -157,6 +170,11 @@ export function InputStage({
       setSubject(resolved);
       setDefaultTopicId('');
       setDefaultSubtopicId('');
+      // Ревью P2-4: exam был вычислен для ПРЕЖНЕГО предмета — пересчитать под
+      // новый (иначе физический last-used утёк бы во французскую форму).
+      setDefaultExam(
+        resolveTutorDefaultExamEgeOge(resolved, tutorProfile?.exam_focus_by_subject) ?? '',
+      );
     }
   }, [tutorProfile, fixedSubject, subject]);
   const [text, setText] = useState('');
@@ -658,7 +676,13 @@ export function InputStage({
       // Персист предмета в last-used (review P2): следующий заход загрузчика/
       // форм/корзины стартует с него — не переключать «Химия» каждый раз.
       // hw-режим: предмет форсится конструктором — last-used Базы не трогаем.
-      if (!fixedSubject) saveLastSubject(subject);
+      if (!fixedSubject) {
+        saveLastSubject(subject);
+        // Ф3: пер-предметный last-used экзамена (только реально заданный «Тип»).
+        if (defaultExam === 'ege' || defaultExam === 'oge') {
+          saveExamLastUsed(subject, defaultExam);
+        }
+      }
       onExtracted(allDrafts, totals, effectiveFolderId, subject, allRefs, { expectedTotal, shortfalls }, {
         exam: defaultExam,
         topicId: defaultTopicId,

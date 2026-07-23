@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import AuthGuard from "@/components/AuthGuard";
 import AppNotificationsCard from "@/components/pwa/AppNotificationsCard";
 import { StudentAvatarSection } from "@/components/student/StudentAvatarSection";
+import { StudentSubjectsSection } from "@/components/student/StudentSubjectsSection";
 import { UserAvatar } from "@/components/common/UserAvatar";
 import { Zap, Target, Trophy, Edit, Send, CheckCircle, Loader2, Crown, Gift, CreditCard, Mail, KeyRound, ShieldCheck } from "lucide-react";
 import { z } from "zod";
@@ -517,6 +518,10 @@ const Profile = () => {
               setProfile((prev) => (prev ? { ...prev, gender: g } : prev))
             }
           />
+
+          {/* Ф7 (subject-personalization): предметы для свободного AI-чата/
+              практики; в ДЗ/пробниках предмет задаёт репетитор (инвариант). */}
+          <StudentSubjectsSection />
 
           {/* Main Profile Card */}
           <Card className="bg-slate-800 text-primary-foreground shadow-elegant">

@@ -25,7 +25,11 @@ import { useDeleteSectionToMyBase } from '@/hooks/useModeratorCatalog';
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 import { getSubjectDative } from '@/lib/subjectHelpers';
-import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import {
+  readExamLastUsed,
+  resolveTutorDefaultExam,
+  resolveTutorDefaultSubject,
+} from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { getSubjectLabel, SUBJECTS } from '@/types/homework';
 import { cn } from '@/lib/utils';
@@ -47,11 +51,28 @@ function KnowledgeBaseContent() {
   // Профиль — для дефолта предмета и онбординг-нуджа (кэш card-ключа тёплый).
   const { data: tutorProfile } = useTutorProfile();
   const [mainTab, setMainTab] = useState<MainTab>(initialTab);
-  const [examFilter, setExamFilter] = useState<CatalogFilter>('ege');
   // Дефолт-предмет: last-used (KB-серия) → профиль репетитора → physics.
   const [subject, setSubject] = useState<string>(() =>
     resolveTutorDefaultSubject(tutorProfile?.subjects, loadLastClassification().subject ?? null),
   );
+  // Ф3: exam-фильтр витрины — из фокуса ВЫБРАННОГО предмета (prefill-only).
+  // 'school' в витрине не существует → last-used предмета → прежний 'ege'
+  // (ревью P2-5: непригодный единственный фокус не должен терять last-used).
+  const [examFilter, setExamFilter] = useState<CatalogFilter>(() => {
+    const initialSubject = resolveTutorDefaultSubject(
+      tutorProfile?.subjects,
+      loadLastClassification().subject ?? null,
+    );
+    const lastUsed = readExamLastUsed(initialSubject);
+    const focus = resolveTutorDefaultExam(
+      initialSubject,
+      tutorProfile?.exam_focus_by_subject,
+      lastUsed,
+    );
+    if (focus === 'ege' || focus === 'oge' || focus === 'olympiad') return focus;
+    if (lastUsed === 'ege' || lastUsed === 'oge' || lastUsed === 'olympiad') return lastUsed;
+    return 'ege';
+  });
   const [searchQuery, setSearchQuery] = useState('');
 
   return (

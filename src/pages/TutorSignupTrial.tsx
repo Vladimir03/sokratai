@@ -11,7 +11,7 @@ import { capturePromoFromUrl, getStoredPromo } from "@/lib/promoCapture";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
-import { SubjectsMultiSelect } from "@/components/tutor/profile/SubjectsMultiSelect";
+import { SubjectsMultiSelect } from "@/components/common/SubjectsMultiSelect";
 import {
   applyPendingConsent,
   recordConsent,

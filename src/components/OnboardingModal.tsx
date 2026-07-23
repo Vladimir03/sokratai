@@ -133,6 +133,27 @@ const OnboardingModal = ({ open, userId, onComplete }: OnboardingModalProps) => 
       return;
     }
 
+    // Ф7 (subject-personalization, 2026-07-23): dual-write предмета в массив
+    // profiles.subjects — ОТДЕЛЬНЫМ best-effort апдейтом (deploy-skew: если
+    // миграция 20260723140000 ещё не применена, сбой НЕ ломает онбординг).
+    const pickedSubject =
+      typeof patch.difficult_subject === "string" && patch.difficult_subject
+        ? patch.difficult_subject
+        : null;
+    if (pickedSubject) {
+      void supabase
+        .from("profiles")
+        .update({ subjects: [pickedSubject] } as never)
+        .eq("id", userId)
+        .then(({ error }) => {
+          if (error) {
+            console.warn(
+              JSON.stringify({ event: "onboarding_subjects_array_write_failed", error: error.message }),
+            );
+          }
+        });
+    }
+
     const { error: aErr } = await supabase.from("onboarding_analytics").insert({
       user_id: userId,
       source: "web",

@@ -22,6 +22,7 @@ import {
 import CriteriaBreakdownTable from "@/components/homework/CriteriaBreakdownTable";
 import PhysicsFlowchartTrace from "@/components/homework/PhysicsFlowchartTrace";
 import { SUBJECTS, getSubjectLabel } from "@/types/homework";
+import { getSubjectDative } from "@/lib/subjectHelpers";
 import { SubjectSelect } from "@/components/tutor/SubjectSelect";
 import type {
   HomeworkAiCriteriaItem,
@@ -262,6 +263,15 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {getSubjectLabel(sample.subject)} · {sample.examLabel}
             </p>
+            {/* Ф6 (2026-07-23): честная подпись вместо тихого physics-фолбэка —
+                готового сэмпла по предмету репетитора нет. */}
+            {subject && subject !== sample.subject ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Готовый пример — по {getSubjectDative(sample.subject)}: для «
+                {getSubjectLabel(subject)}» образца пока нет. Попробуйте «Свою
+                задачу» — проверка уже работает по вашему предмету.
+              </p>
+            ) : null}
             <section className="rounded-lg border border-slate-200 bg-white p-3">
               <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Условие

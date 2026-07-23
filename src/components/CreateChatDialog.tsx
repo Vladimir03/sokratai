@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { SUBJECTS } from "@/types/homework";
+import { groupSubjectsBySelection } from "@/lib/tutorSubjects";
 
 interface CreateChatDialogProps {
   open: boolean;
@@ -26,7 +26,37 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
   // Ф5 (subject-personalization): опц. предмет диалога → chats.subject —
   // детерминированный контекст для AI (сервер читает снапшот по chatId).
   const [subject, setSubject] = useState("");
+  // Ф7: предметы ученика (profiles.subjects) — группа «Мои предметы» сверху.
+  const [mySubjects, setMySubjects] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id;
+      if (!uid) return;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("subjects, difficult_subject")
+        .eq("id", uid)
+        .maybeSingle();
+      if (cancelled || error || !data) return;
+      const row = data as { subjects?: unknown; difficult_subject?: unknown };
+      const arr = Array.isArray(row.subjects)
+        ? (row.subjects as unknown[]).filter((s): s is string => typeof s === "string")
+        : typeof row.difficult_subject === "string" && row.difficult_subject
+          ? [row.difficult_subject]
+          : [];
+      setMySubjects(arr);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const subjectGroups = groupSubjectsBySelection(mySubjects);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -164,9 +194,24 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-[16px] [touch-action:manipulation]"
             >
               <option value="">Без предмета</option>
-              {SUBJECTS.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
+              {subjectGroups.yours.length > 0 ? (
+                <>
+                  <optgroup label="Мои предметы">
+                    {subjectGroups.yours.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Другие предметы">
+                    {subjectGroups.others.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </optgroup>
+                </>
+              ) : (
+                subjectGroups.others.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))
+              )}
             </select>
             <p className="text-xs text-muted-foreground">
               Сократ будет держаться этого предмета в объяснениях.
