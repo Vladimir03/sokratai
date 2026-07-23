@@ -47,6 +47,9 @@ export function BulkActionsBar({
   const [subtopicId, setSubtopicId] = useState(KEEP);
   const [exam, setExam] = useState(KEEP);
   const [sourceLabel, setSourceLabel] = useState('');
+  // Bulk-КИМ (техдолг 5.6): один № на все выбранные (тематические подборки
+  // «все задачи — КИМ 17»). Пусто = не менять.
+  const [kimNumber, setKimNumber] = useState('');
   const { subtopics } = useSubtopics(topicId !== KEEP && topicId !== '' ? topicId : undefined);
   const { sources = [] } = useKbSources();
 
@@ -55,7 +58,8 @@ export function BulkActionsBar({
     exam === 'ege' || exam === 'oge' ? topics.filter((t) => t.exam === exam) : topics;
 
   const hasPatch =
-    topicId !== KEEP || subtopicId !== KEEP || exam !== KEEP || sourceLabel.trim() !== '';
+    topicId !== KEEP || subtopicId !== KEEP || exam !== KEEP ||
+    sourceLabel.trim() !== '' || kimNumber.trim() !== '';
 
   const handleApply = () => {
     if (!hasPatch || selectedCount === 0) return;
@@ -67,6 +71,12 @@ export function BulkActionsBar({
     if (subtopicId !== KEEP) patch.subtopicId = subtopicId || null;
     if (exam !== KEEP) patch.exam = exam as ReviewOverrides['exam'];
     if (sourceLabel.trim() !== '') patch.sourceLabel = sourceLabel.trim();
+    if (kimNumber.trim() !== '') {
+      // Смена КИМ сбрасывает балл (как per-row правка) + provenance 'manual'.
+      patch.kimNumber = kimNumber.trim();
+      patch.primaryScore = '';
+      patch.kimSource = 'manual';
+    }
     onApply(patch);
   };
 
@@ -153,6 +163,17 @@ export function BulkActionsBar({
         <option value="ege">ЕГЭ</option>
         <option value="oge">ОГЭ</option>
       </select>
+
+      <input
+        type="text"
+        inputMode="numeric"
+        value={kimNumber}
+        disabled={disabled}
+        onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
+        placeholder="КИМ: не менять"
+        className={cn(SELECT_CLASS, 'w-32')}
+        aria-label="№ КИМ для выбранных"
+      />
 
       {showTaxonomy ? (
         <>

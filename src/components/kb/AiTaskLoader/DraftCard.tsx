@@ -402,6 +402,7 @@ function DraftCardComponent({
                   onOverrideChange(index, {
                     kimNumber: e.target.value.replace(/\D/g, ''),
                     primaryScore: '',
+                    kimSource: e.target.value.replace(/\D/g, '') ? 'manual' : null,
                   })
                 }
                 disabled={disabled}

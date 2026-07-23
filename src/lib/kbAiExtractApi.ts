@@ -53,6 +53,12 @@ export interface ExtractedTask {
   /** Grading mode — persisted to kb_tasks.check_format on commit (P1-4, 2026-06-27). */
   check_format: ExtractedCheckFormat | null;
   kim_number: number | null;
+  /**
+   * CLIENT-ONLY (НЕ с edge): 'marker' — КИМ проставлен детерминированным
+   * zip'ом InputStage («Тип N» / вариантная нумерация, taskMarkers.ts) поверх
+   * догадки AI. Основа provenance-чипа КИМ в ревью (техдолг ревью 5.6).
+   */
+  kim_source_client?: 'marker';
   exam: ExtractedExam | null;
   primary_score: number | null;
   /** tutor-only — в Каталог не уходит (пишется в личную папку owner=tutor). */

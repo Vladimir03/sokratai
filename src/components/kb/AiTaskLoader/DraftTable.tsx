@@ -132,7 +132,7 @@ const DraftRow = memo(function DraftRow({
             <option value="oge">ОГЭ</option>
           </select>
         </td>
-        {/* КИМ */}
+        {/* КИМ (+ provenance-чип: откуда номер — маркер файла / AI / вручную) */}
         <td className="px-1.5 py-2">
           <input
             type="text"
@@ -143,11 +143,29 @@ const DraftRow = memo(function DraftRow({
               onChangeOverride(index, {
                 kimNumber: e.target.value.replace(/\D/g, ''),
                 primaryScore: '',
+                kimSource: e.target.value.replace(/\D/g, '') ? 'manual' : null,
               })
             }
             className={CELL_INPUT_CLASS}
             aria-label={`№ КИМ задачи ${index + 1}`}
           />
+          {override.kimNumber && override.kimSource ? (
+            <span
+              className={cn(
+                'mt-0.5 block text-center text-[10px] leading-tight',
+                override.kimSource === 'marker' ? 'text-emerald-600' : 'text-slate-400',
+              )}
+              title={
+                override.kimSource === 'marker'
+                  ? 'Номер из разметки файла («Тип N» / нумерация варианта) — надёжный'
+                  : override.kimSource === 'ai'
+                    ? 'Догадка AI — проверьте'
+                    : 'Введён вручную'
+              }
+            >
+              {override.kimSource === 'marker' ? 'файл' : override.kimSource === 'ai' ? 'AI' : 'вручную'}
+            </span>
+          ) : null}
         </td>
         {/* Балл */}
         <td className="px-1.5 py-2">

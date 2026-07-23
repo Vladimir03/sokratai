@@ -574,9 +574,11 @@ export function InputStage({
             const typeKim = typeNums?.[i] ?? null;
             if (typeKim !== null) {
               d.kim_number = typeKim;
+              d.kim_source_client = 'marker'; // provenance для ревью (чип «Тип»)
               kimAutoFilled += 1;
             } else if (markerScan.isVariantNumbering && !markerScan.hasTypeMarkers) {
               d.kim_number = markerNums[i];
+              d.kim_source_client = 'marker';
               kimAutoFilled += 1;
             }
           });

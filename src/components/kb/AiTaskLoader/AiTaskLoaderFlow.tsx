@@ -257,6 +257,10 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           sourceLabel: d.source_label.trim(),
           exam: defaultClassification.exam || batchTopicExam || d.exam || '',
           kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
+          // Provenance КИМ (техдолг 5.6): маркер файла ('Тип N'/вариант) vs
+          // догадка AI — чип в таблице ревью; ручная правка выставит 'manual'.
+          kimSource:
+            d.kim_number === null ? null : d.kim_source_client === 'marker' ? 'marker' : 'ai',
           // Балл: если по (предмет, экзамен, КИМ) есть авто-балл ФИПИ — поле сидируем
           // ПУСТЫМ (placeholder покажет авто, commit применит карту). Сид из AI-догадки
           // неотличим от ручного ввода и побеждал карту (репорт Милады: КИМ 3 → «2»
