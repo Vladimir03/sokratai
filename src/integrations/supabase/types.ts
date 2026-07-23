@@ -1421,6 +1421,7 @@ export type Database = {
       homework_tutor_templates: {
         Row: {
           created_at: string
+          creation_request_id: string | null
           disable_ai_bootstrap: boolean
           exam_type: string | null
           feedback_language: string | null
@@ -1441,6 +1442,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          creation_request_id?: string | null
           disable_ai_bootstrap?: boolean
           exam_type?: string | null
           feedback_language?: string | null
@@ -1461,6 +1463,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          creation_request_id?: string | null
           disable_ai_bootstrap?: boolean
           exam_type?: string | null
           feedback_language?: string | null
@@ -4990,6 +4993,21 @@ export type Database = {
       hw_reorder_tasks: {
         Args: { p_assignment_id: string; p_task_order: Json }
         Returns: undefined
+      }
+      hw_subject_check_defs: {
+        Args: never
+        Returns: {
+          constraint_name: string
+          definition: string
+        }[]
+      }
+      hw_template_materialize_refs: {
+        Args: {
+          _kb_task_ids: string[]
+          _template_id: string
+          _tutor_id: string
+        }
+        Returns: number
       }
       hw_template_task_counts: {
         Args: { p_template_ids: string[] }
