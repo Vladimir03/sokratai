@@ -48,6 +48,7 @@ import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import {
   createEmptyVariantTask,
   readAndClearVariantPrefill,
+  reclassifyDraftsForSubjectExam,
   rowToDraft,
   type VariantTaskDraft,
 } from '@/components/tutor/mock-exams/variantTaskDraft';
@@ -492,6 +493,26 @@ function VariantEditorContent() {
     );
   }, []);
 
+  // Ревью 5.6 P1 #2 (остаток): смена предмета/экзамена в шапке переклассифицирует
+  // уже добавленные задачи (формат проверки + балл ФИПИ Части 1) — у каждого
+  // предмета свои критерии. Вызывается ТОЛЬКО из пользовательского onChange
+  // селектора (не эффект — иначе затрёт edit-prefill/поздний автодефолт). Читает
+  // массивы из scope: onChange единичный, гонки нет.
+  const reclassifyTasks = useCallback(
+    (nextSubject: string, nextExam: '' | 'ege' | 'oge') => {
+      const r1 = reclassifyDraftsForSubjectExam(part1Tasks, nextSubject, nextExam);
+      const r2 = reclassifyDraftsForSubjectExam(part2Tasks, nextSubject, nextExam);
+      const changed = r1.changed + r2.changed;
+      if (changed === 0) return;
+      setPart1Tasks(r1.drafts);
+      setPart2Tasks(r2.drafts);
+      toast.info(
+        `Обновили формат проверки и баллы у ${changed} задан${changed === 1 ? 'ия' : 'ий'} под «${getSubjectLabel(nextSubject)}» — критерии ФИПИ у предметов отличаются. Проверьте перед сохранением.`,
+      );
+    },
+    [part1Tasks, part2Tasks],
+  );
+
   const totalMax = useMemo(
     () =>
       [...part1Tasks, ...part2Tasks].reduce((acc, t) => {
@@ -730,15 +751,16 @@ function VariantEditorContent() {
                 disabled={contentLocked}
                 onChange={(v) => {
                   subjectTouchedRef.current = true;
-                  setSubject(v);
                   // Ф3 (ревью 5.6 P1 №3): экзамен не трогали (и не edit) →
                   // пересчёт под новый предмет — stale ЕГЭ прежнего предмета
                   // не должен молча уезжать в вариант и его last-used.
-                  if (!isEditMode && !examTouchedRef.current) {
-                    setExam(
-                      resolveTutorDefaultExamEgeOge(v, tutorProfile?.exam_focus_by_subject) ?? 'ege',
-                    );
-                  }
+                  const nextExam =
+                    !isEditMode && !examTouchedRef.current
+                      ? resolveTutorDefaultExamEgeOge(v, tutorProfile?.exam_focus_by_subject) ?? 'ege'
+                      : exam;
+                  setSubject(v);
+                  if (nextExam !== exam) setExam(nextExam);
+                  reclassifyTasks(v, nextExam);
                 }}
                 className={cn(INPUT_CLASS, 'w-full')}
                 profileSubjects={tutorProfile?.subjects}
@@ -752,7 +774,9 @@ function VariantEditorContent() {
                 disabled={contentLocked}
                 onChange={(e) => {
                   examTouchedRef.current = true;
-                  setExam(e.target.value as 'ege' | 'oge');
+                  const nextExam = e.target.value as 'ege' | 'oge';
+                  setExam(nextExam);
+                  reclassifyTasks(subject, nextExam);
                 }}
                 className={INPUT_CLASS}
                 aria-label="Экзамен"

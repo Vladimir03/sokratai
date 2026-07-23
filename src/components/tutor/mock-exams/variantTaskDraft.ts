@@ -110,6 +110,47 @@ export function inferPart1CheckMode(
   return 'strict';
 }
 
+/**
+ * Переклассификация уже добавленных черновиков при смене предмета/экзамена в
+ * шапке редактора (ревью 5.6 P1 #2, остаток). Пересчитывает ТОЛЬКО то, что
+ * критично для грейдинга и детерминированно выводится из (№ КИМ, предмет,
+ * экзамен):
+ *   - `checkMode` Части 1 — у каждого предмета свои критерии ФИПИ (rule 45);
+ *     физический `multi_choice` засчитывает замену цифры, обществоведческий
+ *     `multi_choice_strict` — нет. Старый режим после смены предмета неверен.
+ *   - `maxScore` — балл ФИПИ, если карта нового (предмет × экзамен) его знает.
+ *
+ * НЕ трогает: контент (текст/ответ/фото/решение/тему), № КИМ и раскладку по
+ * частям (репетитор разложил вручную; авто-перемещение между частями = сюрприз,
+ * правится селектором «Часть»). Вызывать ТОЛЬКО из пользовательского onChange
+ * селектора — НЕ из эффекта на [subject, exam] (тот сработает и на edit-prefill,
+ * затерев сохранённые check_mode варианта, и на позднем автодефолте профиля).
+ *
+ * `changed` = сколько задач реально изменилось (0 → toast не показываем).
+ */
+export function reclassifyDraftsForSubjectExam(
+  drafts: VariantTaskDraft[],
+  subject: string,
+  exam: '' | 'ege' | 'oge' | null,
+): { drafts: VariantTaskDraft[]; changed: number } {
+  let changed = 0;
+  const next = drafts.map((t) => {
+    const kim = t.kimNumber.trim() ? parseInt(t.kimNumber.trim(), 10) : null;
+    if (kim === null || Number.isNaN(kim)) return t;
+    const patch: Partial<VariantTaskDraft> = {};
+    if (t.part === 1) {
+      const mode = inferPart1CheckMode(subject, exam, kim);
+      if (mode !== t.checkMode) patch.checkMode = mode;
+    }
+    const score = getKimPrimaryScoreForSubject(subject, exam || null, kim);
+    if (score != null && String(score) !== t.maxScore) patch.maxScore = String(score);
+    if (Object.keys(patch).length === 0) return t;
+    changed += 1;
+    return { ...t, ...patch };
+  });
+  return { drafts: next, changed };
+}
+
 // ─── Маппер: AI-загрузчик → черновик варианта ────────────────────────────────
 
 export function aiExtractToVariantTaskDraft(

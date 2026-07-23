@@ -245,3 +245,48 @@ test("обёртка getEgePhysicsBenchmarks: порог 8 / хорошо 27 / �
   assert.equal(scale.primaryToSecondary(8), 36, "шкала не задета registry-рефакторингом");
   assert.equal(scale.primaryToSecondary(45), 100);
 });
+
+test("reclassifyDraftsForSubjectExam: смена предмета пересчитывает режим+балл Ч1 (ревью 5.6 P1 #2)", () => {
+  const f = variantDraft.reclassifyDraftsForSubjectExam;
+  const mk = (over) => ({
+    localId: "x", part: 1, kimNumber: "2", maxScore: "1", taskText: "",
+    taskImageUrl: null, correctAnswer: "", checkMode: "multi_choice",
+    solutionText: "", solutionImageUrls: null, topic: "", ...over,
+  });
+
+  // Физика → обществознание: КИМ 2 меняет режим (multi_choice → strict) и балл (1 → 2).
+  const r1 = f([mk({ checkMode: "multi_choice", maxScore: "1" })], "social", "ege");
+  assert.equal(r1.changed, 1);
+  assert.equal(r1.drafts[0].checkMode, "multi_choice_strict");
+  assert.equal(r1.drafts[0].maxScore, "2");
+  // Контент/№/часть не тронуты.
+  assert.equal(r1.drafts[0].kimNumber, "2");
+  assert.equal(r1.drafts[0].part, 1);
+
+  // Обществознание → физика: КИМ 5 (strict → multi_choice, балл 2 → 2).
+  const r2 = f([mk({ kimNumber: "5", checkMode: "multi_choice_strict", maxScore: "2" })], "physics", "ege");
+  assert.equal(r2.drafts[0].checkMode, "multi_choice");
+  assert.equal(r2.drafts[0].maxScore, "2");
+
+  // Пустой № КИМ — не трогаем (нет базы для инференса).
+  const r3 = f([mk({ kimNumber: "", checkMode: "strict", maxScore: "3" })], "social", "ege");
+  assert.equal(r3.changed, 0);
+  assert.equal(r3.drafts[0].checkMode, "strict");
+
+  // Предмет без карты (chemistry): режим Ч1 → strict, балл не трогаем (карты нет).
+  const r4 = f([mk({ kimNumber: "5", checkMode: "multi_choice", maxScore: "2" })], "chemistry", "ege");
+  assert.equal(r4.drafts[0].checkMode, "strict");
+  assert.equal(r4.drafts[0].maxScore, "2", "нет карты → maxScore не трогаем");
+
+  // Идемпотентность: тот же предмет → 0 изменений.
+  const r5 = f([mk({ checkMode: "multi_choice_strict", maxScore: "2" })], "social", "ege");
+  assert.equal(r5.changed, 0);
+
+  // Часть 2 — режим не пересчитываем (на submit форсится manual), балл по карте.
+  const r6 = f(
+    [{ ...mk({ kimNumber: "21", checkMode: "manual", maxScore: "5", part: 2 }) }],
+    "physics", "ege",
+  );
+  assert.equal(r6.drafts[0].checkMode, "manual", "Ч2 режим не трогаем");
+  assert.equal(r6.drafts[0].maxScore, "3", "Ч2 балл по карте физики КИМ 21 = 3");
+});
