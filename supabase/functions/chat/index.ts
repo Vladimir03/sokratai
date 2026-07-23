@@ -97,6 +97,7 @@ interface ChatRequestBody {
 import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
 import { SUPABASE_PROXY_URL, rewriteToDirect } from "../_shared/proxy-url.ts";
 import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
+import { SUBJECT_LABELS } from "../_shared/subjects.generated.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 import { buildPedagogyContextBlock, loadLearningContext } from "../_shared/learning-context.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
@@ -746,29 +747,11 @@ ${modeInstructions[mode]}`;
 }
 
 // ─── Subject-aware prompt helpers ───────────────────────────────────────────
-// Mirror of `guided_ai.ts::SUBJECT_LABELS_DENO`. Keep in sync with SUBJECTS
-// from src/types/homework.ts when new subjects land. Fallback = raw id.
-const SUBJECT_LABELS_DENO: Record<string, string> = {
-  maths: "Математика",
-  physics: "Физика",
-  informatics: "Информатика",
-  russian: "Русский язык",
-  literature: "Литература",
-  history: "История",
-  social: "Обществознание",
-  english: "Английский язык",
-  french: "Французский язык",
-  spanish: "Испанский язык",
-  chemistry: "Химия",
-  biology: "Биология",
-  geography: "География",
-  other: "Другое",
-  math: "Математика",
-  rus: "Русский язык",
-  cs: "Информатика",
-  algebra: "Алгебра",
-  geometry: "Геометрия",
-};
+// Словарь — из СГЕНЕРИРОВАННОГО зеркала единого реестра
+// (`src/lib/subjects/registry.ts` → `_shared/subjects.generated.ts`, 2026-07-23).
+// Раньше здесь лежала третья ручная копия того же словаря. Новый предмет →
+// правь реестр + `npm run generate:subjects`. Fallback = raw id (не менялся).
+const SUBJECT_LABELS_DENO: Record<string, string> = SUBJECT_LABELS;
 
 function getSubjectLabelDeno(subjectId: string | null | undefined): string {
   const id = (subjectId ?? "").trim();

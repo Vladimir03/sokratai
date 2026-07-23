@@ -28,6 +28,7 @@ import {
   type SubjectRubric,
 } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
+import { SUBJECTS_REQUIRING_CEFR } from "../_shared/subjects.generated.ts";
 // #61 (2026-07-11): несколько допустимых верных ответов + числовой диапазон.
 import { describeAnswerSpecForPrompt, parseAnswerSpec } from "../_shared/answer-alternatives.ts";
 import { type FlowchartTraceStep, physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
@@ -2439,7 +2440,10 @@ export async function evaluateStudentAnswer(
   // target/immersion-режиме (feedback_language) даёт mixed-language ученику.
   // Языковые numeric-задачи редки → стоимость лишнего AI-вызова приемлема ради
   // консистентного языка ответа.
-  const isLanguageSubject = ["french", "english", "spanish"].includes(params.subject);
+  // Из сгенерированного зеркала реестра предметов (2026-07-23): локальный
+  // литерал разошёлся бы с бэкендом при добавлении нового языка → новый язык
+  // молча пошёл бы по deterministic fast path с русским «Верно».
+  const isLanguageSubject = SUBJECTS_REQUIRING_CEFR.has(params.subject);
   // Criteria-grading feature (2026-06): if a per-criterion template is active
   // (tutor criteria OR built-in preset), always run the AI so the breakdown is
   // produced — never short-circuit a criteria task on a deterministic match.

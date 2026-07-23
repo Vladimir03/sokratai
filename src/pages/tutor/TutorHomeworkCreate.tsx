@@ -30,7 +30,7 @@ import {
   getTutorHomeworkAssignment,
   updateTutorHomeworkAssignment,
   getTutorHomeworkTemplate,
-  createTutorHomeworkTemplate,
+  createTemplateFromAssignment,
   getHomeworkImageSignedUrl,
   pushHomeworkTaskToKb,
   type HomeworkSubject,
@@ -45,6 +45,12 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteTelegramLink, getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
+import { generateClientUuid } from '@/lib/clientUuid';
+// Языковой предикат — из ЕДИНОГО реестра предметов, не локальный литерал
+// (ревью 5.6 р.2 P2: семь копий `['french','english','spanish']` в этом файле
+// расходились бы с бэкендом при добавлении нового языка — backend требовал бы
+// CEFR, а форма его не показывала → создание ДЗ блокировалось бы).
+import { subjectRequiresCefr } from '@/lib/subjects/registry';
 // Канонический массив SUBJECTS (@/types/homework, {id,...}) нужен для валидации
 // lesson-prefill по `.id`; L0-селектор предмета — shared SubjectSelect (Ф2).
 import { SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
@@ -398,7 +404,7 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
   meta: (m: MetaState) => Partial<MetaState>;
   task: (t: HomeworkTemplateTask) => DraftTask;
 } {
-  const isLang = ['french', 'english', 'spanish'].includes(tpl.subject);
+  const isLang = subjectRequiresCefr(tpl.subject);
   const autoCefr = isLang
     ? detectCefrLevelFromText([tpl.title, ...tpl.tasks_json.map((t) => t.task_text)].join(' \n '))
     : null;
@@ -1206,7 +1212,7 @@ function TutorHomeworkCreateContent() {
     // Phase 11 (2026-05-31): для языковых subjects (french/english/spanish) с
     // письменными/устными задачами — CEFR-уровень ОБЯЗАТЕЛЕН. Без него AI молча
     // грейдит по B1 (баг Эмилии: A2-ДЗ проверялись по B1 + «160 слов»).
-    const isLang = ['french', 'english', 'spanish'].includes(meta.subject);
+    const isLang = subjectRequiresCefr(meta.subject);
     if (isLang) {
       const hasWritingTask = tasks.some((t) => {
         const tk = t.task_kind ?? (t.check_format === 'detailed_solution' ? 'extended' : 'numeric');
@@ -1313,7 +1319,7 @@ function TutorHomeworkCreateContent() {
           task_kind: t.task_kind,
           // Phase 11 (2026-05-31): CEFR — assignment-level каскад во все задачи для
           // языковых subjects (single control в L0). Non-language → null.
-          cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
+          cefr_level: subjectRequiresCefr(meta.subject)
             ? (meta.cefr_level ?? null)
             : null,
           // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
@@ -1477,41 +1483,55 @@ function TutorHomeworkCreateContent() {
       }
 
       // Phase: save as template (optional)
-      if (saveAsTemplate) {
-        try {
-          // Field-parity fix (2026-06-03, review P0): чекбокс «Сохранить как шаблон»
-          // идёт через legacy POST /templates (а НЕ save_as_template-флаг), поэтому
-          // ОБЯЗАН слать те же поля, что submit-payload выше — иначе reuse шаблона
-          // терял check_format/task_kind/cefr + assignment-meta (баг #1 на видимой
-          // кнопке). cefr_level + feedback_language — только для языковых (Q2).
-          const isLang = ['french', 'english', 'spanish'].includes(meta.subject);
-          await createTutorHomeworkTemplate({
-            title: resolvedTitle,
-            subject: meta.subject as ModernHomeworkSubject,
-            exam_type: meta.exam_type ?? 'ege',
-            disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
-            feedback_language: isLang ? (meta.feedback_language ?? 'auto') : null,
-            tasks_json: tasks.map((t) => ({
-              task_text: t.task_text.trim(),
-              task_image_url: t.task_image_path ?? null,
-              correct_answer: t.correct_answer.trim() || null,
-              rubric_text: t.rubric_text.trim() || null,
-              rubric_image_urls: t.rubric_image_paths ?? null,
-              solution_text: t.solution_text.trim() || null,
-              solution_image_urls: t.solution_image_paths ?? null,
-              max_score: t.max_score,
-              check_format: t.check_format,
-              task_kind: t.task_kind ?? null,
-              cefr_level: isLang ? (meta.cefr_level ?? null) : null,
-              kim_number: t.kim_number ?? null,
-              grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
-            })),
-          });
-          void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
-        } catch (tplErr) {
-          console.warn('homework_template_save_failed', tplErr);
-          toast.warning('Не удалось сохранить как шаблон');
-        }
+      //
+      // 2026-07-23 — чекбокс переведён с legacy `POST /templates` (клиент второй
+      // раз собирал payload задач) на серверный `POST /assignments/:id/save-as-template`.
+      // ДЗ к этому моменту уже создано, поэтому сервер читает задачи из БД сам:
+      //   • ноль дубля write-path → поле задачи больше не может «потеряться по
+      //     дороге в шаблон» (класс P0 field-parity 2026-06-03);
+      //   • provenance `source_kb_task_id` едет в снимок → шаблон получается
+      //     ССЫЛОЧНЫМ (unified-task-model), клиентский путь его терял;
+      //   • фото-задача сохраняет `[Задача на фото]` (клиент писал пустой текст);
+      //   • серверные guard'ы (валидный subject, 23514 → 409) уже там.
+      // `include_materials: false` — на уровне схемы noop, не шлём true, чтобы не
+      // писать в лог noop-строку.
+      if (saveAsTemplate && assignmentId) {
+        const templateAssignmentId = assignmentId;
+        // Ключ ОДНОЙ попытки сохранения: одинаков во всех ретраях ниже, поэтому
+        // «201 отправлен, ответ не дошёл» + «Повторить» вернут тот же шаблон,
+        // а не создадут дубль (ревью P1 #8).
+        const templateRequestId = generateClientUuid();
+        // Ошибка НЕ фатальна (ДЗ уже создано и выдано), но и не должна теряться
+        // тихим warning'ом в конце длинного флоу — репорт Ульяны 2026-07-23 был
+        // именно про «молча не сохраняется». Паттерн `attachToLesson` выше:
+        // toast.error + одно-тапный ретрай.
+        const saveTemplate = async (): Promise<void> => {
+          try {
+            await createTemplateFromAssignment(templateAssignmentId, {
+              title: resolvedTitle,
+              tags: [],
+              include_rubric: true,
+              include_materials: false,
+              include_ai_settings: true,
+              request_id: templateRequestId,
+            });
+            void queryClient.invalidateQueries({ queryKey: ['tutor', 'homework', 'templates'] });
+            toast.success('Шаблон сохранён');
+          } catch (tplErr) {
+            const code = tplErr instanceof HomeworkApiError ? tplErr.code : null;
+            console.warn('homework_template_save_failed', code ?? String(tplErr));
+            // Серверные фразы уже русские и actionable (rule 97) — показываем их.
+            const message =
+              tplErr instanceof HomeworkApiError && tplErr.message
+                ? tplErr.message
+                : 'Не удалось сохранить как шаблон';
+            toast.error(`ДЗ создано, но шаблон не сохранён. ${message}`, {
+              action: { label: 'Повторить', onClick: () => { void saveTemplate(); } },
+              duration: 10000,
+            });
+          }
+        };
+        await saveTemplate();
       }
 
       // Done
@@ -1688,7 +1708,7 @@ function TutorHomeworkCreateContent() {
             task_kind: t.task_kind,
             // Phase 11 (2026-05-31): CEFR — assignment-level каскад (single L0 control).
             // Belt-and-suspenders для задач, добавленных после смены уровня. Non-language → null.
-            cefr_level: ['french', 'english', 'spanish'].includes(meta.subject)
+            cefr_level: subjectRequiresCefr(meta.subject)
               ? (meta.cefr_level ?? null)
               : null,
             // Phase 2 (2026-06-21): per-task № КИМ из KB → grading по ФИПИ.
@@ -1886,7 +1906,7 @@ function TutorHomeworkCreateContent() {
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
   // Phase 11 (2026-05-31): язык. subjects → показываем CEFR + feedback language
   // селекторы в L0; CEFR обязателен. Mirror backend LANGUAGE_SUBJECTS_REQUIRING_CEFR.
-  const isLanguageSubject = ['french', 'english', 'spanish'].includes(meta.subject);
+  const isLanguageSubject = subjectRequiresCefr(meta.subject);
 
   const submitLabel = (() => {
     if (isEditMode && !isEditSnapshotReady) {
@@ -2035,7 +2055,7 @@ function TutorHomeworkCreateContent() {
                 // Phase 11: при переключении на языковой subject без заданного уровня —
                 // попробовать авто-подставить из текста (если репетитор написал «DELF A2»).
                 // Bonus: для image-задач (Эмилия) маркера нет → останется null → required.
-                const becameLanguage = ['french', 'english', 'spanish'].includes(nextSubject);
+                const becameLanguage = subjectRequiresCefr(nextSubject);
                 let nextCefr = meta.cefr_level ?? null;
                 if (becameLanguage && !nextCefr) {
                   const haystack = [meta.title, ...tasks.map((t) => t.task_text)].join(' \n ');
@@ -2229,8 +2249,9 @@ function TutorHomeworkCreateContent() {
             assignmentId={isEditMode ? editId : null}
             onRequestPushToKB={isEditMode ? handleRequestPushToKB : undefined}
             voiceSpeakingEnabled={voiceSpeakingEnabled}
-            cefrLevelEnabled={['french', 'english', 'spanish'].includes(meta.subject)}
-            aiLoaderSubject={meta.subject || 'physics'}
+            cefrLevelEnabled={subjectRequiresCefr(meta.subject)}
+            subject={meta.subject || 'physics'}
+            examType={meta.exam_type ?? null}
           />
         </section>
 

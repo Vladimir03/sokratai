@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -20,6 +20,7 @@ import {
   type CreateTemplateFromAssignmentPayload,
 } from '@/lib/tutorHomeworkApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
+import { generateClientUuid } from '@/lib/clientUuid';
 import { getSubjectLabel } from '@/types/homework';
 import { cn } from '@/lib/utils';
 
@@ -99,6 +100,22 @@ export function SaveAsTemplateDialog({
   const [includeAiSettings, setIncludeAiSettings] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  /**
+   * Идемпотентность повторного сохранения (ревью 5.6 р.2, P1).
+   *
+   * Сценарий дубля: INSERT прошёл, ответ оборвался (RU-DPI, rule 95) — диалог
+   * показал ошибку и остался открыт; повторное «Сохранить» создавало ВТОРОЙ
+   * идентичный шаблон, потому что без ключа partial-UNIQUE
+   * (tutor_id, creation_request_id) такие строки не покрывает.
+   *
+   * Ключ живёт до успеха/закрытия и переживает ретраи. НО пересоздаётся, если
+   * тьютор ИЗМЕНИЛ payload между попытками (правил название/теги/тумблеры):
+   * иначе сервер вернул бы ПЕРВЫЙ шаблон со старым названием и правки молча
+   * потерялись бы — типичная ловушка наивной идемпотентности.
+   */
+  const requestIdRef = useRef<string | null>(null);
+  const requestPayloadSigRef = useRef<string | null>(null);
+
   // Reset transient state when the dialog (re)opens so a previous session's
   // edits don't bleed across opens.
   useEffect(() => {
@@ -109,6 +126,9 @@ export function SaveAsTemplateDialog({
       setIncludeRubric(true);
       setIncludeAiSettings(true);
       setSubmitting(false);
+      // Новое намеренное открытие = новая попытка сохранения.
+      requestIdRef.current = null;
+      requestPayloadSigRef.current = null;
     }
   }, [open, assignmentTitle, assignmentSubject, assignmentTopic]);
 
@@ -162,6 +182,20 @@ export function SaveAsTemplateDialog({
       include_materials: false,
       include_ai_settings: includeAiSettings,
     };
+
+    // Тот же payload → тот же ключ (чистый ретрай идемпотентен); изменённый
+    // payload → новый ключ (правки тьютора не должны молча теряться).
+    const payloadSig = JSON.stringify([
+      payload.title,
+      payload.tags,
+      payload.include_rubric,
+      payload.include_ai_settings,
+    ]);
+    if (requestIdRef.current === null || requestPayloadSigRef.current !== payloadSig) {
+      requestIdRef.current = generateClientUuid();
+      requestPayloadSigRef.current = payloadSig;
+    }
+    payload.request_id = requestIdRef.current;
 
     try {
       const template = await createTemplateFromAssignment(assignmentId, payload);

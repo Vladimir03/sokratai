@@ -70,6 +70,49 @@ export function kbTaskMaxScore(kb: Pick<KbTaskLike, "primary_score" | "difficult
   return 1;
 }
 
+/** Рекурсивно-стабильная сериализация (ключи объектов сортируются). */
+function stableSerialize(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v ?? null) ?? "null";
+  if (Array.isArray(v)) return `[${v.map(stableSerialize).join(",")}]`;
+  const entries = Object.entries(v as Record<string, unknown>)
+    // undefined-ключи и явный null считаем одним и тем же «поля нет»: обе
+    // стороны строятся разными функциями, но семантика отсутствия одна.
+    .filter(([, val]) => val !== undefined && val !== null)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${entries.map(([k, val]) => `${JSON.stringify(k)}:${stableSerialize(val)}`).join(",")}}`;
+}
+
+/** Провенанс не влияет на то, что увидит репетитор → вне сравнения контента. */
+const CONTENT_COMPARE_OMIT = new Set(["source_kb_task_id"]);
+
+/**
+ * Совпадает ли СИНТЕЗ из Базы (`kbTaskToTemplateTaskJson`) с сохранённым
+ * снимком задачи шаблона ПО КОНТЕНТУ.
+ *
+ * Гейт промоушена шаблона в ССЫЛОЧНЫЙ режим (ревью ChatGPT-5.6, 2026-07-23):
+ * после `tasks_migrated_at` GET синтезирует задачи из ЖИВЫХ строк Базы и
+ * игнорирует audit-снимок, поэтому промоушен допустим ТОЛЬКО когда синтез
+ * побайтово даст то же самое. Иначе шаблон молча покажет другую задачу:
+ *   • задачу импортировали из Базы и правили в конструкторе без «Обновить в
+ *     Базе» → в ДЗ новая версия, в Базе старая (P1 #1 ревью);
+ *   • `max_score` 2.5 округляется при зеркалировании в `primary_score`;
+ *   • `include_rubric=false` / `include_ai_settings=false` зануляют поля в
+ *     снимке, а синтез из Базы вернёт их обратно (P1 #4 ревью).
+ * Любое расхождение → остаёмся на legacy-снимке (он самодостаточен и точен).
+ *
+ * Сравнение намеренно КОНСЕРВАТИВНО: ложное «не равно» безопасно (легаси-путь),
+ * ложное «равно» — нет. Новое поле в `kbTaskToTemplateTaskJson` автоматически
+ * попадает в сравнение — отдельной синхронизации не требует.
+ */
+export function templateTaskContentEquals(
+  synthesized: Record<string, unknown>,
+  snapshot: Record<string, unknown>,
+): boolean {
+  const strip = (o: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(o).filter(([k]) => !CONTENT_COMPARE_OMIT.has(k)));
+  return stableSerialize(strip(synthesized)) === stableSerialize(strip(snapshot));
+}
+
 /**
  * kb_task → элемент tasks_json (HomeworkTemplateTask-shape). Используется для
  * СИНТЕЗА legacy-формы GET /templates/:id из ссылок (deploy-skew: старый фронт

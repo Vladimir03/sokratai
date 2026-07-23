@@ -35,6 +35,7 @@ import {
 import { rewriteToProxy } from "../_shared/proxy-url.ts";
 import { checkPart1, type CheckMode } from "../_shared/mock-exam-part1-checker.ts";
 import { parseAttachmentUrls } from "../_shared/attachment-refs.ts";
+import { SUBJECT_IDS } from "../_shared/subjects.generated.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -49,14 +50,13 @@ const VAPID_SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:support@sokratai.
 const VALID_MODES = ["blank", "form", "manual_entry"] as const;
 
 // ─── Фаза 2 (2026-07-20): репетиторские варианты ────────────────────────────
-// Канонический словарь предметов — зеркало src/types/homework.ts SUBJECTS
-// (Deno не импортирует фронт-типы; синхронизация вручную, как SUBJECT_LABELS).
-const VALID_VARIANT_SUBJECTS = new Set([
-  "maths", "physics", "informatics",
-  "russian", "literature", "history", "social",
-  "english", "french", "spanish",
-  "chemistry", "biology", "geography", "other",
-]);
+// Канонический словарь предметов — из СГЕНЕРИРОВАННОГО зеркала единого реестра
+// (`src/lib/subjects/registry.ts` → `_shared/subjects.generated.ts`, 2026-07-23).
+// Ручная копия здесь была ещё одним источником дрейфа: добавленный в реестр
+// предмет молча не проходил бы валидацию вариантов пробника.
+// Легаси-id намеренно НЕ принимаем — варианты пробников новые, легаси-значений
+// в `mock_exam_variants.subject` не существует (зеркало его CHECK'а).
+const VALID_VARIANT_SUBJECTS = new Set<string>(SUBJECT_IDS);
 // Часть 1 — режимы детерминированного чекера (без 'manual' — тот для Части 2).
 const VALID_PART1_CHECK_MODES = new Set([
   "strict", "ordered", "ordered_lenient", "unordered", "multi_choice", "task20", "pair",

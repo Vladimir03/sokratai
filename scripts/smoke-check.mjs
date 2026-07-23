@@ -401,87 +401,30 @@ if (!supabaseUrl || !supabaseKey) {
 
 console.log("");
 
-// ─── 7. Humanities subjects mirror sync (Phase 7 round 2, 2026-05-20) ──────
-console.log("7. Humanities subjects mirror sync invariant...");
-
-const HUMANITIES_REQUIRED = ["russian", "rus", "literature", "english", "french", "spanish"];
-
-const humanitiesMirrors = [
-  {
-    label: "supabase/functions/_shared/subject-rubrics/index.ts::HUMANITIES_SUBJECTS",
-    path: "supabase/functions/_shared/subject-rubrics/index.ts",
-    pattern: /export const HUMANITIES_SUBJECTS = new Set<string>\(\[([^\]]+)\]\)/,
-  },
-  {
-    label: "src/lib/subjectHelpers.ts::HUMANITIES_WRITING_SUBJECTS",
-    path: "src/lib/subjectHelpers.ts",
-    pattern: /const HUMANITIES_WRITING_SUBJECTS = new Set<string>\(\[([^\]]+)\]\)/,
-  },
-  {
-    label: "src/components/homework/GuidedChatMessage.tsx::HUMANITIES_WRITING_SUBJECTS",
-    path: "src/components/homework/GuidedChatMessage.tsx",
-    pattern: /const HUMANITIES_WRITING_SUBJECTS = new Set\(\[([^\]]+)\]\)/,
-  },
-];
-
-// Phase 7 round 3 polish (2026-05-20, ChatGPT-5.5 review P2 #1):
-// Parse all 3 mirrors → check baseline coverage AND pairwise equality.
-// Раньше только верифицировал что HUMANITIES_REQUIRED ⊆ each set, но
-// extras в одном set но не в других проходили silently. Теперь — extras
-// flagged тоже.
-const declaredSets = new Map(); // label → sorted unique members array
-for (const mirror of humanitiesMirrors) {
-  const fullPath = path.resolve(rootDir, mirror.path);
-  if (!fs.existsSync(fullPath)) {
-    fail(`${mirror.path} is missing — required for humanities mirror invariant`);
-    continue;
-  }
-  const content = fs.readFileSync(fullPath, "utf8");
-  const match = content.match(mirror.pattern);
-  if (!match) {
-    fail(`${mirror.label}: pattern not found — refactor may have broken the set declaration`);
-    continue;
-  }
-  // Extract все quoted strings (single / double) внутри set body — игнорирует
-  // inline comments типа `"rus", // legacy`.
-  const declared = [...match[1].matchAll(/["']([^"']+)["']/g)].map((m) => m[1]);
-  const missing = HUMANITIES_REQUIRED.filter((req) => !declared.includes(req));
-  if (missing.length > 0) {
-    fail(`${mirror.label} missing required subjects: ${missing.join(", ")}`);
-  } else {
-    ok(`${mirror.label} contains all required humanities subjects`);
-  }
-  declaredSets.set(mirror.label, [...new Set(declared)].sort());
+// ─── 7. Единый справочник предметов: реестр ↔ Deno-зеркало ──────────────────
+//
+// Phase 7 (2026-05-20) держал ЧЕТЫРЕ рукописные копии множества письменных
+// гуманитарных предметов и сверял их регэкспами по исходникам. С 2026-07-23
+// копий нет: единственный источник — src/lib/subjects/registry.ts, фронт зовёт
+// его напрямую, edge читает СГЕНЕРИРОВАННОЕ _shared/subjects.generated.ts.
+// Тест проверяет рантайм-эквивалентность (множества, порядок id, лейблы,
+// дательный падеж, легаси-алиасы). Свежесть файла зеркала — секция 19,
+// соответствие CHECK'ам прод-БД — секция 17.
+console.log("7. Единый справочник предметов (реестр ↔ Deno-зеркало)...");
+const subjectsRegistryTestPath = path.join(rootDir, "scripts", "test-subjects-registry.mjs");
+if (!fs.existsSync(subjectsRegistryTestPath)) {
+  fail("scripts/test-subjects-registry.mjs missing — справочник предметов без гарда");
 }
-
-// Pairwise equality check — catches extras добавленные в один mirror но
-// не в другие. Example failure: someone добавил `german` в backend set,
-// не обновил frontend → smoke fail с явным сообщением о diff.
-if (declaredSets.size >= 2) {
-  const entries = [...declaredSets.entries()];
-  const [refLabel, refMembers] = entries[0];
-  const refJoined = refMembers.join(",");
-  let allMatch = true;
-  for (let i = 1; i < entries.length; i++) {
-    const [otherLabel, otherMembers] = entries[i];
-    if (otherMembers.join(",") !== refJoined) {
-      const onlyInRef = refMembers.filter((m) => !otherMembers.includes(m));
-      const onlyInOther = otherMembers.filter((m) => !refMembers.includes(m));
-      fail(
-        `Humanities mirror sets differ between\n` +
-          `    ${refLabel} (${refMembers.length} members)\n` +
-          `    ${otherLabel} (${otherMembers.length} members)\n` +
-          `    only in first: [${onlyInRef.join(", ") || "—"}]\n` +
-          `    only in second: [${onlyInOther.join(", ") || "—"}]\n` +
-          `  Sync all 3 mirrors when adding/removing humanities subjects.`,
-      );
-      allMatch = false;
-    }
-  }
-  if (allMatch) {
-    ok(`All 3 humanities mirror sets are pairwise-equal (${refMembers.length} members)`);
-  }
+const subjectsRegistryResult = spawnSync(process.execPath, [subjectsRegistryTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (subjectsRegistryResult.status !== 0) {
+  console.error(subjectsRegistryResult.stdout ?? "");
+  console.error(subjectsRegistryResult.stderr ?? "");
+  fail("subjects registry parity FAILED — see node:test output above");
 }
+ok("реестр предметов = Deno-зеркало (множества, порядок, лейблы, алиасы)");
 
 console.log("");
 console.log("8. Homework constructor write-form query invariant (Phase 10, 2026-05-26)...");
@@ -762,5 +705,73 @@ if (examProfilesResult.status !== 0) {
 }
 ok("exam-profile parity pass (registry = обёртки, Σ45/Σ39/Σ28 канарейки)");
 
+// ── 17. Subject CHECK parity vs PROD (инцидент «не сохраняется шаблон», 2026-07-23) ──
+//
+// Класс бага — «миграция в репо ≠ применена в проде»: CHECK на
+// homework_tutor_templates.subject два месяца оставался легаси-списком, из-за чего
+// шаблоны молча не сохранялись у 13 репетиторов (химия/французский/математика/русский).
+//
+// Реализация — scripts/check-prod-schema.mjs (ТОТ ЖЕ скрипт гоняет CI-job
+// `prod-schema-guard` на push в main с SMOKE_DB_STRICT=1, где любая невозможность
+// проверить = FAIL). Здесь best-effort: оффлайн-запуск smoke-check не должен падать.
+console.log("");
+console.log("17. Subject CHECK parity vs production schema...");
+const prodSchemaCheckPath = path.join(rootDir, "scripts", "check-prod-schema.mjs");
+if (!fs.existsSync(prodSchemaCheckPath)) {
+  fail("scripts/check-prod-schema.mjs missing — subject CHECK drift unguarded");
+}
+const prodSchemaResult = spawnSync(process.execPath, [prodSchemaCheckPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+console.log((prodSchemaResult.stdout ?? "").trimEnd());
+if (prodSchemaResult.status !== 0) {
+  console.error(prodSchemaResult.stderr ?? "");
+  fail("subject CHECK parity FAILED — см. вывод выше");
+}
+// ── 18. Template ref-promotion parity (ревью 5.6 P1 #1/#4, 2026-07-23) ──────
+//
+// Промоушен шаблона в ССЫЛОЧНЫЙ режим допустим только если синтез из Базы даст
+// ровно сохранённый снимок — иначе шаблон молча покажет ДРУГУЮ задачу (правка
+// без «Обновить в Базе», округление дробного max_score, выключенные
+// include_rubric / include_ai_settings). Гейт = templateTaskContentEquals.
+console.log("");
+console.log("18. Template ref-promotion parity (снимок ↔ Базa)...");
+const refParityTestPath = path.join(rootDir, "scripts", "test-template-ref-parity.mjs");
+if (!fs.existsSync(refParityTestPath)) {
+  fail("scripts/test-template-ref-parity.mjs missing — гейт промоушена шаблона без теста");
+}
+const refParityResult = spawnSync(process.execPath, [refParityTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (refParityResult.status !== 0) {
+  console.error(refParityResult.stdout ?? "");
+  console.error(refParityResult.stderr ?? "");
+  fail("template ref-promotion parity FAILED — see node:test output above");
+}
+ok("template ref-promotion parity pass (divergence/rubric/AI-toggles → legacy snapshot)");
+// ── 19. Deno-зеркало справочника предметов не устарело (2026-07-23) ─────────
+//
+// Единый источник — src/lib/subjects/registry.ts; edge-функции читают
+// СГЕНЕРИРОВАННЫЙ _shared/subjects.generated.ts (Deno не импортирует src/).
+// Забыли `npm run generate:subjects` → edge работает со СТАРЫМ словарём:
+// новый предмет не проходит валидацию, лейбл в AI-промпте — сырой id.
+// Ровно тот класс бага, из-за которого шаблоны молча не сохранялись.
+console.log("");
+console.log("19. Subjects Deno-mirror freshness (registry → subjects.generated.ts)...");
+const subjectsGenPath = path.join(rootDir, "scripts", "generate-subjects.mjs");
+if (!fs.existsSync(subjectsGenPath)) {
+  fail("scripts/generate-subjects.mjs missing — зеркало предметов без гарда");
+}
+const subjectsGenResult = spawnSync(process.execPath, [subjectsGenPath, "--check"], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+console.log((subjectsGenResult.stdout ?? "").trimEnd());
+if (subjectsGenResult.status !== 0) {
+  console.error(subjectsGenResult.stderr ?? "");
+  fail("subjects mirror stale — запусти `npm run generate:subjects` и закоммить результат");
+}
 console.log("");
 console.log("=== Smoke Check Complete ===");

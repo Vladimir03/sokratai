@@ -1,24 +1,20 @@
 /**
- * Subject UX helpers. Distinct from `getSubjectLabel` in `@/types/homework`
- * (label rendering) — this module classifies subjects for **UX adaptations**
- * inside the student homework problem screen.
+ * Subject UX helpers.
  *
- * See plan §«UX (Phase 2 — humanities-aware)»: для письменных гуманитарных
- * предметов (French / English / Russian письмо / сочинение по литературе)
- * стандартный «Краткий ответ»/«Развёрнутое решение» banner и numeric input
- * в SubmitSheet звучат как физика. Этот хелпер — единый switch для
- * humanities-aware UX в `ProblemContext.tsx` и `SubmitSheet.tsx`.
+ * ⚠️ ТОНКИЕ ОБЁРТКИ над `@/lib/subjects/registry` — единственным справочником
+ * предметов (2026-07-23). Раньше здесь жили СВОИ копии множества письменных
+ * гуманитарных предметов и словаря дательного падежа; расхождение таких копий
+ * с `SUBJECTS`/CHECK'ами БД и было классом бага «предмет добавили, а половина
+ * сервисов о нём не знает». Новый предмет заводится в реестре — эти функции
+ * подхватывают его сами.
+ *
+ * Имена и сигнатуры сохранены: у обеих функций много вызывающих.
  */
 
-const HUMANITIES_WRITING_SUBJECTS = new Set<string>([
-  "russian",
-  "literature",
-  "english",
-  "french",
-  "spanish",
-  // Legacy aliases (see `LEGACY_SUBJECT_LABELS` in @/types/homework).
-  "rus",
-]);
+import {
+  getSubjectDativeName,
+  subjectIsHumanitiesWriting,
+} from '@/lib/subjects/registry';
 
 /**
  * Returns true for subjects where the canonical extended task is a piece of
@@ -34,41 +30,19 @@ const HUMANITIES_WRITING_SUBJECTS = new Set<string>([
  *   «покажи ход рассуждений».
  *
  * Defensive: accepts unknown/empty subjects (returns false) — non-humanities
- * subjects keep existing physics/maths-oriented UX.
+ * subjects keep existing physics/maths-oriented UX. Легаси-id (`rus`)
+ * резолвятся реестром через alias; нормализация case — там же (Deno-зеркало
+ * `_shared/subject-rubrics/index.ts::isHumanitiesSubject` ведёт себя так же).
  */
 export function isHumanitiesWritingSubject(subject: string | null | undefined): boolean {
-  if (!subject) return false;
-  // Phase 7 round 2 (2026-05-20): `.toLowerCase()` для symmetry с Deno
-  // mirror (`_shared/subject-rubrics/index.ts::isHumanitiesSubject`) и
-  // `GuidedChatMessage.tsx::isHumanitiesWritingSubjectLocal`. DB CHECK
-  // constraint хранит subject lowercase, но defensive normalization
-  // против case-mismatch (например, если когда-то в БД попадёт «French»).
-  return HUMANITIES_WRITING_SUBJECTS.has(subject.trim().toLowerCase());
+  return subjectIsHumanitiesWriting(subject);
 }
 
 /**
- * Дательный падеж предмета («по физике», «по обществознанию»). Полный словарь
- * SUBJECTS. Общий для витрины Каталога (empty-state) и заголовка пробника
- * («Пробник ЕГЭ по …»). Неизвестный/пустой предмет → «этому предмету».
+ * Дательный падеж предмета («по физике», «по обществознанию»). Общий для
+ * витрины Каталога (empty-state) и заголовка пробника («Пробник ЕГЭ по …»).
+ * Неизвестный/пустой предмет → «этому предмету».
  */
-const SUBJECT_DATIVE: Record<string, string> = {
-  maths: 'математике',
-  physics: 'физике',
-  informatics: 'информатике',
-  russian: 'русскому языку',
-  literature: 'литературе',
-  history: 'истории',
-  social: 'обществознанию',
-  english: 'английскому языку',
-  french: 'французскому языку',
-  spanish: 'испанскому языку',
-  chemistry: 'химии',
-  biology: 'биологии',
-  geography: 'географии',
-  other: 'этому предмету',
-};
-
 export function getSubjectDative(subject: string | null | undefined): string {
-  if (!subject) return 'этому предмету';
-  return SUBJECT_DATIVE[subject.trim().toLowerCase()] ?? 'этому предмету';
+  return getSubjectDativeName(subject);
 }

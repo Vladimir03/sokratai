@@ -150,3 +150,23 @@ export function countTasksBySubtopic(tasks: KBTask[]): SubtopicCounts {
   }
   return { bySubtopic, noSubtopic };
 }
+
+/**
+ * Группирует темы по разделу (`section`) с сохранением порядка появления.
+ *
+ * ОБЩИЙ для витрины Каталога (`KnowledgeBasePage`) и пикера «+ из БЗ»
+ * (`KBPickerSheet`): пикер до 2026-07-23 показывал плоский список тем всех
+ * предметов сразу (репорт Ульяны), теперь у обеих поверхностей одна структура
+ * «предмет → экзамен → раздел → тема».
+ */
+export function groupTopicsBySection<T extends { section: string }>(
+  topics: readonly T[],
+): Array<[string, T[]]> {
+  const grouped = new Map<string, T[]>();
+  for (const topic of topics) {
+    const current = grouped.get(topic.section) ?? [];
+    current.push(topic);
+    grouped.set(topic.section, current);
+  }
+  return Array.from(grouped.entries());
+}

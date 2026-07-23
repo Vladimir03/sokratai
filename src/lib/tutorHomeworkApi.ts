@@ -210,7 +210,12 @@ export interface HomeworkTemplateListItem {
   topic: string | null;
   tags: string[];
   created_at: string;
-  task_count?: number;
+  /**
+   * `null` = бэкенд не смог посчитать (сбой RPC счётчика) — рисовать «—», НЕ 0
+   * (ревью P1 #7, 2026-07-23: уверенный ноль на странице шаблонов = ложь).
+   * `undefined` = старый бэкенд без поля (deploy-skew).
+   */
+  task_count?: number | null;
   /** unified-task-model (2026-07-05) — Банк ДЗ (additive; старый бэк не отдаёт). */
   visibility?: 'private' | 'shared';
   usage_count?: number;
@@ -1344,6 +1349,13 @@ export interface CreateTemplateFromAssignmentPayload {
   include_rubric: boolean;
   include_materials: boolean;
   include_ai_settings: boolean;
+  /**
+   * Идемпотентный ключ ОДНОЙ попытки сохранения: генерится один раз и шлётся
+   * неизменным во всех ретраях этой попытки (`generateClientUuid`). Если сервер
+   * успел создать шаблон, но ответ не дошёл, ретрай вернёт уже созданный, а не
+   * второй такой же (ревью P1 #8). Старый бэкенд поле игнорирует.
+   */
+  request_id?: string;
 }
 
 export async function createTemplateFromAssignment(

@@ -36,33 +36,20 @@ import { buildPhysicsEgeRubric } from "./physics-ege.ts";
 import { buildRussianEgeRubric } from "./russian-ege.ts";
 import type { SubjectCriterionTemplate, SubjectRubric, SubjectRubricInput } from "./types.ts";
 
-// ─── Subject labels (mirror src/types/homework.ts SUBJECTS) ──────────────
-// Keep in sync — Deno cannot import TS from src/. See .claude/rules/40-homework-system.md.
+// ─── Subject labels ───────────────────────────────────────────────────────
+// Из СГЕНЕРИРОВАННОГО зеркала единого реестра (`src/lib/subjects/registry.ts`,
+// 2026-07-23). Ручной копии словаря здесь больше нет: расхождение таких копий и
+// было классом бага «предмет добавили, а половина сервисов о нём не знает».
+// Новый предмет → правь реестр + `npm run generate:subjects`.
 
-const SUBJECT_LABELS: Record<string, string> = {
-  maths: "Математика",
-  physics: "Физика",
-  informatics: "Информатика",
-  russian: "Русский язык",
-  literature: "Литература",
-  history: "История",
-  social: "Обществознание",
-  english: "Английский язык",
-  french: "Французский язык",
-  spanish: "Испанский язык",
-  chemistry: "Химия",
-  biology: "Биология",
-  geography: "География",
-  other: "Другое",
-  math: "Математика",
-  rus: "Русский язык",
-  cs: "Информатика",
-  algebra: "Алгебра",
-  geometry: "Геометрия",
-};
+import {
+  HUMANITIES_WRITING_SUBJECTS,
+  SUBJECT_LABELS,
+  SUBJECTS_REQUIRING_CEFR,
+} from "../subjects.generated.ts";
 
 const MATH_LIKE_SUBJECTS = new Set<string>(["maths", "math", "algebra", "geometry"]);
-const LANGUAGE_SUBJECTS = new Set<string>(["english", "french", "spanish"]);
+const LANGUAGE_SUBJECTS = SUBJECTS_REQUIRING_CEFR;
 
 // Phase 7 (2026-05-16) — humanities subjects где AI ОБЯЗАН использовать тот
 // же словарь, что и tutor solution_text (это French / Russian / etc., нельзя
@@ -71,16 +58,10 @@ const LANGUAGE_SUBJECTS = new Set<string>(["english", "french", "spanish"]);
 // hardcoded физический fallback. См. plan `~/.claude/plans/1-functional-meteor.md`
 // Phase 7 section + .claude/rules/45-mock-exams.md / .claude/rules/40-homework-system.md.
 //
-// **Mirror** of `src/lib/subjectHelpers.ts::isHumanitiesWritingSubject` —
-// Deno cannot import TS from src/, keep in sync.
-export const HUMANITIES_SUBJECTS = new Set<string>([
-  "russian",
-  "rus", // legacy
-  "literature",
-  "english",
-  "french",
-  "spanish",
-]);
+// Из сгенерированного зеркала реестра (поле `isHumanitiesWriting`; легаси-id
+// вроде `rus` наследуют письменность через alias). Имя экспорта сохранено —
+// у него есть внешние потребители.
+export const HUMANITIES_SUBJECTS = HUMANITIES_WRITING_SUBJECTS;
 
 export function isHumanitiesSubject(subject: string | null | undefined): boolean {
   const id = (subject ?? "").trim().toLowerCase();

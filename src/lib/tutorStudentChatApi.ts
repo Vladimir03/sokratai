@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 import { compressForUpload } from '@/lib/imageCompression';
+import { generateClientUuid } from '@/lib/clientUuid';
 import { parseISO } from 'date-fns';
 import type {
   ChatConversationListItem,
@@ -224,21 +225,12 @@ export async function resolveChatAttachmentUrl(ref: string): Promise<string | nu
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-/** UUID v4 с fallback — `crypto.randomUUID` есть только с Safari 15.4 (rule 80). */
-export function generateClientMsgId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  let uuid = '';
-  const hex = '0123456789abcdef';
-  for (let i = 0; i < 36; i++) {
-    if (i === 8 || i === 13 || i === 18 || i === 23) uuid += '-';
-    else if (i === 14) uuid += '4';
-    else if (i === 19) uuid += hex[(Math.random() * 4 + 8) | 0];
-    else uuid += hex[(Math.random() * 16) | 0];
-  }
-  return uuid;
-}
+/**
+ * UUID v4 с fallback — `crypto.randomUUID` есть только с Safari 15.4 (rule 80).
+ * Реализация переехала в `@/lib/clientUuid` (появился второй потребитель —
+ * идемпотентность сохранения шаблона ДЗ); имя сохранено для чат-вызывающих.
+ */
+export const generateClientMsgId = generateClientUuid;
 
 /**
  * Канонический merge realtime/optimistic сообщений в flat-кэш (mirror

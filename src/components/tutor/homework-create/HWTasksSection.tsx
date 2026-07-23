@@ -257,11 +257,15 @@ export interface HWTasksSectionProps {
    */
   cefrLevelEnabled?: boolean;
   /**
-   * Фаза 1 «один загрузчик — N назначений» (2026-07-20): предмет ДЗ
-   * (meta.subject) для кнопки «Из файла (AI)» — shared AI-загрузчик в Sheet,
-   * задачи ложатся в конструктор как DraftTask[] (path A, без новых write-path).
+   * Предмет ДЗ (`meta.subject`). Два потребителя:
+   *   • кнопка «Из файла (AI)» — shared AI-загрузчик в Sheet, задачи ложатся в
+   *     конструктор как DraftTask[] (Фаза 1, 2026-07-20; path A);
+   *   • пикер «+ из БЗ» — стартовый фильтр Каталога (2026-07-23, репорт Ульяны:
+   *     показывались темы всех предметов и экзаменов одним списком).
    */
-  aiLoaderSubject?: string;
+  subject?: string;
+  /** Экзамен ДЗ (`meta.exam_type`) — стартовый фильтр Каталога в пикере. */
+  examType?: string | null;
 }
 
 export function HWTasksSection({
@@ -277,7 +281,8 @@ export function HWTasksSection({
   onRequestPushToKB,
   voiceSpeakingEnabled = false,
   cefrLevelEnabled = false,
-  aiLoaderSubject,
+  subject,
+  examType,
 }: HWTasksSectionProps) {
   const [kbPickerOpen, setKbPickerOpen] = useState(false);
   const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
@@ -525,11 +530,16 @@ export function HWTasksSection({
         onAddTasks={handleAddFromKB}
         addedKbTaskIds={addedKbTaskIds}
         topicHint={topicHint}
+        // Стартовые фильтры Каталога = предмет и экзамен ДЗ (репорт Ульяны):
+        // без них пикер открывается на physics/ege и снова показывает чужой
+        // предмет. Переключатели внутри видны — фильтр мягкий.
+        subject={subject}
+        examType={examType}
       />
       <HWAiLoaderSheet
         open={aiLoaderOpen}
         onOpenChange={setAiLoaderOpen}
-        subject={aiLoaderSubject || 'physics'}
+        subject={subject || 'physics'}
         onAddTasks={handleAddFromAiLoader}
       />
 

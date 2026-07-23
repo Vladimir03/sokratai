@@ -20,6 +20,7 @@ const AI_DISPLAY_NAME = 'Сократ AI';
 const AI_AVATAR_URL: string = sokratChatIcon;
 import { getStudentTaskImageSignedUrl } from '@/lib/studentHomeworkApi';
 import type { GuidedMessageKind, MessageDeliveryStatus } from '@/types/homework';
+import { subjectIsHumanitiesWriting } from '@/lib/subjects/registry';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
 import { ThreadAttachments } from './ThreadAttachments';
 
@@ -113,21 +114,11 @@ function formatTime(isoString?: string, showDate?: boolean): string {
 // Phase 7 (2026-05-16): humanities-writing subjects где «Шаг решения» /
 // «Решение к задаче» звучат физико-математически. Для DELF B1 production
 // écrite / письма / эссе по русскому — рендерим «Письмо» / «Решение».
-// Mirror src/lib/subjectHelpers.ts::isHumanitiesWritingSubject (нельзя
-// import оттуда внутрь homework component без circular dep risk).
-const HUMANITIES_WRITING_SUBJECTS = new Set([
-  'russian',
-  'rus',
-  'literature',
-  'english',
-  'french',
-  'spanish',
-]);
-
-function isHumanitiesWritingSubjectLocal(subject: string | null | undefined): boolean {
-  if (!subject) return false;
-  return HUMANITIES_WRITING_SUBJECTS.has(subject.trim().toLowerCase());
-}
+//
+// 2026-07-23: локальная копия множества УДАЛЕНА — теперь единый реестр
+// (`@/lib/subjects/registry`, leaf-модуль без зависимостей, circular dep
+// невозможен). Это была четвёртая копия одного словаря.
+const isHumanitiesWritingSubjectLocal = subjectIsHumanitiesWriting;
 
 function formatMessageKind(
   kind: GuidedMessageKind | undefined,

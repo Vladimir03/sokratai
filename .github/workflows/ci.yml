@@ -44,6 +44,38 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+  # Fail-closed проверка того, что схема ПРОДА соответствует репо (ревью 5.6 P1 #5).
+  # В обычном smoke-check секция 17 best-effort (нет сети → warn+skip), поэтому
+  # инцидентный класс «миграция в репо, но не в проде» оставался бы вечно-зелёным.
+  # Здесь SMOKE_DB_STRICT=1: недоступная RPC / дрейф CHECK / отсутствие креды = FAIL.
+  #
+  # Только на push в main (путь релиза): на PR сетевой блип до Selectel-VPS не должен
+  # блокировать ревью. Секреты не нужны — гард берёт публичный anon-ключ из
+  # src/lib/supabaseClient.ts (он и так в отгружаемом бандле).
+  prod-schema-guard:
+    name: Prod schema guard (blocking on main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Subject CHECK parity vs production schema
+        run: node scripts/check-prod-schema.mjs
+        env:
+          SMOKE_DB_STRICT: "1"
+
   lint-informational:
     name: Lint (informational)
     runs-on: ubuntu-latest

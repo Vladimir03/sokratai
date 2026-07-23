@@ -1,5 +1,5 @@
 // Job: Быстро добавить задачу из базы в черновик ДЗ (P0.1 wedge)
-import { memo, useState, useMemo, useCallback, useEffect } from 'react';
+import { memo, useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   ArrowLeft,
   Check,
@@ -9,6 +9,7 @@ import {
   Library,
   Loader2,
   Plus,
+  Search,
 } from 'lucide-react';
 import {
   Sheet,
@@ -21,13 +22,17 @@ import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
+import { SubjectPills } from '@/components/kb/SubjectPills';
+import { FilterChips } from '@/components/kb/ui/FilterChips';
 import { cn } from '@/lib/utils';
 import { useTopics, useCatalogTasks, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { useRootFolders, useFolder } from '@/hooks/useFolders';
-import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
+import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, groupTopicsBySection, NO_SUBTOPIC_FILTER } from '@/lib/kbCatalogGrouping';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
-import type { KBTask, KBTopicWithCounts, KBFolderWithCounts } from '@/types/kb';
+import { DEFAULT_KB_SUBJECT, type CatalogFilter, type KBTask, type KBTopicWithCounts, type KBFolderWithCounts } from '@/types/kb';
+import { getSubjectDative } from '@/lib/subjectHelpers';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +43,13 @@ interface KBPickerSheetProps {
   onAddTasks: (tasks: KBTask[]) => void;
   addedKbTaskIds: Set<string>;
   topicHint?: string;
+  /**
+   * Предмет ДЗ — стартовый фильтр Каталога (репорт Ульяны 2026-07-23: пикер
+   * показывал темы всех предметов подряд). Переключатель виден.
+   */
+  subject?: string;
+  /** Экзамен ДЗ (`ege`/`oge`) — стартовый фильтр; олимпиады выбираются вручную. */
+  examType?: string | null;
 }
 
 type Tab = 'catalog' | 'my';
@@ -184,16 +196,61 @@ function CatalogBrowser({
   addedIds,
   onAddTasks,
   topicHint,
+  defaultSubject,
+  defaultExam,
+  tutorSubjects,
 }: {
   addedIds: Set<string>;
   onAddTasks: (tasks: KBTask[]) => void;
   topicHint?: string;
+  /** Предмет ДЗ — фильтр по умолчанию (репетитор его переключает). */
+  defaultSubject?: string;
+  /** Экзамен ДЗ — фильтр по умолчанию; олимпиады выбираются вручную. */
+  defaultExam?: CatalogFilter;
+  /** Предметы профиля — попадают в pills (персонализация). */
+  tutorSubjects?: readonly string[];
 }) {
   const [selectedTopicId, setSelectedTopicId] = useState<string | undefined>();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [subtopicFilter, setSubtopicFilter] = useState<string | null>(null);
+  // Структура «предмет → экзамен → раздел → тема» — та же, что на витрине Базы
+  // (репорт Ульяны 2026-07-23: пикер показывал темы ВСЕХ предметов и всех
+  // экзаменов одним плоским списком). Дефолты берутся из ДЗ; переключатели
+  // видны — задачу из другого раздела взять по-прежнему можно.
+  const [subject, setSubject] = useState<string>(defaultSubject ?? DEFAULT_KB_SUBJECT);
+  const [examFilter, setExamFilter] = useState<CatalogFilter>(defaultExam ?? 'ege');
+  const [topicQuery, setTopicQuery] = useState('');
 
-  const { topics, loading: topicsLoading } = useTopics(undefined, undefined);
+  // Предмет/экзамен ДЗ резолвятся асинхронно (профиль, prefill шаблона) — если
+  // они приехали ПОСЛЕ монтирования, подхватываем, пока репетитор сам не
+  // переключил фильтр (иначе клоббер выбора — класс багов конструктора).
+  const filtersTouchedRef = useRef(false);
+  useEffect(() => {
+    if (filtersTouchedRef.current) return;
+    if (defaultSubject) setSubject(defaultSubject);
+    if (defaultExam) setExamFilter(defaultExam);
+  }, [defaultSubject, defaultExam]);
+
+  const handleSubjectChange = useCallback((next: string) => {
+    filtersTouchedRef.current = true;
+    setSubject(next);
+    setSelectedTopicId(undefined);
+    setSubtopicFilter(null);
+    setSelectedIds(new Set());
+  }, []);
+
+  const handleExamChange = useCallback((next: CatalogFilter) => {
+    filtersTouchedRef.current = true;
+    setExamFilter(next);
+    setSelectedTopicId(undefined);
+    setSubtopicFilter(null);
+    setSelectedIds(new Set());
+  }, []);
+
+  const { topics, loading: topicsLoading } = useTopics(examFilter, subject);
+  // Отдельный «тихий» запрос ВСЕХ тем — только чтобы pills показали предметы, у
+  // которых контент есть (тот же кэш-ключ, что у витрины: справочник, quiet).
+  const { topics: allTopics } = useTopics();
   const { subtopics } = useSubtopics(selectedTopicId);
   const { tasks, loading: tasksLoading } = useCatalogTasks(selectedTopicId);
 
@@ -226,6 +283,24 @@ function CatalogBrowser({
     setSubtopicFilter(id);
     setSelectedIds(new Set());
   }, []);
+
+  // Предметы, по которым в каталоге реально есть темы → в pills (вместе с
+  // якорными и предметами профиля; логика union — в общем компоненте).
+  const allTopicSubjects = useMemo(() => allTopics.map((t) => t.subject), [allTopics]);
+
+  // Поиск по темам/подтемам — локальный, по уже загруженному списку предмета.
+  const visibleTopics = useMemo(() => {
+    const q = topicQuery.trim().toLowerCase();
+    if (!q) return topics;
+    return topics.filter(
+      (t) =>
+        t.name.toLowerCase().includes(q) ||
+        t.section.toLowerCase().includes(q) ||
+        (t.subtopic_names ?? []).some((n) => n.toLowerCase().includes(q)),
+    );
+  }, [topics, topicQuery]);
+
+  const topicSections = useMemo(() => groupTopicsBySection(visibleTopics), [visibleTopics]);
 
   // Auto-select topic matching hint (one-time, after topics load)
   const hintMatchedTopicId = useMemo(() => {
@@ -268,32 +343,88 @@ function CatalogBrowser({
     (id) => !addedIds.has(id),
   ).length;
 
-  // Topic list view
+  // Topic list view — предмет → экзамен → раздел → тема (структура витрины).
   if (!selectedTopicId) {
+    const filters = (
+      <div className="space-y-3">
+        <SubjectPills
+          value={subject}
+          onChange={handleSubjectChange}
+          topicSubjects={allTopicSubjects}
+          tutorSubjects={tutorSubjects}
+          aria-label="Предмет каталога"
+        />
+        <FilterChips
+          selected={examFilter}
+          onChange={(key) => handleExamChange(key as CatalogFilter)}
+          options={[
+            { key: 'ege', label: 'ЕГЭ', activeClassName: 'text-socrat-ege' },
+            { key: 'oge', label: 'ОГЭ', activeClassName: 'text-socrat-oge' },
+            { key: 'olympiad', label: 'Олимпиады', activeClassName: 'text-socrat-folder' },
+          ]}
+        />
+        {/* Поиск по темам — локальный по уже загруженному списку предмета,
+            без нового запроса (у физики 30+ тем, скролл утомляет). */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={topicQuery}
+            onChange={(e) => setTopicQuery(e.target.value)}
+            placeholder="Поиск по темам и подтемам..."
+            aria-label="Поиск по темам"
+            // 16px — иначе iOS Safari зумит поле (rule 80).
+            className="h-10 w-full rounded-lg border border-socrat-border bg-white pl-9 pr-3 text-base text-slate-800 placeholder:text-muted-foreground focus:border-socrat-primary focus:outline-none focus:ring-2 focus:ring-socrat-primary/20 [touch-action:manipulation]"
+          />
+        </div>
+      </div>
+    );
+
     if (topicsLoading) {
       return (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <div className="space-y-3">
+          {filters}
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
         </div>
       );
     }
 
     return (
-      <div className="space-y-1.5">
-        {topics.map((topic) => (
-          <TopicRow
-            key={topic.id}
-            topic={topic}
-            onClick={() => {
-              setSelectedTopicId(topic.id);
-              setSubtopicFilter(null);
-              setSelectedIds(new Set());
-            }}
-          />
+      <div className="space-y-4">
+        {filters}
+
+        {topicSections.map(([section, sectionTopics]) => (
+          <section key={section}>
+            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+              {section}
+            </h3>
+            <div className="space-y-1.5">
+              {sectionTopics.map((topic) => (
+                <TopicRow
+                  key={topic.id}
+                  topic={topic}
+                  onClick={() => {
+                    setSelectedTopicId(topic.id);
+                    setSubtopicFilter(null);
+                    setSelectedIds(new Set());
+                  }}
+                />
+              ))}
+            </div>
+          </section>
         ))}
-        {topics.length === 0 && (
+
+        {visibleTopics.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">
-            Нет тем в каталоге
+            {topicQuery.trim()
+              ? 'Ничего не найдено — измените запрос'
+              : `По ${getSubjectDative(subject)} ${
+                  examFilter === 'olympiad'
+                    ? 'олимпиадных тем пока нет'
+                    : `тем ${examFilter === 'oge' ? 'ОГЭ' : 'ЕГЭ'} пока нет`
+                }`}
           </p>
         )}
       </div>
@@ -661,8 +792,14 @@ export function KBPickerSheet({
   onAddTasks,
   addedKbTaskIds,
   topicHint,
+  subject,
+  examType,
 }: KBPickerSheetProps) {
   const [tab, setTab] = useState<Tab>('catalog');
+  const { data: tutorProfile } = useTutorProfile();
+  // Олимпиадный дефолт не выводим из ДЗ: `exam_type` у ДЗ — только ЕГЭ/ОГЭ.
+  const defaultExam: CatalogFilter | undefined =
+    examType === 'ege' || examType === 'oge' ? examType : undefined;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -711,6 +848,9 @@ export function KBPickerSheet({
               addedIds={addedKbTaskIds}
               onAddTasks={onAddTasks}
               topicHint={topicHint}
+              defaultSubject={subject}
+              defaultExam={defaultExam}
+              tutorSubjects={tutorProfile?.subjects}
             />
           ) : (
             <FolderBrowser addedIds={addedKbTaskIds} onAddTasks={onAddTasks} />

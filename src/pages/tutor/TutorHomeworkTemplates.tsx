@@ -23,6 +23,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { getSubjectLabel, SUBJECTS as MODERN_SUBJECTS } from '@/types/homework';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { normalizeContentSubjects } from '@/lib/tutorSubjects';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 // unified-task-model F3 (2026-07-05): Банк ДЗ — публикация модераторами
 // (mirror kb_mod_* каталога задач), fork «Своя копия» для всех.
 import { useIsModerator } from '@/hooks/useIsModerator';
@@ -139,8 +140,12 @@ function TemplateCardImpl({
                 В банке
               </Badge>
             ) : null}
+            {/* null/undefined = бэкенд не посчитал → «—», а не выдуманный ноль
+                (ревью P1 #7). Склонение — общий helper, не ad-hoc тернарник. */}
             <Badge variant="outline" className="text-xs">
-              {template.task_count ?? 0} {(template.task_count ?? 0) === 1 ? 'задача' : 'задач'}
+              {template.task_count == null
+                ? '— задач'
+                : `${template.task_count} ${pluralizeRu(template.task_count, ['задача', 'задачи', 'задач'])}`}
             </Badge>
           </div>
         </div>

@@ -8,6 +8,7 @@ import { DeleteCatalogDialog } from '@/components/kb/DeleteCatalogDialog';
 import { DeleteFolderDialog } from '@/components/kb/DeleteFolderDialog';
 import { FolderCard } from '@/components/kb/FolderCard';
 import { KBSearchDropdown } from '@/components/kb/KBSearchDropdown';
+import { SubjectPills } from '@/components/kb/SubjectPills';
 import { KBStatusCard } from '@/components/kb/KBStatusCard';
 import { KnowledgeBaseFrame } from '@/components/kb/KnowledgeBaseFrame';
 import { RenameFolderModal } from '@/components/kb/RenameFolderModal';
@@ -22,6 +23,7 @@ import { useAdminAccess } from '@/hooks/useAdminAccess';
 import { useKBSearch } from '@/hooks/useKBSearch';
 import { useTopics } from '@/hooks/useKnowledgeBase';
 import { useDeleteSectionToMyBase } from '@/hooks/useModeratorCatalog';
+import { groupTopicsBySection } from '@/lib/kbCatalogGrouping';
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { pluralizeRu } from '@/lib/pluralizeRu';
 import { getSubjectDative } from '@/lib/subjectHelpers';
@@ -178,22 +180,9 @@ function CatalogHome({
     [deletingSection, deleteSectionMutation, subject, examFilter],
   );
 
-  // Pills = union(якорные каталожные, предметы существующих тем, предметы
-  // репетитора, активный) в каноническом порядке SUBJECTS; неизвестные id
-  // (нестандартный subject темы) — в конец. Персонализация: у репетитора-химика
-  // появляется pill «Химия» с честным empty-state, у остальных — без шума.
-  const subjectPills = useMemo(() => {
-    const ids = new Set<string>(KB_SUBJECTS.map((s) => s.id));
-    for (const t of allTopics) if (t.subject) ids.add(t.subject);
-    for (const s of tutorProfile?.subjects ?? []) {
-      if (s !== 'other' && SUBJECTS.some((cs) => cs.id === s)) ids.add(s);
-    }
-    ids.add(subject);
-    const order = new Map(SUBJECTS.map((s, i) => [s.id, i]));
-    return [...ids].sort(
-      (a, b) => (order.get(a) ?? 99) - (order.get(b) ?? 99) || a.localeCompare(b),
-    );
-  }, [allTopics, tutorProfile?.subjects, subject]);
+  // Предметы существующих тем → pills (union-логика и рендер живут в общем
+  // `SubjectPills`, чтобы витрина и пикер «+ из БЗ» не разъезжались, 2026-07-23).
+  const topicSubjects = useMemo(() => allTopics.map((t) => t.subject), [allTopics]);
   const [showDropdown, setShowDropdown] = useState(true);
   const [showCreateTopic, setShowCreateTopic] = useState(false);
   const [showSources, setShowSources] = useState(false);
@@ -285,25 +274,16 @@ function CatalogHome({
 
       {/* Предмет — компактные pills, НЕ второй сегмент-контрол (UX review P2:
           три уровня навигации одинакового веса перед контентом перегружали
-          «где я»; предмет — фильтр витрины, визуально легче таба раздела). */}
-      <div className="mb-4 flex flex-wrap items-center gap-1.5" role="group" aria-label="Предмет каталога">
-        {subjectPills.map((id) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setSubject(id)}
-            aria-pressed={subject === id}
-            className={cn(
-              'inline-flex min-h-[36px] items-center rounded-full border px-3.5 py-1.5 text-[13px] font-semibold transition-colors duration-200 [touch-action:manipulation]',
-              subject === id
-                ? 'border-socrat-primary bg-socrat-primary text-white'
-                : 'border-socrat-border bg-white text-slate-600 hover:border-socrat-primary/40 hover:text-socrat-primary',
-            )}
-          >
-            {getSubjectLabel(id)}
-          </button>
-        ))}
-      </div>
+          «где я»; предмет — фильтр витрины, визуально легче таба раздела).
+          Компонент общий с пикером «+ из БЗ». */}
+      <SubjectPills
+        className="mb-4"
+        value={subject}
+        onChange={setSubject}
+        topicSubjects={topicSubjects}
+        tutorSubjects={tutorProfile?.subjects}
+        aria-label="Предмет каталога"
+      />
 
       <div className="relative mb-4">
         <KBSearchInput

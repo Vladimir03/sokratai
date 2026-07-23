@@ -5,6 +5,8 @@
 // unified-task-model M1 (2026-07-05): единый носитель формы критерия
 // (type-only import — без runtime-связи с homework-модулем).
 import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
+// Лейблы предметов — из единого реестра (см. KB_SUBJECTS ниже).
+import { getSubjectName } from '@/lib/subjects/registry';
 
 export type ExamType = 'ege' | 'oge';
 
@@ -28,16 +30,24 @@ export type CatalogFilter = 'ege' | 'oge' | 'olympiad';
  * модератор-предметник → добавляй сюда + онбординг-миграция с ОБЕИМИ ролями,
  * rule 50). `kb_topics.subject`/`kb_sources.subject` — свободный TEXT.
  */
-export const KB_SUBJECTS = [
-  { id: 'physics', label: 'Физика' },
+/**
+ * Только ID якорных предметов — ЛЕЙБЛЫ берутся из единого реестра
+ * (`@/lib/subjects/registry`, 2026-07-23). Своя копия названий тут была вторым
+ * словарём форм и уже расходилась по стилю с `SUBJECTS`.
+ */
+const KB_ANCHOR_SUBJECT_IDS = [
+  'physics',
   // Лидеры предметов 2026-07-11: Светлана (математика), Эмилия (французский) —
   // онбординг модераторами; якорные pills видны до появления первых тем.
-  { id: 'maths', label: 'Математика' },
-  { id: 'social', label: 'Обществознание' },
-  { id: 'french', label: 'Французский язык' },
+  'maths',
+  'social',
+  'french',
 ] as const;
 
-export type KBSubjectId = (typeof KB_SUBJECTS)[number]['id'];
+export type KBSubjectId = (typeof KB_ANCHOR_SUBJECT_IDS)[number];
+
+export const KB_SUBJECTS: readonly { id: KBSubjectId; label: string }[] =
+  KB_ANCHOR_SUBJECT_IDS.map((id) => ({ id, label: getSubjectName(id) }));
 
 /**
  * Исторический fallback-предмет KB (весь старый контент — физика).

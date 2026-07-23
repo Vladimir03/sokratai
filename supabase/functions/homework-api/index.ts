@@ -35,7 +35,13 @@ import {
   KB_TASK_SNAPSHOT_SELECT,
   type KbTaskLike,
   kbTaskToTemplateTaskJson,
+  templateTaskContentEquals,
 } from "./kb_snapshot.ts";
+import {
+  LEGACY_SUBJECT_IDS,
+  SUBJECT_IDS,
+  SUBJECTS_REQUIRING_CEFR,
+} from "../_shared/subjects.generated.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -401,16 +407,15 @@ async function resolveTaskProvenanceBatch(
   return { ids, mirror };
 }
 
-const VALID_SUBJECTS_CREATE = [
-  "maths", "physics", "informatics",
-  "russian", "literature", "history", "social",
-  "english", "french", "chemistry", "biology",
-  "geography", "spanish", "other",
-] as const;
-const VALID_SUBJECTS_UPDATE = [
-  ...VALID_SUBJECTS_CREATE,
-  "math", "cs", "rus", "algebra", "geometry",
-] as const;
+// Словарь предметов — из СГЕНЕРИРОВАННОГО зеркала единого реестра
+// (`src/lib/subjects/registry.ts` → `_shared/subjects.generated.ts`, 2026-07-23).
+// Ручной список здесь был одной из ≥9 копий; расхождение с CHECK'ами БД два
+// месяца ломало сохранение шаблонов у 13 репетиторов. Новый предмет → правь
+// реестр + `npm run generate:subjects` + миграцию на ОБА CHECK'а.
+// CREATE — только канонические; UPDATE дополнительно принимает легаси-id
+// (существующие строки), семантика прежняя.
+const VALID_SUBJECTS_CREATE: readonly string[] = SUBJECT_IDS;
+const VALID_SUBJECTS_UPDATE: readonly string[] = [...SUBJECT_IDS, ...LEGACY_SUBJECT_IDS];
 const VALID_STATUSES = ["draft", "active", "closed"] as const;
 const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
@@ -514,7 +519,8 @@ const VALID_FEEDBACK_LANGUAGES = ["auto", "russian", "target"] as const;
 // ОБЯЗАНЫ нести явный CEFR-уровень (иначе silent default B1 — баг Эмилии).
 // Mirror frontend `cefrLevelEnabled`. NOTE: 'russian'/'literature' — родной язык,
 // CEFR не применяется.
-const LANGUAGE_SUBJECTS_REQUIRING_CEFR = new Set<string>(["french", "english", "spanish"]);
+// Иностранные языки (CEFR + политика языка фидбэка) — из того же зеркала.
+const LANGUAGE_SUBJECTS_REQUIRING_CEFR = SUBJECTS_REQUIRING_CEFR;
 
 /**
  * Phase 11 (2026-05-31): normalize assignment-level `feedback_language`.
@@ -5205,10 +5211,15 @@ async function handleListTemplates(
   // shared (Банк ДЗ — шаблоны, опубликованные модераторами).
   const scope = searchParams.get("scope") === "shared" ? "shared" : "mine";
 
+  // Перф (2026-07-23): `tasks_json` в SELECT-списке НЕТ намеренно — он тянулся
+  // целиком только ради `.length` легаси-шаблонов (~46 kB лишнего JSONB на
+  // открытие списка/пикера у активного тьютора). Счёт для ОБОИХ видов шаблонов
+  // теперь делает SQL-агрегат `hw_template_task_counts` (миграция 20260723150000).
+  // Не возвращать `tasks_json` сюда: в ответе endpoint'а его никогда не было.
   let query = db
     .from("homework_tutor_templates")
     .select(
-      "id, title, subject, topic, tags, created_at, tasks_json, visibility, usage_count, published_at, tasks_migrated_at",
+      "id, title, subject, topic, tags, created_at, visibility, usage_count, published_at",
     )
     .order("created_at", { ascending: false });
   if (scope === "shared") {
@@ -5227,24 +5238,47 @@ async function handleListTemplates(
     return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить шаблоны");
   }
 
-  // task_count: ссылочные шаблоны (migrated) — SQL-агрегатом (ревью-фикс P1
-  // 2026-07-06: выборка всех junction-строк была O(шаблоны×задачи) и тихо
-  // резалась PostgREST-капом 1000 → неверный счётчик); legacy — по tasks_json
-  // (skew-совместимость: старый фронт видит те же цифры).
+  // task_count — SQL-агрегатом для ВСЕХ шаблонов (ревью-фикс P1 2026-07-06:
+  // выборка всех junction-строк была O(шаблоны×задачи) и тихо резалась
+  // PostgREST-капом 1000 → неверный счётчик). С 2026-07-23 RPC покрывает и
+  // legacy-шаблоны (jsonb_array_length внутри SQL), поэтому `tasks_json` больше
+  // не едет по сети. Сбой RPC → счётчик 0 (косметика), список не ломаем.
   const rows = data ?? [];
-  const migratedIds = rows
-    .filter((t) => t.tasks_migrated_at != null)
-    .map((t) => t.id as string);
-  const refCountByTemplate = new Map<string, number>();
-  if (migratedIds.length > 0) {
+  const allIds = rows.map((t) => t.id as string);
+  const countByTemplate = new Map<string, number>();
+  if (allIds.length > 0) {
     const { data: countRows, error: refErr } = await db.rpc("hw_template_task_counts", {
-      p_template_ids: migratedIds,
+      p_template_ids: allIds,
     });
     if (refErr) {
       console.warn("homework_api_template_ref_count_failed", { error: refErr.message });
     }
     for (const r of (countRows ?? []) as Array<{ template_id: string; task_count: number }>) {
-      refCountByTemplate.set(r.template_id, Number(r.task_count) || 0);
+      countByTemplate.set(r.template_id, Number(r.task_count) || 0);
+    }
+
+    // Ревью P1 #7: сбой RPC (transient / старая версия функции при deploy-skew)
+    // не должен превращаться в уверенный «0 задач» — на странице шаблонов это
+    // заметная ложь. Точечный fallback ТОЛЬКО для непосчитанных id: тянем
+    // tasks_json лишь для них (в норме таких нет → перф-выигрыш сохраняется).
+    const missingIds = allIds.filter((id) => !countByTemplate.has(id));
+    if (missingIds.length > 0) {
+      const { data: fallbackRows, error: fallbackErr } = await db
+        .from("homework_tutor_templates")
+        .select("id, tasks_json, tasks_migrated_at")
+        .in("id", missingIds);
+      if (fallbackErr) {
+        console.warn("homework_api_template_count_fallback_failed", { error: fallbackErr.message });
+      }
+      for (const r of (fallbackRows ?? []) as Array<Record<string, unknown>>) {
+        // Ссылочный шаблон без ответа RPC посчитать нечем — оставляем null,
+        // чтобы клиент показал «—», а не выдуманный ноль.
+        if (r.tasks_migrated_at != null) continue;
+        countByTemplate.set(
+          r.id as string,
+          Array.isArray(r.tasks_json) ? (r.tasks_json as unknown[]).length : 0,
+        );
+      }
     }
   }
 
@@ -5255,9 +5289,9 @@ async function handleListTemplates(
     topic: t.topic,
     tags: t.tags,
     created_at: t.created_at,
-    task_count: t.tasks_migrated_at != null
-      ? (refCountByTemplate.get(t.id as string) ?? 0)
-      : (Array.isArray(t.tasks_json) ? t.tasks_json.length : 0),
+    // null = «не смогли посчитать» (RPC упал И fallback не применим). Клиент
+    // рисует «—» вместо выдуманного нуля; поле остаётся числом в норме.
+    task_count: countByTemplate.get(t.id as string) ?? null,
     // Банк ДЗ (additive — старый фронт игнорирует):
     visibility: t.visibility ?? "private",
     usage_count: typeof t.usage_count === "number" ? t.usage_count : 0,
@@ -5267,8 +5301,58 @@ async function handleListTemplates(
   return jsonOk(cors, result);
 }
 
-// ─── Endpoint: POST /templates ───────────────────────────────────────────────
+// ─── Templates: единый маппинг ошибок записи ─────────────────────────────────
+//
+// Инцидент 2026-07-23 (репорт Ульяны, химия): CHECK `homework_tutor_templates_
+// subject_check` в проде два месяца оставался легаси-списком (миграция
+// 20260525120000 не доехала при синке) → INSERT падал `23514 check_violation` →
+// generic 500 «Не удалось сохранить шаблон» → тьютор видел молчаливый провал и
+// не мог сообщить ничего диагностируемого. Дрейф закрыт миграцией
+// 20260723150000 + гардом «subject CHECK parity» в scripts/smoke-check.mjs, но
+// маппинг оставляем как defense-in-depth: следующий дрейф схемы обязан выходить
+// наружу конкретной русской фразой (rule 97), а не «непонятным тостом».
+//
+// Зеркало ветки в `handleCreateTemplateFromAssignment` — при правке текста
+// синхронизировать оба места.
+function templateWriteError(
+  cors: Record<string, string>,
+  route: string,
+  err: unknown,
+  ctx: Record<string, unknown> = {},
+  // Фраза для НЕ-23514 сбоя. Дефолт покрывает пути сохранения; форк передаёт
+  // свою, чтобы не терять точность («создать копию» ≠ «сохранить шаблон»).
+  fallbackMessage = "Не удалось сохранить шаблон. Попробуйте ещё раз.",
+): Response {
+  const pgCode =
+    typeof (err as { code?: unknown } | null)?.code === "string"
+      ? (err as { code: string }).code
+      : null;
+  const message =
+    typeof (err as { message?: unknown } | null)?.message === "string"
+      ? (err as { message: string }).message
+      : null;
 
+  if (pgCode === "23514") {
+    console.warn("homework_api_save_template_check_violation", { route, ...ctx, error: message });
+    return jsonError(
+      cors,
+      409,
+      "CHECK_VIOLATION",
+      "Не удалось сохранить шаблон: данные не прошли валидацию схемы БД. Свяжитесь с поддержкой.",
+    );
+  }
+
+  console.error("homework_api_request_error", { route, error: message, pg_code: pgCode });
+  return jsonError(cors, 500, "DB_ERROR", fallbackMessage);
+}
+
+// ─── Endpoint: POST /templates ───────────────────────────────────────────────
+//
+// Legacy-путь: клиент передаёт `tasks_json` (или `task_refs`) целиком. С
+// 2026-07-23 чекбокс «Сохранить как шаблон» в конструкторе НА НЕГО НЕ ХОДИТ —
+// он переведён на серверный `POST /assignments/:id/save-as-template` (снимок
+// собирается из БД, ноль дубля полей). Endpoint сохранён ради deploy-skew
+// (старые бандлы / stale PWA) и внешних вызовов; новых клиентов сюда не вести.
 async function handleCreateTemplate(
   db: SupabaseClient,
   tutorUserId: string,
@@ -5342,8 +5426,7 @@ async function handleCreateTemplate(
       .select("id")
       .single();
     if (createErr || !created) {
-      console.error("homework_api_request_error", { route: "POST /templates", error: createErr?.message });
-      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон");
+      return templateWriteError(cors, "POST /templates (refs)", createErr, { subject: b.subject });
     }
     // Дедуп повторных kb_task_id (UNIQUE в junction) с сохранением порядка.
     const seenIds = new Set<string>();
@@ -5413,8 +5496,7 @@ async function handleCreateTemplate(
     .single();
 
   if (error || !data) {
-    console.error("homework_api_request_error", { route: "POST /templates", error: error?.message });
-    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон");
+    return templateWriteError(cors, "POST /templates", error, { subject: b.subject });
   }
 
   return jsonOk(cors, { template_id: data.id }, 201);
@@ -5591,8 +5673,15 @@ async function handleForkTemplate(
     .select("id")
     .single();
   if (createErr || !created) {
-    console.error("homework_api_request_error", { route: "POST /templates/:id/fork", error: createErr?.message });
-    return jsonError(cors, 500, "DB_ERROR", "Не удалось создать копию шаблона");
+    // Форк несёт subject исходного шаблона — при дрейфе CHECK падал так же
+    // молча, как чекбокс (инцидент 2026-07-23). Тот же маппинг 23514 → 409.
+    return templateWriteError(
+      cors,
+      "POST /templates/:id/fork",
+      createErr,
+      { source_template_id: templateId, subject: tpl.subject },
+      "Не удалось создать копию шаблона",
+    );
   }
 
   if (tpl.tasks_migrated_at != null) {
@@ -5716,7 +5805,13 @@ async function handleCreateTemplateFromAssignment(
       route: "POST /assignments/:id/save-as-template",
       error: tasksErr.message,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks");
+    // rule 97: пользовательский путь → русская actionable-фраза (ревью P2 #10).
+    return jsonError(
+      cors,
+      500,
+      "DB_ERROR",
+      "Не удалось загрузить задачи ДЗ для шаблона. Попробуйте ещё раз.",
+    );
   }
 
   const includeRubric = b.include_rubric === true;
@@ -5740,6 +5835,7 @@ async function handleCreateTemplateFromAssignment(
     cefr_level: string | null;
     kim_number: number | null;
     grading_criteria_json: unknown;
+    source_kb_task_id: string | null;
   }>).map((t) => {
     const base: Record<string, unknown> = {
       task_text: t.task_text ?? "",
@@ -5766,6 +5862,10 @@ async function handleCreateTemplateFromAssignment(
       const gc = normalizeGradingCriteria(t.grading_criteria_json);
       if (gc) base.grading_criteria_json = gc;
     }
+    // AC-15 provenance в audit-снимке (ревью P1 #6): при неудачной
+    // материализации refs шаблон остаётся legacy — без этого поля он терял бы
+    // связь с Базой навсегда. Пишем только валидный UUID.
+    if (isUUID(t.source_kb_task_id)) base.source_kb_task_id = t.source_kb_task_id;
     return base;
   });
 
@@ -5780,10 +5880,38 @@ async function handleCreateTemplateFromAssignment(
   }
   const tags = Array.from(tagSet);
 
+  // Идемпотентность ретрая (ревью P1 #8): клиент генерит ключ ОДИН раз на
+  // попытку сохранения и шлёт его неизменным во всех ретраях. Если предыдущая
+  // попытка успела создать шаблон, но ответ не дошёл (RU-DPI рвёт TLS, rule 95),
+  // возвращаем УЖЕ созданный шаблон вместо второго. Ключ скоупится тьютором —
+  // UNIQUE (tutor_id, creation_request_id), миграция 20260723170000.
+  const requestId = isNonEmptyString(b.request_id)
+    ? (b.request_id as string).trim().slice(0, 64)
+    : null;
+  const TEMPLATE_RETURN_SELECT =
+    "id, title, subject, topic, tags, tasks_json, created_at, exam_type, feedback_language, disable_ai_bootstrap";
+
+  if (requestId) {
+    const { data: existing } = await db
+      .from("homework_tutor_templates")
+      .select(TEMPLATE_RETURN_SELECT)
+      .eq("tutor_id", tutorUserId)
+      .eq("creation_request_id", requestId)
+      .maybeSingle();
+    if (existing) {
+      console.info("homework_api_save_template_idempotent_hit", {
+        assignment_id: assignmentId,
+        template_id: existing.id,
+      });
+      return jsonOk(cors, existing, 200);
+    }
+  }
+
   const { data: inserted, error: insertErr } = await db
     .from("homework_tutor_templates")
     .insert({
       tutor_id: tutorUserId,
+      creation_request_id: requestId,
       title: (b.title as string).trim(),
       subject: assignment.subject as string,
       topic: isNonEmptyString(assignment.topic) ? (assignment.topic as string).trim() : null,
@@ -5800,37 +5928,39 @@ async function handleCreateTemplateFromAssignment(
         ? (normalizeFeedbackLanguage(assignment.feedback_language) ?? "auto")
         : null,
     })
-    .select("id, title, subject, topic, tags, tasks_json, created_at, exam_type, feedback_language, disable_ai_bootstrap")
+    .select(TEMPLATE_RETURN_SELECT)
     .single();
 
   if (insertErr || !inserted) {
-    // Phase 9 (2026-05-25): catch Postgres CHECK constraint violation explicitly
-    // (code 23514). Defensive — pre-validate выше уже отбивает invalid subjects,
-    // но если миграция CHECK constraint снова разойдётся с VALID_SUBJECTS_CREATE,
-    // surface specific reason вместо generic «Не удалось сохранить шаблон».
-    const pgCode =
+    // Гонка двух параллельных ретраев: pre-check выше их разминулся, но UNIQUE
+    // поймал второй (23505). Это НЕ ошибка — отдаём созданный первым.
+    const insertPgCode =
       typeof (insertErr as { code?: unknown } | null)?.code === "string"
-        ? ((insertErr as { code: string }).code)
+        ? (insertErr as { code: string }).code
         : null;
-    if (pgCode === "23514") {
-      console.warn("homework_api_save_template_check_violation", {
-        assignment_id: assignmentId,
-        subject: assignmentSubject,
-        error: insertErr?.message,
-      });
-      return jsonError(
-        cors,
-        409,
-        "CHECK_VIOLATION",
-        "Не удалось сохранить шаблон: данные не прошли валидацию схемы БД. Свяжитесь с поддержкой.",
-      );
+    if (requestId && insertPgCode === "23505") {
+      const { data: raced } = await db
+        .from("homework_tutor_templates")
+        .select(TEMPLATE_RETURN_SELECT)
+        .eq("tutor_id", tutorUserId)
+        .eq("creation_request_id", requestId)
+        .maybeSingle();
+      if (raced) {
+        console.info("homework_api_save_template_idempotent_race", {
+          assignment_id: assignmentId,
+          template_id: raced.id,
+        });
+        return jsonOk(cors, raced, 200);
+      }
     }
-    console.error("homework_api_request_error", {
-      route: "POST /assignments/:id/save-as-template",
-      error: insertErr?.message,
-      pg_code: pgCode,
+    // Phase 9 (2026-05-25): CHECK constraint violation (23514) выходит наружу
+    // конкретной фразой, а не generic «Не удалось сохранить шаблон». Общий
+    // маппинг вынесен в `templateWriteError` (2026-07-23) — им же пользуются
+    // POST /templates и /templates/:id/fork.
+    return templateWriteError(cors, "POST /assignments/:id/save-as-template", insertErr, {
+      assignment_id: assignmentId,
+      subject: assignmentSubject,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить шаблон. Попробуйте ещё раз.");
   }
 
   // NOTE: include_materials — no schema support yet. Templates don't own
@@ -5876,25 +6006,67 @@ async function handleCreateTemplateFromAssignment(
       refIds.push(kbId);
     }
     if (allResolved && refIds.length > 0) {
-      const seenRefIds = new Set<string>();
-      const junctionRows = refIds
-        .filter((id) => {
-          if (seenRefIds.has(id)) return false;
-          seenRefIds.add(id);
-          return true;
-        })
-        .map((id, i) => ({ template_id: inserted.id, kb_task_id: id, sort_order: i }));
-      const { error: junctionErr } = await db.from("homework_template_tasks").insert(junctionRows);
-      if (!junctionErr) {
-        await db
-          .from("homework_tutor_templates")
-          .update({ tasks_migrated_at: new Date().toISOString() })
-          .eq("id", inserted.id);
-      } else {
-        console.warn("homework_api_save_template_refs_failed", {
+      // ── Гейты промоушена в ССЫЛОЧНЫЙ режим (ревью ChatGPT-5.6, 2026-07-23) ──
+      // После `tasks_migrated_at` GET синтезирует задачи из ЖИВЫХ строк Базы и
+      // игнорирует audit-снимок. Промоушен допустим ТОЛЬКО если синтез даст
+      // ровно то, что мы сейчас сохранили. Иначе — остаёмся на legacy-снимке
+      // (он самодостаточен и точен); ничего не теряем, кроме «живой» связи.
+
+      // Гейт 1 (P1 #2): повторяющиеся kb_task_id. Junction имеет UNIQUE по
+      // (template_id, kb_task_id) → дедуп схлопнул бы ДЗ из N задач в шаблон из
+      // N-k. Две одинаковые задачи получают один kb-id по fingerprint, поэтому
+      // кейс реальный, а не теоретический.
+      const hasDuplicateRefs = new Set(refIds).size !== refIds.length;
+
+      // Гейт 2 (P1 #1 + #4): контентный паритет снимок ↔ База. Ловит и правку
+      // KB-задачи в конструкторе без «Обновить в Базе», и округление дробного
+      // max_score при зеркалировании, и выключенные include_rubric /
+      // include_ai_settings (их снимок занулил, а синтез вернёт из Базы).
+      let contentParity = !hasDuplicateRefs;
+      if (contentParity) {
+        const { data: kbRows, error: kbErr } = await db
+          .from("kb_tasks")
+          .select(KB_TASK_SNAPSHOT_SELECT)
+          .in("id", Array.from(new Set(refIds)));
+        if (kbErr || !kbRows) {
+          contentParity = false;
+        } else {
+          const kbById = new Map(
+            (kbRows as unknown as KbTaskLike[]).map((k) => [k.id, k]),
+          );
+          contentParity = refIds.every((id, i) => {
+            const kb = kbById.get(id);
+            if (!kb) return false;
+            const snapshot = tasksJson[i];
+            if (!snapshot) return false;
+            return templateTaskContentEquals(kbTaskToTemplateTaskJson(kb), snapshot);
+          });
+        }
+      }
+
+      if (!contentParity) {
+        console.warn("homework_api_save_template_refs_skipped", {
           template_id: inserted.id,
-          error: junctionErr.message,
+          reason: hasDuplicateRefs ? "duplicate_kb_refs" : "snapshot_diverges_from_kb",
         });
+      } else {
+        // АТОМАРНО (ревью 5.6 р.2, P2): junction-строки + `tasks_migrated_at`
+        // одной транзакцией. Раньше это были три отдельных запроса с
+        // компенсирующим DELETE, и при сбое И маркера, И отката legacy-шаблон
+        // оставался с orphan junction-строками — те через RESTRICT блокировали
+        // удаление задачи из Базы («используется в шаблоне» без шаблона).
+        // Теперь: либо шаблон стал ссылочным, либо не изменилось ничего.
+        const { error: refsErr } = await db.rpc("hw_template_materialize_refs", {
+          _template_id: inserted.id,
+          _tutor_id: tutorUserId,
+          _kb_task_ids: refIds,
+        });
+        if (refsErr) {
+          console.warn("homework_api_save_template_refs_failed", {
+            template_id: inserted.id,
+            error: refsErr.message,
+          });
+        }
       }
     } else if (!allResolved) {
       console.warn("homework_api_save_template_refs_degraded", {

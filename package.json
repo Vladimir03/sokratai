@@ -17,7 +17,9 @@
     "analyze": "vite build && echo '\\n=== Bundle Analysis ===' && ls -lhS dist/assets/*.js | awk '{print $5, $9}'",
     "analyze:visual": "ANALYZE=1 vite build && echo '\\n=== Visual treemap: dist/stats.html ==='",
     "smoke-test": "bash scripts/smoke-test.sh",
-    "smoke-check": "node scripts/smoke-check.mjs"
+    "smoke-check": "node scripts/smoke-check.mjs",
+    "generate:subjects": "node scripts/generate-subjects.mjs",
+    "check:prod-schema": "node scripts/check-prod-schema.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -1,34 +1,29 @@
+import {
+  SUBJECT_REGISTRY,
+  getSubjectName,
+  type SubjectCategory,
+} from '@/lib/subjects/registry';
+
 export interface HomeworkSubjectConfig {
   id: string;
   name: string;
-  category: 'technical' | 'humanities' | 'natural' | 'other';
+  category: SubjectCategory;
 }
 
-// Предметы сгруппированы по типу: технические (приоритет), гуманитарные,
-// естественные. Каноничный modern-набор для create/select flows.
-export const SUBJECTS: HomeworkSubjectConfig[] = [
-  // Технические (приоритет)
-  { id: 'maths', name: 'Математика', category: 'technical' },
-  { id: 'physics', name: 'Физика', category: 'technical' },
-  { id: 'informatics', name: 'Информатика', category: 'technical' },
-
-  // Гуманитарные
-  { id: 'russian', name: 'Русский язык', category: 'humanities' },
-  { id: 'literature', name: 'Литература', category: 'humanities' },
-  { id: 'history', name: 'История', category: 'humanities' },
-  { id: 'social', name: 'Обществознание', category: 'humanities' },
-  { id: 'english', name: 'Английский язык', category: 'humanities' },
-  { id: 'french', name: 'Французский язык', category: 'humanities' },
-  { id: 'spanish', name: 'Испанский язык', category: 'humanities' },
-
-  // Естественные
-  { id: 'chemistry', name: 'Химия', category: 'natural' },
-  { id: 'biology', name: 'Биология', category: 'natural' },
-  { id: 'geography', name: 'География', category: 'natural' },
-
-  // Другое
-  { id: 'other', name: 'Другое', category: 'other' },
-];
+/**
+ * Каноничный modern-набор для create/select flows.
+ *
+ * ⚠️ ПРОИЗВОДНАЯ от `@/lib/subjects/registry` — единственного справочника
+ * предметов (2026-07-23). Предмет добавляется ТАМ (плюс `npm run
+ * generate:subjects` для Deno-зеркала и миграция на оба CHECK'а) — здесь
+ * править нечего. Форма и порядок сохранены байт-в-байт, чтобы все текущие
+ * импорты `SUBJECTS` продолжали работать без изменений.
+ */
+export const SUBJECTS: HomeworkSubjectConfig[] = SUBJECT_REGISTRY.map((s) => ({
+  id: s.id,
+  name: s.name,
+  category: s.category,
+}));
 
 /** Quick id→name lookup derived from SUBJECTS */
 export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
@@ -36,21 +31,12 @@ export const SUBJECT_NAME_MAP: Record<string, string> = Object.fromEntries(
 );
 
 /**
- * Legacy subject ids that were used before the subject list was split
- * (e.g. general "math" split into algebra/geometry). Map them to a sensible
- * Russian label so existing assignments don't render raw english ids in UI.
+ * Человекочитаемое русское название предмета; неизвестный id возвращается как
+ * есть. Легаси-id (`math`, `rus`, `cs`, `algebra`, `geometry`) резолвятся
+ * реестром — их список живёт там же (`LEGACY_SUBJECTS`).
  */
-const LEGACY_SUBJECT_LABELS: Record<string, string> = {
-  math: 'Математика',
-  rus: 'Русский язык',
-  cs: 'Информатика',
-  algebra: 'Алгебра',
-  geometry: 'Геометрия',
-};
-
-/** Get human-readable Russian subject name; falls back to raw id */
 export function getSubjectLabel(id: string): string {
-  return SUBJECT_NAME_MAP[id] ?? LEGACY_SUBJECT_LABELS[id] ?? id;
+  return getSubjectName(id) || id;
 }
 
 export type StudentAssignmentStatus = 'draft' | 'active' | 'closed';
