@@ -650,17 +650,20 @@ const GenericAnswerInstructionsPanel = memo(function GenericAnswerInstructionsPa
       </button>
       {open && (
         <div className="border-t border-slate-100 px-4 py-5 text-[15px] leading-relaxed text-slate-700 space-y-2">
+          {/* Ревью 5.6 U4: прежний текст противоречил сам себе («без запятых» vs
+              «дробные через запятую»). Общее правило — следуй подсказке у поля;
+              конкретика — только непротиворечивая. */}
           <p>
-            Ответ — <strong>цифры или слово без пробелов и запятых</strong>. Пример:{' '}
-            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">124</code>
+            Следуй формату, указанному <strong>под полем ответа</strong> каждого задания.
           </p>
           <p className="text-slate-600">
-            В заданиях на <strong>соответствие</strong> записывай цифры в порядке, соответствующем
-            буквам (А, Б, В…). В заданиях на <strong>выбор нескольких вариантов</strong> порядок цифр
-            не важен.
+            <strong>Последовательности цифр</strong> записывай слитно, без пробелов и разделителей:{' '}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">124</code>.
+            В заданиях на <strong>соответствие</strong> — цифры в порядке букв (А, Б, В…); в заданиях
+            на <strong>выбор нескольких вариантов</strong> порядок не важен.
           </p>
           <p className="text-slate-600">
-            Если ответ — число с дробной частью, используй запятую:{' '}
+            <strong>Число с дробной частью</strong> записывай через запятую:{' '}
             <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[13px] font-mono">2,5</code>
           </p>
         </div>

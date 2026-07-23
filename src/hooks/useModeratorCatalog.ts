@@ -171,6 +171,10 @@ export function useDeleteTaskPreview(taskId: string | null) {
     queryFn: () => previewDeleteCatalogTask(taskId as string),
     enabled: taskId !== null,
     refetchOnWindowFocus: false,
+    // Необратимое действие: превью всегда свежее. Повторное открытие диалога
+    // может отдать кэш + background refetch — диалог обязан гейтить confirm
+    // по isFetching, а не только isLoading (ревью 5.6 P2).
+    refetchOnMount: 'always',
     staleTime: 0,
   });
 }

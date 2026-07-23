@@ -87,9 +87,12 @@ export const TaskCard = memo(function TaskCard({
   // Hard-delete из каталога (запрос Милады 2026-07-22): «не скрыть, а вообще
   // удалить». Свой исходник удаляется вместе с копией; ветка/гарды — на сервере.
   if (isModeratable && onDeleteFromCatalog) {
+    // «Удалить безвозвратно…» (ревью 5.6 U1): own-source ветка удаляет и личный
+    // исходник — «из каталога» звучало бы уже, чем действие. Многоточие =
+    // откроется confirm-диалог с деталями по ветке.
     menuItems.push({
       key: 'delete_catalog',
-      label: 'Удалить из каталога',
+      label: 'Удалить безвозвратно…',
       icon: Trash2,
       destructive: true,
       onSelect: onDeleteFromCatalog,

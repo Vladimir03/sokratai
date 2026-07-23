@@ -718,5 +718,27 @@ if (answerAltResult.status !== 0) {
 }
 ok("answer alternatives parser pass (mirror parity + range semantics)");
 
+// ── 15. Mock-exam check_mode parity (ревью 5.6 A4, 2026-07-23) ─────────────
+// Набор режимов проверки живёт в 7 местах (2 зеркала чекера, 2 клиентских
+// типа, OCR-хелпер, валидатор tutor-api, опции редактора). Реестр
+// MOCK_EXAM_CHECK_MODES — source of truth; тест сверяет все поверхности +
+// канареечные векторы каждого режима между зеркалами. Subprocess (async + esbuild).
+console.log("");
+console.log("15. Mock-exam check_mode parity (реестр × 6 поверхностей)...");
+const checkModeParityPath = path.join(rootDir, "scripts", "test-mockexam-checkmode-parity.mjs");
+if (!fs.existsSync(checkModeParityPath)) {
+  fail("scripts/test-mockexam-checkmode-parity.mjs missing — check_mode parity unguarded");
+}
+const checkModeParityResult = spawnSync(process.execPath, [checkModeParityPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (checkModeParityResult.status !== 0) {
+  console.error(checkModeParityResult.stdout ?? "");
+  console.error(checkModeParityResult.stderr ?? "");
+  fail("check_mode parity FAILED — see node:test output above");
+}
+ok("check_mode parity pass (реестр = Deno-зеркало = OCR = tutor-api = редактор)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

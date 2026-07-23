@@ -22,15 +22,25 @@
 // Spec: docs/delivery/features/mock-exams-v1/spec.md
 // AC-3: deterministic checker возвращает корректные баллы для всех 5+ типов.
 
-export type MockExamCheckMode =
-  | 'strict'
-  | 'ordered'
-  | 'ordered_lenient'
-  | 'unordered'
-  | 'multi_choice'
-  | 'task20'
-  | 'pair'
-  | 'manual';
+/**
+ * Канонический РЕЕСТР режимов проверки (ревью 5.6 A4) — единственный source of
+ * truth набора. Parity-тест `scripts/test-mockexam-checkmode-parity.mjs`
+ * (smoke-check) сверяет с ним Deno-зеркало, OCR-хелпер, валидатор tutor-api и
+ * опции редактора варианта: добавил режим сюда — обнови остальные поверхности,
+ * иначе тест упадёт (гасит fan-out «7 мест» молчаливым пропуском).
+ */
+export const MOCK_EXAM_CHECK_MODES = [
+  'strict',
+  'ordered',
+  'ordered_lenient',
+  'unordered',
+  'multi_choice',
+  'task20',
+  'pair',
+  'manual',
+] as const;
+
+export type MockExamCheckMode = (typeof MOCK_EXAM_CHECK_MODES)[number];
 
 export interface CheckPart1Input {
   /** Эталонный ответ из mock_exam_variant_tasks.correct_answer. */

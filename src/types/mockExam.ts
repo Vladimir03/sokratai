@@ -63,15 +63,9 @@ export type MockExamPart2SolutionStatus =
   | 'tutor_approved'
   | 'tutor_modified';
 
-export type MockExamCheckMode =
-  | 'strict'
-  | 'ordered'
-  | 'ordered_lenient'
-  | 'unordered'
-  | 'multi_choice'
-  | 'task20'
-  | 'pair'
-  | 'manual';
+// Single source набора режимов — реестр в checker'е (ревью 5.6 A4); локальный
+// дубль-union убран, чтобы новый режим не мог «забыть» одну из копий.
+export type { MockExamCheckMode } from '@/lib/mockExamPart1Checker';
 
 export type MockExamSource = 'tutor' | 'fipi';
 export type MockExamType = 'ege_physics' | 'oge_physics';

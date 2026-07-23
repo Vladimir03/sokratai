@@ -19,6 +19,7 @@ import type {
   MockExamAssignmentDetail,
   MockExamAssignmentListItem,
   MockExamAttemptDetail,
+  MockExamCheckMode,
   MockExamInviteLink,
   MockExamPart2SolutionStatus,
 } from '@/types/mockExam';
@@ -418,14 +419,8 @@ export async function listMockExamInviteLinks(
 // «каталог ∪ мои» (см. useMockExamVariants).
 
 /** Режимы авто-проверки Части 1 (mirror mock-exam-part1-checker). */
-export type MockExamPart1CheckMode =
-  | 'strict'
-  | 'ordered'
-  | 'ordered_lenient'
-  | 'unordered'
-  | 'multi_choice'
-  | 'task20'
-  | 'pair';
+// Derived из канонического реестра (ревью 5.6 A4) — не дублировать union.
+export type MockExamPart1CheckMode = Exclude<MockExamCheckMode, 'manual'>;
 
 /** Задача варианта в write-payload (order_num назначает сервер по порядку). */
 export interface MockExamVariantTaskInput {

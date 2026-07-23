@@ -26,6 +26,7 @@ import {
   Clock,
   Hourglass,
   Loader2,
+  MinusCircle,
   ShieldCheck,
   Sparkles,
   XCircle,
@@ -283,9 +284,11 @@ function Part1Card({
                           ) : isPartial ? (
                             <Tooltip>
                               <TooltipTrigger asChild>
+                                {/* p-3.5/-m-3.5: hit-area 44px без сдвига layout
+                                    (ревью 5.6 U5 — 16px цель мала для мобильного). */}
                                 <button
                                   type="button"
-                                  className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 cursor-help items-center justify-center rounded-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                                  className="mt-0.5 inline-flex flex-shrink-0 cursor-help touch-manipulation items-center justify-center rounded-sm p-3.5 -m-3.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                                   aria-label={`Частично верно: ${earned} из ${row.max_score}`}
                                 >
                                   <Check className="h-4 w-4 text-amber-600" />
@@ -299,13 +302,17 @@ function Part1Card({
                                 </p>
                               </TooltipContent>
                             </Tooltip>
-                          ) : (
+                          ) : hasScore ? (
                             <XCircle
-                              className={cn(
-                                'mt-0.5 h-4 w-4 flex-shrink-0',
-                                hasScore ? 'text-rose-500' : 'text-slate-400',
-                              )}
-                              aria-label={hasScore ? 'Неверно' : 'Без ответа'}
+                              className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500"
+                              aria-label="Неверно"
+                            />
+                          ) : (
+                            // «Без ответа» ≠ ошибка: MinusCircle, не серый крест
+                            // (ревью 5.6 U5 — XCircle семантически читается как «неверно»).
+                            <MinusCircle
+                              className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-400"
+                              aria-label="Без ответа"
                             />
                           )}
                           {row.student_answer ? (
@@ -335,8 +342,10 @@ function Part1Card({
                             ? 'text-slate-400'
                             : isCorrect
                               ? 'font-semibold text-emerald-700'
+                              // amber-700: amber-600 на amber-50 фоне даёт ~3:1 —
+                              // ниже AA 4.5:1 для 14px (ревью 5.6 U5).
                               : isPartial
-                                ? 'font-semibold text-amber-600'
+                                ? 'font-semibold text-amber-700'
                                 : 'font-semibold text-rose-700',
                         )}
                       >

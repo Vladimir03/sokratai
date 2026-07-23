@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Pencil, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,6 +29,59 @@ import { countTasksBySubtopic, groupTasksByKim, groupTasksBySubtopic, NO_SUBTOPI
 import { kbModReassign, parseAttachmentUrls } from '@/lib/kbApi';
 import { useHWDraftStore } from '@/stores/hwDraftStore';
 import type { KBTask } from '@/types/kb';
+
+// Ревью 5.6 P1: memo-обёртка строит зиро-арг колбэки TaskCard из СТАБИЛЬНЫХ
+// параметризованных (зеркало TaskCardRow в HWTasksSection — API TaskCard не
+// трогаем, его рендерит и FolderPage). Инлайн-замыкания в renderTask убивали
+// memo: любой setState страницы перерисовывал все 200+ карточек с MathText;
+// теперь expand трогает 2 карточки, диалоги — 0.
+const CatalogTaskItem = memo(function CatalogTaskItem({
+  task,
+  isExpanded,
+  inHW,
+  isModerator,
+  canMod,
+  subtopicName,
+  onKimClick,
+  onToggleTask,
+  onCopyTask,
+  onAddToHW,
+  onMoveTask,
+  onReassignTask,
+  onDeleteTask,
+}: {
+  task: KBTask;
+  isExpanded: boolean;
+  inHW: boolean;
+  isModerator: boolean;
+  canMod: boolean;
+  subtopicName: string | undefined;
+  onKimClick: (kim: number) => void;
+  onToggleTask: (taskId: string) => void;
+  onCopyTask: (task: KBTask) => void;
+  onAddToHW: (task: KBTask) => void;
+  onMoveTask: (task: KBTask) => void;
+  onReassignTask: (task: KBTask) => void;
+  onDeleteTask: (task: KBTask) => void;
+}) {
+  return (
+    <TaskCard
+      task={task}
+      isOwn={false}
+      inHW={inHW}
+      isModerator={isModerator}
+      subtopicName={subtopicName}
+      isExpanded={isExpanded}
+      onKimClick={onKimClick}
+      onToggle={() => onToggleTask(task.id)}
+      onCopyToFolder={() => onCopyTask(task)}
+      onAddToHW={() => onAddToHW(task)}
+      onMoveToMyBase={canMod ? () => onMoveTask(task) : undefined}
+      onReassign={canMod ? () => onReassignTask(task) : undefined}
+      onDeleteFromCatalog={canMod ? () => onDeleteTask(task) : undefined}
+    />
+  );
+});
 
 function CatalogTopicContent() {
   const { topicId } = useParams<{ topicId: string }>();
@@ -181,22 +234,38 @@ function CatalogTopicContent() {
 
   const error = topicError || tasksError;
 
-  const handleAddToHW = (task: KBTask) => {
-    if (hasTask(task.id)) {
-      toast.info('Задача уже в ДЗ.');
-      return;
-    }
-    const subtopicName = subtopics.find((s) => s.id === task.subtopic_id)?.name;
-    // subjectHint = предмет темы (review P1 2026-07-07): HWDrawer префиллит
-    // «Предмет ДЗ», check_format-эвристика становится subject-aware.
-    addTask(task, subtopicName, topic?.name, topic?.subject);
-    const imageCount = parseAttachmentUrls(task.attachment_url).length;
-    if (imageCount > 1) {
-      toast.success(`Задача добавлена в ДЗ (в ДЗ уйдёт первое фото из ${imageCount})`);
-    } else {
-      toast.success('Задача добавлена в ДЗ');
-    }
-  };
+  const handleAddToHW = useCallback(
+    (task: KBTask) => {
+      if (hasTask(task.id)) {
+        toast.info('Задача уже в ДЗ.');
+        return;
+      }
+      const subtopicName = subtopics.find((s) => s.id === task.subtopic_id)?.name;
+      // subjectHint = предмет темы (review P1 2026-07-07): HWDrawer префиллит
+      // «Предмет ДЗ», check_format-эвристика становится subject-aware.
+      addTask(task, subtopicName, topic?.name, topic?.subject);
+      const imageCount = parseAttachmentUrls(task.attachment_url).length;
+      if (imageCount > 1) {
+        toast.success(`Задача добавлена в ДЗ (в ДЗ уйдёт первое фото из ${imageCount})`);
+      } else {
+        toast.success('Задача добавлена в ДЗ');
+      }
+    },
+    [hasTask, subtopics, addTask, topic?.name, topic?.subject],
+  );
+
+  // Стабильные параметризованные колбэки (ревью 5.6 P1, конвенция PickerTaskCard
+  // W3.4): инлайн-замыкания в renderTask убивали memo TaskCard — любой setState
+  // страницы (expand, открытие диалога) пересравнивал и перерисовывал 200+
+  // карточек с MathText. Зиро-арг замыкания строит memo-обёртка CatalogTaskItem.
+  const handleKimClick = useCallback((kim: number) => setKimFilter(kim), []);
+  const handleToggleTask = useCallback(
+    (taskId: string) => setExpandedTaskId((prev) => (prev === taskId ? null : taskId)),
+    [],
+  );
+  const handleCopyTask = useCallback((task: KBTask) => setCopyTask(task), []);
+  const handleMoveTask = useCallback((task: KBTask) => setMoveTask(task), []);
+  const handleDeleteTaskOpen = useCallback((task: KBTask) => setDeleteTask(task), []);
 
   return (
       <KnowledgeBaseFrame>
@@ -340,20 +409,20 @@ function CatalogTopicContent() {
               key={topicId}
               groups={taskGroups}
               renderTask={(task) => (
-                <TaskCard
+                <CatalogTaskItem
                   task={task}
-                  isOwn={false}
+                  isExpanded={expandedTaskId === task.id}
                   inHW={hasTask(task.id)}
                   isModerator={isModerator}
+                  canMod={canMod}
                   subtopicName={subtopicById.get(task.subtopic_id ?? '')?.name}
-                  isExpanded={expandedTaskId === task.id}
-                  onKimClick={(kim) => setKimFilter(kim)}
-                  onToggle={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                  onCopyToFolder={() => setCopyTask(task)}
-                  onAddToHW={() => handleAddToHW(task)}
-                  onMoveToMyBase={canMod ? () => setMoveTask(task) : undefined}
-                  onReassign={canMod ? () => handleReassign(task) : undefined}
-                  onDeleteFromCatalog={canMod ? () => setDeleteTask(task) : undefined}
+                  onKimClick={handleKimClick}
+                  onToggleTask={handleToggleTask}
+                  onCopyTask={handleCopyTask}
+                  onAddToHW={handleAddToHW}
+                  onMoveTask={handleMoveTask}
+                  onReassignTask={handleReassign}
+                  onDeleteTask={handleDeleteTaskOpen}
                 />
               )}
             />

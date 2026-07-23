@@ -20,9 +20,16 @@
  * ветке. НЕ трогать `multi_choice` / `ordered` / `unordered` / `pair` / `task20`.
  */
 
-export type CheckMode =
-  | "strict" | "ordered" | "ordered_lenient" | "unordered" | "multi_choice"
-  | "task20" | "pair" | "manual";
+/**
+ * Реестр режимов — зеркало `src/lib/mockExamPart1Checker.ts::MOCK_EXAM_CHECK_MODES`
+ * (parity-тест scripts/test-mockexam-checkmode-parity.mjs сверяет наборы).
+ */
+export const CHECK_MODES = [
+  "strict", "ordered", "ordered_lenient", "unordered", "multi_choice",
+  "task20", "pair", "manual",
+] as const;
+
+export type CheckMode = (typeof CHECK_MODES)[number];
 
 export function normalizeBasic(s: string): string {
   // \s+ matches non-breaking space (U+00A0) too — JS regex spec.

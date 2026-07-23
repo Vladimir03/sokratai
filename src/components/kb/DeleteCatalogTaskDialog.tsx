@@ -57,13 +57,25 @@ export function DeleteCatalogTaskDialog({
   onConfirm,
   onClose,
 }: DeleteCatalogTaskDialogProps) {
-  const { data: preview, isLoading, error } = useDeleteTaskPreview(taskId);
+  const { data: preview, isLoading, isFetching, error } = useDeleteTaskPreview(taskId);
 
   const templateBlocked =
     (preview?.templateCount ?? 0) > 0 || (preview?.sourceTemplateCount ?? 0) > 0;
   const body = preview ? branchBody(preview.branch) : null;
+  // Гейт по isFetching, не только isLoading (ревью 5.6 P2): повторное открытие
+  // отдаёт кэш + background refetch — confirm по устаревшей ветке запрещён
+  // (сервер перепроверит, но UX кончился бы неожиданным отказом).
   const canConfirm =
-    !isPending && !isLoading && !error && body !== null && !body.blocking && !templateBlocked;
+    !isPending && !isLoading && !isFetching && !error &&
+    body !== null && !body.blocking && !templateBlocked;
+
+  // Заголовок честен про масштаб (ревью 5.6 U1): own-source удаляет И исходник.
+  const title =
+    preview?.branch === 'own_source'
+      ? 'Удалить из каталога и Моей базы?'
+      : preview
+        ? 'Удалить из каталога?'
+        : 'Удалить задачу?';
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -87,7 +99,7 @@ export function DeleteCatalogTaskDialog({
               <AlertTriangle className="h-5 w-5 text-red-600" />
             </span>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-red-600">Удалить задачу из каталога</h3>
+              <h3 className="text-base font-semibold text-red-600">{title}</h3>
               <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">«{taskPreviewText}»</p>
             </div>
           </div>
