@@ -31,6 +31,7 @@ const {
   checkPair,
   numericRoundingMatch,
   gradeMultiChoice,
+  gradeMultiChoiceStrict,
   gradeOrdered,
   gradeOrderedLenient,
 } = checker;
@@ -98,6 +99,29 @@ test("checkMultiChoice: subset match", () => {
 // строковое равенство (order-dependent), репортнут Vladimir («13» верно, но «31»
 // считалось неверным). Все task20-задачи в сидах — «номера выбранных …».
 // ────────────────────────────────────────────────────────────────────────────
+
+test("gradeMultiChoiceStrict: обществознание — ЗАМЕНА цифры даёт 0 (кейс Милады 2026-07-23)", () => {
+  // Эталон «135», ответ «123»: недостаёт 5, лишняя 2 → замена → 0 баллов.
+  // Физический gradeMultiChoice на тех же данных даёт 1 — это и был баг.
+  assert.equal(gradeMultiChoiceStrict("135", "123", 2), 0);
+  assert.equal(gradeMultiChoice("135", "123", 2), 1, "физика замену засчитывает — её не трогаем");
+
+  // 1 балл: один лишний наряду со всеми верными.
+  assert.equal(gradeMultiChoiceStrict("124", "1245", 2), 1);
+  assert.equal(gradeMultiChoiceStrict("14", "145", 2), 1);
+  // 1 балл: не указан ровно один верный, лишних нет.
+  assert.equal(gradeMultiChoiceStrict("135", "13", 2), 1);
+
+  // Полное совпадение (порядок неважен) → max.
+  assert.equal(gradeMultiChoiceStrict("135", "531", 2), 2);
+
+  // Две ошибки одного вида → 0.
+  assert.equal(gradeMultiChoiceStrict("135", "1", 2), 0, "недостаёт двух → 0");
+  assert.equal(gradeMultiChoiceStrict("13", "1345", 2), 0, "два лишних → 0");
+
+  // maxScore=1 → частичный балл невозможен.
+  assert.equal(gradeMultiChoiceStrict("124", "1245", 1), 0);
+});
 
 test("checkTask20: order-independent set match", () => {
   assert.equal(checkTask20("13", "13"), true);

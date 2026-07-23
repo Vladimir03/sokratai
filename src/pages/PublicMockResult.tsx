@@ -130,11 +130,18 @@ function StateScreen({
   );
 }
 
-function FooterCaption() {
+/**
+ * Ревью 5.6 P1 #6: приписка про шкалу ЕГЭ-2026 — ТОЛЬКО когда тестовый балл
+ * реально показан (физика ЕГЭ, 45 первичных). Раньше рендерилась всегда, и
+ * родитель ученика по обществознанию читал обещание физической шкалы.
+ */
+function FooterCaption({ showScaleNote }: { showScaleNote: boolean }) {
   return (
     <p className="mt-6 text-center text-xs leading-relaxed text-slate-500">
-      Через платформу <strong className="text-slate-700">Сократ AI</strong> ·
-      тестовый балл предварительный, окончательная шкала — после ЕГЭ-2026
+      Через платформу <strong className="text-slate-700">Сократ AI</strong>
+      {showScaleNote
+        ? ' · тестовый балл предварительный, окончательная шкала — после ЕГЭ-2026'
+        : null}
     </p>
   );
 }
@@ -659,7 +666,7 @@ export default function PublicMockResult() {
           {result.tutor ? <TutorContactCard tutor={result.tutor} /> : null}
         </div>
 
-        <FooterCaption />
+        <FooterCaption showScaleNote={scale.testScore != null} />
       </div>
     </div>
   );

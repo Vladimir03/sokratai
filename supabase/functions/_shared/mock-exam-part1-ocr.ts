@@ -78,6 +78,7 @@ export interface Part1OCRTaskMeta {
   check_mode:
     | "strict"
     | "multi_choice"
+    | "multi_choice_strict"
     | "ordered"
     | "ordered_lenient"
     | "unordered"
@@ -135,6 +136,7 @@ export function buildPart1BlankOCRPrompt(
           case "strict":
             return "одно число (целое / десятичная дробь)";
           case "multi_choice":
+          case "multi_choice_strict":
             return "последовательность 2-3 цифр (например, `134`)";
           case "ordered":
           case "ordered_lenient":
@@ -231,6 +233,7 @@ export function buildPart1FreeformOCRPrompt(
           case "strict":
             return "одно число (целое / десятичная дробь)";
           case "multi_choice":
+          case "multi_choice_strict":
             return "последовательность 2-3 цифр (например, `134`)";
           case "ordered":
           case "ordered_lenient":

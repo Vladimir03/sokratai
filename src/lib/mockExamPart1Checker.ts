@@ -14,6 +14,10 @@
 //                     обществознание ЕГЭ № 6/13/15, критерии Милады 2026-07-22)
 //   - unordered     — множество без порядка (multiset, дубликаты учитываются)
 //   - multi_choice  — два-три номера верных вариантов из 5, без порядка
+//                     (физика: ЗАМЕНА символа = 1 ошибка → 1 балл)
+//   - multi_choice_strict — то же, но по критериям обществознания: 1 балл ТОЛЬКО
+//                     за один лишний ИЛИ один недостающий; замена → 0
+//                     (обществознание ЕГЭ Ч1, критерии Милады 2026-07-23)
 //   - task20        — спец-логика для №20 (число + запас 0.05 для целых, ровное для дробей)
 //   - pair          — пара значение/единица: "12.5;м" или "12,5 м";
 //                     для измерений также compact бланк-формат "2,70,1"
@@ -35,6 +39,7 @@ export const MOCK_EXAM_CHECK_MODES = [
   'ordered_lenient',
   'unordered',
   'multi_choice',
+  'multi_choice_strict',
   'task20',
   'pair',
   'manual',
@@ -254,6 +259,49 @@ export function gradeMultiChoice(
 }
 
 /**
+ * Partial credit для multi_choice_strict (обществознание ЕГЭ Часть 1 — задания
+ * с выбором нескольких верных; критерии ФИПИ, репорт Милады 2026-07-23).
+ *
+ * Критерий: «1 балл — если указан ОДИН лишний элемент наряду со всеми верными
+ * ЛИБО не указан ровно ОДИН из верных (лишних при этом нет). Если одновременно
+ * есть и лишний, и недостающий (замена цифры) — 0. Две и более ошибок — 0.»
+ *
+ * ОТЛИЧИЕ от физического `multi_choice`: у ФИПИ-ФИЗИКИ замена явно засчитывается
+ * («1 балл, если только один из символов не соответствует эталону») → 1 балл;
+ * у обществознания замена → 0. У каждого предмета СВОИ критерии (решение
+ * владельца 2026-07-22) — физика байт-в-байт не тронута.
+ *
+ *   missing = |C \ S|, extra = |S \ C|
+ *   (0,0) → maxScore; (1,0) или (0,1) → 1 (при maxScore ≥ 2); иначе → 0
+ *
+ * Пример Милады: эталон «135», ответ «123» → missing={5}=1, extra={2}=1 → 0
+ * (старый multi_choice давал 1 — это и был баг).
+ */
+export function gradeMultiChoiceStrict(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctSet = toMultiChoiceSet(correct);
+  const studentSet = toMultiChoiceSet(student);
+  if (correctSet.size === 0) return 0; // нет эталона → не оцениваем
+  if (studentSet.size === 0) return 0; // ученик ничего не ввёл
+  let missing = 0;
+  for (const item of correctSet) {
+    if (!studentSet.has(item)) missing += 1;
+  }
+  let extra = 0;
+  for (const item of studentSet) {
+    if (!correctSet.has(item)) extra += 1;
+  }
+  if (missing === 0 && extra === 0) return maxScore;
+  if (maxScore >= 2 && ((missing === 1 && extra === 0) || (missing === 0 && extra === 1))) {
+    return 1;
+  }
+  return 0;
+}
+
+/**
  * Partial credit для ordered (KIM 6/10/15/17 ЕГЭ физика 2026).
  *
  * ФИПИ официальный критерий: «Выставляется 1 балл, если на любой одной
@@ -431,6 +479,10 @@ export function checkPart1Answer(input: CheckPart1Input): CheckPart1Result {
   switch (checkMode) {
     case 'multi_choice': {
       const earned = gradeMultiChoice(correctAnswer, studentAnswer, maxScore);
+      return { earnedScore: earned, isCorrect: earned === maxScore };
+    }
+    case 'multi_choice_strict': {
+      const earned = gradeMultiChoiceStrict(correctAnswer, studentAnswer, maxScore);
       return { earnedScore: earned, isCorrect: earned === maxScore };
     }
     case 'ordered': {

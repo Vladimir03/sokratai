@@ -273,7 +273,9 @@ async function handleInviteRead(
   const { data: variant } = await db
     .from("mock_exam_variants")
     .select(
-      "title, exam_type, source, source_attribution, " +
+      // `subject` — ревью 5.6 P1 #4: публичное приглашение обязано знать предмет,
+      // иначе ученик обществознания читает «пробник по физике».
+      "title, exam_type, subject, source, source_attribution, " +
         "duration_minutes, total_max_score, part1_max, part2_max, task_count",
     )
     .eq("id", assignment.variant_id)

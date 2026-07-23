@@ -51,6 +51,8 @@ import {
   type PublicMockInviteData,
 } from '@/lib/mockExamPublicApi';
 import { detectContactType } from '@/lib/mockExamContactType';
+import { getExamProfile, normalizeExamType } from '@/lib/examProfiles';
+import { getSubjectDative } from '@/lib/subjectHelpers';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -106,6 +108,41 @@ function FooterCaption() {
   );
 }
 
+/**
+ * Мета приглашения по предмету/экзамену варианта (ревью 5.6 P1 #4).
+ *
+ * Публичная страница была захардкожена физикой: «пробник по физике», «таймер
+ * на 4 часа», «Часть 1 (1–20) / Часть 2 (21–26)», «PDF бланка ответов». Это
+ * ПЕРВОЕ, что видит ученик по ссылке репетитора — по обществознанию всё это
+ * ложь. Номера заданий и упоминание бланка показываем только когда профиль их
+ * реально подтверждает; иначе — нейтральные «Часть 1 / Часть 2».
+ */
+interface InviteExamMeta {
+  subjectDative: string;
+  durationLabel: string;
+  part1Label: string;
+  part2Label: string;
+  /** Бланк ФИПИ существует только у физики и только в blank-режиме. */
+  hasBlankPdf: boolean;
+}
+
+function buildInviteExamMeta(data: PublicMockInviteData): InviteExamMeta {
+  const variant = data.variant;
+  // null = легаси-строка или старый edge (deploy-skew) → историческая физика.
+  const subject = variant?.subject ?? 'physics';
+  const profile = getExamProfile(subject, normalizeExamType(variant?.exam_type));
+  const range = profile?.part2KimRange ?? null;
+  return {
+    subjectDative: getSubjectDative(subject),
+    durationLabel: formatDuration(
+      variant?.duration_minutes ?? profile?.durationMinutes ?? null,
+    ),
+    part1Label: range ? `Часть 1 (1–${range[0] - 1})` : 'Часть 1',
+    part2Label: range ? `Часть 2 (${range[0]}–${range[1]})` : 'Часть 2',
+    hasBlankPdf: subject === 'physics' && data.assignment.mode === 'blank',
+  };
+}
+
 // ─── Post-submit ready-to-start panel ────────────────────────────────────────
 //
 // Olympiad-style flow (TASK-7, F8): после успешного POST на startPublicMockInvite
@@ -117,9 +154,11 @@ function FooterCaption() {
 function ReadyToStartPanel({
   leadName,
   onStart,
+  meta,
 }: {
   leadName: string;
   onStart: () => void;
+  meta: InviteExamMeta;
 }) {
   return (
     <div className="rounded-lg border border-emerald-200 bg-white p-5 sm:p-6">
@@ -136,7 +175,9 @@ function ReadyToStartPanel({
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             Заявка сохранена. Когда нажмёшь «Начать пробник», запустится
-            таймер на&nbsp;4&nbsp;часа — сразу откроется первая задача.
+            таймер
+            {meta.durationLabel === '—' ? null : <> на&nbsp;{meta.durationLabel}</>}
+            {' '}— сразу откроется первая задача.
           </p>
         </div>
       </div>
@@ -144,9 +185,11 @@ function ReadyToStartPanel({
       <div className="mt-4 rounded-md bg-slate-50 px-3 py-3 text-xs leading-relaxed text-slate-600">
         <strong className="font-semibold text-slate-700">Как устроен пробник:</strong>
         <ul className="mt-1 list-disc space-y-0.5 pl-4">
-          <li>Часть&nbsp;1 (1–20) проверится автоматически — баллы сразу</li>
-          <li>Часть&nbsp;2 (21–26) проверит репетитор и&nbsp;пришлёт разбор в&nbsp;течение&nbsp;24&nbsp;часов</li>
-          <li>Перед стартом приготовь PDF бланка ответов — его дадим скачать на странице пробника</li>
+          <li>{meta.part1Label} проверится автоматически — баллы сразу</li>
+          <li>{meta.part2Label} проверит репетитор и&nbsp;пришлёт разбор в&nbsp;течение&nbsp;24&nbsp;часов</li>
+          {meta.hasBlankPdf ? (
+            <li>Перед стартом приготовь PDF бланка ответов — его дадим скачать на странице пробника</li>
+          ) : null}
         </ul>
       </div>
 
@@ -173,10 +216,13 @@ function ConfirmStartDialog({
   open,
   onOpenChange,
   onConfirm,
+  durationLabel,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  /** Реальная длительность варианта — «4 часа» были физическим хардкодом. */
+  durationLabel: string;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -184,8 +230,15 @@ function ConfirmStartDialog({
         <DialogHeader>
           <DialogTitle>Готов начать?</DialogTitle>
           <DialogDescription className="text-slate-600">
-            Тебе будет дано <strong>4 часа</strong> на прохождение пробника.
-            Таймер запустится сразу — лучше начинать в спокойной обстановке.
+            {durationLabel === '—' ? (
+              <>Таймер пробника запустится сразу</>
+            ) : (
+              <>
+                Тебе будет дано <strong>{durationLabel}</strong> на прохождение
+                пробника. Таймер запустится сразу
+              </>
+            )}{' '}
+            — лучше начинать в спокойной обстановке.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2 sm:gap-2">
@@ -261,6 +314,7 @@ function TutorCard({ tutor }: { tutor: PublicMockInviteData['tutor'] }) {
 
 function OfferBlock({ data }: { data: PublicMockInviteData }) {
   const { variant } = data;
+  const meta = buildInviteExamMeta(data);
   const subtitle =
     variant?.title ?? data.assignment.title ?? 'Тренировочный вариант';
 
@@ -268,17 +322,17 @@ function OfferBlock({ data }: { data: PublicMockInviteData }) {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold leading-tight text-slate-900 sm:text-[28px]">
-          Бесплатный диагностический пробник по&nbsp;физике
+          Бесплатный диагностический пробник по&nbsp;{meta.subjectDative}
         </h1>
         <p className="mt-2 text-sm text-slate-700">
-          {subtitle}. После сдачи Часть&nbsp;1 (1–20) проверится автоматически
-          и&nbsp;ты&nbsp;увидишь баллы сразу. Часть&nbsp;2 (21–26) репетитор
+          {subtitle}. После сдачи {meta.part1Label} проверится автоматически
+          и&nbsp;ты&nbsp;увидишь баллы сразу. {meta.part2Label} репетитор
           лично проверит и&nbsp;пришлёт разбор в&nbsp;течение 24&nbsp;часов.
         </p>
       </div>
 
       <div className="grid grid-cols-3 gap-3 border-t border-slate-100 pt-4 text-sm">
-        <Metric label="Время" value={formatDuration(variant?.duration_minutes ?? null)} />
+        <Metric label="Время" value={meta.durationLabel} />
         <Metric
           label="Заданий"
           value={variant?.task_count ? String(variant.task_count) : '—'}
@@ -291,8 +345,9 @@ function OfferBlock({ data }: { data: PublicMockInviteData }) {
       </div>
 
       <p className="text-xs text-slate-500">
-        Для прохождения нужны фото бланка ответов (Часть&nbsp;1) и&nbsp;решений
-        Части&nbsp;2. PDF бланка дадим перед стартом.
+        {meta.hasBlankPdf
+          ? 'Для прохождения нужны фото бланка ответов (Часть 1) и решений Части 2. PDF бланка дадим перед стартом.'
+          : 'Для прохождения нужны фото решений — сфотографируешь и приложишь прямо на странице пробника.'}
       </p>
     </div>
   );
@@ -691,6 +746,7 @@ export default function PublicMockInvite() {
             <ReadyToStartPanel
               leadName={success.leadName}
               onStart={() => setConfirmOpen(true)}
+              meta={buildInviteExamMeta(result)}
             />
           </div>
         ) : (
@@ -709,6 +765,7 @@ export default function PublicMockInvite() {
         open={confirmOpen && success !== null}
         onOpenChange={setConfirmOpen}
         onConfirm={() => handleStartNow(result.assignment.id)}
+        durationLabel={buildInviteExamMeta(result).durationLabel}
       />
     </div>
   );

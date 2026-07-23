@@ -52,6 +52,12 @@ export interface ExamProfile {
   part2KimRange: [number, number] | null;
   /** Бенчмарки первичной шкалы result-бара; null = скрыть порог/хорошо. */
   benchmarks: { pass: number; good: number; maxPrimary: number } | null;
+  /**
+   * Длительность экзамена в минутах (ФИПИ) — дефолт, когда у варианта не задан
+   * `duration_minutes`. null = значение не подтверждено предметником, тогда
+   * остаётся общий фолбэк вызывающей стороны (НЕ подставляем чужой предмет).
+   */
+  durationMinutes: number | null;
   /** Справочные материалы студенческой поверхности пробника. */
   referencesKind: 'physics' | 'generic';
   /** PDF бланка ФИПИ (public bucket); null = ссылку не показывать. */
@@ -93,13 +99,16 @@ const PHYSICS_EGE_CHECK_MODES: Record<number, string> = {
 /**
  * Обществознание ЕГЭ Часть 1 (критерии ФИПИ, Милада 2026-07-21/22, rule 45):
  * 6/13/15 — ordered_lenient (Левенштейн ≤1 → 1 балл; НЕ физический ordered);
- * 1/3/9/12 — набор цифр без порядка, любая ошибка → 0 → task20.
+ * 1/3/9/12 — набор цифр без порядка, любая ошибка → 0 → task20;
+ * остальные Ч1 — multi_choice_strict: 1 балл ТОЛЬКО за один лишний ИЛИ один
+ * недостающий, ЗАМЕНА цифры → 0 (репорт Милады 2026-07-23; физический
+ * multi_choice засчитывает замену — у каждого предмета свои критерии).
  */
 const SOCIAL_EGE_CHECK_MODES: Record<number, string> = {
   6: 'ordered_lenient', 13: 'ordered_lenient', 15: 'ordered_lenient',
-  2: 'multi_choice', 4: 'multi_choice', 5: 'multi_choice', 7: 'multi_choice',
-  8: 'multi_choice', 10: 'multi_choice', 11: 'multi_choice', 14: 'multi_choice',
-  16: 'multi_choice',
+  2: 'multi_choice_strict', 4: 'multi_choice_strict', 5: 'multi_choice_strict',
+  7: 'multi_choice_strict', 8: 'multi_choice_strict', 10: 'multi_choice_strict',
+  11: 'multi_choice_strict', 14: 'multi_choice_strict', 16: 'multi_choice_strict',
   1: 'task20', 3: 'task20', 9: 'task20', 12: 'task20',
 };
 
@@ -114,6 +123,7 @@ const PROFILES: Record<string, ExamProfile> = {
     part2KimRange: [21, 26],
     // 8 первичных → 36 тестовых (порог ВУЗа); 27 ≈ «хорошо» (владелец 2026-06-07).
     benchmarks: { pass: 8, good: 27, maxPrimary: 45 },
+    durationMinutes: 235, // 3ч55м — совпадает с текстом инструкции в ReferencesPanel
     referencesKind: 'physics',
     blankPdfUrl: null, // BLANK_PDF_URL живёт в StudentMockExam до его миграции
   },
@@ -126,6 +136,7 @@ const PROFILES: Record<string, ExamProfile> = {
     defaultPart1CheckMode: 'strict',
     part2KimRange: null,
     benchmarks: null, // шкала 2-5, 100-балльного бара нет (rule 45)
+    durationMinutes: null, // ОГЭ-физика: значение не подтверждено Егором → фолбэк
     referencesKind: 'physics',
     blankPdfUrl: null,
   },
@@ -138,6 +149,7 @@ const PROFILES: Record<string, ExamProfile> = {
     defaultPart1CheckMode: 'strict',
     part2KimRange: null, // Ч2 (17-25) есть, но part-инференс не заводили
     benchmarks: null,
+    durationMinutes: 210, // 3ч30м — ЕГЭ обществознание (Милада 2026-07-23)
     referencesKind: 'generic',
     blankPdfUrl: null,
   },
@@ -150,6 +162,21 @@ export function getExamProfile(
 ): ExamProfile | null {
   if (!subject || !exam) return null;
   return PROFILES[`${subject}:${exam}`] ?? null;
+}
+
+/**
+ * Легаси-значения `mock_exam_variants.exam_type` → ключ профиля. Физика
+ * исторически пишется как `ege_physics`/`oge_physics` (rule 45 — на них
+ * гейтится шкала тестовых баллов), прочие предметы — generic `ege`/`oge`.
+ * Registry ключуется generic-значением, поэтому нормализуем на входе.
+ */
+export function normalizeExamType(
+  raw: string | null | undefined,
+): ExamProfileExam | null {
+  if (!raw) return null;
+  if (raw.startsWith('oge')) return 'oge';
+  if (raw.startsWith('ege')) return 'ege';
+  return null;
 }
 
 /** Все заведённые профили (для parity-теста / будущих честных пометок Ф6). */

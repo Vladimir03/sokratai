@@ -352,16 +352,19 @@ export async function buildStudentProgress(
       created_at: (a.created_at as string) ?? "",
     });
   }
-  const variantMeta = new Map<string, { exam_type: string; total_max_score: number; part1_max: number; part2_max: number }>();
+  const variantMeta = new Map<string, { exam_type: string; subject: string | null; total_max_score: number; part1_max: number; part2_max: number }>();
   const mvIds = [...new Set((mockAssignments ?? []).map((a) => a.variant_id as string | null).filter(Boolean) as string[])];
   if (mvIds.length > 0) {
     const { data: variants } = await db
       .from("mock_exam_variants")
-      .select("id, exam_type, total_max_score, part1_max, part2_max")
+      // Ревью 5.6 P1 #5: subject обязателен — без него аналитика метила любой
+      // пробник физикой и шкалировала физической шкалой.
+      .select("id, exam_type, subject, total_max_score, part1_max, part2_max")
       .in("id", mvIds);
     for (const v of variants ?? []) {
       variantMeta.set(v.id as string, {
         exam_type: v.exam_type as string,
+        subject: (v.subject as string | null) ?? null,
         total_max_score: Number(v.total_max_score ?? 45),
         part1_max: Number(v.part1_max ?? 0),
         part2_max: Number(v.part2_max ?? 0),
@@ -380,7 +383,18 @@ export async function buildStudentProgress(
       if (!meta) continue;
       const variant = meta.variant_id ? variantMeta.get(meta.variant_id) : null;
       const examType = variant?.exam_type ?? (track === "oge" ? "oge_physics" : "ege_physics");
-      const scoreKind = examType === "oge_physics" ? "oge_grade" : "ege_scaled";
+      // Легаси-строки забэкфилены физикой, поэтому null здесь = физика.
+      const variantSubject = variant?.subject ?? "physics";
+      // Ревью 5.6 P1 #5: шкалируем ТОЛЬКО при наличии точной шкалы (физика ЕГЭ).
+      // Раньше любой exam_type кроме `oge_physics` получал `ege_scaled`, и
+      // обществознание ЕГЭ пересчитывалось по ФИЗИЧЕСКОЙ шкале 45→100 —
+      // тутор/родитель видели выдуманный тестовый балл. Прочие предметы →
+      // первичный балл без конверсии.
+      const scoreKind = examType === "oge_physics"
+        ? "oge_grade"
+        : examType === "ege_physics"
+          ? "ege_scaled"
+          : "primary";
       const totalMax = variant?.total_max_score ?? 45;
       const part1Max = variant?.part1_max ?? 0;
       const part2Max = variant?.part2_max ?? 0;

@@ -59,7 +59,8 @@ const VALID_MODES = ["blank", "form", "manual_entry"] as const;
 const VALID_VARIANT_SUBJECTS = new Set<string>(SUBJECT_IDS);
 // Часть 1 — режимы детерминированного чекера (без 'manual' — тот для Части 2).
 const VALID_PART1_CHECK_MODES = new Set([
-  "strict", "ordered", "ordered_lenient", "unordered", "multi_choice", "task20", "pair",
+  "strict", "ordered", "ordered_lenient", "unordered", "multi_choice",
+  "multi_choice_strict", "task20", "pair",
 ]);
 const VARIANT_TASKS_MAX = 60;
 const VARIANT_TITLE_MAX = 200;

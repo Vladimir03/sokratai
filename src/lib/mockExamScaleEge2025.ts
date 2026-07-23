@@ -98,9 +98,12 @@ export const GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = EGE_PHYSICS_BENCHMARKS.go
  *   - `totalMax !== 45`, ИЛИ
  *   - `examType` явно НЕ `'ege_physics'` (напр. `'oge_physics'` — у него другая
  *     шкала и оценка 2–5, не 100-балльная).
- * `examType` null/undefined трактуется пермиссивно (legacy / по max) — чтобы не
- * спрятать бар, если поле не прокинуто. Single source of truth для обоих
- * result-экранов (StudentMockExamResult + PublicMockResult), чтобы не разъезжались.
+ * `examType` null/undefined → **null** (ревью 5.6 P1 #6). Раньше трактовался
+ * пермиссивно «по max», из-за чего ручные записи (variant = null → max
+ * подставлялся 45) и любой предмет без exam_type получали ФИЗИЧЕСКУЮ шкалу и
+ * фиктивный тестовый балл /100. С мультипредметностью пермиссивность = ложь.
+ * Single source of truth для обоих result-экранов (StudentMockExamResult +
+ * PublicMockResult), чтобы не разъезжались.
  *
  * @example
  *   getEgePhysicsBenchmarks({ totalMax: 45, examType: 'ege_physics' }) // → { pass: 8, good: 27 }
@@ -113,7 +116,8 @@ export function getEgePhysicsBenchmarks(params: {
 }): { pass: number; good: number } | null {
   const { totalMax, examType } = params;
   if (totalMax !== MAX_PRIMARY_EGE_PHYSICS_2025) return null;
-  if (examType != null && examType !== 'ege_physics') return null;
+  // Строго: только явная физика-ЕГЭ. null/undefined больше НЕ проходит.
+  if (examType !== 'ege_physics') return null;
   return {
     pass: PASS_THRESHOLD_PRIMARY_EGE_PHYSICS_2025,
     good: GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025,

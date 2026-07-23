@@ -70,7 +70,8 @@ const CHECK_MODE_OPTIONS: { value: string; label: string }[] = [
   { value: 'ordered', label: 'Последовательность цифр — порядок важен' },
   { value: 'ordered_lenient', label: 'Последовательность — 1 ошибка/лишняя позиция = 1 балл' },
   { value: 'unordered', label: 'Набор цифр — порядок неважен' },
-  { value: 'multi_choice', label: 'Выбор нескольких (частичный балл за 1 ошибку)' },
+  { value: 'multi_choice', label: 'Выбор нескольких — физика (замена цифры = 1 балл)' },
+  { value: 'multi_choice_strict', label: 'Выбор нескольких — обществознание (замена = 0)' },
   { value: 'task20', label: 'Набор цифр — всё или ничего' },
   { value: 'pair', label: 'Пара «значение + единица»' },
 ];
@@ -399,7 +400,18 @@ function VariantEditorContent() {
     const s = cartPrefill?.subject ?? resolveTutorDefaultSubject(tutorProfile?.subjects, null);
     return resolveTutorDefaultExamEgeOge(s, tutorProfile?.exam_focus_by_subject) ?? 'ege';
   });
-  const [durationText, setDurationText] = useState('235');
+  // Ревью 5.6 P1 #1: стартовая длительность — из ExamProfile (предмет × экзамен),
+  // а не жёсткие физические 235. Раньше новый вариант обществознания сохранял
+  // 3ч55м (репорт Милады), и read-side фолбэк на профиль не срабатывал никогда —
+  // в БД лежало «валидное» чужое значение. `durationTouchedRef` фиксирует ручную
+  // правку: после неё смена предмета/экзамена поле не трогает.
+  const durationTouchedRef = useRef(false);
+  const [durationText, setDurationText] = useState(() => {
+    const s = cartPrefill?.subject ?? resolveTutorDefaultSubject(tutorProfile?.subjects, null);
+    const e = resolveTutorDefaultExamEgeOge(s, tutorProfile?.exam_focus_by_subject) ?? 'ege';
+    // 235 — общий фолбэк, когда профиля нет / длительность не подтверждена предметником.
+    return String(getExamProfile(s, e)?.durationMinutes ?? 235);
+  });
   const [part1Tasks, setPart1Tasks] = useState<VariantTaskDraft[]>(
     () => cartPrefill?.drafts.filter((d) => d.part === 1) ?? [],
   );
@@ -426,6 +438,14 @@ function VariantEditorContent() {
     setPart1Tasks(detail.tasks.filter((t) => t.part === 1).map(rowToDraft));
     setPart2Tasks(detail.tasks.filter((t) => t.part === 2).map(rowToDraft));
   }, [isEditMode, detail]);
+
+  // Длительность следует за профилем, пока репетитор не правил поле руками.
+  // В edit-режиме молчим — там истина в сохранённом варианте (prefill выше).
+  useEffect(() => {
+    if (isEditMode || durationTouchedRef.current) return;
+    const profileDuration = getExamProfile(subject, exam)?.durationMinutes;
+    if (profileDuration != null) setDurationText(String(profileDuration));
+  }, [subject, exam, isEditMode]);
 
   const inUse = isEditMode && (detail?.inUse ?? false);
   const contentLocked = inUse;
@@ -748,7 +768,10 @@ function VariantEditorContent() {
                 inputMode="numeric"
                 value={durationText}
                 disabled={contentLocked}
-                onChange={(e) => setDurationText(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => {
+                  durationTouchedRef.current = true;
+                  setDurationText(e.target.value.replace(/\D/g, ''));
+                }}
                 className={INPUT_CLASS}
                 aria-label="Длительность в минутах"
               />

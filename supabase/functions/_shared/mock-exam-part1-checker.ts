@@ -26,7 +26,7 @@
  */
 export const CHECK_MODES = [
   "strict", "ordered", "ordered_lenient", "unordered", "multi_choice",
-  "task20", "pair", "manual",
+  "multi_choice_strict", "task20", "pair", "manual",
 ] as const;
 
 export type CheckMode = (typeof CHECK_MODES)[number];
@@ -137,6 +137,39 @@ export function gradeMultiChoice(
   const errors = Math.max(correctSet.size, studentSet.size) - matches;
   if (errors === 0) return maxScore;
   if (errors === 1 && maxScore >= 2) return 1;
+  return 0;
+}
+
+/**
+ * Partial credit для multi_choice_strict (обществознание ЕГЭ Ч1, критерии
+ * Милады 2026-07-23). 1 балл ТОЛЬКО за один лишний ИЛИ один недостающий;
+ * ЗАМЕНА цифры (и лишний, и недостающий) → 0. Физический `multi_choice`
+ * замену засчитывает — у каждого предмета СВОИ критерии, не путать.
+ *
+ * Hard invariant (.claude/rules/45-mock-exams.md): любое изменение этой функции
+ * ОБЯЗАНО синхронно править `src/lib/mockExamPart1Checker.ts::gradeMultiChoiceStrict`.
+ */
+export function gradeMultiChoiceStrict(
+  correct: string,
+  student: string,
+  maxScore: number,
+): number {
+  const correctSet = toMultiChoiceSet(correct);
+  const studentSet = toMultiChoiceSet(student);
+  if (correctSet.size === 0) return 0;
+  if (studentSet.size === 0) return 0;
+  let missing = 0;
+  for (const item of correctSet) {
+    if (!studentSet.has(item)) missing += 1;
+  }
+  let extra = 0;
+  for (const item of studentSet) {
+    if (!correctSet.has(item)) extra += 1;
+  }
+  if (missing === 0 && extra === 0) return maxScore;
+  if (maxScore >= 2 && ((missing === 1 && extra === 0) || (missing === 0 && extra === 1))) {
+    return 1;
+  }
   return 0;
 }
 
@@ -280,6 +313,10 @@ export function checkPart1(
   // ФИПИ 2026 partial credit (AC-P4) для multi_choice и ordered.
   if (checkMode === "multi_choice") {
     const earned = gradeMultiChoice(correctAnswer, studentAnswer, maxScore);
+    return { earned, correct: earned === maxScore };
+  }
+  if (checkMode === "multi_choice_strict") {
+    const earned = gradeMultiChoiceStrict(correctAnswer, studentAnswer, maxScore);
     return { earned, correct: earned === maxScore };
   }
   if (checkMode === "ordered") {

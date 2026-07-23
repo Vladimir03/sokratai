@@ -49,6 +49,7 @@ import {
 import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
 import { getSubjectDative } from '@/lib/subjectHelpers';
+import { getExamProfile, normalizeExamType } from '@/lib/examProfiles';
 import { toast } from 'sonner';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
 import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
@@ -1087,7 +1088,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   const part2Tasks = useMemo(() => tasks.filter((task) => task.part === 2), [tasks]);
   const imagesByKim = useSignedTaskImages(tasks);
   const isFinal = data.attempt.status !== 'in_progress';
-  const durationMinutes = data.variant?.duration_minutes ?? 235;
+  // Длительность: значение варианта → дефолт профиля (предмет × экзамен) →
+  // общий фолбэк. Раньше был голый `?? 235` (физический ЕГЭ), из-за чего
+  // обществознание показывало 3ч55м вместо 3ч30м (репорт Милады 2026-07-23).
+  const durationMinutes = data.variant?.duration_minutes
+    ?? getExamProfile(
+      data.variant?.subject ?? null,
+      normalizeExamType(data.variant?.exam_type),
+    )?.durationMinutes
+    ?? 235;
 
   const autosave = useMockExamAutoSave({
     attemptId: data.attempt.id,

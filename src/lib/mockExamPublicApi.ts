@@ -26,6 +26,12 @@ export interface PublicMockInviteTutor {
 export interface PublicMockInviteVariant {
   title: string;
   exam_type: string;
+  /**
+   * Предмет варианта. Ревью 5.6 P1 #4: без него публичная страница-приглашение
+   * была захардкожена физикой. `null` = легаси-строка (забэкфилена физикой) или
+   * старый edge (deploy-skew) → клиент читает как physics.
+   */
+  subject: string | null;
   source: string;
   source_attribution: string | null;
   duration_minutes: number;
