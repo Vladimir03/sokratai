@@ -1376,8 +1376,13 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // поля → физика (прежнее поведение байт-в-байт). Управляет eyebrow-заголовком,
   // справочником (физ-константы только физике) и ссылкой на физ-бланк ФИПИ.
   const variantSubject = data.variant?.subject ?? 'physics';
-  const isPhysicsVariant = variantSubject === 'physics';
-  const examKindLabel = (data.variant?.exam_type ?? 'ege').startsWith('oge') ? 'ОГЭ' : 'ЕГЭ';
+  const variantExam = normalizeExamType(data.variant?.exam_type) ?? 'ege';
+  const examKindLabel = variantExam === 'oge' ? 'ОГЭ' : 'ЕГЭ';
+  // Ревью 5.6 P1 #3: справочник (константы + «3 ч 55 мин, 26 заданий»), бланк
+  // `ege-physics-2026.pdf` и подсказка формата КИМ-19 — материалы именно
+  // ЕГЭ-физики. Гейт был по одному предмету, поэтому физика-ОГЭ получала чужой
+  // справочник, чужой PDF бланка и подсказку по несуществующему у неё номеру.
+  const isPhysicsEgeVariant = variantSubject === 'physics' && variantExam === 'ege';
 
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
@@ -1459,8 +1464,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           </section>
 
           <div className="space-y-4">
-            {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsVariant} />}
-            {isPhysicsVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
+            {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsEgeVariant} />}
+            {isPhysicsEgeVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
           </div>
 
           <section className="mt-6 space-y-3">
@@ -1508,7 +1513,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 imageUrls={imagesByKim[task.kim_number] ?? []}
                 onAnswer={autosave.setAnswer}
                 disabled={isFinal}
-                isPhysics={isPhysicsVariant}
+                isPhysics={isPhysicsEgeVariant}
               />
             ))}
             {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —

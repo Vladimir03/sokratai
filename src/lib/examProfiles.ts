@@ -147,7 +147,10 @@ const PROFILES: Record<string, ExamProfile> = {
     kimPrimaryScores: SOCIAL_EGE_SCORES,
     part1CheckModes: SOCIAL_EGE_CHECK_MODES,
     defaultPart1CheckMode: 'strict',
-    part2KimRange: null, // Ч2 (17-25) есть, но part-инференс не заводили
+    // Ч2 обществознания = 17-25 (ФИПИ, Милада). Ревью 5.6 P1 #2: раньше было
+    // null «инференс не заводили» → задачи 17-25 из AI-загрузчика падали в
+    // Часть 1, а публичное приглашение не могло назвать номера заданий.
+    part2KimRange: [17, 25],
     benchmarks: null,
     durationMinutes: 210, // 3ч30м — ЕГЭ обществознание (Милада 2026-07-23)
     referencesKind: 'generic',

@@ -201,7 +201,26 @@ test("обёртка inferPart1CheckMode: exam-гейтинг сохранён",
 test("обёртка inferVariantTaskPart + inferCheckFormatFromKim: граница Ч2 [21,26]", () => {
   assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer"), 2);
   assert.equal(variantDraft.inferVariantTaskPart("physics", 20, "short_answer"), 1);
-  assert.equal(variantDraft.inferVariantTaskPart("social", 21, "short_answer"), 1, "граница — только физика");
+  // Физика байт-в-байт: лояльна к пустому/любому exam (её карта = ЕГЭ).
+  assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer", ""), 2);
+  assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer", "oge"), 2);
+  // Ревью 5.6 P1 #2: обществознание получило свою границу Ч2 [17,25], но
+  // строго по указанному экзамену (зеркало inferPart1CheckMode).
+  assert.equal(variantDraft.inferVariantTaskPart("social", 17, "short_answer", "ege"), 2);
+  assert.equal(variantDraft.inferVariantTaskPart("social", 25, "short_answer", "ege"), 2);
+  assert.equal(variantDraft.inferVariantTaskPart("social", 16, "short_answer", "ege"), 1);
+  assert.equal(variantDraft.inferVariantTaskPart("social", 17, "short_answer", "oge"), 1, "social строго ЕГЭ");
+  assert.equal(
+    variantDraft.inferVariantTaskPart("social", 21, "short_answer"),
+    1,
+    "без exam — физическая граница на чужой предмет НЕ распространяется",
+  );
+  assert.equal(variantDraft.inferVariantTaskPart("chemistry", 21, "short_answer", "ege"), 1);
+  assert.equal(
+    variantDraft.inferVariantTaskPart("social", 3, "detailed_solution", "ege"),
+    2,
+    "формат проверки остаётся фолбэком вне диапазона",
+  );
   assert.equal(checkFormat.inferCheckFormatFromKim(21), "detailed_solution");
   assert.equal(checkFormat.inferCheckFormatFromKim(26), "detailed_solution");
   assert.equal(checkFormat.inferCheckFormatFromKim(20), "short_answer");

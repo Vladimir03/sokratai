@@ -74,9 +74,18 @@ export function inferVariantTaskPart(
   subject: string,
   kimNumber: number | null,
   checkFormat: 'short_answer' | 'detailed_solution',
+  exam?: '' | 'ege' | 'oge' | null,
 ): 1 | 2 {
-  if (subject === 'physics' && kimNumber !== null) {
-    const range = getExamProfile('physics', 'ege')?.part2KimRange;
+  if (kimNumber !== null) {
+    // Гейтинг зеркалит inferPart1CheckMode / getKimPrimaryScoreForSubject:
+    // физика лояльна к пустому exam (её карта = ЕГЭ, прежнее поведение
+    // байт-в-байт), остальные предметы — строго по указанному экзамену.
+    // Ревью 5.6 P1 #2: раньше диапазон был захардкожен физикой, поэтому
+    // задачи 17-25 обществознания молча уезжали в Часть 1.
+    const resolvedExam = subject === 'physics' ? 'ege' : exam || null;
+    const range = resolvedExam
+      ? getExamProfile(subject, resolvedExam)?.part2KimRange
+      : null;
     if (range && kimNumber >= range[0] && kimNumber <= range[1]) return 2;
   }
   return checkFormat === 'detailed_solution' ? 2 : 1;
@@ -118,7 +127,7 @@ export function aiExtractToVariantTaskDraft(
     kim_number: kimNum,
     subject,
   });
-  const part = inferVariantTaskPart(subject, kimNum, checkFormat);
+  const part = inferVariantTaskPart(subject, kimNum, checkFormat, exam);
 
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
   const resolvedScore =
