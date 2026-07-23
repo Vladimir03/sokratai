@@ -2551,7 +2551,7 @@ export type Database = {
           part2_max: number
           source: string
           source_attribution: string | null
-          subject: string | null
+          subject: string
           task_count: number
           title: string
           total_max_score: number
@@ -2568,7 +2568,7 @@ export type Database = {
           part2_max: number
           source: string
           source_attribution?: string | null
-          subject?: string | null
+          subject?: string
           task_count: number
           title: string
           total_max_score: number
@@ -2585,7 +2585,7 @@ export type Database = {
           part2_max?: number
           source?: string
           source_attribution?: string | null
-          subject?: string | null
+          subject?: string
           task_count?: number
           title?: string
           total_max_score?: number
