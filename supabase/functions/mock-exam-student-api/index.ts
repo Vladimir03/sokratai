@@ -326,11 +326,14 @@ async function handleGetStudentAssignment(
   let variant: Record<string, unknown> | null = null;
   let tasks: Record<string, unknown>[] = [];
   if (assignment.variant_id) {
-    const { data: variantRow } = await db
+    const { data: variantRow, error: variantErr } = await db
       .from("mock_exam_variants")
       .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
+    // Rule 45: НЕ глотать error supabase-запроса (класс инцидента 2026-06-08 —
+    // несуществующая колонка молча превращалась в «variant отсутствует»).
+    if (variantErr) console.error("[mock-exam-student-api] variant meta select failed:", variantErr.message);
     variant = variantRow;
 
     // Anti-leak: SELECT explicitly omits correct_answer, solution_text.
@@ -587,7 +590,7 @@ async function handleGetResult(
   let variant: Record<string, unknown> | null = null;
   const variantTasksByKim: Record<number, Record<string, unknown>> = {};
   if (assignment.variant_id) {
-    const { data: variantRow } = await db
+    const { data: variantRow, error: variantErr } = await db
       .from("mock_exam_variants")
       .select(
         "id, title, subject, exam_type, duration_minutes, total_max_score, " +
@@ -595,6 +598,8 @@ async function handleGetResult(
       )
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
+    // Rule 45: НЕ глотать error supabase-запроса (см. handleGet — тот же класс).
+    if (variantErr) console.error("[mock-exam-student-api] result variant select failed:", variantErr.message);
     variant = variantRow;
 
     // State-aware task SELECT.

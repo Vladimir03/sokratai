@@ -255,11 +255,19 @@ function Part1Card({
                     // Цветовая схема Милады (2026-07-22): полный балл — зелёный,
                     // частичный — оранжевый, 0 — бордовый; мягкий фон строки для
                     // быстрого сканирования (зеркало тьютор-панели Part1ReviewPanel).
+                    // «Без ответа» (нет балла вовсе) — нейтральный slate, не
+                    // «неверно» (ревью 2026-07-23 P2-1).
                     <tr
                       key={row.kim_number}
                       className={cn(
                         'text-slate-700',
-                        isCorrect ? 'bg-emerald-50/60' : isPartial ? 'bg-amber-50/60' : 'bg-rose-50/50',
+                        !hasScore
+                          ? 'bg-slate-50/60'
+                          : isCorrect
+                            ? 'bg-emerald-50/60'
+                            : isPartial
+                              ? 'bg-amber-50/60'
+                              : 'bg-rose-50/50',
                       )}
                     >
                       <td className="px-3 py-2 font-medium tabular-nums">
@@ -293,8 +301,11 @@ function Part1Card({
                             </Tooltip>
                           ) : (
                             <XCircle
-                              className="mt-0.5 h-4 w-4 flex-shrink-0 text-rose-500"
-                              aria-label="Неверно"
+                              className={cn(
+                                'mt-0.5 h-4 w-4 flex-shrink-0',
+                                hasScore ? 'text-rose-500' : 'text-slate-400',
+                              )}
+                              aria-label={hasScore ? 'Неверно' : 'Без ответа'}
                             />
                           )}
                           {row.student_answer ? (
@@ -319,12 +330,14 @@ function Part1Card({
                       </td>
                       <td
                         className={cn(
-                          'px-3 py-2 text-right font-semibold tabular-nums',
-                          isCorrect
-                            ? 'text-emerald-700'
-                            : isPartial
-                              ? 'text-amber-600'
-                              : 'text-rose-700',
+                          'px-3 py-2 text-right tabular-nums',
+                          !hasScore
+                            ? 'text-slate-400'
+                            : isCorrect
+                              ? 'font-semibold text-emerald-700'
+                              : isPartial
+                                ? 'font-semibold text-amber-600'
+                                : 'font-semibold text-rose-700',
                         )}
                       >
                         {earned}/{row.max_score}

@@ -75,7 +75,15 @@ export type Part1OCRResult = Record<number, Part1OCRCell>;
 export interface Part1OCRTaskMeta {
   kim_number: number;
   max_score: number;
-  check_mode: "strict" | "multi_choice" | "ordered" | "pair" | "task20" | "manual";
+  check_mode:
+    | "strict"
+    | "multi_choice"
+    | "ordered"
+    | "ordered_lenient"
+    | "unordered"
+    | "pair"
+    | "task20"
+    | "manual";
 }
 
 const VALID_CONFIDENCE = new Set<Part1OCRConfidence>(["low", "medium", "high"]);
@@ -129,7 +137,10 @@ export function buildPart1BlankOCRPrompt(
           case "multi_choice":
             return "последовательность 2-3 цифр (например, `134`)";
           case "ordered":
+          case "ordered_lenient":
             return "последовательность цифр в порядке (например, `2143`)";
+          case "unordered":
+            return "набор цифр (например, `13`)";
           case "pair":
             return "два числа без разделителей (например, `1,40,2` для ответа `(1,4±0,2)`)";
           case "task20":
@@ -222,7 +233,10 @@ export function buildPart1FreeformOCRPrompt(
           case "multi_choice":
             return "последовательность 2-3 цифр (например, `134`)";
           case "ordered":
+          case "ordered_lenient":
             return "последовательность цифр в порядке (например, `2143`)";
+          case "unordered":
+            return "набор цифр (например, `13`)";
           case "pair":
             return "два числа без разделителей (например, `1,40,2` для ответа `(1,4±0,2)`)";
           case "task20":

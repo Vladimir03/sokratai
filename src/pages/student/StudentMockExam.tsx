@@ -171,11 +171,17 @@ function getModeLabel(mode: MockExamMode): string {
   return 'Ручной результат';
 }
 
-function getAnswerHint(mode: MockExamCheckMode | null, kimNumber?: number): string {
+function getAnswerHint(
+  mode: MockExamCheckMode | null,
+  kimNumber?: number,
+  isPhysics = true,
+): string {
   // Per-kim overrides (TASK-12 — priority over generic check_mode hints).
   // KIM 19 — динамометр + погрешность: значение и погрешность слитно (см.
   // инструкцию варианта «два числа, не разделяя пробелом, например 2,70,1»).
-  if (kimNumber === 19) {
+  // ТОЛЬКО физика (ревью 2026-07-23 P2-2): у обществознания/химии КИМ 19 —
+  // обычное задание, физическая подсказка вводила бы в заблуждение.
+  if (kimNumber === 19 && isPhysics) {
     return 'Два числа слитно: значение и погрешность, например 2,70,1';
   }
   switch (mode) {
@@ -831,6 +837,7 @@ function Part1TaskCard({
   imageUrls,
   onAnswer,
   disabled,
+  isPhysics,
 }: {
   task: StudentMockExamVariantTask;
   answer: string;
@@ -838,6 +845,7 @@ function Part1TaskCard({
   imageUrls: string[];
   onAnswer: (kim: number, answer: string) => void;
   disabled: boolean;
+  isPhysics: boolean;
 }) {
   return (
     <Card className="shadow-none hover:shadow-sm" id={`task-${task.kim_number}`}>
@@ -891,7 +899,7 @@ function Part1TaskCard({
               inputMode={task.check_mode === 'pair' ? 'text' : 'decimal'}
               autoComplete="off"
             />
-            <span className="text-sm text-slate-500">{getAnswerHint(task.check_mode, task.kim_number)}</span>
+            <span className="text-sm text-slate-500">{getAnswerHint(task.check_mode, task.kim_number, isPhysics)}</span>
           </div>
           {status && status !== 'idle' && (
             <div className="mt-2 text-sm text-slate-500">
@@ -1488,6 +1496,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 imageUrls={imagesByKim[task.kim_number] ?? []}
                 onAnswer={autosave.setAnswer}
                 disabled={isFinal}
+                isPhysics={isPhysicsVariant}
               />
             ))}
             {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
