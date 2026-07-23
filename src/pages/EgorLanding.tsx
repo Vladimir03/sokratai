@@ -2,6 +2,10 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import sokratLogo from "@/assets/sokrat-logo.png";
 import { capturePromoFromUrl } from "@/lib/promoCapture";
+import {
+  SOKRAT_COMMUNITY_TELEGRAM_URL,
+  SOKRAT_COMMUNITY_VK_URL,
+} from "@/lib/tutorPlanCopy";
 
 // Промо-лендинг под QR визитки/буклета Егора Блинова (конференция в Иваново).
 // Публичный роут /egor. UTM/промо пробрасываются в регистрацию; визиты считает
@@ -38,7 +42,9 @@ export default function EgorLanding() {
         .egor-lp .promo .small{opacity:.92;font-size:13px;margin-top:4px}
         .egor-lp .cta{display:block;text-align:center;background:var(--amber);color:#fff;text-decoration:none;font-weight:700;font-size:17px;padding:15px;border-radius:12px;margin:6px 0 4px}
         .egor-lp .cta.alt{background:var(--ink)}
-        .egor-lp .hint{text-align:center;color:var(--muted);font-size:12px;margin:0 0 18px}
+        .egor-lp .hint{text-align:center;color:var(--muted);font-size:12px;margin:0 0 6px}
+        .egor-lp .subs{color:var(--greendk);font-size:13px;font-weight:600;margin:0 0 16px}
+        .egor-lp .trust{text-align:center;color:var(--muted);font-size:12px;margin:0 0 18px}
         .egor-lp .val{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)}
         .egor-lp .val .dot{color:var(--green);font-weight:800}
         .egor-lp .val b{display:block;color:var(--ink)}
@@ -53,6 +59,12 @@ export default function EgorLanding() {
         .egor-lp .quote .who{color:var(--muted);font-size:12px;margin-top:6px}
         .egor-lp .foot{text-align:center;color:var(--muted);font-size:13px;margin-top:22px}
         .egor-lp .foot b{color:var(--greendk)}
+        .egor-lp .community{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px;margin:18px 0 0}
+        .egor-lp .community b{display:block;font-size:15px;color:var(--ink)}
+        .egor-lp .community p{color:var(--muted);font-size:13px;margin:2px 0 12px}
+        .egor-lp .community .links{display:flex;flex-wrap:wrap;gap:8px}
+        .egor-lp .community .links a{flex:1 1 160px;text-align:center;text-decoration:none;font-weight:600;font-size:14px;padding:12px;border-radius:10px;border:1px solid var(--border);color:var(--ink);background:#fff;touch-action:manipulation}
+        .egor-lp .community .links a.tg{border-color:#0088cc;color:#0088cc}
       `}</style>
       <div className="wrap">
         <div className="top">
@@ -63,41 +75,58 @@ export default function EgorLanding() {
           </div>
         </div>
 
-        <h1>Меньше рутины.<br />Больше преподавания.</h1>
+        {/* Заголовок = Big Job репетитора (рост), а не «экономия времени» —
+            синхронно с прод-лендингом sokratai.ru. Мультипредметно: в зале у
+            Егора физики, математики, химики и гуманитарии (решение владельца). */}
+        <h1>Ведите в 2 раза больше учеников — без ночной проверки ДЗ</h1>
         <p className="sub">
-          AI проверяет ДЗ и пробники — даже рукописные. Ученик думает сам, а не
-          списывает у ChatGPT.
+          Сократ проверяет рукописные домашки по критериям ФИПИ и ведёт ученика
+          вопросами, пока вас нет рядом. Вы подтверждаете балл — за минуты, а не
+          за вечер.
+        </p>
+        <p className="subs">
+          Физика · Математика · Химия · Обществознание · Русский · Языки — ЕГЭ и ОГЭ
         </p>
 
         <div className="promo">
           <div>По промокоду</div>
           <div className="code">БЛИНОВ_20</div>
-          <div className="small">7 дней бесплатно без карты + −20% на первые полгода</div>
+          <div className="small">
+            7 дней бесплатно, без карты → 200 ₽ за первый месяц → −20% на месяцы 2–6
+          </div>
         </div>
 
         <a className="cta" href={REG_URL}>Начать бесплатно →</a>
-        <p className="hint">промокод <b>БЛИНОВ_20</b> введите при регистрации</p>
+        {/* Промокод подхватывается из ссылки автоматически (promoCapture →
+            signUp-метаданные → profiles.promo_code). Поля ввода промокода в
+            регистрации НЕТ и не будет — цену задаёт только сервер (anti-tamper,
+            rule 99), поэтому копия НЕ должна просить «ввести промокод». */}
+        <p className="hint">промокод <b>БЛИНОВ_20</b> уже в ссылке — вводить ничего не нужно</p>
+        {/* Снятие трёх главных страхов профи разом: деньги, «заменит меня», «AI ошибётся». */}
+        <p className="trust">
+          Без карты · отмена в один клик · финальное слово по баллу всегда за вами
+        </p>
 
         <div>
           <div className="val">
             <span className="dot">●</span>
             <div>
-              <b>Второй взгляд</b>
-              <span>AI проверяет рукописные ДЗ и пробники по критериям ФИПИ и ловит ошибки, на которых замылен глаз.</span>
+              <b>Проверка ДЗ: 3 часа → 40 минут</b>
+              <span>Тетрадные решения по физике и математике, задачи по химии, сочинения по русскому, эссе по обществознанию. AI читает рукопись, находит ошибки и пишет черновик разбора — балл подтверждаете вы.</span>
             </div>
           </div>
           <div className="val">
             <span className="dot">●</span>
             <div>
-              <b>Ученик думает сам</b>
-              <span>Сократический метод: AI ведёт наводящими вопросами, а не выдаёт готовый ответ.</span>
+              <b>Ученик думает сам, а не списывает</b>
+              <span>Застрял — Сократ ведёт наводящими вопросами и не выдаёт готовый ответ. ChatGPT даёт списать; здесь ученик доходит сам.</span>
             </div>
           </div>
           <div className="val">
             <span className="dot">●</span>
             <div>
               <b>Рабочее место в одном</b>
-              <span>Расписание, банк заданий, учёт оплат, отчёты родителям. Расписание и оплаты — бесплатно.</span>
+              <span>Расписание, база задач по ФИПИ, учёт оплат, отчёты родителям. Расписание и оплаты — бесплатно навсегда.</span>
             </div>
           </div>
         </div>
@@ -105,18 +134,51 @@ export default function EgorLanding() {
         <img className="shot" src="/egor-cabinet.png" alt="Экран Сократ AI: прогресс по ученикам" loading="lazy" />
         <p className="cap">реальный экран кабинета Сократ AI</p>
 
+        {/* Цифры синхронны с прод-лендингом sokratai.ru (~10 ч, ×2 учеников) —
+            расхождение между визиткой и сайтом било бы по доверию. */}
         <div className="egor">
           <b>Егор Блинов</b>
-          <div className="role">репетитор физики · выпускник МФТИ · дважды 100-балльник ЕГЭ · создатель Сократ AI</div>
-          <div className="stat">Ведёт 40+ учеников в Сократ AI · освободил ~8 часов в неделю</div>
+          <div className="role">преподаватель МФТИ · дважды 100-балльник ЕГЭ · 10 лет репетиторства · создатель Сократ AI</div>
+          <div className="stat">Освободил ~10 часов в неделю на проверке ДЗ, учёте оплат и отчётах родителям</div>
         </div>
 
+        {/* Конкретная история вместо абстрактного «сравнивала платформы» —
+            она же снимает страх «AI ошибётся» лучше любого заверения. */}
         <div className="quote">
-          «Сравнивала известные платформы — больше всех понравился Сократ AI: оплатила сразу на полгода вперёд.»
-          <div className="who">— Елена Иванова, репетитор физики</div>
+          «Я проверила — вроде всё верно. Сократ поставил 1 из 2 — и оказался прав.»
+          <div className="who">— Елена Иванова, репетитор физики · ведёт в 2 раза больше учеников с Сократом</div>
         </div>
 
         <a className="cta alt" href={REG_URL}>Попробовать 7 дней бесплатно</a>
+
+        {/* Сообщество — вторичный блок ПОСЛЕ обоих CTA (не отбирает конверсию,
+            rule 90: один primary). Ссылки из констант tutorPlanCopy — инлайн-
+            хардкод запрещён; это ЧАТ-сообщество, не «канал Егора». */}
+        <div className="community">
+          <b>Есть вопросы? Загляните в сообщество</b>
+          <p>
+            Репетиторы, прямая линия с командой Сократа и анонсы — можно
+            спросить до регистрации.
+          </p>
+          <div className="links">
+            <a
+              className="tg"
+              href={SOKRAT_COMMUNITY_TELEGRAM_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Чат в Telegram
+            </a>
+            <a
+              href={SOKRAT_COMMUNITY_VK_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Чат в VK
+            </a>
+          </div>
+        </div>
+
         <p className="foot">
           <b>Инструмент репетитора. От репетитора.</b>
           <br />sokratai.ru

@@ -120,7 +120,7 @@
 
 **P0 (фронт):**
 - `src/lib/promoCapture.ts` — **новый** helper: `capturePromoFromUrl(searchParams)` пишет `sokrat-promo`/`sokrat-ref`/`sokrat-utm` в localStorage (идемпотентно, не перезатирать непустое); `getStoredPromo()`.
-- `src/pages/EgorLanding.tsx` — на mount вызвать `capturePromoFromUrl` (belt-and-suspenders: URL уже несёт промо).
+- `src/pages/EgorLanding.tsx` — на mount вызвать `capturePromoFromUrl` (belt-and-suspenders: URL уже несёт промо). **2026-07-23 копия страницы переписана** (маркетинг QR): H1 «×2 учеников» + строка предметов (в зале физики/математики/химики/гуманитарии) + цена «200 ₽ первый месяц» + уточнённая механика промо (интро-месяц вне −20%) + цифры/цитата синхронизированы с прод-лендингом + блок чатов TG/VK после обоих CTA. Детали — memory `project_egor_qr_onboarding.md`.
 - `src/pages/RegisterTutor.tsx` — добавить `useSearchParams` + `capturePromoFromUrl` (**только capture; auth/signUp-логику не трогать**, rule 96). Аналогично `TutorSignupTrial.tsx`, `SignupRouter.tsx`.
 - `src/components/tutor/home/ActivationChecklist.tsx` — тихий бейдж «−20% закреплено» (`getStoredPromo()` && не premium).
 - `src/components/tutor/home/DemoCheckCard.tsx` / `DemoCheckSheet.tsx` — по факту просмотра/прогона демо поднять community-CTA (флаг в localStorage `sokrat-demo-seen`).

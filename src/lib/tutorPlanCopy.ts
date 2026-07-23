@@ -16,19 +16,20 @@ export const TUTOR_SUPPORT_TELEGRAM_URL = 'https://t.me/Analyst_Vladimir';
 /**
  * Сообщество репетиторов — ЧАТ, не канал. Единственный источник ссылок,
  * инлайн-хардкод запрещён. Потребители: CommunityJoinCard (/tutor/home),
- * SocialProof + Footer (лендинг).
+ * SocialProof + Footer (лендинг), EgorLanding (/egor — QR-страница).
  *
- * ⚠️ НЕ путать с «Каналом Егора» (`https://t.me/sokrat_rep` БЕЗ `/16`) — тот
- * живёт инлайн в 5 местах лендинга (Hero, ProductTour3, SocialProof.FOUNDERS,
- * FinalCTA, Footer) и это ДРУГАЯ сущность: канал с анонсами, а не общение
- * репетиторов. До 2026-07-20 здесь стояла ручка канала — кнопка «Чат в
- * Telegram» уводила в анонсы (репорт владельца).
+ * ⚠️ НЕ путать с «Каналом Егора» (`https://t.me/sokrat_rep`) — тот живёт инлайн
+ * в 5 местах лендинга (Hero, ProductTour3, SocialProof.FOUNDERS, FinalCTA,
+ * Footer) и это ДРУГАЯ сущность: канал с анонсами, а не общение репетиторов.
+ * До 2026-07-20 здесь стояла ручка канала — кнопка уводила в анонсы (баг).
  *
- *  - Telegram — пост №16 в канале, внутри invite-ссылка на чат (вход в 2 клика;
- *    прямого invite нет, поэтому в UI пишем «Сообщество в Telegram», не «Чат»).
+ *  - Telegram — ПРЯМАЯ invite-ссылка в чат (владелец выдал 2026-07-20; до этого
+ *    стоял обходной путь через пост `/sokrat_rep/16` = вход в 2 клика, из-за чего
+ *    в UI писали «Сообщество в Telegram»). Теперь вход в 1 клик → в UI честно
+ *    «Чат в Telegram».
  *  - VK — прямая инвайт-ссылка в чат.
  */
-export const SOKRAT_COMMUNITY_TELEGRAM_URL = 'https://t.me/sokrat_rep/16';
+export const SOKRAT_COMMUNITY_TELEGRAM_URL = 'https://t.me/+PbTN16zp_kRlZjli';
 export const SOKRAT_COMMUNITY_VK_URL =
   'https://vk.me/join/WooW6wjwjhNwG7R0rzmKxpEBunNfHq1C3QQ=';
 
