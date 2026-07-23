@@ -302,6 +302,7 @@ export type Database = {
           id: string
           is_archived: boolean
           last_message_at: string | null
+          subject: string | null
           title: string | null
           updated_at: string
           user_id: string
@@ -314,6 +315,7 @@ export type Database = {
           id?: string
           is_archived?: boolean
           last_message_at?: string | null
+          subject?: string | null
           title?: string | null
           updated_at?: string
           user_id: string
@@ -326,6 +328,7 @@ export type Database = {
           id?: string
           is_archived?: boolean
           last_message_at?: string | null
+          subject?: string | null
           title?: string | null
           updated_at?: string
           user_id?: string
@@ -2859,6 +2862,7 @@ export type Database = {
           referred_at: string | null
           referred_by_code: string | null
           registration_source: string | null
+          subjects: string[] | null
           subscription_expires_at: string | null
           subscription_tier: string
           telegram_user_id: number | null
@@ -2891,6 +2895,7 @@ export type Database = {
           referred_at?: string | null
           referred_by_code?: string | null
           registration_source?: string | null
+          subjects?: string[] | null
           subscription_expires_at?: string | null
           subscription_tier?: string
           telegram_user_id?: number | null
@@ -2923,6 +2928,7 @@ export type Database = {
           referred_at?: string | null
           referred_by_code?: string | null
           registration_source?: string | null
+          subjects?: string[] | null
           subscription_expires_at?: string | null
           subscription_tier?: string
           telegram_user_id?: number | null
@@ -4403,6 +4409,7 @@ export type Database = {
           bio: string | null
           booking_link: string | null
           created_at: string | null
+          exam_focus_by_subject: Json
           feature_mock_exams_enabled: boolean
           feature_voice_speaking_enabled: boolean
           gender: string | null
@@ -4423,6 +4430,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          exam_focus_by_subject?: Json
           feature_mock_exams_enabled?: boolean
           feature_voice_speaking_enabled?: boolean
           gender?: string | null
@@ -4443,6 +4451,7 @@ export type Database = {
           bio?: string | null
           booking_link?: string | null
           created_at?: string | null
+          exam_focus_by_subject?: Json
           feature_mock_exams_enabled?: boolean
           feature_voice_speaking_enabled?: boolean
           gender?: string | null
