@@ -73,6 +73,28 @@ export function groupSubjectsBySelection(
 }
 
 /**
+ * Prefill предмета УЧЕНИКА при добавлении (subject-personalization Ф4,
+ * решение владельца 2026-07-23: предмет обязателен, подстановка из профиля):
+ * один контент-предмет → он; несколько → last-used ЕСЛИ он из профиля
+ * (осмысленный дефолт, а не произвольный), иначе первый предмет профиля;
+ * профиль пуст → null (поле пустое + required — гейт-диалог на /tutor/students
+ * обычно уже заставил заполнить профиль). В отличие от
+ * resolveTutorDefaultSubject НЕ падает в physics — молча сохранённый неверный
+ * предмет ученика хуже пустого поля (ревью A2 спеки).
+ */
+export function resolveStudentSubjectPrefill(
+  profileSubjects: readonly string[] | null | undefined,
+  lastUsed: string | null | undefined,
+): string | null {
+  const contentSubjects = normalizeContentSubjects(profileSubjects);
+  if (contentSubjects.length === 0) return null;
+  if (contentSubjects.length === 1) return contentSubjects[0];
+  const fromLastUsed = normalizeSubjectId(lastUsed);
+  if (fromLastUsed && contentSubjects.includes(fromLastUsed)) return fromLastUsed;
+  return contentSubjects[0];
+}
+
+/**
  * Дефолт предмета: [один контент-предмет в профиле] → lastUsed (валидный) →
  * первый контент-предмет профиля → physics.
  * `profileSubjects` может быть undefined (профиль ещё не загружен/нет строки).

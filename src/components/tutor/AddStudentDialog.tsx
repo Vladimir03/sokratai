@@ -33,7 +33,11 @@ import { Switch } from '@/components/ui/switch';
 import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2, Users, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getSubjectLabel, SUBJECTS } from '@/types/homework';
-import { groupSubjectsBySelection } from '@/lib/tutorSubjects';
+import {
+  groupSubjectsBySelection,
+  readHwLastSubject,
+  resolveStudentSubjectPrefill,
+} from '@/lib/tutorSubjects';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import {
   manualAddTutorStudent,
@@ -159,17 +163,16 @@ export function AddStudentDialog({
   // Онбординг v2 — массовое добавление по списку имён (контакт NULL).
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkNames, setBulkNames] = useState('');
+  // Ф4: общий предмет пачки (обязателен, как и в single-add).
+  const [bulkSubject, setBulkSubject] = useState('');
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
 
-  // Prefill предмета ученика ТОЛЬКО при однозначности: ровно один контент-предмет
-  // в профиле репетитора (Егор-физик). Мульти-предметнику молча подставлять нечего
-  // (поле в скрытом аккордеоне — тихая запись неверного предмета хуже пустого).
-  const singleTutorSubject = (() => {
-    const ids = (tutor?.subjects ?? []).filter(
-      (s) => s !== 'other' && SUBJECTS.some((cs) => cs.id === s),
-    );
-    return ids.length === 1 ? ids[0] : undefined;
-  })();
+  // Ф4 (решение владельца 2026-07-23): предмет ОБЯЗАТЕЛЕН + подстановка из
+  // профиля: один → он; мульти → last-used (если из профиля) → первый; пустой
+  // профиль → пусто + required (гейт-диалог на /tutor/students обычно уже
+  // заставил заполнить). Поле вынесено из аккордеона в основную форму.
+  const studentSubjectPrefill =
+    resolveStudentSubjectPrefill(tutor?.subjects, readHwLastSubject()) ?? undefined;
 
   // Умные списки (Ф2): предметы профиля сверху в селекте предмета ученика.
   const subjectGroups = useMemo(
@@ -185,7 +188,7 @@ export function AddStudentDialog({
     learning_goal: '',
     grade: undefined,
     exam_type: undefined,
-    subject: singleTutorSubject,
+    subject: studentSubjectPrefill,
     start_score: undefined,
     target_score: undefined,
     notes: '',
@@ -195,17 +198,18 @@ export function AddStudentDialog({
     gender: null,
   });
 
-  // Review P2 (2026-07-07): lazy-init захватывает singleTutorSubject на mount,
-  // когда useTutor() мог быть ещё не загружен (диалог монтируется вместе со
+  // Review P2 (2026-07-07): lazy-init захватывает prefill на mount, когда
+  // useTutor() мог быть ещё не загружен (диалог монтируется вместе со
   // страницей) → prefill терялся. One-shot при открытии: subject пуст +
-  // предмет однозначен → проставить; ручной выбор не перетираем (functional
-  // update смотрит на актуальный prev.subject).
+  // prefill есть → проставить; ручной выбор не перетираем (functional
+  // update смотрит на актуальный prev). Покрывает и bulk-предмет.
   const subjectPrefilledRef = useRef(false);
   useEffect(() => {
-    if (!open || subjectPrefilledRef.current || !singleTutorSubject) return;
+    if (!open || subjectPrefilledRef.current || !studentSubjectPrefill) return;
     subjectPrefilledRef.current = true;
-    setFormData((prev) => (prev.subject ? prev : { ...prev, subject: singleTutorSubject }));
-  }, [open, singleTutorSubject]);
+    setFormData((prev) => (prev.subject ? prev : { ...prev, subject: studentSubjectPrefill }));
+    setBulkSubject((prev) => (prev ? prev : studentSubjectPrefill));
+  }, [open, studentSubjectPrefill]);
 
   const resetManualForm = () => {
     setFormData({
@@ -215,7 +219,7 @@ export function AddStudentDialog({
       learning_goal: '',
       grade: undefined,
       exam_type: undefined,
-      subject: singleTutorSubject,
+      subject: studentSubjectPrefill,
       start_score: undefined,
       target_score: undefined,
       notes: '',
@@ -230,6 +234,7 @@ export function AddStudentDialog({
     setNewGroupName('');
     setBulkMode(false);
     setBulkNames('');
+    setBulkSubject(studentSubjectPrefill ?? '');
   };
 
   const handleDialogOpenChange = (nextOpen: boolean) => {
@@ -410,6 +415,15 @@ export function AddStudentDialog({
       toast({ title: 'За раз не больше 50 имён', variant: 'destructive' });
       return;
     }
+    // Ф4: предмет обязателен и для пачки (один общий на всех).
+    if (!bulkSubject) {
+      toast({
+        title: 'Укажите предмет занятий',
+        description: 'Один предмет применится ко всем ученикам списка',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (miniGroupsEnabled && isInMiniGroup && !selectedGroupId) {
       toast({
         title: 'Выберите мини-группу',
@@ -421,7 +435,7 @@ export function AddStudentDialog({
 
     setIsBulkSubmitting(true);
     try {
-      const res = await bulkAddTutorStudents(names);
+      const res = await bulkAddTutorStudents(names, bulkSubject);
       const okN = res.created.length;
       const errN = res.errors.length;
 
@@ -459,6 +473,7 @@ export function AddStudentDialog({
       });
       if (okN > 0) {
         setBulkNames('');
+        setBulkSubject(studentSubjectPrefill ?? '');
         setIsInMiniGroup(false);
         setSelectedGroupId('');
         setBulkMode(false);
@@ -556,6 +571,16 @@ export function AddStudentDialog({
     // Validate required fields
     if (!formData.name.trim()) {
       toast({ title: 'Введите имя ученика', variant: 'destructive' });
+      return;
+    }
+    // Ф4 (решение владельца 2026-07-23): предмет обязателен — AI-контекст,
+    // фильтры и аналитика без него слепы (77% связок были пустыми).
+    if (!formData.subject) {
+      toast({
+        title: 'Укажите предмет занятий',
+        description: 'Предмет ведёт AI-проверку и фильтры кабинета',
+        variant: 'destructive',
+      });
       return;
     }
     const hasEmail = formData.email?.trim();
@@ -768,6 +793,41 @@ export function AddStudentDialog({
                   </p>
                 </div>
 
+                {/* Ф4: общий предмет пачки — обязателен (применится ко всем). */}
+                <div className="space-y-2">
+                  <Label htmlFor="bulk-subject">Предмет занятий *</Label>
+                  <Select value={bulkSubject || undefined} onValueChange={setBulkSubject}>
+                    <SelectTrigger id="bulk-subject" className="text-base">
+                      <SelectValue placeholder="Выберите предмет" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {subjectGroups.yours.length > 0 ? (
+                        <>
+                          <SelectGroup>
+                            <SelectLabel>Ваши предметы</SelectLabel>
+                            {subjectGroups.yours.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                          <SelectGroup>
+                            <SelectLabel>Другие предметы</SelectLabel>
+                            {subjectGroups.others.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </>
+                      ) : (
+                        subjectGroups.others.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Один предмет на всю пачку — применится к каждому ученику списка.
+                  </p>
+                </div>
+
                 {renderMiniGroupSection()}
 
                 <div className="flex justify-end gap-2">
@@ -799,6 +859,51 @@ export function AddStudentDialog({
                       onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity('Пожалуйста, заполните это поле')}
                       onInput={(e) => (e.target as HTMLInputElement).setCustomValidity('')}
                     />
+                  </div>
+
+                  {/* Ф4 (решение владельца 2026-07-23): предмет ОБЯЗАТЕЛЕН и
+                      живёт в основной форме (был в аккордеоне «Дополнительно» —
+                      77% связок без предмета). Prefill из профиля репетитора;
+                      умные группы Ф2. Канонический словарь SUBJECTS (id в
+                      tutor_students.subject). */}
+                  <div className="space-y-2">
+                    <Label htmlFor="subject">Предмет занятий *</Label>
+                    <Select
+                      value={formData.subject || undefined}
+                      onValueChange={(value) => handleFormChange('subject', value)}
+                    >
+                      <SelectTrigger id="subject" className="text-base">
+                        <SelectValue placeholder="Выберите предмет" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {subjectGroups.yours.length > 0 ? (
+                          <>
+                            <SelectGroup>
+                              <SelectLabel>Ваши предметы</SelectLabel>
+                              {subjectGroups.yours.map((s) => (
+                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                              ))}
+                            </SelectGroup>
+                            <SelectGroup>
+                              <SelectLabel>Другие предметы</SelectLabel>
+                              {subjectGroups.others.map((s) => (
+                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </>
+                        ) : (
+                          subjectGroups.others.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                          ))
+                        )}
+                        {formData.subject &&
+                        !SUBJECTS.some((s) => s.id === formData.subject) ? (
+                          <SelectItem value={formData.subject}>
+                            {getSubjectLabel(formData.subject)}
+                          </SelectItem>
+                        ) : null}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="space-y-2">
@@ -978,59 +1083,6 @@ export function AddStudentDialog({
                             <SelectContent>
                               <SelectItem value="ege">ЕГЭ</SelectItem>
                               <SelectItem value="oge">ОГЭ</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor="subject">Предмет</Label>
-                          {/* Канонический словарь SUBJECTS (id в tutor_students.subject)
-                              вместо free-text — сравнимо с остальным приложением.
-                              Legacy free-text значение (edit) — отдельной опцией,
-                              чтобы не терять сохранённое. */}
-                          <Select
-                            value={formData.subject || undefined}
-                            onValueChange={(value) =>
-                              handleFormChange(
-                                'subject',
-                                value === '__none__' ? undefined : value
-                              )
-                            }
-                          >
-                            <SelectTrigger id="subject" className="text-base">
-                              <SelectValue placeholder="Не указан" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__none__">Не указан</SelectItem>
-                              {/* Умные списки (Ф2): предметы профиля сверху,
-                                  остальные под «Другие предметы»; ничего не
-                                  прячем. Профиль пуст → плоский список. */}
-                              {subjectGroups.yours.length > 0 ? (
-                                <>
-                                  <SelectGroup>
-                                    <SelectLabel>Ваши предметы</SelectLabel>
-                                    {subjectGroups.yours.map((s) => (
-                                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                  <SelectGroup>
-                                    <SelectLabel>Другие предметы</SelectLabel>
-                                    {subjectGroups.others.map((s) => (
-                                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                                    ))}
-                                  </SelectGroup>
-                                </>
-                              ) : (
-                                subjectGroups.others.map((s) => (
-                                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                                ))
-                              )}
-                              {formData.subject &&
-                              !SUBJECTS.some((s) => s.id === formData.subject) ? (
-                                <SelectItem value={formData.subject}>
-                                  {getSubjectLabel(formData.subject)}
-                                </SelectItem>
-                              ) : null}
                             </SelectContent>
                           </Select>
                         </div>

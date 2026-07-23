@@ -98,6 +98,7 @@ import { buildAllowedSignedUrlPrefixes } from "../_shared/image-domains.ts";
 import { SUPABASE_PROXY_URL, rewriteToDirect } from "../_shared/proxy-url.ts";
 import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-rubrics/index.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
+import { buildPedagogyContextBlock, loadLearningContext } from "../_shared/learning-context.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -1263,6 +1264,46 @@ async function processAIRequest(
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 
+  // Ф5 (subject-personalization, 2026-07-23): педагогический контекст ученика
+  // (класс/тип/цель из profiles) — server-side по userId (anti-tamper, клиент
+  // ничего не шлёт). Только ТОН объяснений; never-throws → null при сбое.
+  // Промис стартует здесь, await — при сборке промпта (нулевая доп. латентность).
+  const learningContextPromise = loadLearningContext(adminSupabase, userId);
+
+  // Ф5: предметный СНАПШОТ свободного чата — chats.subject по chatId (guided
+  // путь свой subject резолвит из assignment ниже; там снапшот не читаем).
+  // Ownership-чек user_id === userId (mismatch → молча игнор): чужой chatId
+  // не должен подтягивать контекст. Deploy-skew-safe: колонки нет → error →
+  // null (warn), путь живёт как раньше.
+  const chatSubjectPromise: Promise<string | null> =
+    !guidedHomeworkAssignmentId && chatId
+      ? adminSupabase
+        .from("chats")
+        .select("subject, user_id")
+        .eq("id", chatId)
+        .maybeSingle()
+        .then(({ data, error }: {
+          data: { subject?: unknown; user_id?: unknown } | null;
+          error: { message: string } | null;
+        }) => {
+          if (error) {
+            console.warn("chat_subject_snapshot_lookup_failed", { error: error.message });
+            return null;
+          }
+          if (!data || data.user_id !== userId) return null;
+          const s = typeof data.subject === "string" ? data.subject.trim() : "";
+          // typeof-чек (ревью P2-2): plain-object словарь наследует prototype
+          // («constructor» и т.п. — truthy функции) — пропускаем ТОЛЬКО строки.
+          return s.length > 0 && typeof SUBJECT_LABELS_DENO[s] === "string" ? s : null;
+        })
+        .catch((e: unknown) => {
+          console.warn("chat_subject_snapshot_lookup_threw", {
+            error: e instanceof Error ? e.message : String(e),
+          });
+          return null;
+        })
+      : Promise.resolve(null);
+
   // Fetch tutor's reference solution server-side for guided homework context.
   // Student-side API never exposes solution_text / solution_image_urls directly —
   // we verify here that `userId` is assigned to this homework before loading.
@@ -1780,6 +1821,31 @@ async function processAIRequest(
     const nameGuidance = nameLines.join("\n");
     // Append after solution block, before telegram appendix (see PLACEMENT note).
     effectiveSystemPrompt = `${effectiveSystemPrompt}\n${nameGuidance}`;
+  }
+
+  // Ф5 (2026-07-23): свободный чат — лёгкий предметный блок из СНАПШОТА
+  // диалога (chats.subject; guided-путь получил полный subjectBlock выше).
+  // Детерминизм: у ученика с двумя репетиторами предмет чата задан диалогом,
+  // а не «случайным» полем профиля.
+  const chatSubjectSnapshot = await chatSubjectPromise;
+  if (!guidedHomeworkAssignmentId && chatSubjectSnapshot) {
+    effectiveSystemPrompt = [
+      effectiveSystemPrompt,
+      "",
+      `Контекст диалога: предмет — ${getSubjectLabelDeno(chatSubjectSnapshot)}.`,
+      "Держись этого предмета в объяснениях и примерах; на вопрос явно про другое ответь, но мягко вернись к предмету диалога.",
+    ].join("\n");
+  }
+
+  // Ф5: педагогический контекст (класс/тип/цель) — ТОЛЬКО тон объяснений.
+  // Append'ится отдельным блоком ВНЕ методологии subjectBlock'а (evaluation/
+  // pedagogy split — запрет влиять на оценку зашит в текст блока).
+  // examHint — только free-чат: в guided экзамен известен (exam_type ДЗ).
+  const pedagogyBlock = buildPedagogyContextBlock(await learningContextPromise, {
+    includeExamHint: !guidedHomeworkAssignmentId,
+  });
+  if (pedagogyBlock) {
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n${pedagogyBlock}`;
   }
 
   if (responseProfile === "telegram_compact") {

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { SUBJECTS } from "@/types/homework";
 
 interface CreateChatDialogProps {
   open: boolean;
@@ -22,6 +23,9 @@ interface CreateChatDialogProps {
 export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDialogProps) {
   const [title, setTitle] = useState("");
   const [icon, setIcon] = useState("💬");
+  // Ф5 (subject-personalization): опц. предмет диалога → chats.subject —
+  // детерминированный контекст для AI (сервер читает снапшот по chatId).
+  const [subject, setSubject] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -62,24 +66,32 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
     const tempId = `temp-${Date.now()}`;
     const optimisticTitle = title.trim();
     const optimisticIcon = icon || '💬';
-    
+    const optimisticSubject = subject || null;
+
     // Immediately close modal and show optimistic chat
     setTitle("");
     setIcon("💬");
+    setSubject("");
     onClose();
     onChatCreated(tempId);
 
     setIsCreating(true);
 
     try {
+      // `subject` — narrow-cast escape hatch до регенерации types.ts Lovable
+      // (паттерн tutorProfileApi gender): колонка chats.subject — миграция
+      // 20260723130000. Ключ шлётся ТОЛЬКО при выбранном предмете (ревью
+      // P2-3): если миграция ещё не применена, ломается только subject-путь,
+      // а не создание ЛЮБОГО чата.
       const { data: newChat, error } = await supabase
         .from('chats')
         .insert({
           user_id: user.id,
           chat_type: 'custom',
           title: optimisticTitle,
-          icon: optimisticIcon
-        })
+          icon: optimisticIcon,
+          ...(optimisticSubject ? { subject: optimisticSubject } : {}),
+        } as never)
         .select()
         .single();
 
@@ -140,6 +152,25 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
               maxLength={2}
               disabled={isCreating}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="chat-subject">Предмет (опционально)</Label>
+            <select
+              id="chat-subject"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              disabled={isCreating}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-[16px] [touch-action:manipulation]"
+            >
+              <option value="">Без предмета</option>
+              {SUBJECTS.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Сократ будет держаться этого предмета в объяснениях.
+            </p>
           </div>
         </div>
 

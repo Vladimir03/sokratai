@@ -22,6 +22,7 @@ import {
 import { rewriteToDirect, rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 import type { SubjectCriterionTemplate } from "../_shared/subject-rubrics/index.ts";
 import { computeFinalScore } from "../_shared/score-compute.ts";
+import { buildLearningContext, type LearningContext } from "../_shared/learning-context.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
 import {
   subjectToWhisperLang,
@@ -7681,10 +7682,22 @@ async function resolveStudentDisplayName(
  */
 type StudentGender = "male" | "female" | null;
 
+/**
+ * subject-personalization Ф5 (2026-07-23): резолвер дополнительно собирает
+ * педагогический контекст (класс/тип/цель из profiles — та же строка, что и
+ * fallback-имя, лишних запросов нет). Контекст идёт ТОЛЬКО в AI-промпты
+ * (тон объяснений, НЕ оценка — _shared/learning-context.ts); в client-ответы
+ * identity-полей НЕ добавлять (анти-leak: существующие вызыватели читают
+ * только name/gender).
+ */
 async function resolveStudentIdentity(
   db: SupabaseClient,
   studentAssignmentId: string,
-): Promise<{ name: string | null; gender: StudentGender }> {
+): Promise<{
+  name: string | null;
+  gender: StudentGender;
+  learningContext: LearningContext | null;
+}> {
   try {
     const { data: sa, error: saErr } = await db
       .from("homework_tutor_student_assignments")
@@ -7699,7 +7712,9 @@ async function resolveStudentIdentity(
     }
     const studentId = sa?.student_id as string | undefined;
     const assignmentId = sa?.assignment_id as string | undefined;
-    if (!studentId || !assignmentId) return { name: null, gender: null };
+    if (!studentId || !assignmentId) {
+      return { name: null, gender: null, learningContext: null };
+    }
 
     const { data: assn, error: assnErr } = await db
       .from("homework_tutor_assignments")
@@ -7763,10 +7778,11 @@ async function resolveStudentIdentity(
       }
     }
 
-    // Always read profiles for fallback name + fallback gender.
+    // Always read profiles for fallback name + fallback gender + pedagogy
+    // context (Ф5: grade/learner_type/learning_goal — тон, не оценка).
     const { data: prof, error: profErr } = await db
       .from("profiles")
-      .select("full_name, username, gender")
+      .select("full_name, username, gender, grade, learner_type, learning_goal")
       .eq("id", studentId)
       .maybeSingle();
     if (profErr) {
@@ -7796,14 +7812,18 @@ async function resolveStudentIdentity(
       if (pg === "male" || pg === "female") resolvedGender = pg;
     }
 
-    return { name: resolvedName, gender: resolvedGender };
+    return {
+      name: resolvedName,
+      gender: resolvedGender,
+      learningContext: prof ? buildLearningContext(prof) : null,
+    };
   } catch (err) {
     // Non-fatal: AI should still work without name/gender.
     console.warn("resolve_student_identity_failed", {
       studentAssignmentId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { name: null, gender: null };
+    return { name: null, gender: null, learningContext: null };
   }
 }
 
@@ -9556,6 +9576,9 @@ async function runStudentAnswerGrading(args: {
       : undefined,
     studentName,
     studentGender,
+    // Ф5 (2026-07-23): педагогический контекст — ТОЛЬКО тон объяснений,
+    // вставляется билдером выше grading-секции (evaluation/pedagogy split).
+    learningContext: studentIdentity.learningContext,
     // ai-usage-logging (2026-07-06): source='homework_check'. Fire-and-forget.
     logDb: db,
     logUserId: userId,
@@ -10693,6 +10716,8 @@ async function handleRequestHint(
     hintCount: (activeState.hint_count as number) ?? 0,
     studentName,
     studentGender,
+    // Ф5 (2026-07-23): педагогический контекст — только тон подсказки.
+    learningContext: studentIdentity.learningContext,
     // ai-usage-logging (2026-07-06): source='homework_hint'. Fire-and-forget.
     logDb: db,
     logUserId: userId,

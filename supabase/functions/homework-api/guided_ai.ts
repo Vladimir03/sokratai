@@ -36,6 +36,7 @@ import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_sha
 // only — the homework check/hint AI call is the single grading path for BOTH
 // homework write-paths (rule 40), so instrumenting here covers both.
 import { makeUsageLogger, type TokenUsageAdminClient } from "../_shared/token-usage.ts";
+import { buildPedagogyContextBlock, type LearningContext } from "../_shared/learning-context.ts";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -333,6 +334,13 @@ export interface EvaluateStudentAnswerParams {
    */
   studentGender?: "male" | "female" | null;
   /**
+   * Ф5 (2026-07-23) — педагогический контекст (класс/тип/цель) из profiles.
+   * Влияет ТОЛЬКО на тон feedback (блок вставляется ВЫШЕ grading-секции,
+   * evaluation/pedagogy split — _shared/learning-context.ts). Никогда не
+   * меняет verdict/ai_score.
+   */
+  learningContext?: LearningContext | null;
+  /**
    * Observability (ai-usage-logging, 2026-07-06): service-role client + student
    * user id → `token_usage_logs` (source='homework_check', assignment_id from
    * `assignmentId`). Fire-and-forget; absence = no logging. Does NOT affect the
@@ -393,6 +401,8 @@ export interface GenerateHintParams {
   studentName?: string | null;
   /** See EvaluateStudentAnswerParams.studentGender (Phase 8). */
   studentGender?: "male" | "female" | null;
+  /** See EvaluateStudentAnswerParams.learningContext (Ф5 — только тон). */
+  learningContext?: LearningContext | null;
   /**
    * Observability (ai-usage-logging, 2026-07-06): service-role client + student
    * user id → `token_usage_logs` (source='homework_hint', assignment_id from
@@ -1855,6 +1865,11 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     // (выше priority AI attention). Раньше был в конце — тонул в 100+ строках
     // ФИПИ methodology / anti-spoiler / etc. См. .claude/rules/40-homework-system.md.
     studentNameGuidance,
+    // Ф5 (2026-07-23): педагогический контекст (класс/цель) — ТОЛЬКО тон.
+    // СТРУКТУРНО выше МЕТОДОЛОГИИ/ПРАВИЛ ОЦЕНКИ (evaluation/pedagogy split);
+    // запрет влиять на балл зашит в сам текст блока (_shared/learning-context).
+    // includeExamHint: false — экзамен ДЗ известен серверу (exam_type).
+    buildPedagogyContextBlock(params.learningContext ?? null, { includeExamHint: false }),
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
@@ -2071,6 +2086,10 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
     // (после role/subject/CEFR, перед task content). Раньше был в конце —
     // тонул в 80+ строках hint level rules + ФИПИ methodology. См. .claude/rules/40-homework-system.md.
     buildStudentNameGuidance(params.studentName, params.studentGender ?? null),
+    // Ф5 (2026-07-23): педагогический контекст — только тон подсказки
+    // (evaluation/pedagogy split; подсказки балл не ставят, но инвариант един).
+    // includeExamHint: false — экзамен ДЗ известен серверу (exam_type).
+    buildPedagogyContextBlock(params.learningContext ?? null, { includeExamHint: false }),
     "",
     "УРОВЕНЬ ПОДСКАЗКИ: 1/3",
     "- Level 1 (nudge): одним коротким вопросом направь внимание на ключевое правило, приём или элемент условия",

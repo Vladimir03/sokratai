@@ -63,6 +63,10 @@ async function createPlaceholderByName(
   admin: ReturnType<typeof createClient>,
   tutorId: string,
   name: string,
+  // Ф4 (subject-personalization, 2026-07-23): общий предмет пачки. Optional —
+  // deploy-skew: старый бандл subject не шлёт, добавление НЕ блокируем
+  // (обязательность — фронтом).
+  subject: string | null = null,
 ): Promise<{ tutor_student_id: string; student_id: string }> {
   const userEmail = await generateUniqueShortTempEmail(admin);
   const { data: authData, error: authError } = await admin.auth.admin.createUser({
@@ -93,7 +97,12 @@ async function createPlaceholderByName(
 
   const { data: ts, error: insErr } = await admin
     .from("tutor_students")
-    .insert({ tutor_id: tutorId, student_id: studentId, status: "active" })
+    .insert({
+      tutor_id: tutorId,
+      student_id: studentId,
+      status: "active",
+      ...(subject ? { subject } : {}),
+    })
     .select("id")
     .single();
   if (insErr || !ts) {
@@ -270,6 +279,15 @@ Deno.serve(async (req) => {
         );
       }
 
+      // Ф4 (2026-07-23): общий предмет пачки → tutor_students.subject каждой
+      // строки. Лояльно (missing/мусор → null): deploy-skew со старым бандлом
+      // не должен блокировать добавление; обязательность — на фронте.
+      const bulkSubject =
+        typeof body.subject === "string" && body.subject.trim().length > 0 &&
+        body.subject.trim().length <= 100
+          ? body.subject.trim()
+          : null;
+
       const created: Array<{ tutor_student_id: string; student_id: string; name: string }> = [];
       const errors: Array<{ name: string; error: string }> = [];
       for (const nm of names) {
@@ -279,7 +297,7 @@ Deno.serve(async (req) => {
           continue;
         }
         try {
-          const r = await createPlaceholderByName(supabaseAdmin, tutor.id, nm);
+          const r = await createPlaceholderByName(supabaseAdmin, tutor.id, nm, bulkSubject);
           created.push({ ...r, name: nm });
         } catch (e) {
           errors.push({ name: nm, error: e instanceof Error ? e.message : String(e) });

@@ -633,9 +633,15 @@ export async function manualAddTutorStudent(
  */
 export async function bulkAddTutorStudents(
   names: string[],
+  /** Ф4 (2026-07-23): общий предмет на пачку → tutor_students.subject каждой строки. */
+  subject?: string | null,
 ): Promise<BulkAddTutorStudentsResponse> {
   const { data, error } = await supabase.functions.invoke("tutor-manual-add-student", {
-    body: { action: "bulk-add-students", names },
+    body: {
+      action: "bulk-add-students",
+      names,
+      ...(subject ? { subject } : {}),
+    },
   });
 
   if (error) {
