@@ -291,6 +291,17 @@ function TutorHomeworkTemplatesContent() {
   const [subjectFilter, setSubjectFilter] = useState<ModernHomeworkSubject | 'all'>(() =>
     profileSubjects.length === 1 ? (profileSubjects[0] as ModernHomeworkSubject) : 'all',
   );
+  // Ревью 5.6 P2 №5: холодный кэш — профиль приезжает ПОСЛЕ lazy-init →
+  // одно-предметник оставался на 'all'. One-shot доводка, пока фильтр не
+  // трогали руками (не клоббер — паттерн InputStage).
+  const filterTouchedRef = useRef(false);
+  const singleProfileSubject = profileSubjects.length === 1 ? profileSubjects[0] : null;
+  useEffect(() => {
+    if (!singleProfileSubject || filterTouchedRef.current) return;
+    setSubjectFilter((prev) =>
+      prev === 'all' ? (singleProfileSubject as ModernHomeworkSubject) : prev,
+    );
+  }, [singleProfileSubject]);
   const subjectFilters = useMemo(
     () => [
       SUBJECT_FILTERS[0],
@@ -441,7 +452,10 @@ function TutorHomeworkTemplatesContent() {
           {subjectFilters.map((tab) => (
             <button
               key={tab.value}
-              onClick={() => setSubjectFilter(tab.value)}
+              onClick={() => {
+                filterTouchedRef.current = true;
+                setSubjectFilter(tab.value);
+              }}
               className={`px-3 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 subjectFilter === tab.value
                   ? 'border-primary text-primary'

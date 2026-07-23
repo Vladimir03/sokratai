@@ -40,6 +40,82 @@ const scale = await bundleTs("src/lib/mockExamScaleEge2025.ts");
 
 const sum = (map) => Object.values(map).reduce((a, b) => a + b, 0);
 
+// ─── Замороженные полные карты (ревью 5.6 P2 №8): суммы не ловят компенсирующие
+// правки («КИМ 5: 2→1, КИМ 6: 2→3» даёт ту же Σ). Эталоны сняты из
+// ДО-registry источников (kbKimScores/variantTaskDraft на коммите 50e9ed6);
+// осознанное обновление ФИПИ = правка литерала здесь + подтверждение
+// предметника (Егор/Милада). ─────────────────────────────────────────────────
+
+const FROZEN_PHYSICS_EGE_SCORES = {
+  1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 1, 8: 1, 9: 2, 10: 2,
+  11: 1, 12: 1, 13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 2, 19: 1, 20: 1,
+  21: 3, 22: 2, 23: 2, 24: 3, 25: 3, 26: 4,
+};
+const FROZEN_PHYSICS_OGE_SCORES = {
+  1: 2, 2: 2, 3: 1, 4: 2, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
+  12: 2, 13: 2, 14: 2, 15: 1, 16: 2, 17: 3, 18: 2, 19: 2, 20: 3, 21: 3, 22: 3,
+};
+const FROZEN_SOCIAL_EGE_SCORES = {
+  1: 1, 2: 2, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2,
+  9: 1, 10: 2, 11: 2, 12: 1, 13: 2, 14: 2, 15: 2, 16: 2,
+};
+const FROZEN_PHYSICS_EGE_CHECK_MODES = {
+  5: "multi_choice", 9: "multi_choice", 14: "multi_choice", 18: "multi_choice",
+  6: "ordered", 10: "ordered", 15: "ordered", 17: "ordered",
+  20: "task20",
+};
+const FROZEN_SOCIAL_EGE_CHECK_MODES = {
+  6: "ordered_lenient", 13: "ordered_lenient", 15: "ordered_lenient",
+  2: "multi_choice", 4: "multi_choice", 5: "multi_choice", 7: "multi_choice",
+  8: "multi_choice", 10: "multi_choice", 11: "multi_choice", 14: "multi_choice",
+  16: "multi_choice",
+  1: "task20", 3: "task20", 9: "task20", 12: "task20",
+};
+
+test("registry: полные карты = замороженные эталоны (deepEqual, не только Σ)", () => {
+  assert.deepEqual(
+    profiles.getExamProfile("physics", "ege").kimPrimaryScores,
+    FROZEN_PHYSICS_EGE_SCORES,
+  );
+  assert.deepEqual(
+    profiles.getExamProfile("physics", "oge").kimPrimaryScores,
+    FROZEN_PHYSICS_OGE_SCORES,
+  );
+  assert.deepEqual(
+    profiles.getExamProfile("social", "ege").kimPrimaryScores,
+    FROZEN_SOCIAL_EGE_SCORES,
+  );
+  assert.deepEqual(
+    profiles.getExamProfile("physics", "ege").part1CheckModes,
+    FROZEN_PHYSICS_EGE_CHECK_MODES,
+  );
+  assert.deepEqual(
+    profiles.getExamProfile("social", "ege").part1CheckModes,
+    FROZEN_SOCIAL_EGE_CHECK_MODES,
+  );
+});
+
+test("sweep: обёртки = registry для КАЖДОГО (профиль × КИМ), не только канарейки", () => {
+  for (const p of profiles.listExamProfiles()) {
+    for (const [kimStr, score] of Object.entries(p.kimPrimaryScores ?? {})) {
+      const kim = Number(kimStr);
+      assert.equal(
+        kbScores.getKimPrimaryScoreForSubject(p.subject, p.exam, kim),
+        score,
+        `балл ${p.subject}:${p.exam} КИМ ${kim}`,
+      );
+    }
+    for (const [kimStr, mode] of Object.entries(p.part1CheckModes ?? {})) {
+      const kim = Number(kimStr);
+      assert.equal(
+        variantDraft.inferPart1CheckMode(p.subject, p.exam, kim),
+        mode,
+        `режим ${p.subject}:${p.exam} КИМ ${kim}`,
+      );
+    }
+  }
+});
+
 test("registry: суммы первичных баллов ФИПИ (канарейки предметников)", () => {
   const phEge = profiles.getExamProfile("physics", "ege");
   const phOge = profiles.getExamProfile("physics", "oge");

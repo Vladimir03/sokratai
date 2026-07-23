@@ -797,7 +797,7 @@ export function AddStudentDialog({
                 <div className="space-y-2">
                   <Label htmlFor="bulk-subject">Предмет занятий *</Label>
                   <Select value={bulkSubject || undefined} onValueChange={setBulkSubject}>
-                    <SelectTrigger id="bulk-subject" className="text-base">
+                    <SelectTrigger id="bulk-subject" className="min-h-[44px] text-base">
                       <SelectValue placeholder="Выберите предмет" />
                     </SelectTrigger>
                     <SelectContent>
@@ -872,7 +872,7 @@ export function AddStudentDialog({
                       value={formData.subject || undefined}
                       onValueChange={(value) => handleFormChange('subject', value)}
                     >
-                      <SelectTrigger id="subject" className="text-base">
+                      <SelectTrigger id="subject" className="min-h-[44px] text-base">
                         <SelectValue placeholder="Выберите предмет" />
                       </SelectTrigger>
                       <SelectContent>

@@ -128,6 +128,9 @@ export function InputStage({
   );
   const userTouchedSubjectRef = useRef(false);
   const subjectAutoSetRef = useRef(false);
+  // Ф3 (ревью 5.6 P1 №3): «Тип» выбран руками → смена предмета/поздний профиль
+  // его не пересчитывают (иначе клоббер явного выбора тутора).
+  const examTouchedRef = useRef(false);
   // ВОЛНА 5: тема по умолчанию на ВЕСЬ пакет (необязательно) — предмет → тип →
   // тема → подтема. Применится ко всем задачам (переопределение по одной — в
   // ревью). Только KB-назначение (fixedSubject === undefined).
@@ -166,6 +169,13 @@ export function InputStage({
     if (!profs || profs.length === 0) return; // ждём профиль
     subjectAutoSetRef.current = true;
     const resolved = resolveTutorDefaultSubject(profs, loadLastClassification().subject ?? null);
+    if (resolved === subject && !examTouchedRef.current) {
+      // Предмет не изменился, но exam-init мог пройти БЕЗ exam_focus (холодный
+      // кэш) → доводим «Тип» уже с картой фокусов (ревью 5.6 P1 №3).
+      setDefaultExam(
+        resolveTutorDefaultExamEgeOge(resolved, tutorProfile?.exam_focus_by_subject) ?? '',
+      );
+    }
     if (resolved !== subject) {
       setSubject(resolved);
       setDefaultTopicId('');
@@ -715,6 +725,14 @@ export function InputStage({
               setSubject(v);
               setDefaultTopicId('');
               setDefaultSubtopicId('');
+              // Ф3 (ревью 5.6 P1 №3): «Тип» не трогали → пересчёт под новый
+              // предмет (stale ЕГЭ физики не должен уезжать в химию + не
+              // травить её per-subject last-used на extract).
+              if (!examTouchedRef.current) {
+                setDefaultExam(
+                  resolveTutorDefaultExamEgeOge(v, tutorProfile?.exam_focus_by_subject) ?? '',
+                );
+              }
             }}
             disabled={isExtracting}
             className="w-full rounded-lg border border-socrat-border px-3 py-2 transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
@@ -740,6 +758,7 @@ export function InputStage({
                 aria-label="Тип задания по умолчанию"
                 value={defaultExam}
                 onChange={(e) => {
+                  examTouchedRef.current = true;
                   setDefaultExam(e.target.value as '' | 'ege' | 'oge');
                   setDefaultTopicId('');
                   setDefaultSubtopicId('');

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -36,6 +36,15 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
   const [filterSubject, setFilterSubject] = useState<string>(() =>
     profileSubjects.length === 1 ? profileSubjects[0] : 'all',
   );
+  // Ревью 5.6 P2 №5: холодный кэш — профиль приезжает ПОСЛЕ lazy-init →
+  // одно-предметник оставался на 'all'. One-shot доводка дефолта, пока тутор
+  // не трогал фильтр руками (не клоббер — паттерн InputStage).
+  const filterTouchedRef = useRef(false);
+  const singleProfileSubject = profileSubjects.length === 1 ? profileSubjects[0] : null;
+  useEffect(() => {
+    if (!singleProfileSubject || filterTouchedRef.current) return;
+    setFilterSubject((prev) => (prev === 'all' ? singleProfileSubject : prev));
+  }, [singleProfileSubject]);
   const { templates, loading } = useTutorHomeworkTemplates(
     filterSubject !== 'all' ? (filterSubject as HomeworkSubject) : undefined,
     tab,
@@ -92,7 +101,10 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
             ].map((s) => (
               <button
                 key={s}
-                onClick={() => setFilterSubject(s)}
+                onClick={() => {
+                  filterTouchedRef.current = true;
+                  setFilterSubject(s);
+                }}
                 className={`px-3 py-1 text-xs rounded-full border transition-colors ${
                   filterSubject === s
                     ? 'bg-primary text-primary-foreground border-primary'

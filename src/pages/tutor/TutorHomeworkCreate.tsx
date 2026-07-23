@@ -543,6 +543,10 @@ function TutorHomeworkCreateContent() {
       exam_type: resolveCreateDefaultExam(subject),
     };
   });
+  // Ф3 (ревью 5.6 P1 №3): пока экзамен не выбран руками — смена предмета
+  // пересчитывает exam_type под НОВЫЙ предмет (иначе stale экзамен прежнего
+  // предмета молча уезжает в ДЗ и на save травит per-subject last-used).
+  const examTouchedRef = useRef(false);
 
   // ── Tasks ──
   const [tasks, setTasks] = useState<DraftTask[]>([createEmptyTask()]);
@@ -2037,7 +2041,12 @@ function TutorHomeworkCreateContent() {
                   const haystack = [meta.title, ...tasks.map((t) => t.task_text)].join(' \n ');
                   nextCefr = detectCefrLevelFromText(haystack);
                 }
-                setMeta({ ...meta, subject: nextSubject, cefr_level: nextCefr });
+                // Ф3: экзамен не трогали руками (и не edit-режим) → пересчёт
+                // под новый предмет (см. examTouchedRef).
+                const nextExam = !isEditMode && !examTouchedRef.current
+                  ? resolveCreateDefaultExam(nextSubject)
+                  : meta.exam_type;
+                setMeta({ ...meta, subject: nextSubject, cefr_level: nextCefr, exam_type: nextExam });
                 if (becameLanguage && nextCefr) {
                   setTasks((prev) => prev.map((t) => ({ ...t, cefr_level: nextCefr })));
                 }
@@ -2054,7 +2063,10 @@ function TutorHomeworkCreateContent() {
             <select
               id="hw-exam-type"
               value={meta.exam_type ?? 'ege'}
-              onChange={(e) => setMeta({ ...meta, exam_type: e.target.value as 'ege' | 'oge' })}
+              onChange={(e) => {
+                examTouchedRef.current = true;
+                setMeta({ ...meta, exam_type: e.target.value as 'ege' | 'oge' });
+              }}
               className="w-full border border-slate-200 rounded-md px-3 py-2 bg-white"
               style={{ fontSize: '16px', touchAction: 'manipulation' }}
             >

@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { logAnalyticsEventOnce } from "../_shared/analytics.ts";
+import { CANONICAL_SUBJECT_IDS } from "../_shared/subjects.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -282,11 +283,15 @@ Deno.serve(async (req) => {
       // Ф4 (2026-07-23): общий предмет пачки → tutor_students.subject каждой
       // строки. Лояльно (missing/мусор → null): deploy-skew со старым бандлом
       // не должен блокировать добавление; обязательность — на фронте.
-      const bulkSubject =
-        typeof body.subject === "string" && body.subject.trim().length > 0 &&
-        body.subject.trim().length <= 100
-          ? body.subject.trim()
-          : null;
+      // Ревью 5.6 P2 №7: канонический словарь вместо «любой текст ≤100» —
+      // мусорный subject размножился бы на все 50 строк пачки. Лояльность
+      // сохранена: неканонический/missing → null, добавление НЕ блокируем.
+      const bulkSubjectRaw =
+        typeof body.subject === "string" ? body.subject.trim() : "";
+      const bulkSubject = CANONICAL_SUBJECT_IDS.has(bulkSubjectRaw) ? bulkSubjectRaw : null;
+      if (bulkSubjectRaw && !bulkSubject) {
+        console.warn(JSON.stringify({ event: "bulk_add_noncanonical_subject_dropped" }));
+      }
 
       const created: Array<{ tutor_student_id: string; student_id: string; name: string }> = [];
       const errors: Array<{ name: string; error: string }> = [];

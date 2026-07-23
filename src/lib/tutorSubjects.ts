@@ -76,11 +76,11 @@ export function groupSubjectsBySelection(
  * Prefill предмета УЧЕНИКА при добавлении (subject-personalization Ф4,
  * решение владельца 2026-07-23: предмет обязателен, подстановка из профиля):
  * один контент-предмет → он; несколько → last-used ЕСЛИ он из профиля
- * (осмысленный дефолт, а не произвольный), иначе первый предмет профиля;
- * профиль пуст → null (поле пустое + required — гейт-диалог на /tutor/students
- * обычно уже заставил заполнить профиль). В отличие от
- * resolveTutorDefaultSubject НЕ падает в physics — молча сохранённый неверный
- * предмет ученика хуже пустого поля (ревью A2 спеки).
+ * (осмысленный дефолт); иначе null = ПУСТОЕ поле + required (ревью 5.6 P1 №4:
+ * «первый элемент массива» — не профильный дефолт, а произвольный; молча
+ * сохранённый неверный предмет — особенно bulk на 50 учеников — хуже пустого
+ * поля, ревью A2 спеки). В отличие от resolveTutorDefaultSubject НЕ падает
+ * в physics.
  */
 export function resolveStudentSubjectPrefill(
   profileSubjects: readonly string[] | null | undefined,
@@ -91,7 +91,27 @@ export function resolveStudentSubjectPrefill(
   if (contentSubjects.length === 1) return contentSubjects[0];
   const fromLastUsed = normalizeSubjectId(lastUsed);
   if (fromLastUsed && contentSubjects.includes(fromLastUsed)) return fromLastUsed;
-  return contentSubjects[0];
+  return null;
+}
+
+/**
+ * Нормализация списка предметов УЧЕНИКА для отображения/записи (Ф7, ревью 5.6
+ * P2 №9): legacy-id (math/cs/rus/…) → канонические, 'other' СОХРАНЯЕТСЯ
+ * (в отличие от normalizeContentSubjects — «Другое» валидный выбор ученика),
+ * мусор отбрасывается, дедуп. Данные чинит и миграция 20260723150000 —
+ * это belt-and-suspenders на чтении.
+ */
+export function normalizeStudentSubjects(
+  raw: readonly string[] | null | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const s of raw ?? []) {
+    if (typeof s !== 'string' || !s) continue;
+    const id = LEGACY_TO_CANONICAL[s] ?? s;
+    if (!SUBJECT_NAME_MAP[id]) continue;
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
 }
 
 /**

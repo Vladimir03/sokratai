@@ -99,7 +99,7 @@ export function SubjectSelect({
       onChange={(e) => handleChange(e.target.value)}
       disabled={disabled}
       aria-invalid={ariaInvalid}
-      className={cn('text-[16px] [touch-action:manipulation]', className)}
+      className={cn('min-h-[44px] text-[16px] [touch-action:manipulation]', className)}
     >
       {topOption ? <option value={topOption.value}>{topOption.label}</option> : null}
       {isLegacyValue ? (

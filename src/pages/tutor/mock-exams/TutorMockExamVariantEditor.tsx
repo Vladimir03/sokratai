@@ -364,6 +364,9 @@ function VariantEditorContent() {
   );
   const subjectTouchedRef = useRef(false);
   const subjectAutoSetRef = useRef(false);
+  // Ф3 (ревью 5.6 P1 №3): экзамен выбран руками → смена предмета/поздний
+  // профиль его не пересчитывают.
+  const examTouchedRef = useRef(false);
   // Холодный кэш профиля мог не успеть к useState-init (mirror InputStage):
   // one-shot ре-дефолт, когда профиль подъехал. Не клоббер: edit-prefill,
   // корзина и ручной выбор побеждают.
@@ -374,6 +377,13 @@ function VariantEditorContent() {
     if (!profs || profs.length === 0) return; // ждём профиль
     subjectAutoSetRef.current = true;
     const resolved = resolveTutorDefaultSubject(profs, null);
+    if (resolved === subject && !examTouchedRef.current) {
+      // Предмет не сменился, но exam-init мог пройти без exam_focus (холодный
+      // кэш) → доводим экзамен уже с картой фокусов (ревью 5.6 P1 №3).
+      setExam(
+        resolveTutorDefaultExamEgeOge(resolved, tutorProfile?.exam_focus_by_subject) ?? 'ege',
+      );
+    }
     if (resolved !== subject) {
       setSubject(resolved);
       // Ревью P2-4: exam был вычислен для прежнего предмета — пересчитать.
@@ -701,6 +711,14 @@ function VariantEditorContent() {
                 onChange={(v) => {
                   subjectTouchedRef.current = true;
                   setSubject(v);
+                  // Ф3 (ревью 5.6 P1 №3): экзамен не трогали (и не edit) →
+                  // пересчёт под новый предмет — stale ЕГЭ прежнего предмета
+                  // не должен молча уезжать в вариант и его last-used.
+                  if (!isEditMode && !examTouchedRef.current) {
+                    setExam(
+                      resolveTutorDefaultExamEgeOge(v, tutorProfile?.exam_focus_by_subject) ?? 'ege',
+                    );
+                  }
                 }}
                 className={cn(INPUT_CLASS, 'w-full')}
                 profileSubjects={tutorProfile?.subjects}
@@ -712,7 +730,10 @@ function VariantEditorContent() {
               <select
                 value={exam}
                 disabled={contentLocked}
-                onChange={(e) => setExam(e.target.value as 'ege' | 'oge')}
+                onChange={(e) => {
+                  examTouchedRef.current = true;
+                  setExam(e.target.value as 'ege' | 'oge');
+                }}
                 className={INPUT_CLASS}
                 aria-label="Экзамен"
               >

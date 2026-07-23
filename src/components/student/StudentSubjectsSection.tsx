@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SubjectsMultiSelect } from '@/components/common/SubjectsMultiSelect';
 import { supabase } from '@/lib/supabaseClient';
+import { normalizeStudentSubjects } from '@/lib/tutorSubjects';
 import { useToast } from '@/hooks/use-toast';
 
 export function StudentSubjectsSection() {
@@ -50,11 +51,15 @@ export function StudentSubjectsSection() {
           return;
         }
         const row = data as { subjects?: unknown; difficult_subject?: unknown };
-        const arr = Array.isArray(row.subjects)
-          ? (row.subjects as unknown[]).filter((s): s is string => typeof s === 'string')
-          : typeof row.difficult_subject === 'string' && row.difficult_subject
-            ? [row.difficult_subject]
-            : [];
+        // normalizeStudentSubjects: legacy-id (math/cs/rus) → канонические,
+        // иначе чипы не подсветились бы (ревью 5.6 P2 №9).
+        const arr = normalizeStudentSubjects(
+          Array.isArray(row.subjects)
+            ? (row.subjects as unknown[]).filter((s): s is string => typeof s === 'string')
+            : typeof row.difficult_subject === 'string' && row.difficult_subject
+              ? [row.difficult_subject]
+              : [],
+        );
         setSaved(arr);
         setDraft(arr);
       } finally {

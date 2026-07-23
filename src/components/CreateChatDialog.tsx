@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { groupSubjectsBySelection } from "@/lib/tutorSubjects";
+import { groupSubjectsBySelection, normalizeStudentSubjects } from "@/lib/tutorSubjects";
 
 interface CreateChatDialogProps {
   open: boolean;
@@ -44,11 +44,14 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
         .maybeSingle();
       if (cancelled || error || !data) return;
       const row = data as { subjects?: unknown; difficult_subject?: unknown };
-      const arr = Array.isArray(row.subjects)
-        ? (row.subjects as unknown[]).filter((s): s is string => typeof s === "string")
-        : typeof row.difficult_subject === "string" && row.difficult_subject
-          ? [row.difficult_subject]
-          : [];
+      // normalizeStudentSubjects: legacy-id → канонические (ревью 5.6 P2 №9).
+      const arr = normalizeStudentSubjects(
+        Array.isArray(row.subjects)
+          ? (row.subjects as unknown[]).filter((s): s is string => typeof s === "string")
+          : typeof row.difficult_subject === "string" && row.difficult_subject
+            ? [row.difficult_subject]
+            : [],
+      );
       setMySubjects(arr);
     })();
     return () => {
@@ -110,20 +113,36 @@ export function CreateChatDialog({ open, onClose, onChatCreated }: CreateChatDia
     try {
       // `subject` — narrow-cast escape hatch до регенерации types.ts Lovable
       // (паттерн tutorProfileApi gender): колонка chats.subject — миграция
-      // 20260723130000. Ключ шлётся ТОЛЬКО при выбранном предмете (ревью
-      // P2-3): если миграция ещё не применена, ломается только subject-путь,
-      // а не создание ЛЮБОГО чата.
-      const { data: newChat, error } = await supabase
+      // 20260723130000. Ключ шлётся ТОЛЬКО при выбранном предмете; если
+      // миграции ещё нет (skew) — одноразовый ретрай БЕЗ subject (ревью 5.6
+      // P1 №2: чат обязан создаться, предмет — деградация, не блокер).
+      const basePayload = {
+        user_id: user.id,
+        chat_type: 'custom',
+        title: optimisticTitle,
+        icon: optimisticIcon,
+      };
+      let { data: newChat, error } = await supabase
         .from('chats')
         .insert({
-          user_id: user.id,
-          chat_type: 'custom',
-          title: optimisticTitle,
-          icon: optimisticIcon,
+          ...basePayload,
           ...(optimisticSubject ? { subject: optimisticSubject } : {}),
         } as never)
         .select()
         .single();
+
+      if (
+        error &&
+        optimisticSubject &&
+        (error.code === 'PGRST204' || error.code === '42703')
+      ) {
+        console.warn('chat_subject_column_missing_fallback', error.message);
+        ({ data: newChat, error } = await supabase
+          .from('chats')
+          .insert(basePayload as never)
+          .select()
+          .single());
+      }
 
       if (error) throw error;
 

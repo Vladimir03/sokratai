@@ -1865,11 +1865,17 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     // (выше priority AI attention). Раньше был в конце — тонул в 100+ строках
     // ФИПИ methodology / anti-spoiler / etc. См. .claude/rules/40-homework-system.md.
     studentNameGuidance,
-    // Ф5 (2026-07-23): педагогический контекст (класс/цель) — ТОЛЬКО тон.
+    // Ф5 (2026-07-23): педагогический контекст (класс/тип) — ТОЛЬКО тон.
     // СТРУКТУРНО выше МЕТОДОЛОГИИ/ПРАВИЛ ОЦЕНКИ (evaluation/pedagogy split);
     // запрет влиять на балл зашит в сам текст блока (_shared/learning-context).
     // includeExamHint: false — экзамен ДЗ известен серверу (exam_type).
-    buildPedagogyContextBlock(params.learningContext ?? null, { includeExamHint: false }),
+    // includeGoal: false (ревью 5.6 P1) — learning_goal = student-writable
+    // free text = injection-канал в ОЦЕНКУ; в грейдинг едут только
+    // неинжектируемые grade/learner_type. Цель остаётся в hint/чате.
+    buildPedagogyContextBlock(params.learningContext ?? null, {
+      includeExamHint: false,
+      includeGoal: false,
+    }),
     `Условие задачи: ${clampPromptText(params.taskText)}`,
     ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",

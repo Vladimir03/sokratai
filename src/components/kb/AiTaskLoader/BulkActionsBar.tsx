@@ -71,9 +71,11 @@ export function BulkActionsBar({
     if (subtopicId !== KEEP) patch.subtopicId = subtopicId || null;
     if (exam !== KEEP) patch.exam = exam as ReviewOverrides['exam'];
     if (sourceLabel.trim() !== '') patch.sourceLabel = sourceLabel.trim();
-    if (kimNumber.trim() !== '') {
+    const kimParsed = Number.parseInt(kimNumber.trim(), 10);
+    if (kimNumber.trim() !== '' && Number.isInteger(kimParsed) && kimParsed >= 1) {
       // Смена КИМ сбрасывает балл (как per-row правка) + provenance 'manual'.
-      patch.kimNumber = kimNumber.trim();
+      // Гард ≥1 (ревью 5.6 P2 №10): «0»/«00» — не валидный № КИМ, молча skip.
+      patch.kimNumber = String(kimParsed);
       patch.primaryScore = '';
       patch.kimSource = 'manual';
     }
@@ -169,7 +171,7 @@ export function BulkActionsBar({
         inputMode="numeric"
         value={kimNumber}
         disabled={disabled}
-        onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, ''))}
+        onChange={(e) => setKimNumber(e.target.value.replace(/\D/g, '').slice(0, 2))}
         placeholder="КИМ: не менять"
         className={cn(SELECT_CLASS, 'w-32')}
         aria-label="№ КИМ для выбранных"
