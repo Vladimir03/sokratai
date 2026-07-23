@@ -17,7 +17,7 @@
  * lastUsed из `kbLastClassification.subject`; конструктор ДЗ — из
  * `readHwLastSubject()` (отдельный ключ: словари жизненных циклов разные).
  */
-import { SUBJECT_NAME_MAP } from '@/types/homework';
+import { SUBJECTS, SUBJECT_NAME_MAP, type HomeworkSubjectConfig } from '@/types/homework';
 
 /** Legacy id → канонический (профили/сторэдж могли застать старый словарь). */
 const LEGACY_TO_CANONICAL: Record<string, string> = {
@@ -39,6 +39,40 @@ function normalizeSubjectId(raw: unknown): string | null {
 }
 
 /**
+ * Уникальные КОНТЕНТ-предметы профиля: канонические id в порядке массива,
+ * 'other'/legacy нормализуется, мусор отбрасывается, дедуп. Пустой массив =
+ * «профиль не заполнен» (гейт-диалог предметов показывается именно по этому
+ * условию — subject-personalization Ф1).
+ */
+export function normalizeContentSubjects(
+  profileSubjects: readonly string[] | null | undefined,
+): string[] {
+  const contentSubjects: string[] = [];
+  for (const s of profileSubjects ?? []) {
+    const id = normalizeSubjectId(s);
+    if (id && !contentSubjects.includes(id)) contentSubjects.push(id);
+  }
+  return contentSubjects;
+}
+
+/**
+ * Умные списки предметов (subject-personalization Ф2): предметы профиля →
+ * группа «Ваши предметы» (канонический порядок SUBJECTS), остальные (включая
+ * «Другое») → «Другие предметы». НИКОГДА не прячет предметы — только группирует
+ * (решение владельца: разовый ученик по новому предмету всегда возможен).
+ */
+export function groupSubjectsBySelection(
+  profileSubjects: readonly string[] | null | undefined,
+): { yours: HomeworkSubjectConfig[]; others: HomeworkSubjectConfig[] } {
+  const yoursSet = new Set(normalizeContentSubjects(profileSubjects));
+  if (yoursSet.size === 0) return { yours: [], others: [...SUBJECTS] };
+  return {
+    yours: SUBJECTS.filter((s) => yoursSet.has(s.id)),
+    others: SUBJECTS.filter((s) => !yoursSet.has(s.id)),
+  };
+}
+
+/**
  * Дефолт предмета: [один контент-предмет в профиле] → lastUsed (валидный) →
  * первый контент-предмет профиля → physics.
  * `profileSubjects` может быть undefined (профиль ещё не загружен/нет строки).
@@ -47,12 +81,7 @@ export function resolveTutorDefaultSubject(
   profileSubjects: readonly string[] | null | undefined,
   lastUsed: string | null | undefined,
 ): string {
-  // Уникальные контент-предметы профиля (дедуп, 'other'/legacy нормализуется).
-  const contentSubjects: string[] = [];
-  for (const s of profileSubjects ?? []) {
-    const id = normalizeSubjectId(s);
-    if (id && !contentSubjects.includes(id)) contentSubjects.push(id);
-  }
+  const contentSubjects = normalizeContentSubjects(profileSubjects);
 
   // Одно-предметный профиль → его предмет ВСЕГДА (last-used не «залипает»).
   if (contentSubjects.length === 1) return contentSubjects[0];

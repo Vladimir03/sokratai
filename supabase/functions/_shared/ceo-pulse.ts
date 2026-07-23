@@ -17,6 +17,7 @@
  */
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { computePreFunnel, type PulsePreFunnel } from "./metrika.ts";
+import { isContentSubject } from "./subjects.ts";
 
 export type { PulsePreFunnel };
 
@@ -36,6 +37,7 @@ export type PulseStageKey =
   | "hw_sent"
   | "student_opened"
   | "student_submitted"
+  | "profile_filled"
   | "trial"
   | "paid";
 
@@ -137,6 +139,7 @@ interface TutorRow {
   name: string;
   telegram_username: string | null;
   referral_code: string | null;
+  subjects: string[] | null;
   created_at: string;
 }
 
@@ -294,6 +297,17 @@ const COMMERCIAL_STAGES: Array<{ key: PulseStageKey; label: string }> = [
   { key: "paid", label: "Оплата" },
 ];
 
+/**
+ * «Профиль: предметы» (subject-personalization Ф1, решение владельца 2026-07-23):
+ * НЕЗАВИСИМЫЙ счётчик по шаблону trial/paid — НЕ в max(stage). reached =
+ * репетиторы с ≥1 контент-предметом в tutors.subjects; stuck (инверсия
+ * относительно поведенческих) = НЕзаполнившие — рабочий список «кому написать».
+ */
+const PROFILE_FILLED_STAGE: { key: PulseStageKey; label: string } = {
+  key: "profile_filled",
+  label: "Профиль: предметы",
+};
+
 const MRR_WINDOW_DAYS = 35;
 
 // ────────────────────────── Aggregation ──────────────────────────
@@ -314,7 +328,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     (from, to) =>
       db
         .from("tutors")
-        .select("id, user_id, name, telegram_username, referral_code, created_at")
+        .select("id, user_id, name, telegram_username, referral_code, subjects, created_at")
         .order("created_at")
         .order("id")
         .range(from, to),
@@ -333,7 +347,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
         weeklyValueTutors: { count: 0, names: [] },
         deltas: { newTutors: 0, weeklyValue: 0, mrr: 0 },
       },
-      funnel: [...BEHAVIORAL_STAGES, ...COMMERCIAL_STAGES].map((s) => ({ ...s, reached: 0, stuck: [] })),
+      funnel: [...BEHAVIORAL_STAGES, PROFILE_FILLED_STAGE, ...COMMERCIAL_STAGES].map((s) => ({ ...s, reached: 0, stuck: [] })),
       channels: [],
       atRisk: [],
       totals: { tutors: 0 },
@@ -629,6 +643,9 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
   // и channel-конверсии: paidEver = реальный платёж (ручные гранты НЕ входят).
   const trialEverIds = new Set<string>();
   const paidEverIds = new Set<string>();
+  // «Профиль: предметы» — считается из данных (tutors.subjects) на момент
+  // снапшота, событий не требует (subject-personalization Ф1).
+  const profileFilledIds = new Set<string>();
 
   const pulseTutors: PulseTutor[] = tutors.map((t) => {
     const profile = profileByUserId.get(t.user_id);
@@ -676,6 +693,7 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
 
     if (hasTrial) trialEverIds.add(t.id);
     if (firstPaidAt != null) paidEverIds.add(t.id);
+    if ((t.subjects ?? []).some(isContentSubject)) profileFilledIds.add(t.id);
 
     return {
       tutorId: t.id,
@@ -714,6 +732,15 @@ export async function computePulse(db: SupabaseClient, now: Date = new Date()): 
     const reached = pulseTutors.filter((t) => t.stage >= k).length;
     const stuck = pulseTutors.filter((t) => t.stage === k).sort(byRegisteredDesc);
     return { key: s.key, label: s.label, reached, stuck };
+  });
+  funnel.push({
+    key: PROFILE_FILLED_STAGE.key,
+    label: PROFILE_FILLED_STAGE.label,
+    reached: profileFilledIds.size,
+    // stuck = НЕзаполнившие профиль (инверсия — actionable «кому написать»)
+    stuck: pulseTutors
+      .filter((t) => !profileFilledIds.has(t.tutorId))
+      .sort(byRegisteredDesc),
   });
   funnel.push({
     key: "trial",

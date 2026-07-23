@@ -11,6 +11,7 @@ import { capturePromoFromUrl, getStoredPromo } from "@/lib/promoCapture";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import { EmailConfirmWaiting } from "@/components/auth/EmailConfirmWaiting";
+import { SubjectsMultiSelect } from "@/components/tutor/profile/SubjectsMultiSelect";
 import {
   applyPendingConsent,
   recordConsent,
@@ -31,16 +32,6 @@ function isExistingEmailError(error: unknown): boolean {
   );
 }
 
-const SUBJECT_OPTIONS = [
-  { value: "physics", label: "Физика" },
-  { value: "maths", label: "Математика" },
-  { value: "informatics", label: "Информатика" },
-  { value: "multiple", label: "Несколько предметов" },
-  { value: "other", label: "Другое" },
-] as const;
-
-type SubjectValue = (typeof SUBJECT_OPTIONS)[number]["value"];
-
 const trialSignupSchema = z.object({
   email: z
     .string()
@@ -52,13 +43,12 @@ const trialSignupSchema = z.object({
     .min(8, { message: "Минимум 8 символов" })
     .regex(/[A-Z]/, { message: "Должна быть заглавная буква" })
     .regex(/[0-9]/, { message: "Должна быть цифра" }),
-  subject: z.enum(["physics", "maths", "informatics", "multiple", "other"]),
   oferta: z.literal(true, {
     errorMap: () => ({ message: "Нужно принять оферту" }),
   }),
 });
 
-type FieldErrors = Partial<Record<"email" | "password" | "subject" | "oferta", string>>;
+type FieldErrors = Partial<Record<"email" | "password" | "oferta", string>>;
 
 function generateUsernameFromEmail(email: string): string {
   const local = email.split("@")[0] ?? "";
@@ -71,7 +61,10 @@ export default function TutorSignupTrial() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [subject, setSubject] = useState<SubjectValue>("physics");
+  // Предметы — мультивыбор (subject-personalization Ф1). Опционально: гейт
+  // кабинета (SubjectsGateDialog) — backstop для пропустивших. Уезжают в
+  // user_metadata.subjects_intent → tutors.subjects при финализации.
+  const [subjects, setSubjects] = useState<string[]>([]);
   // Реферальный код коллеги (Stage 3): prefill из ?rc= (localStorage), опционален.
   const [referralCode, setReferralCode] = useState(() => getStoredPromo().rc ?? "");
   const [oferta, setOferta] = useState(false);
@@ -82,7 +75,6 @@ export default function TutorSignupTrial() {
   const [touched, setTouched] = useState<Record<keyof FieldErrors, boolean>>({
     email: false,
     password: false,
-    subject: false,
     oferta: false,
   });
 
@@ -177,7 +169,7 @@ export default function TutorSignupTrial() {
   }, [applyTrialMarker]);
 
   const validateField = useCallback(
-    (next: { email: string; password: string; subject: SubjectValue; oferta: boolean }) => {
+    (next: { email: string; password: string; oferta: boolean }) => {
       const result = trialSignupSchema.safeParse(next);
       if (result.success) {
         setErrors({});
@@ -195,22 +187,21 @@ export default function TutorSignupTrial() {
 
   const handleBlur = (field: keyof FieldErrors) => {
     setTouched((t) => ({ ...t, [field]: true }));
-    validateField({ email, password, subject, oferta });
+    validateField({ email, password, oferta });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    setTouched({ email: true, password: true, subject: true, oferta: true });
+    setTouched({ email: true, password: true, oferta: true });
     const validation = trialSignupSchema.safeParse({
       email,
       password,
-      subject,
       oferta,
     });
     if (!validation.success) {
-      validateField({ email, password, subject, oferta });
+      validateField({ email, password, oferta });
       toast.error(validation.error.errors[0]?.message ?? "Проверьте поля формы");
       setLoading(false);
       return;
@@ -239,7 +230,9 @@ export default function TutorSignupTrial() {
           // confirm path session arrives only after email-verify redirect).
           data: {
             username,
-            subject: validation.data.subject,
+            // subjects_intent → tutors.subjects при финализации (email-verify /
+            // assign-tutor-role, _shared/subjects.ts::persistSubjectsIntent).
+            ...(subjects.length > 0 ? { subjects_intent: subjects } : {}),
             signup_source: "tutor-landing-trial",
             consent_intent: "web-signup-tutor",
             trial_intent: isTrialIntent,
@@ -322,7 +315,7 @@ export default function TutorSignupTrial() {
     if (!oferta) {
       toast.error("Сначала отметьте согласие с офертой и политикой");
       setTouched((t) => ({ ...t, oferta: true }));
-      validateField({ email, password, subject, oferta: false });
+      validateField({ email, password, oferta: false });
       return false;
     }
     stashPendingConsent("telegram-oauth-tutor");
@@ -643,7 +636,6 @@ export default function TutorSignupTrial() {
                   validateField({
                     email,
                     password,
-                    subject,
                     oferta: e.target.checked,
                   });
                 }
@@ -717,7 +709,6 @@ export default function TutorSignupTrial() {
                     validateField({
                       email: e.target.value,
                       password,
-                      subject,
                       oferta,
                     });
                   }
@@ -756,7 +747,6 @@ export default function TutorSignupTrial() {
                     validateField({
                       email,
                       password: e.target.value,
-                      subject,
                       oferta,
                     });
                   }
@@ -790,24 +780,8 @@ export default function TutorSignupTrial() {
             </div>
 
             <div className="tst-field">
-              <label className="tst-label" htmlFor="tst-subject">
-                Какой предмет вы преподаёте?
-              </label>
-              <select
-                id="tst-subject"
-                value={subject}
-                onChange={(e) => setSubject(e.target.value as SubjectValue)}
-                onBlur={() => handleBlur("subject")}
-                disabled={loading}
-                style={inputBaseStyle}
-                className="tst-select"
-              >
-                {SUBJECT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
+              <span className="tst-label">Какие предметы вы преподаёте?</span>
+              <SubjectsMultiSelect value={subjects} onChange={setSubjects} hideLabel />
             </div>
 
             {/* Реферальный код коллеги (Stage 3): опционально, без валидации-гейта */}

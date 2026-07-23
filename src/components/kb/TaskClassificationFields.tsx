@@ -3,7 +3,7 @@ import { Pencil } from 'lucide-react';
 import { useKbSources, useSubtopics, useTopics } from '@/hooks/useKnowledgeBase';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
-import { SUBJECTS } from '@/types/homework';
+import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { CatalogFilter } from '@/types/kb';
 
 /** Тип задания: задаёт фильтр тем + переключает «№ КИМ» ↔ «уровень сложности». */
@@ -124,22 +124,18 @@ export function TaskClassificationFields({
 
   return (
     <div className="space-y-4">
-      {/* Предмет — скоупит список тем. Полный школьный словарь SUBJECTS (14):
-          школьный репетитор любого предмета грузит задачи в личную базу
-          (каталожные темы для предмета опциональны). */}
+      {/* Предмет — скоупит список тем. Полный школьный словарь SUBJECTS (14),
+          умная группировка «Ваши предметы»/«Другие» из профиля (Ф2) — ничего
+          не прячем: разовая задача по чужому предмету всегда возможна. */}
       {showSubject ? (
         <fieldset>
           <legend className={LEGEND_CLASS}>Предмет</legend>
-          <select
+          <SubjectSelect
             value={subject}
-            onChange={(e) => onSubjectChange!(e.target.value)}
+            onChange={(v) => onSubjectChange!(v)}
             disabled={disabled}
             className={SELECT_CLASS}
-          >
-            {SUBJECTS.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          />
         </fieldset>
       ) : null}
 

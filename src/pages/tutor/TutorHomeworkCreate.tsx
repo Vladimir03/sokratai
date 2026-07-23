@@ -43,12 +43,10 @@ import {
 } from '@/lib/tutorHomeworkApi';
 import { getTutorInviteTelegramLink, getTutorInviteWebLink } from '@/utils/telegramLinks';
 import { supabase } from '@/lib/supabaseClient';
-// `SUBJECTS` уже импортируется из homework-create/types ({value,label}[] для L0
-// селектора). Канонический массив (@/types/homework, {id,...}) нужен только для
-// валидации lesson-prefill по `.id` — импортируем под алиасом, иначе дубль
-// идентификатора `SUBJECTS` ломает dev-сервер (esbuild bundling его дедупит,
-// поэтому prod-build не падал, но это латентный баг).
-import { getSubjectLabel, SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
+// Канонический массив SUBJECTS (@/types/homework, {id,...}) нужен для валидации
+// lesson-prefill по `.id`; L0-селектор предмета — shared SubjectSelect (Ф2).
+import { SUBJECTS as CANONICAL_SUBJECTS } from '@/types/homework';
+import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import { attachHomework, LessonMaterialsApiError } from '@/lib/lessonMaterialsApi';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { detectCefrLevelFromText } from '@/lib/cefrDetect';
@@ -60,7 +58,6 @@ import {
   type MetaState,
   type SubmitPhase,
   type SubmitSuccessResult,
-  SUBJECTS,
   computeTaskContentFingerprint,
   createEmptyTask,
   generateUUID,
@@ -1864,8 +1861,6 @@ function TutorHomeworkCreateContent() {
   }, [miniGroupsEnabled, selectedGroupIds]);
 
   const isSubmitting = submitPhase !== 'idle' && submitPhase !== 'done';
-  const hasLegacySelectedSubject =
-    meta.subject !== '' && !SUBJECTS.some((subject) => subject.value === meta.subject);
   // Phase 11 (2026-05-31): язык. subjects → показываем CEFR + feedback language
   // селекторы в L0; CEFR обязателен. Mirror backend LANGUAGE_SUBJECTS_REQUIRING_CEFR.
   const isLanguageSubject = ['french', 'english', 'spanish'].includes(meta.subject);
@@ -2003,11 +1998,17 @@ function TutorHomeworkCreateContent() {
         <section className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="hw-subject">Предмет *</Label>
-            <select
+            {/* Умный селект (Ф2): группировка «Ваши предметы»/«Другие» из
+                профиля; legacy-значение SubjectSelect детектит сам. Профиль —
+                внутренний useTutorProfile (тот же app-wide ключ, что держит
+                SideNav — НОВОЙ подписки/refetch-поведения не добавляет,
+                rule 40 focus-refetch класс не задет: данные профиля влияют
+                только на группировку option'ов, не на meta/tasks). */}
+            <SubjectSelect
               id="hw-subject"
               value={meta.subject}
-              onChange={(e) => {
-                const nextSubject = e.target.value as HomeworkSubject;
+              onChange={(v) => {
+                const nextSubject = v as HomeworkSubject;
                 // Phase 11: при переключении на языковой subject без заданного уровня —
                 // попробовать авто-подставить из текста (если репетитор написал «DELF A2»).
                 // Bonus: для image-задач (Эмилия) маркера нет → останется null → required.
@@ -2023,20 +2024,9 @@ function TutorHomeworkCreateContent() {
                 }
               }}
               className="w-full rounded-md border border-slate-200 bg-white px-3 py-2"
-              style={{ fontSize: '16px', touchAction: 'manipulation' }}
-              aria-invalid={errors.subject ? 'true' : undefined}
-            >
-              {hasLegacySelectedSubject && (
-                <option value={meta.subject}>
-                  {getSubjectLabel(meta.subject)} (legacy)
-                </option>
-              )}
-              {SUBJECTS.map((subject) => (
-                <option key={subject.value} value={subject.value}>
-                  {subject.label}
-                </option>
-              ))}
-            </select>
+              ariaInvalid={errors.subject ? true : undefined}
+              overrideTracking={isEditMode ? undefined : { surface: 'hw_create' }}
+            />
             {errors.subject && <p className="text-sm text-red-500">{errors.subject}</p>}
           </div>
 

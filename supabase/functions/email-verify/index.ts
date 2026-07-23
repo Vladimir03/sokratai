@@ -50,6 +50,7 @@ import {
   persistPromoAttributionAndTrack,
   persistTutorTelegramFromMetadata,
 } from "../_shared/promo-intent.ts";
+import { persistSubjectsIntent } from "../_shared/subjects.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -199,6 +200,12 @@ async function assignTutorRoleIfNeeded(
       // metadata is filled on first edit.
     }
   }
+
+  // Предметы из signup-формы (subject-personalization Ф1): metadata.subjects_intent
+  // → tutors.subjects. Never-throws + only-when-empty (auth-флоу не ломаем,
+  // существующий выбор не перетираем). Покрывает и fresh-insert, и
+  // existing-row (репетитор мог быть создан ранее без предметов).
+  await persistSubjectsIntent(adminClient, userId, metadata);
 
   // Apply trial marker if RegisterTutor / TutorSignupTrial stashed the intent.
   // TutorSignupTrial does this client-side after SIGNED_IN, but email-confirm

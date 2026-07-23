@@ -8,7 +8,7 @@
  *   2. Соберите домашку    — есть ≥1 assignment
  *   3. Отправьте ученику   — есть assignment с assigned_count > 0
  * Авто-скрывается когда все 3 сделаны. «Скрыть» — per-browser localStorage
- * (mirror SubjectsNudgeBanner; completion всё равно data-derived).
+ * (completion всё равно data-derived).
  *
  * P14: НЕ блокирует, dismissible, не 5-шаговый визард. Один primary-CTA (первый
  * незакрытый шаг). Lucide без эмодзи (rule 90).

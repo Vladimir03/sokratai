@@ -42,7 +42,17 @@ export type AnalyticsEventName =
   // расширен миграцией 20260715120000; writer — edge client-error-report).
   // ОСОЗНАННОЕ исключение из «meta без свободного текста»: meta.message =
   // технический текст ошибки (усечён + route санитизирован на edge).
-  | "client_error";
+  | "client_error"
+  // рефералка v1 (CHECK-whitelist расширен миграцией 20260716120000; в union
+  // добавлены 2026-07-23 — дрейф: Deno-код не тайпчекается пайплайном)
+  | "referral_attributed"
+  | "referral_code_copied"
+  // предметная персонализация Ф1/Ф2 (CHECK-whitelist расширен миграцией
+  // 20260723120000; writer — tutor-progress-api POST /track)
+  | "subjects_gate_shown"
+  | "subjects_gate_postponed"
+  | "subjects_gate_saved" // once-per-tutor (данные гасят гейт — честно 1 раз)
+  | "subject_default_overridden"; // {surface, from, to} — канонические id
 
 export interface AnalyticsEventInput {
   event_name: AnalyticsEventName;

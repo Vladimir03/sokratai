@@ -63,6 +63,16 @@ async function requestTutorProgressApi<T>(
  * подстраховывает). Сбой телеметрии молча игнорируется — на UX не влияет.
  */
 export function trackCommunityCtaClicked(channel: 'telegram' | 'vk'): void {
+  postTrackEvent({ event: 'community_cta_clicked', channel });
+}
+
+/**
+ * Generic fire-and-forget beacon в `tutor-progress-api` POST /track (сервер
+ * пишет `analytics_events` под whitelist имён — клиент произвольное не впишет).
+ * Сбой молча игнорируется — телеметрия не влияет на UX. Реюз для событий
+ * subject-personalization (`subjects_gate_*`, `subject_default_overridden`).
+ */
+export function postTrackEvent(payload: Record<string, unknown>): void {
   void (async () => {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -75,7 +85,7 @@ export function trackCommunityCtaClicked(channel: 'telegram' | 'vk'): void {
           Authorization: `Bearer ${token}`,
           apikey: SUPABASE_KEY,
         },
-        body: JSON.stringify({ event: 'community_cta_clicked', channel }),
+        body: JSON.stringify(payload),
         keepalive: true,
       });
     } catch {

@@ -4,6 +4,7 @@ import TutorGuard from '@/components/TutorGuard';
 import { SideNav } from '@/components/tutor/chrome/SideNav';
 import { MobileTopBar } from '@/components/tutor/chrome/MobileTopBar';
 import { MobileDrawer } from '@/components/tutor/chrome/MobileDrawer';
+import { SubjectsGateDialog } from '@/components/tutor/SubjectsGateDialog';
 
 const PageFallback = () => (
   <div className="flex items-center justify-center min-h-[50vh]">
@@ -29,6 +30,9 @@ export function AppFrame() {
         </aside>
         <MobileTopBar isDrawerOpen={drawerOpen} onOpenDrawer={openDrawer} />
         <MobileDrawer open={drawerOpen} onClose={closeDrawer} />
+        {/* Гейт предметов (Ф1) — один монтаж на весь кабинет: переживает
+            route-changes и тихую ре-верификацию TutorGuard (rule 96 §5a). */}
+        <SubjectsGateDialog />
         <main className="t-app__main">
           <Suspense fallback={<PageFallback />}>
             <Outlet />

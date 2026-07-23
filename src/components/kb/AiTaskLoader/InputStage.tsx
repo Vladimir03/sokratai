@@ -20,7 +20,7 @@ import { scanTaskMarkers } from '@/lib/taskMarkers';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
-import { SUBJECTS } from '@/types/homework';
+import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { BatchClassification, ExtractCompleteness } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { CatalogFilter, KBFolderTreeNode } from '@/types/kb';
 
@@ -682,21 +682,19 @@ export function InputStage({
       {fixedSubject === undefined ? (
         <fieldset>
           <legend className="mb-1.5 text-xs font-semibold text-slate-500">Предмет</legend>
-          <select
+          <SubjectSelect
             value={subject}
-            onChange={(e) => {
+            onChange={(v) => {
               userTouchedSubjectRef.current = true;
-              setSubject(e.target.value);
+              setSubject(v);
               setDefaultTopicId('');
               setDefaultSubtopicId('');
             }}
             disabled={isExtracting}
-            className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
-          >
-            {SUBJECTS.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+            className="w-full rounded-lg border border-socrat-border px-3 py-2 transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+            profileSubjects={tutorProfile?.subjects}
+            overrideTracking={{ surface: 'ai_loader' }}
+          />
         </fieldset>
       ) : null}
 

@@ -52,7 +52,9 @@ import {
   type VariantTaskDraft,
 } from '@/components/tutor/mock-exams/variantTaskDraft';
 import { MockExamAiLoaderSheet } from '@/components/tutor/mock-exams/MockExamAiLoaderSheet';
-import { SUBJECTS } from '@/types/homework';
+import { SubjectSelect } from '@/components/tutor/SubjectSelect';
+import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -347,7 +349,27 @@ function VariantEditorContent() {
   const cartPrefill = cartPrefillRef.current;
 
   const [title, setTitle] = useState('');
-  const [subject, setSubject] = useState(cartPrefill?.subject ?? 'physics');
+  // Дефолт предмета (Ф2, был хардкод physics — вариант обществоведа стартовал
+  // физикой): корзина Базы → профиль репетитора → physics. Кэш профиля тёплый
+  // (SideNav держит app-wide ключ) → init обычно синхронный.
+  const { data: tutorProfile } = useTutorProfile();
+  const [subject, setSubject] = useState(
+    () => cartPrefill?.subject ?? resolveTutorDefaultSubject(tutorProfile?.subjects, null),
+  );
+  const subjectTouchedRef = useRef(false);
+  const subjectAutoSetRef = useRef(false);
+  // Холодный кэш профиля мог не успеть к useState-init (mirror InputStage):
+  // one-shot ре-дефолт, когда профиль подъехал. Не клоббер: edit-prefill,
+  // корзина и ручной выбор побеждают.
+  useEffect(() => {
+    if (subjectAutoSetRef.current) return;
+    if (isEditMode || cartPrefill?.subject || subjectTouchedRef.current) return;
+    const profs = tutorProfile?.subjects;
+    if (!profs || profs.length === 0) return; // ждём профиль
+    subjectAutoSetRef.current = true;
+    const resolved = resolveTutorDefaultSubject(profs, null);
+    if (resolved !== subject) setSubject(resolved);
+  }, [tutorProfile, isEditMode, cartPrefill, subject]);
   const [exam, setExam] = useState<'ege' | 'oge'>('ege');
   const [durationText, setDurationText] = useState('235');
   const [part1Tasks, setPart1Tasks] = useState<VariantTaskDraft[]>(
@@ -651,18 +673,19 @@ function VariantEditorContent() {
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div>
-              <Label className="mb-1 block text-xs font-semibold text-slate-500">Предмет</Label>
-              <select
+              <Label htmlFor="variant-subject" className="mb-1 block text-xs font-semibold text-slate-500">Предмет</Label>
+              <SubjectSelect
+                id="variant-subject"
                 value={subject}
                 disabled={contentLocked}
-                onChange={(e) => setSubject(e.target.value)}
-                className={INPUT_CLASS}
-                aria-label="Предмет варианта"
-              >
-                {SUBJECTS.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
+                onChange={(v) => {
+                  subjectTouchedRef.current = true;
+                  setSubject(v);
+                }}
+                className={cn(INPUT_CLASS, 'w-full')}
+                profileSubjects={tutorProfile?.subjects}
+                overrideTracking={isEditMode ? undefined : { surface: 'mock_exam' }}
+              />
             </div>
             <div>
               <Label className="mb-1 block text-xs font-semibold text-slate-500">Экзамен</Label>

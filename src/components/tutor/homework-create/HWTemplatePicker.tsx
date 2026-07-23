@@ -10,8 +10,10 @@ import {
 } from '@/components/ui/sheet';
 import { Library } from 'lucide-react';
 import { useTutorHomeworkTemplates } from '@/hooks/useTutorHomework';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
 import type { HomeworkSubject, HomeworkTemplateListItem } from '@/lib/tutorHomeworkApi';
 import { getSubjectLabel } from '@/types/homework';
+import { normalizeContentSubjects } from '@/lib/tutorSubjects';
 import { SUBJECTS } from './types';
 
 export interface HWTemplatePickerProps {
@@ -25,7 +27,15 @@ type PickerTab = 'mine' | 'shared';
 
 export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
   const [tab, setTab] = useState<PickerTab>('mine');
-  const [filterSubject, setFilterSubject] = useState<string>('all');
+  // Ф2: дефолт фильтра — единственный контент-предмет профиля (иначе 'all');
+  // чипы предметов профиля — первыми. Тот же app-wide profile-ключ, что держит
+  // SideNav (НЕ новая query-подписка в смысле rule 40 — данные влияют только
+  // на дефолт/порядок чипов фильтра, не на state конструктора).
+  const { data: tutorProfile } = useTutorProfile();
+  const profileSubjects = normalizeContentSubjects(tutorProfile?.subjects);
+  const [filterSubject, setFilterSubject] = useState<string>(() =>
+    profileSubjects.length === 1 ? profileSubjects[0] : 'all',
+  );
   const { templates, loading } = useTutorHomeworkTemplates(
     filterSubject !== 'all' ? (filterSubject as HomeworkSubject) : undefined,
     tab,
@@ -75,7 +85,11 @@ export function HWTemplatePicker({ onSelect }: HWTemplatePickerProps) {
             ))}
           </div>
           <div className="flex flex-wrap gap-1">
-            {['all', ...SUBJECTS.map(s => s.value)].map((s) => (
+            {[
+              'all',
+              ...profileSubjects,
+              ...SUBJECTS.map((s) => s.value).filter((v) => !profileSubjects.includes(v)),
+            ].map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterSubject(s)}

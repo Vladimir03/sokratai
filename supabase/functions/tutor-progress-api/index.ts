@@ -16,6 +16,7 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { logAnalyticsEvent, logAnalyticsEventOnce } from "../_shared/analytics.ts";
+import { CANONICAL_SUBJECT_IDS } from "../_shared/subjects.ts";
 import { egePrimaryToScaled, ogeMark } from "../_shared/score-scales.ts";
 import {
   BEHIND_GOAL_PCT,
@@ -43,6 +44,17 @@ const FALLBACK_ORIGINS = [
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Предметная персонализация (2026-07-23): whitelist поверхностей телеметрии
+// POST /track. Гейт-диалог — 4 гейт-зоны; override — селекты предметов.
+const GATE_SURFACES = new Set(["knowledge", "homework_create", "students", "mock_exams"]);
+const OVERRIDE_SURFACES = new Set([
+  "ai_loader",
+  "hw_create",
+  "hw_drawer",
+  "mock_exam",
+  "demo_check",
+]);
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
@@ -627,6 +639,73 @@ async function handleTrackEvent(
   cors: Record<string, string>,
 ): Promise<Response> {
   const event = typeof body?.event === "string" ? body.event : "";
+
+  // ── Предметная персонализация Ф1/Ф2 (2026-07-23) ────────────────────────────
+  // Гейт-диалог предметов: shown/postponed — без дедупа (nag-count = сигнал);
+  // saved — once-per-tutor (гаснет данными, физически один раз, дедуп = страховка
+  // от даблкликов). surface — whitelist (клиент произвольное не впишет).
+  if (
+    event === "subjects_gate_shown" ||
+    event === "subjects_gate_postponed" ||
+    event === "subjects_gate_saved"
+  ) {
+    const rawSurface = typeof body?.surface === "string" ? body.surface : "";
+    const surface = GATE_SURFACES.has(rawSurface) ? rawSurface : null;
+    const tutorPkId = await resolveTutorPkId(db, userId);
+    if (event === "subjects_gate_saved") {
+      const rawCount = typeof body?.count === "number" ? body.count : null;
+      const count =
+        rawCount !== null && Number.isInteger(rawCount) && rawCount >= 0 && rawCount <= 20
+          ? rawCount
+          : null;
+      await logAnalyticsEventOnce(
+        db,
+        {
+          event_name: "subjects_gate_saved",
+          actor_user_id: userId,
+          tutor_id: tutorPkId,
+          source: surface,
+          meta: { ...(surface ? { surface } : {}), ...(count !== null ? { count } : {}) },
+        },
+        { tutor_id: tutorPkId },
+      );
+    } else {
+      await logAnalyticsEvent(db, {
+        event_name: event,
+        actor_user_id: userId,
+        tutor_id: tutorPkId,
+        source: surface,
+        meta: surface ? { surface } : null,
+      });
+    }
+    return jsonOk(cors, { ok: true });
+  }
+
+  // Смена предвыбранного дефолта предмета (меряем качество персонализации).
+  // from/to — только канонические id (категории, PII-free).
+  if (event === "subject_default_overridden") {
+    const rawSurface = typeof body?.surface === "string" ? body.surface : "";
+    const surface = OVERRIDE_SURFACES.has(rawSurface) ? rawSurface : null;
+    const from =
+      typeof body?.from === "string" && CANONICAL_SUBJECT_IDS.has(body.from)
+        ? body.from
+        : null;
+    const to =
+      typeof body?.to === "string" && CANONICAL_SUBJECT_IDS.has(body.to) ? body.to : null;
+    const tutorPkId = await resolveTutorPkId(db, userId);
+    await logAnalyticsEvent(db, {
+      event_name: "subject_default_overridden",
+      actor_user_id: userId,
+      tutor_id: tutorPkId,
+      source: surface,
+      meta: {
+        ...(surface ? { surface } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+      },
+    });
+    return jsonOk(cors, { ok: true });
+  }
 
   // Рефералка v1: клик «Скопировать» в кабинете (повторы легальны — без дедупа).
   if (event === "referral_code_copied") {

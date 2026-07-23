@@ -3,6 +3,7 @@ import {
   persistPromoAttributionAndTrack,
   persistTutorTelegramFromMetadata,
 } from "../_shared/promo-intent.ts";
+import { persistSubjectsIntent } from "../_shared/subjects.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -160,6 +161,9 @@ Deno.serve(async (req) => {
       | undefined;
     await persistPromoAttributionAndTrack(supabaseAdmin, user.id, signupMeta);
     await persistTutorTelegramFromMetadata(supabaseAdmin, user.id, signupMeta);
+    // Предметы из signup-формы (subject-personalization Ф1): subjects_intent →
+    // tutors.subjects. Never-throws, only-when-empty (идемпотентно).
+    await persistSubjectsIntent(supabaseAdmin, user.id, signupMeta);
 
     return new Response(
       JSON.stringify({ success: true }),

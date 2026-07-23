@@ -27,7 +27,6 @@ import { pluralizeRu } from '@/lib/pluralizeRu';
 import { getSubjectDative } from '@/lib/subjectHelpers';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { useTutorProfile } from '@/hooks/useTutorProfile';
-import { SubjectsNudgeBanner } from '@/components/tutor/SubjectsNudgeBanner';
 import { getSubjectLabel, SUBJECTS } from '@/types/homework';
 import { cn } from '@/lib/utils';
 import {
@@ -46,7 +45,7 @@ function KnowledgeBaseContent() {
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get('tab') === 'mybase' ? 'mybase' : 'catalog';
   // Профиль — для дефолта предмета и онбординг-нуджа (кэш card-ключа тёплый).
-  const { data: tutorProfile, isLoading: profileLoading } = useTutorProfile();
+  const { data: tutorProfile } = useTutorProfile();
   const [mainTab, setMainTab] = useState<MainTab>(initialTab);
   const [examFilter, setExamFilter] = useState<CatalogFilter>('ege');
   // Дефолт-предмет: last-used (KB-серия) → профиль репетитора → physics.
@@ -58,11 +57,8 @@ function KnowledgeBaseContent() {
   return (
       <KnowledgeBaseFrame>
         <div className="space-y-8">
-          {/* Онбординг-нудж: профиль без предметов → предложить заполнить здесь,
-              где боль (персонализация кабинета начинается с этого). */}
-          {!profileLoading && tutorProfile && tutorProfile.subjects.length === 0 ? (
-            <SubjectsNudgeBanner profile={tutorProfile} />
-          ) : null}
+          {/* Онбординг предметов теперь — SubjectsGateDialog в AppFrame
+              (subject-personalization Ф1); баннер удалён, чтобы не дублировать. */}
           <div className="flex gap-1.5 rounded-2xl bg-socrat-border-light p-1.5">
             {([
               { key: 'catalog' as MainTab, label: 'Каталог Сократ AI', Icon: LayoutGrid },

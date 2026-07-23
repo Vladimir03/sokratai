@@ -18,6 +18,9 @@ export type PulseStageKey =
   | "hw_sent"
   | "student_opened"
   | "student_submitted"
+  // независимый счётчик «Профиль: предметы» (subject-personalization Ф1,
+  // 2026-07-23): reached = заполнившие subjects; stuck = НЕзаполнившие
+  | "profile_filled"
   | "trial"
   | "paid";
 
@@ -28,7 +31,7 @@ export interface PulseTutor {
   telegram: string | null;
   channel: PulseChannelInfo;
   registeredAt: string;
-  /** 1..6 — поведенческая стадия; триал/оплата — отдельно (isPaying/isTrial + funnel[6..7]). */
+  /** 1..6 — поведенческая стадия; профиль/триал/оплата — отдельно (funnel[6..8]). */
   stage: number;
   stageDates: Partial<Record<PulseStageKey, string | null>>;
   lastActivityAt: string | null;

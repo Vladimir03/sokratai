@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState, useCallback } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,8 @@ import type {
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSubjectLabel, SUBJECTS as MODERN_SUBJECTS } from '@/types/homework';
+import { useTutorProfile } from '@/hooks/useTutorProfile';
+import { normalizeContentSubjects } from '@/lib/tutorSubjects';
 // unified-task-model F3 (2026-07-05): Банк ДЗ — публикация модераторами
 // (mirror kb_mod_* каталога задач), fork «Своя копия» для всех.
 import { useIsModerator } from '@/hooks/useIsModerator';
@@ -282,7 +284,23 @@ const TemplateCard = memo(TemplateCardImpl);
 function TutorHomeworkTemplatesContent() {
   // unified-task-model F3 (2026-07-05): вкладки «Мои шаблоны / Банк Сократа».
   const [scope, setScope] = useState<'mine' | 'shared'>('mine');
-  const [subjectFilter, setSubjectFilter] = useState<ModernHomeworkSubject | 'all'>('all');
+  // Ф2: дефолт фильтра — единственный контент-предмет профиля, иначе 'all';
+  // вкладки предметов профиля — первыми (ничего не прячем).
+  const { data: tutorProfile } = useTutorProfile();
+  const profileSubjects = normalizeContentSubjects(tutorProfile?.subjects);
+  const [subjectFilter, setSubjectFilter] = useState<ModernHomeworkSubject | 'all'>(() =>
+    profileSubjects.length === 1 ? (profileSubjects[0] as ModernHomeworkSubject) : 'all',
+  );
+  const subjectFilters = useMemo(
+    () => [
+      SUBJECT_FILTERS[0],
+      ...SUBJECT_FILTERS.slice(1).filter((f) => profileSubjects.includes(f.value)),
+      ...SUBJECT_FILTERS.slice(1).filter((f) => !profileSubjects.includes(f.value)),
+    ],
+    // profileSubjects — derived-массив; ключ стабилен строкой.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [profileSubjects.join(',')],
+  );
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { isModerator } = useIsModerator();
@@ -420,7 +438,7 @@ function TutorHomeworkTemplatesContent() {
 
         {/* Subject filter tabs */}
         <div className="flex gap-1 border-b overflow-x-auto">
-          {SUBJECT_FILTERS.map((tab) => (
+          {subjectFilters.map((tab) => (
             <button
               key={tab.value}
               onClick={() => setSubjectFilter(tab.value)}

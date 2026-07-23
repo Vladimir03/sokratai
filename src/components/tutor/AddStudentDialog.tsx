@@ -16,7 +16,9 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -31,6 +33,7 @@ import { Switch } from '@/components/ui/switch';
 import { Copy, Check, Link, UserPlus, AlertCircle, RefreshCw, Loader2, Users, CheckCircle2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { getSubjectLabel, SUBJECTS } from '@/types/homework';
+import { groupSubjectsBySelection } from '@/lib/tutorSubjects';
 import { StudentCredentialsModal } from '@/components/tutor/StudentCredentialsModal';
 import {
   manualAddTutorStudent,
@@ -167,6 +170,12 @@ export function AddStudentDialog({
     );
     return ids.length === 1 ? ids[0] : undefined;
   })();
+
+  // Умные списки (Ф2): предметы профиля сверху в селекте предмета ученика.
+  const subjectGroups = useMemo(
+    () => groupSubjectsBySelection(tutor?.subjects),
+    [tutor?.subjects],
+  );
 
   // Form state for manual add
   const [formData, setFormData] = useState<ManualAddTutorStudentInput>({
@@ -993,9 +1002,29 @@ export function AddStudentDialog({
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="__none__">Не указан</SelectItem>
-                              {SUBJECTS.map((s) => (
-                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                              ))}
+                              {/* Умные списки (Ф2): предметы профиля сверху,
+                                  остальные под «Другие предметы»; ничего не
+                                  прячем. Профиль пуст → плоский список. */}
+                              {subjectGroups.yours.length > 0 ? (
+                                <>
+                                  <SelectGroup>
+                                    <SelectLabel>Ваши предметы</SelectLabel>
+                                    {subjectGroups.yours.map((s) => (
+                                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                  <SelectGroup>
+                                    <SelectLabel>Другие предметы</SelectLabel>
+                                    {subjectGroups.others.map((s) => (
+                                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                </>
+                              ) : (
+                                subjectGroups.others.map((s) => (
+                                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                ))
+                              )}
                               {formData.subject &&
                               !SUBJECTS.some((s) => s.id === formData.subject) ? (
                                 <SelectItem value={formData.subject}>

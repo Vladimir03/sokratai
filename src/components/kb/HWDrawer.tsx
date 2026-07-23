@@ -30,7 +30,7 @@ import {
 import { loadLastClassification } from '@/lib/kbLastClassification';
 import { resolveTutorDefaultSubject } from '@/lib/tutorSubjects';
 import { supabase } from '@/lib/supabaseClient';
-import { SUBJECTS } from '@/types/homework';
+import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { HWDraftTask } from '@/types/kb';
 import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
 
@@ -503,20 +503,18 @@ export function HWDrawer({
             <label htmlFor="hwdrawer-subject" className="shrink-0 text-xs font-semibold text-slate-500">
               Предмет ДЗ
             </label>
-            <select
+            <SubjectSelect
               id="hwdrawer-subject"
               value={subject}
-              onChange={(e) => {
+              onChange={(v) => {
                 subjectTouchedRef.current = true; // ручной выбор — prefill не перетирает
-                setSubject(e.target.value);
+                setSubject(v);
               }}
               disabled={submitting}
-              className="w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
-            >
-              {SUBJECTS.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
+              className="w-full rounded-lg border border-socrat-border px-3 py-2 transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none"
+              profileSubjects={tutorProfile?.subjects}
+              overrideTracking={{ surface: 'hw_drawer' }}
+            />
           </div>
           <button
             type="button"

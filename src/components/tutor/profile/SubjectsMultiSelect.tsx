@@ -6,6 +6,12 @@ import { SUBJECTS } from '@/types/homework';
 export interface SubjectsMultiSelectProps {
   value: string[];
   onChange: (subjects: string[]) => void;
+  /**
+   * Скрыть внутренний лейбл (subject-personalization Ф1): хосты со СВОИМ
+   * заголовком (форма регистрации, гейт-диалог) передают true — иначе дубль
+   * подписи. Группа получает aria-label вместо labelledby.
+   */
+  hideLabel?: boolean;
 }
 
 /**
@@ -20,7 +26,7 @@ function sortByCanonicalOrder(subjectIds: Iterable<string>): string[] {
   return SUBJECTS.filter((subject) => set.has(subject.id)).map((subject) => subject.id);
 }
 
-export function SubjectsMultiSelect({ value, onChange }: SubjectsMultiSelectProps) {
+export function SubjectsMultiSelect({ value, onChange, hideLabel = false }: SubjectsMultiSelectProps) {
   const selectedSubjects = new Set(value);
 
   const toggleSubject = (subjectId: string) => {
@@ -44,13 +50,16 @@ export function SubjectsMultiSelect({ value, onChange }: SubjectsMultiSelectProp
 
   return (
     <div className="flex flex-col gap-3">
-      <span id="tutor-profile-subjects-label" className="text-sm font-medium text-slate-700">
-        Предметы, которые я преподаю
-      </span>
+      {!hideLabel && (
+        <span id="tutor-profile-subjects-label" className="text-sm font-medium text-slate-700">
+          Предметы, которые я преподаю
+        </span>
+      )}
 
       <div
         role="group"
-        aria-labelledby="tutor-profile-subjects-label"
+        aria-labelledby={hideLabel ? undefined : 'tutor-profile-subjects-label'}
+        aria-label={hideLabel ? 'Предметы, которые я преподаю' : undefined}
         className="flex flex-wrap gap-2"
       >
         {SUBJECTS.map((subject) => {

@@ -22,6 +22,7 @@ import {
 import CriteriaBreakdownTable from "@/components/homework/CriteriaBreakdownTable";
 import PhysicsFlowchartTrace from "@/components/homework/PhysicsFlowchartTrace";
 import { SUBJECTS, getSubjectLabel } from "@/types/homework";
+import { SubjectSelect } from "@/components/tutor/SubjectSelect";
 import type {
   HomeworkAiCriteriaItem,
   HomeworkFlowchartTrace,
@@ -112,9 +113,9 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
 
   // Live-форма «Своя задача» — дефолт из реального предмета репетитора (не из
   // образца, который пока только физика).
-  const [ownSubject, setOwnSubject] = useState<string>(
-    subject && SUBJECTS.some((s) => s.id === subject) ? subject : sample.subject,
-  );
+  const ownSubjectDefault =
+    subject && SUBJECTS.some((s) => s.id === subject) ? subject : sample.subject;
+  const [ownSubject, setOwnSubject] = useState<string>(ownSubjectDefault);
   const [examType, setExamType] = useState<"ege" | "oge">("ege");
   const [checkFormat, setCheckFormat] = useState<"short_answer" | "detailed_solution">(
     "detailed_solution",
@@ -293,18 +294,12 @@ export function DemoCheckSheet({ open, onOpenChange, subject }: DemoCheckSheetPr
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-600">Предмет</span>
-                <select
+                <SubjectSelect
                   value={ownSubject}
-                  onChange={(e) => setOwnSubject(e.target.value)}
+                  onChange={setOwnSubject}
                   className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-base"
-                  style={{ touchAction: "manipulation" }}
-                >
-                  {SUBJECTS.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
+                  overrideTracking={{ surface: "demo_check" }}
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-600">Экзамен</span>
