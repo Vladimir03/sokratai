@@ -740,5 +740,27 @@ if (checkModeParityResult.status !== 0) {
 }
 ok("check_mode parity pass (реестр = Deno-зеркало = OCR = tutor-api = редактор)");
 
+// ── 16. ExamProfile registry parity (техдолг 5.6, 2026-07-23) ───────────────
+// Registry (src/lib/examProfiles.ts) консолидировал карты предмет×экзамен
+// (баллы КИМ / режимы Ч1 / граница Ч2 / бенчмарки); обёртки kbKimScores /
+// variantTaskDraft / checkFormatHelpers / mockExamScaleEge2025 обязаны отдавать
+// прежние значения байт-в-байт (Σ45/Σ39/Σ28 — канарейки предметников).
+console.log("");
+console.log("16. ExamProfile registry parity (предмет × экзамен)...");
+const examProfilesTestPath = path.join(rootDir, "scripts", "test-exam-profiles.mjs");
+if (!fs.existsSync(examProfilesTestPath)) {
+  fail("scripts/test-exam-profiles.mjs missing — exam-profile parity unguarded");
+}
+const examProfilesResult = spawnSync(process.execPath, [examProfilesTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (examProfilesResult.status !== 0) {
+  console.error(examProfilesResult.stdout ?? "");
+  console.error(examProfilesResult.stderr ?? "");
+  fail("exam-profile parity FAILED — see node:test output above");
+}
+ok("exam-profile parity pass (registry = обёртки, Σ45/Σ39/Σ28 канарейки)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

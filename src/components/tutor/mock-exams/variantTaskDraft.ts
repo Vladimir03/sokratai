@@ -4,6 +4,7 @@
 // корзина Базы («Создать пробник» в HWDrawer → prefill через sessionStorage).
 
 import { generateUUID } from '@/components/tutor/homework-create/types';
+import { getExamProfile } from '@/lib/examProfiles';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 import { serializeAttachmentUrls } from '@/lib/attachmentRefs';
@@ -63,55 +64,39 @@ export function rowToDraft(row: MockExamVariantTaskRow): VariantTaskDraft {
 
 // ─── Инференс части и режима проверки ────────────────────────────────────────
 
-/** Часть: физика КИМ 21-26 → 2; иначе по формату проверки (развёрнутое → 2). */
+/**
+ * Часть: физика КИМ из part2KimRange (registry physics:ege — [21,26]) → 2;
+ * иначе по формату проверки (развёрнутое → 2). Карты — ExamProfile registry
+ * (`src/lib/examProfiles.ts`, техдолг 5.6); гейтинг exam-семантики остаётся
+ * здесь (физика лояльна к пустому exam, social строг — ревью 5.6 P1).
+ */
 export function inferVariantTaskPart(
   subject: string,
   kimNumber: number | null,
   checkFormat: 'short_answer' | 'detailed_solution',
 ): 1 | 2 {
-  if (subject === 'physics' && kimNumber !== null && kimNumber >= 21 && kimNumber <= 26) {
-    return 2;
+  if (subject === 'physics' && kimNumber !== null) {
+    const range = getExamProfile('physics', 'ege')?.part2KimRange;
+    if (range && kimNumber >= range[0] && kimNumber <= range[1]) return 2;
   }
   return checkFormat === 'detailed_solution' ? 2 : 1;
 }
-
-// Карта режимов Части 1 физики ЕГЭ (mirror mock-exam-part1-checker семантики):
-// {5,9,14,18} — multi_choice (частичный балл), {6,10,15,17} — ordered,
-// 20 — task20. Остальные предметы/номера → strict (репетитор правит в редакторе).
-const PHYSICS_EGE_MULTI_CHOICE = new Set([5, 9, 14, 18]);
-const PHYSICS_EGE_ORDERED = new Set([6, 10, 15, 17]);
-
-// Обществознание ЕГЭ Часть 1 (задания 1-16) — критерии ФИПИ (таблица Милады,
-// 2026-07-21, уточнено 2026-07-22). У КАЖДОГО предмета СВОИ критерии (решение
-// владельца) — карты физики не переиспользовать:
-// • № 6,13,15 — последовательность, порядок важен; 1 ошибка (неверный символ,
-//   ЛИШНЯЯ или НЕДОСТАЮЩАЯ позиция) = 1 балл → ordered_lenient (НЕ физический
-//   ordered: у ФИПИ-физики «символов больше требуемого → 0»);
-// • № 2,4,5,7,8,10,11,14,16 — выбор нескольких, порядок неважен, 1 ошибка = 1 балл
-//   → multi_choice;
-// • № 1,3,9,12 (1 балл) — набор цифр, ПОРЯДОК НЕВАЖЕН, любая ошибка → 0 → task20
-//   (сортировка цифр «23»=«32»; strict здесь давал 0 за верный ответ в другом
-//   порядке — репорт Милады).
-const SOCIAL_EGE_ORDERED_LENIENT = new Set([6, 13, 15]);
-const SOCIAL_EGE_MULTI_CHOICE = new Set([2, 4, 5, 7, 8, 10, 11, 14, 16]);
-const SOCIAL_EGE_DIGIT_SET = new Set([1, 3, 9, 12]);
 
 export function inferPart1CheckMode(
   subject: string,
   exam: '' | 'ege' | 'oge' | null,
   kimNumber: number | null,
 ): string {
-  if (subject === 'physics' && exam !== 'oge' && kimNumber !== null) {
-    if (PHYSICS_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
-    if (PHYSICS_EGE_ORDERED.has(kimNumber)) return 'ordered';
-    if (kimNumber === 20) return 'task20';
+  if (kimNumber === null) return 'strict';
+  // Физика: лояльна к пустому exam (исторически '' трактуется как ЕГЭ);
+  // ОГЭ-карты режимов нет → strict.
+  if (subject === 'physics' && exam !== 'oge') {
+    return getExamProfile('physics', 'ege')?.part1CheckModes?.[kimNumber] ?? 'strict';
   }
   // Строго ЕГЭ (симметрично getKimPrimaryScoreForSubject, ревью 5.6 P1): при
   // неуказанном/ОГЭ exam → strict + обычный балл, а не критерии чужого экзамена.
-  if (subject === 'social' && exam === 'ege' && kimNumber !== null) {
-    if (SOCIAL_EGE_ORDERED_LENIENT.has(kimNumber)) return 'ordered_lenient';
-    if (SOCIAL_EGE_MULTI_CHOICE.has(kimNumber)) return 'multi_choice';
-    if (SOCIAL_EGE_DIGIT_SET.has(kimNumber)) return 'task20';
+  if (subject === 'social' && exam === 'ege') {
+    return getExamProfile('social', 'ege')?.part1CheckModes?.[kimNumber] ?? 'strict';
   }
   return 'strict';
 }

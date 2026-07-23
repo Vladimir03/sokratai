@@ -13,6 +13,8 @@
  *   - hwDraftStore.addTask snapshot resolution.
  */
 
+import { getExamProfile } from '@/lib/examProfiles';
+
 export type CheckFormat = 'short_answer' | 'detailed_solution';
 
 /** Map legacy KB `answer_format` value → canonical `check_format`. */
@@ -27,13 +29,15 @@ export function mapAnswerFormatToCheckFormat(
 }
 
 /**
- * Infer `check_format` from KIM number (ЕГЭ физика):
- * KIM 21-26 = Часть 2 (развёрнутое решение); else краткий ответ.
+ * Infer `check_format` from KIM number (ЕГЭ физика): № из part2KimRange
+ * (ExamProfile registry physics:ege — [21,26]) = Часть 2 (развёрнутое
+ * решение); else краткий ответ.
  */
 export function inferCheckFormatFromKim(
   kimNumber: number | null | undefined,
 ): CheckFormat {
-  if (kimNumber && kimNumber >= 21 && kimNumber <= 26) {
+  const range = getExamProfile('physics', 'ege')?.part2KimRange;
+  if (kimNumber && range && kimNumber >= range[0] && kimNumber <= range[1]) {
     return 'detailed_solution';
   }
   return 'short_answer';

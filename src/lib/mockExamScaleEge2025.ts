@@ -18,6 +18,8 @@
  * прошлых лет — нужна отдельная таблица.
  */
 
+import { getExamProfile } from '@/lib/examProfiles';
+
 const PRIMARY_TO_SECONDARY_EGE_PHYSICS_2025: Record<number, number> = {
   0: 0,
   // Красная зона (не сдал)
@@ -71,19 +73,24 @@ const PRIMARY_TO_SECONDARY_EGE_PHYSICS_2025: Record<number, number> = {
   45: 100,
 };
 
-/** Maximum primary score для ЕГЭ физика 2025. */
-export const MAX_PRIMARY_EGE_PHYSICS_2025 = 45;
+// Бенчмарки первичной шкалы — из ExamProfile registry (техдолг 5.6, 2026-07-23):
+// single source `src/lib/examProfiles.ts` (physics:ege). Шкала перевода
+// первичный→тестовый (карта выше) остаётся здесь — под smoke §10 parity.
+const EGE_PHYSICS_BENCHMARKS = getExamProfile('physics', 'ege')!.benchmarks!;
+
+/** Maximum primary score для ЕГЭ физика 2025 (= benchmarks.maxPrimary registry). */
+export const MAX_PRIMARY_EGE_PHYSICS_2025 = EGE_PHYSICS_BENCHMARKS.maxPrimary;
 /** Maximum secondary (test) score для ЕГЭ физика 2025. */
 export const MAX_SECONDARY_EGE_PHYSICS_2025 = 100;
 /** Минимальный порог сдачи ЕГЭ для поступления в ВУЗ (secondary). */
 export const PASS_THRESHOLD_SECONDARY_EGE_PHYSICS_2025 = 36;
 /** Минимальный первичный для порога сдачи (8 первичных → 36 тестовых). */
-export const PASS_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = 8;
+export const PASS_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = EGE_PHYSICS_BENCHMARKS.pass;
 /**
  * «Хорошо» — граница школьной оценки «5» (27 первичных ≈ 68 тестовых).
  * Vladimir подтвердил 2026-06-07.
  */
-export const GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = 27;
+export const GOOD_THRESHOLD_PRIMARY_EGE_PHYSICS_2025 = EGE_PHYSICS_BENCHMARKS.good;
 
 /**
  * Бенчмарки «порог» / «хорошо» (в первичных баллах) для прогресс-бара результата.

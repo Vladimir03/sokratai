@@ -1,76 +1,48 @@
 import type { ExamType } from '@/types/kb';
+import { getExamProfile } from '@/lib/examProfiles';
 
 /**
- * Карта № КИМ → первичный балл (макс. за задание) по ФИПИ.
+ * Авто-балл по № КИМ (макс. за задание по ФИПИ) — тонкие обёртки над
+ * ExamProfile registry (`src/lib/examProfiles.ts`, техдолг 5.6 2026-07-23):
+ * карты живут ТАМ, здесь — прежние публичные API (callsites не тронуты).
  *
- * Используется ТОЛЬКО для авто-подстановки балла в форме задачи «Моей базы»
- * (запрос Егора: «если указан № КИМ — не спрашивать первичный балл, он
- * известен»). Поле остаётся редактируемым — тутор может переопределить.
- * НЕ источник истины для грейдинга (там балл хранится в задаче).
- *
- * Физика ЕГЭ 2026: 26 заданий, макс. первичный балл 45.
- *  • 2 балла: № 5, 6, 9, 10, 14, 15, 17, 18 (множественный выбор / соответствие —
- *    совпадает с check_mode multi_choice/ordered в пробниках, rule 45).
- *  • Часть 2 (развёрнутая): 21=3, 22=2, 23=2, 24=3, 25=3, 26=4.
- *  • Остальные задания части 1 — 1 балл.
- *  Σ = 45 (сверено). Источник: ФИПИ. Финально подтверждает Егор (физика).
+ * Используется ТОЛЬКО для авто-подстановки балла в формах (Моя база /
+ * AI-загрузчик / конструкторы). Поле редактируемо; НЕ источник истины для
+ * грейдинга (балл снапшотится в задачу).
  */
-export const PHYSICS_EGE_KIM_SCORES: Record<number, number> = {
-  1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 1, 8: 1, 9: 2, 10: 2,
-  11: 1, 12: 1, 13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 2, 19: 1, 20: 1,
-  21: 3, 22: 2, 23: 2, 24: 3, 25: 3, 26: 4,
-};
 
-/**
- * Физика ОГЭ 2026 — первичный балл по № задания (22 задания, Σ=39).
- * Источник: критерии ФИПИ ОГЭ (предоставил Егор, 2026-06-21).
- *  • 1 балл: № 3, 5–11, 15.
- *  • 2 балла: № 1, 2, 4, 12, 13 (позиционные); № 14, 16 (множественный выбор);
- *    № 18, 19 (развёрнутые).
- *  • 3 балла: № 17, 20–22 (развёрнутые).
- * Частичный балл (1 за один неверный/недостающий символ) — забота грейдинга,
- * не формы: здесь только МАКС за задание для авто-подстановки.
- */
-export const PHYSICS_OGE_KIM_SCORES: Record<number, number> = {
-  1: 2, 2: 2, 3: 1, 4: 2, 5: 1, 6: 1, 7: 1, 8: 1, 9: 1, 10: 1, 11: 1,
-  12: 2, 13: 2, 14: 2, 15: 1, 16: 2, 17: 3, 18: 2, 19: 2, 20: 3, 21: 3, 22: 3,
-};
+/** @deprecated читай через getExamProfile('physics','ege') — оставлено для совместимости. */
+export const PHYSICS_EGE_KIM_SCORES: Record<number, number> =
+  getExamProfile('physics', 'ege')!.kimPrimaryScores!;
+/** @deprecated читай через getExamProfile('physics','oge'). */
+export const PHYSICS_OGE_KIM_SCORES: Record<number, number> =
+  getExamProfile('physics', 'oge')!.kimPrimaryScores!;
+/** @deprecated читай через getExamProfile('social','ege'). */
+export const SOCIAL_EGE_KIM_SCORES: Record<number, number> =
+  getExamProfile('social', 'ege')!.kimPrimaryScores!;
 
 /**
  * Известный первичный балл по экзамену и № КИМ, либо `null` — тогда форма
- * НЕ авто-подставляет балл (тутор вводит вручную). v1 = физика.
+ * НЕ авто-подставляет балл (тутор вводит вручную).
  *
- * ⚠️ Карты — ФИЗИЧЕСКИЕ. Номера КИМ физики (1-26/1-22) пересекаются с другими
- * предметами (обществознание ЕГЭ 1-25), поэтому для НЕ-физики авто-балл давать
- * НЕЛЬЗЯ — используй `getKimPrimaryScoreForSubject`. Прямой вызов оставлен для
- * физического homework-пути (HWTaskCard).
+ * ⚠️ ФИЗИЧЕСКИЙ путь (номера КИМ пересекаются между предметами) — для
+ * не-физики используй `getKimPrimaryScoreForSubject`. Прямой вызов оставлен
+ * для физического homework-пути (HWTaskCard).
  */
 export function getKimPrimaryScore(
   exam: ExamType | null | undefined,
   kimNumber: number | null | undefined,
 ): number | null {
   if (!exam || kimNumber == null || !Number.isFinite(kimNumber)) return null;
-  const map = exam === 'ege' ? PHYSICS_EGE_KIM_SCORES : PHYSICS_OGE_KIM_SCORES;
-  return map[kimNumber] ?? null;
+  return getExamProfile('physics', exam)?.kimPrimaryScores?.[kimNumber] ?? null;
 }
 
 /**
- * Обществознание ЕГЭ Часть 1 (задания 1-16) — макс. первичный балл по критериям
- * ФИПИ (таблица Милады, 2026-07-21). № 1,3,9,12 — 1 балл; остальные 1-16 — 2 балла.
- * Σ Части 1 = 28 (сверено с максимумом ЕГЭ обществознание 2024). Часть 2 (17-25) —
- * не здесь (ручной ввод). Частичный балл — забота грейдинга, тут только МАКС.
- */
-export const SOCIAL_EGE_KIM_SCORES: Record<number, number> = {
-  1: 1, 2: 2, 3: 1, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2,
-  9: 1, 10: 2, 11: 2, 12: 1, 13: 2, 14: 2, 15: 2, 16: 2,
-};
-
-/**
- * Subject-aware обёртка (мультипредметный каталог, 2026-07-06): авто-балл по КИМ.
- * Физика ЕГЭ/ОГЭ (карты ФИПИ) + обществознание ЕГЭ Часть 1 (задания 1-16, таблица
- * Милады 2026-07-21). Остальные предметы → `null`: балл вводится вручную. `subject`
- * null/undefined трактуется как физика (обратная совместимость — homework без предмета).
- * Новый предмет с картой баллов — расширяй ЗДЕСЬ (single source of truth).
+ * Subject-aware авто-балл по КИМ (мультипредметный каталог, 2026-07-06).
+ * Гейтинг exam-семантики (ревью 5.6 P1): social — строго ЕГЭ; физика лояльна
+ * (`subject` null/undefined = физика — homework без предмета). Предмет без
+ * профиля в registry → null (балл вручную; честная пометка Ф6 — по этому же
+ * null). Новый предмет с картой — заводи профиль в `examProfiles.ts`.
  */
 export function getKimPrimaryScoreForSubject(
   subject: string | null | undefined,
@@ -79,7 +51,7 @@ export function getKimPrimaryScoreForSubject(
 ): number | null {
   if (subject === 'social') {
     if (exam !== 'ege' || kimNumber == null || !Number.isFinite(kimNumber)) return null;
-    return SOCIAL_EGE_KIM_SCORES[kimNumber] ?? null;
+    return getExamProfile('social', 'ege')?.kimPrimaryScores?.[kimNumber] ?? null;
   }
   if (subject != null && subject !== 'physics') return null;
   return getKimPrimaryScore(exam, kimNumber);
