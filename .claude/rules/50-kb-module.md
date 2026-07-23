@@ -321,6 +321,30 @@
 
 **При расширении (P1+, tasks.md TASK-10..15):** PDF-задачник/Excel/пакетный режим/правка-репликой/вход в конструктор ДЗ/квота; новый AI-путь с картинками → `inlineImageUrlToBase64` + bucket whitelist (`kb-attachments` уже в `HOMEWORK_AI_BUCKETS`); новый write — через `insertTask`, не новый site; AI-перерисовка рисунка (vector-first) — P2, отдельная spec.
 
+### «Тип N» = номер КИМ + приоритет карты ФИПИ над догадкой AI (2026-07-22, репорт Милады)
+
+Сборники РЕШУ ЕГЭ подписывают задачу `N. Тип K № <id>`, где **«Тип» — номер задания КИМ**, а `N` — порядковый в подборке. Раньше `isVariantNumbering`-эвристика (цепочка 1..N ≤ 40 = «полный вариант» → номера = КИМ, фидбэк химиков) БЕЗУСЛОВНО затирала `d.kim_number` порядковым номером — даже когда AI извлёк верный КИМ. Следствие: неверный КИМ → неверный авто-балл и режим проверки.
+
+- **`taskMarkers.ts::scanTaskMarkers`** ловит `Тип K` в хвосте dot-маркера (`TYPE_AFTER_MARKER_RE`, без lookbehind — rule 80; кап `TYPE_KIM_MAX=30` — зеркало edge-normalize) → новые поля `typeNumbersPerPage` (выровнено поэлементно с `numbersPerPage`) + `hasTypeMarkers` (≥2 типизированных маркера).
+- **Двухпроходная цепочка (КРИТИЧНО для обществознания):** суждения ВНУТРИ задания («1. К признакам… 2. При командной…») — тоже line-start dot-маркеры и перехватывают монотонную цепочку, вытесняя настоящие задачи (у Милады находилось 4 задачи вместо 13, Типы терялись). Поэтому: сначала строим цепочку ТОЛЬКО по маркерам с «Тип» — если она ≥ `MIN_CHAIN`, она и есть разметка задач; иначе fallback на прежнюю цепочку по всем маркерам (**байт-в-байт старое поведение** для физики/химии без Типа).
+- **Приоритет в zip (`InputStage`)**: `Тип` → `d.kim_number` побеждает и догадку AI, и variant-эвристику; **`hasTypeMarkers` ГАСИТ `isVariantNumbering`** (документ с Типами = тематическая подборка, порядковый номер КИМом не является). `source_num` (ключ мерджа `answers_table`) по-прежнему = номер сборниковой нумерации.
+- **Промпты** (все 3 в `kb-ai-extract` + `prompts.md` §2 ПЕРВЫМ): «Если рядом с номером указано „Тип N“ — это номер задания КИМ; порядковый номер КИМом НЕ является» — для фото-страниц без текстового слоя.
+- **Балл: карта ФИПИ побеждает догадку AI.** `AiTaskLoaderFlow.handleExtracted` сидирует `primaryScore: ''`, когда `getKimPrimaryScoreForSubject(subject, exam, kim) !== null` — иначе AI-значение в поле override неотличимо от ручного ввода и выигрывает precedence `manualScore ?? map ?? draft.primary_score` (у Милады КИМ 3 получал 2 вместо 1 балла). При неизвестной карте сид из AI сохраняется.
+- **Проверено на реальном PDF Милады:** 13/13 задач, Типы `[5,6,5,6][5,6,7,6][6,5,7,1,5]`.
+- **При расширении:** новая форма явного номера КИМ в сборнике («Задание типа N», «КИМ N») → расширять `TYPE_AFTER_MARKER_RE` + промпты; НИКОГДА не возвращать безусловный override kim порядковым номером; любой новый источник авто-балла — карта ФИПИ приоритетнее AI.
+
+### Hard-delete задачи из каталога (запрос Милады, 2026-07-22, миграция `20260723110000`)
+
+«Не скрыть, а вообще удалить». Дополняет ВОЛНУ 6 («Перенести в Мою базу» = убрать из каталога, СОХРАНИВ контент).
+
+- **`kb_mod_delete_catalog_task(p_task_id)`** (+ `kb_mod_preview_delete_task` — STABLE, для confirm-диалога). Subject-гейт `kb_require_moderator_subject` (admin bypass). Lock-order копия → источник (зеркало `_kb_mod_copy_to_base`). Ветки: **own_source (reciprocal, вкл. `hidden_duplicate`) → удалить ОБЕ строки** (решение владельца); **own_source_detached** (`source.published_task_id IS NULL` после `kb_mod_unpublish`, который рвёт связь ОДНОСТОРОННЕ) → только копию — **без этого carve-out'а `unpublished`-строки были бы неудаляемы**; **orphan** → копию; **foreign / link_broken** → RAISE (чужую работу и аномалию не трогаем; блок и для админа).
+- **Гард шаблонов на ОБА id** (`homework_template_tasks.kb_task_id` RESTRICT) — count-only, БЕЗ названий (SECURITY DEFINER утёк бы чужие приватные шаблоны).
+- **Копию удаляем ПЕРВОЙ:** RI `SET NULL` на `source.published_task_id` фаерит UPDATE-триггеры источника, но dup-block выходит на `published IS NULL`, CASE A требует folder/topic-перехода (+`pg_trigger_depth()>1`), CASE B гейтится `published NOT NULL` → воскрешения публикации нет.
+- **Аудит обязателен:** `kb_moderation_log` `action='hard_delete'` (FK на task-ids у лога нет). **Blob'ы storage НЕ чистим** (могут шариться с личными копиями — тот же принятый долг, что у «Перенести»).
+- **Гранты:** тройной набор В САМОЙ миграции (`GRANT authenticated, service_role` → `REVOKE PUBLIC` → `REVOKE anon`) — DO-блок `20260722130000` разовый и новые `kb_mod_*` не покрывает.
+- UI: kebab `TaskCard` «Удалить из каталога» (`onDeleteFromCatalog`, гейт `isModeratable` + `canMod`) + `DeleteCatalogTaskDialog` (текст по ветке preview; confirm disabled на foreign/link_broken/шаблонах).
+- **При расширении:** новый destructive-путь по каталожным задачам → своя ветка в этой RPC (не второй path); удаление, затрагивающее чужого модератора, — всегда блок; преview-RPC наружу отдаёт только ветку и счётчики.
+
 ## Мультипредметный каталог + PDF-загрузка (2026-07-06)
 
 Онбординг модератора обществознания (Milada, `milada.met@yandex.ru`) + PDF в AI-загрузчик. Коммиты `7d5a43f`/`6f67904`/`1fc2266`/`ce8278d`. Build-лог: memory `project_kb_multisubject_social_2026_07_06.md` + `project_kb_pdf_loader_2026_07_06.md`.
