@@ -1,5 +1,13 @@
-import { useEffect } from 'react';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import { useDeleteTaskPreview } from '@/hooks/useModeratorCatalog';
 import type { DeleteCatalogTaskBranch } from '@/lib/kbModeratorApi';
@@ -10,6 +18,9 @@ import type { DeleteCatalogTaskBranch } from '@/lib/kbModeratorApi';
 // СЕРВЕРНОГО preflight `kb_mod_preview_delete_task` — клиент не может отличить
 // свой исходник от чужого (RLS прячет чужие личные строки). Гонка preview ↔
 // confirm не страшна: мутация-RPC перепроверяет всё под FOR UPDATE.
+//
+// 2026-07-23 (техдолг ревью 5.6): портировано на Radix AlertDialog —
+// focus-trap/aria/Esc/scroll-lock из коробки. Props-контракт не менялся.
 
 interface DeleteCatalogTaskDialogProps {
   taskId: string;
@@ -77,44 +88,32 @@ export function DeleteCatalogTaskDialog({
         ? 'Удалить из каталога?'
         : 'Удалить задачу?';
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [onClose]);
-
   return (
-    <>
-      <div className="fixed inset-0 z-[300] bg-black/40 animate-in fade-in-0" onClick={onClose} />
-      <div className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[420px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
-        <div className="flex items-start justify-between border-b border-socrat-border px-5 py-4">
-          <div className="flex items-start gap-3">
+    <AlertDialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      {/* Тело содержит блочную разметку — AlertDialogDescription (<p>) не
+          подходит; aria-describedby гасится явно (Radix-конвенция). */}
+      <AlertDialogContent className="max-w-[420px]" aria-describedby={undefined}>
+        <AlertDialogHeader>
+          <div className="flex items-start gap-3 text-left">
             <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100">
-              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <AlertTriangle className="h-5 w-5 text-red-600" aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h3 className="text-base font-semibold text-red-600">{title}</h3>
+              <AlertDialogTitle className="text-base font-semibold text-red-600">
+                {title}
+              </AlertDialogTitle>
               <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">«{taskPreviewText}»</p>
             </div>
           </div>
-          <button onClick={onClose} className="ml-2 shrink-0 p-1" aria-label="Закрыть">
-            <X className="h-4 w-4 text-muted-foreground" />
-          </button>
-        </div>
+        </AlertDialogHeader>
 
-        <div className="flex-1 overflow-auto px-5 py-4">
+        <div className="text-left">
           {isLoading ? (
-            <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Проверяем задачу…
+            <div className="flex items-center gap-2 py-4 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Проверяем задачу…
             </div>
           ) : error ? (
-            <p className="py-4 text-sm text-red-600">
+            <p className="py-2 text-sm text-red-600">
               {error instanceof Error ? error.message : 'Не удалось получить сведения'}
             </p>
           ) : body ? (
@@ -139,27 +138,27 @@ export function DeleteCatalogTaskDialog({
           ) : null}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-socrat-border px-5 py-3.5">
-          <button
-            onClick={onClose}
-            className="rounded-lg border border-socrat-border bg-transparent px-4 py-2 text-[13px] text-muted-foreground [touch-action:manipulation]"
-          >
+        <AlertDialogFooter className="gap-2 sm:gap-2">
+          <AlertDialogCancel>
             {body?.blocking || templateBlocked ? 'Понятно' : 'Отмена'}
-          </button>
+          </AlertDialogCancel>
           {!body?.blocking && (
-            <button
-              onClick={() => canConfirm && onConfirm()}
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (canConfirm) onConfirm();
+              }}
               disabled={!canConfirm}
               className={cn(
-                'rounded-lg px-4 py-2 text-[13px] font-semibold text-white [touch-action:manipulation]',
+                'text-white',
                 canConfirm ? 'bg-red-600 hover:bg-red-700' : 'cursor-default bg-socrat-border',
               )}
             >
               {isPending ? 'Удаляем…' : 'Удалить безвозвратно'}
-            </button>
+            </AlertDialogAction>
           )}
-        </div>
-      </div>
-    </>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
