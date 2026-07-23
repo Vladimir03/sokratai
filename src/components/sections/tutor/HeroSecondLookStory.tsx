@@ -1,58 +1,48 @@
 /**
  * W1 «скрин-стори второй взгляд» — вау-элемент hero (landing-v2, GATE A/B).
  *
- * Контент = РЕАЛЬНЫЙ кейс из живого демо Егора (презентация репетиторам,
- * июль 2026): ученик Всеволод, адиабатический процесс, ошибка перевода
- * ΔT в Кельвины (взял −373 вместо ΔT = −100 К) — Сократ поймал её в чате ДЗ.
+ * Контент = РЕАЛЬНЫЙ кейс из живого демо Егора (слайд 16 презентации
+ * репетиторам, июль 2026): ученик Всеволод, адиабатический процесс, ошибка
+ * перевода ΔT в Кельвины (взял −373 вместо ΔT = 100 К) — Сократ поймал её
+ * в чате ДЗ. Фото рукописи — тот же кадр со слайда (вырезан из экспорта,
+ * `public/marketing/tutor-landing/hero-handwritten-solution.webp`, 30 КБ).
  * Текст ответа Сократа — сжатая цитата реального ответа из кабинета.
- *
- * Рукопись пока стилизована JSX (файла фото в репо нет): когда владелец
- * положит скрин в public/marketing/tutor-landing/ — заменить верхнюю
- * карточку на <img> по образцу Tour3ConceptMockup.tsx, контракт не менять.
  *
  * Rule 80: без dvh/lookbehind/новых Web API; чистый CSS.
  */
+const HANDWRITING_SRC = "/marketing/tutor-landing/hero-handwritten-solution.webp";
+
 export default function HeroSecondLookStory() {
   return (
     <figure aria-label="Пример: Сократ нашёл ошибку в рукописном решении и объяснил её ученику в чате">
       <div className="relative">
-        {/* «Фото» рукописного решения Всеволода — подложка, слегка повёрнута */}
-        <div
-          aria-hidden="true"
-          className="rounded-[12px] p-4 pb-12"
+        {/*
+          Фото рукописного решения Всеволода — подложка, слегка повёрнута.
+          Без loading="lazy": элемент above-the-fold, ленивая загрузка сдвинула
+          бы отрисовку hero. width/height заданы — защита от CLS.
+        */}
+        <img
+          src={HANDWRITING_SRC}
+          alt="Рукописное решение ученика: адиабатический процесс, работа газа"
+          width={940}
+          height={556}
+          decoding="async"
+          className="block w-full h-auto rounded-[12px]"
           style={{
-            backgroundColor: "#fffdf5",
             border: "1px solid var(--sokrat-border)",
             boxShadow: "var(--sokrat-shadow-md)",
             transform: "rotate(-2deg)",
-            backgroundImage:
-              "repeating-linear-gradient(transparent, transparent 21px, rgba(100,116,139,0.18) 22px)",
           }}
-        >
-          <div
-            className="text-[14px] leading-[22px]"
-            style={{
-              color: "#334155",
-              fontFamily: "Georgia, 'Times New Roman', serif",
-              fontStyle: "italic",
-            }}
-          >
-            Дано: ν = 3 моль, ΔT = −100 °C
-            <br />
-            Адиабатический процесс ⇒ Q = 0
-            <br />
-            ΔU = 3/2·νR·ΔT = 3/2·3·8,31·
-            <span style={{ color: "#b91c1c" }}>(−373)</span>
-            <br />
-            A = −ΔU = 13 948 Дж ≈ 13,9 кДж
-            <br />
-            Ответ: A ≈ 13,9 кДж
-          </div>
-        </div>
+        />
 
-        {/* Карточка проверки Сократа — поверх, со сдвигом */}
+        {/*
+          Карточка проверки Сократа — поверх, со сдвигом. Перекрытие маленькое
+          (-mt-4): у фото внизу ~10% пустой линованной бумаги, строку
+          «Ответ: A₂ ≈ 13,9 кДж» закрывать нельзя — это тот самый неверный
+          ответ, который поймал Сократ.
+        */}
         <div
-          className="relative -mt-8 ml-3 md:ml-6 rounded-[12px] p-4"
+          className="relative -mt-4 ml-3 md:ml-6 rounded-[12px] p-4"
           style={{
             backgroundColor: "var(--sokrat-card)",
             border: "1px solid var(--sokrat-border)",

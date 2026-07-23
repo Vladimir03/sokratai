@@ -42,6 +42,10 @@ export default function WhyNotOldWay() {
       style={{ backgroundColor: "var(--sokrat-surface)" }}
     >
       <style>{`
+        .sokrat.sokrat-marketing .wnow-lede {
+          font-size: 15px;
+          line-height: 1.6;
+        }
         .sokrat.sokrat-marketing .wnow-title {
           font-size: 16px;
           line-height: 1.3;
@@ -51,15 +55,23 @@ export default function WhyNotOldWay() {
           line-height: 1.6;
         }
         @media (min-width: 768px) {
+          .sokrat.sokrat-marketing .wnow-lede { font-size: 17px; }
           .sokrat.sokrat-marketing .wnow-title { font-size: 18px; }
           .sokrat.sokrat-marketing .wnow-body { font-size: 15px; }
         }
       `}</style>
 
       <div className="mx-auto max-w-[960px] px-4 md:px-8">
-        <h2 id="why-not-old-way-heading" className="text-center mb-7 md:mb-12">
-          Бесплатные инструменты — а&nbsp;вечер всё равно ваш
+        <h2 id="why-not-old-way-heading" className="text-center mb-3 md:mb-4">
+          Почему мессенджеров, ChatGPT и&nbsp;«Решу&nbsp;ЕГЭ» не&nbsp;хватает
         </h2>
+
+        <p
+          className="wnow-lede text-center mx-auto mb-7 md:mb-12 max-w-[680px]"
+          style={{ color: "var(--sokrat-fg2)" }}
+        >
+          Инструменты бесплатные — а проверка всё равно съедает ваш вечер.
+        </p>
 
         <ul className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
           {STRIKES.map(({ Icon, title, body }) => (
