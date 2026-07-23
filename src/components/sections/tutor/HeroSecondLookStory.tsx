@@ -1,22 +1,25 @@
 /**
- * W1 «скрин-стори второй взгляд» — вау-элемент hero (landing-v2, GATE A).
+ * W1 «скрин-стори второй взгляд» — вау-элемент hero (landing-v2, GATE A/B).
  *
- * Стилизованная JSX-композиция «фото рукописного решения → разбор Сократа
- * с баллом 1 из 2» по кейсу Елены. Намеренно НЕ реальный скриншот:
- * (а) ноль PII, (б) шипится без ожидания ассетов. Когда владелец соберёт
- * реальные скрины — заменить внутренности на <img> по образцу
- * Tour3ConceptMockup.tsx, не меняя внешний контракт компонента.
+ * Контент = РЕАЛЬНЫЙ кейс из живого демо Егора (презентация репетиторам,
+ * июль 2026): ученик Всеволод, адиабатический процесс, ошибка перевода
+ * ΔT в Кельвины (взял −373 вместо ΔT = −100 К) — Сократ поймал её в чате ДЗ.
+ * Текст ответа Сократа — сжатая цитата реального ответа из кабинета.
+ *
+ * Рукопись пока стилизована JSX (файла фото в репо нет): когда владелец
+ * положит скрин в public/marketing/tutor-landing/ — заменить верхнюю
+ * карточку на <img> по образцу Tour3ConceptMockup.tsx, контракт не менять.
  *
  * Rule 80: без dvh/lookbehind/новых Web API; чистый CSS.
  */
 export default function HeroSecondLookStory() {
   return (
-    <figure aria-label="Пример: Сократ нашёл ошибку, которую пропустил репетитор">
+    <figure aria-label="Пример: Сократ нашёл ошибку в рукописном решении и объяснил её ученику в чате">
       <div className="relative">
-        {/* «Фото» рукописного решения — подложка, слегка повёрнута */}
+        {/* «Фото» рукописного решения Всеволода — подложка, слегка повёрнута */}
         <div
           aria-hidden="true"
-          className="rounded-[12px] p-4 pb-10"
+          className="rounded-[12px] p-4 pb-12"
           style={{
             backgroundColor: "#fffdf5",
             border: "1px solid var(--sokrat-border)",
@@ -27,26 +30,29 @@ export default function HeroSecondLookStory() {
           }}
         >
           <div
-            className="text-[15px] leading-[22px]"
+            className="text-[14px] leading-[22px]"
             style={{
               color: "#334155",
               fontFamily: "Georgia, 'Times New Roman', serif",
               fontStyle: "italic",
             }}
           >
-            Дано: m = 2 кг, v₀ = 3 м/с
+            Дано: ν = 3 моль, ΔT = −100 °C
             <br />
-            E = mv²/2 = 2·3²/2 = 9 Дж
+            Адиабатический процесс ⇒ Q = 0
             <br />
-            A = F·s = <span style={{ color: "#b91c1c" }}>18 Дж</span>
+            ΔU = 3/2·νR·ΔT = 3/2·3·8,31·
+            <span style={{ color: "#b91c1c" }}>(−373)</span>
             <br />
-            Ответ: 18 Дж
+            A = −ΔU = 13 948 Дж ≈ 13,9 кДж
+            <br />
+            Ответ: A ≈ 13,9 кДж
           </div>
         </div>
 
-        {/* Карточка разбора Сократа — поверх, со сдвигом */}
+        {/* Карточка проверки Сократа — поверх, со сдвигом */}
         <div
-          className="relative -mt-7 ml-4 md:ml-8 rounded-[12px] p-4"
+          className="relative -mt-8 ml-3 md:ml-6 rounded-[12px] p-4"
           style={{
             backgroundColor: "var(--sokrat-card)",
             border: "1px solid var(--sokrat-border)",
@@ -66,7 +72,7 @@ export default function HeroSecondLookStory() {
                 ✓
               </span>
               <span style={{ color: "var(--sokrat-fg2)" }}>
-                Физическая модель и формулы — верно
+                Адиабатический процесс, первый закон — верно
               </span>
             </li>
             <li className="flex items-start gap-2">
@@ -74,7 +80,7 @@ export default function HeroSecondLookStory() {
                 ✗
               </span>
               <span style={{ color: "var(--sokrat-fg2)" }}>
-                Ошибка в вычислении работы — строка 3
+                Перевод ΔT в Кельвины — ошибка в расчёте
               </span>
             </li>
           </ul>
@@ -89,6 +95,31 @@ export default function HeroSecondLookStory() {
             <span className="text-[15px] font-bold" style={{ color: "var(--sokrat-green-800)" }}>
               1 из 2
             </span>
+          </div>
+
+          {/* Ответ Сократа ученику в чате ДЗ (сжатая цитата реального ответа) */}
+          <div
+            className="mt-3 rounded-[10px] rounded-tl-[4px] px-3 py-2.5"
+            style={{
+              backgroundColor: "var(--sokrat-surface)",
+              border: "1px solid var(--sokrat-border)",
+            }}
+          >
+            <div
+              className="mb-1 text-[10px] font-bold uppercase tracking-[0.06em]"
+              style={{ color: "var(--sokrat-fg3)" }}
+            >
+              Сократ — ученику в чате ДЗ
+            </div>
+            <p
+              className="text-[12.5px] leading-[1.5]"
+              style={{ color: "var(--sokrat-fg2)", margin: 0 }}
+            >
+              Всеволод, процесс адиабатический — верно. Но при переводе ΔT
+              в&nbsp;Кельвины ошибка: изменение температуры одинаково
+              в&nbsp;обеих шкалах (ΔT&nbsp;=&nbsp;100&nbsp;К). Пересчитай,
+              учитывая этот момент.
+            </p>
           </div>
         </div>
       </div>
