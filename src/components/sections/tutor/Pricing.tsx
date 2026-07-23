@@ -523,11 +523,11 @@ export default function Pricing() {
         <div className="pp-roi-title">Окупаемость первой неделей</div>
         <ul className="pp-roi-lines">
           <li className="pp-roi-line">
-            Один час вашего времени — <strong>1,5–2 тысячи рублей</strong>
+            Час вашей работы стоит <strong>1,5–2 тысячи рублей</strong>
           </li>
           <li className="pp-roi-line">
-            Экономия трёх часов в неделю —{" "}
-            <strong>4,5–6 тысяч в месяц</strong>
+            Сократ возвращает <strong>~10 часов в неделю</strong> — и стоит
+            меньше одного вашего занятия в месяц
           </li>
           <li className="pp-roi-line">
             Платформа окупается <strong>первой неделей</strong> использования

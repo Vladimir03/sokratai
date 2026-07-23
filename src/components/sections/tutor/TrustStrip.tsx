@@ -1,4 +1,4 @@
-import { BookOpen, GraduationCap, ShieldCheck, Trophy } from "lucide-react";
+import { BookOpen, Clock, ShieldCheck, TrendingUp } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 type Pill = {
@@ -7,11 +7,13 @@ type Pill = {
   caption: string;
 };
 
+// Пилюли синхронизированы с оффером V1 (landing-v2 GATE B):
+// пруфы — Елена ×2 (группы с Сократом) и Егор ~10 ч/нед.
 const PILLS: Pill[] = [
-  { Icon: GraduationCap, value: "10 лет", caption: "опыта Егора Блинова" },
-  { Icon: Trophy, value: "2×100", caption: "баллов ЕГЭ лично у Егора" },
-  { Icon: BookOpen, value: "ФИПИ", caption: "привязка ко всему кодификатору" },
-  { Icon: ShieldCheck, value: "14 дней", caption: "отмена без объяснений" },
+  { Icon: TrendingUp, value: "×2", caption: "учеников у Елены — за счёт групп с Сократом" },
+  { Icon: Clock, value: "~10 ч", caption: "в неделю экономит Егор на проверке и учёте" },
+  { Icon: BookOpen, value: "ФИПИ", caption: "проверка по критериям, весь кодификатор" },
+  { Icon: ShieldCheck, value: "7 дней", caption: "бесплатно — карта не нужна" },
 ];
 
 export default function TrustStrip() {

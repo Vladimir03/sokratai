@@ -21,7 +21,7 @@ export default function FinalCTA() {
           id="final-cta-heading"
           className="final-cta-h2 mb-6 md:mb-7"
         >
-          Готовы перестать проверять до&nbsp;полуночи?
+          Готовы вести больше учеников — без проверки до&nbsp;полуночи?
         </h2>
 
         <p
