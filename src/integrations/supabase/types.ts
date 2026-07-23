@@ -5106,6 +5106,7 @@ export type Database = {
         }
         Returns: string
       }
+      kb_mod_delete_catalog_task: { Args: { p_task_id: string }; Returns: Json }
       kb_mod_delete_section_to_my_base: {
         Args: {
           p_filter: string
@@ -5130,6 +5131,7 @@ export type Database = {
         Args: { p_filter: string; p_section: string; p_subject: string }
         Returns: Json
       }
+      kb_mod_preview_delete_task: { Args: { p_task_id: string }; Returns: Json }
       kb_mod_preview_delete_topic: {
         Args: { p_topic_id: string }
         Returns: Json
