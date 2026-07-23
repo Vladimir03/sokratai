@@ -184,6 +184,13 @@ Backward compat: legacy `sokratai.ru/invite/{code}` URLs продолжают р
 
 Spec: `~/.claude/plans/1-functional-meteor.md`.
 
+### Педагогический контекст ученика — `_shared/learning-context.ts` (Ф5, 2026-07-23)
+
+Класс/тип/цель ученика (`profiles.grade/learner_type/learning_goal`) едут в AI-промпты ДЗ (check/hint через расширенный `resolveStudentIdentity` — та же строка profiles, лишних запросов нет) и student-чата (`chat/index.ts`, server-side по userId; free-чат дополнительно читает предметный СНАПШОТ `chats.subject` по chatId с ownership-чеком).
+- **Evaluation/pedagogy split (КРИТИЧНО, обобщение tone-split `grading_discipline`):** блок `buildPedagogyContextBlock` влияет ТОЛЬКО на тон/подачу — вставляется СТРУКТУРНО ВЫШЕ «МЕТОДОЛОГИЯ/ПРАВИЛА ОЦЕНКИ» + запрет менять вердикт/баллы зашит в сам текст. **Пробники класс НЕ получают.** Новый AI-путь с pedagogy → тот же билдер, вне grading-секции.
+- `deriveExamHint`: ТОЛЬКО 9→ОГЭ, 10-11→ЕГЭ; любая непустая цель → null; в guided ДЗ examHint подавлен (`includeExamHint:false` — экзамен известен из exam_type).
+- `learning_goal` — student-writable free text: схлопнутый whitespace + кап 200 + цитата «…» (анти prompt-injection). Анти-leak: identity-ответы клиентам НЕ расширены — поля только в промпт.
+
 ### Subject-rubric layer — методология ЕГЭ 2026
 
 Subject-aware prompts получают полную методологию ФИПИ / DELF / IELTS.
