@@ -4,6 +4,12 @@ import "./index.css";
 import { registerServiceWorker } from "./registerServiceWorker";
 import { ensurePushSubscriptionSaved, listenForSubscriptionChanges } from "./lib/pushApi";
 import { initPwaInstallCapture } from "./lib/pwaInstall";
+import { installChunkReloadGuards } from "./lib/chunkReload";
+
+// Авто-восстановление при «Failed to fetch dynamically imported module» — ДО
+// всего остального: стейл-чанк после деплоя / DPI-обрыв → тихая перезагрузка,
+// а не краш-оверлей «неустранимая ошибка» (репорт Ульяны/Софьи, rule 95).
+installChunkReloadGuards();
 
 // Регистрируем Service Worker для offline работы
 registerServiceWorker();

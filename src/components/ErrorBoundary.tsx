@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw, AlertTriangle, Copy, Check } from 'lucide-react';
 import { reportClientError } from '@/lib/clientErrorReport';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
+import { isChunkLoadError, reloadForChunkError } from '@/lib/chunkReload';
 
 interface Props {
   children: ReactNode;
@@ -30,24 +31,23 @@ class ErrorBoundary extends Component<Props, State> {
   }
 
   static getDerivedStateFromError(error: Error): State {
-    // Check if it's a chunk loading error (common after deployments)
-    const isChunkLoadError =
-      error.message.includes('Failed to fetch dynamically imported module') ||
-      error.message.includes('Loading chunk') ||
-      error.message.includes('ChunkLoadError') ||
-      error.message.includes('Loading CSS chunk') ||
-      error.name === 'ChunkLoadError';
-
     return {
       hasError: true,
       error,
-      isChunkLoadError,
+      isChunkLoadError: isChunkLoadError(error),
       showDetails: false,
       copied: false,
     };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Chunk-ошибка, дошедшая до рендера (не перехваченная window-гардами) —
+    // авто-перезагружаемся за свежим index.html + чанками, без клика ученика.
+    // reloadForChunkError сам защищён от петли (15с окно): если уже
+    // перезагружались только что, вернёт false → показываем UI ниже.
+    if (isChunkLoadError(error) && reloadForChunkError()) {
+      return; // reload запущен — репорт не нужен (это стейл-деплой, не баг)
+    }
     console.error('ErrorBoundary caught an error:', error.message);
     console.error('Error stack:', error.stack);
     console.error('Component stack:', errorInfo.componentStack);

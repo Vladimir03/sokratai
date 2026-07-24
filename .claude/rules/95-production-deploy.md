@@ -172,6 +172,17 @@ systemctl reload nginx
 
 **Forward-guard (рекомендация):** добавить smoke-check, который грепает `public/service-worker.js` на `respondWith(undefined)`-паттерны и проверяет, что `isHashedAsset` матчит образец Vite-хеша — чтобы регрессия не уехала тихо. Файлы: `public/service-worker.js`, `src/registerServiceWorker.ts`, `src/lib/swKillSwitch.ts`. Build-лог: memory `project_sw_octet_stream_fix_2026_06_29.md`.
 
+### App-level авто-reload при «Failed to fetch dynamically imported module» (2026-07-20)
+
+SW-фикс выше устраняет octet-stream, но НЕ реджект `import()` при реально отсутствующем чанке: у ученика в кэше СТАРЫЙ `index.html`, ссылающийся на хэш, которого уже нет на сервере (после деплоя), ИЛИ DPI роняет запрос → lazy-чанк не грузится. Причём preload-фейл летит window-событием **`vite:preloadError` ДО рендера** lazy-компонента — React `ErrorBoundary` его НЕ видит, ловит **платформенный оверлей Lovable** «произошла неустранимая ошибка / инженеры уведомлены» (текста этого в нашем коде НЕТ — не искать в `src/`). Репорт Ульяны/Софьи 2026-07-20: ученица крашилась на этом, а не входила.
+
+**Фикс — `src/lib/chunkReload.ts` + `installChunkReloadGuards()` в `main.tsx` ДО рендера:**
+- `vite:preloadError` (официальный хук Vite) + `unhandledrejection` (reject `import()` мимо React) + `error`-capture → `event.preventDefault()` (гасит оверлей) + **авто-`location.reload()`** за свежим `index.html`+хэшами (перед reload чистит Cache Storage).
+- **Защита от петли — окно 15с** (`sessionStorage` timestamp): если уже перезагружались только что и снова упало → чанк битый по-настоящему, reload не зовём, `ErrorBoundary` показывает «Доступна новая версия» + ручной reload.
+- `ErrorBoundary` тоже зовёт `reloadForChunkError()` в `componentDidCatch` (chunk-ошибка, дошедшая до рендера) — детект через общий `isChunkLoadError`.
+- **Инвариант:** ошибка-сигнатура чанка (`failed to fetch dynamically imported module`, `loading chunk … failed`, `importing a module script failed`) → авто-reload один раз, НЕ краш-экран. Природа client-side-фикса: юзер со СТАРЫМ бандлом (без гарда) ловит краш один последний раз, после reload новый бандл защищён на все будущие деплои.
+- **Ops-хвост:** `index.html` на nginx должен отдаваться `no-cache` (иначе стейл-shell живёт в HTTP-кэше браузера дольше). SW уже network-first для HTML; проверить nginx-заголовок для `/` и `/index.html`.
+
 ## Anti-patterns для AI агентов
 
 ❌ **НЕ делать:**
