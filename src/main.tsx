@@ -4,7 +4,7 @@ import "./index.css";
 import { registerServiceWorker } from "./registerServiceWorker";
 import { ensurePushSubscriptionSaved, listenForSubscriptionChanges } from "./lib/pushApi";
 import { initPwaInstallCapture } from "./lib/pwaInstall";
-import { installChunkReloadGuards } from "./lib/chunkReload";
+import { installChunkReloadGuards, markChunkReloadResolved } from "./lib/chunkReload";
 
 // Авто-восстановление при «Failed to fetch dynamically imported module» — ДО
 // всего остального: стейл-чанк после деплоя / DPI-обрыв → тихая перезагрузка,
@@ -25,3 +25,8 @@ void ensurePushSubscriptionSaved();
 initPwaInstallCapture();
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// Приложение стартовало — снимаем reload-marker, если 5с проработали без новой
+// chunk-ошибки (подтверждённая стабильная загрузка). Пока флаг стоит, повторная
+// chunk-ошибка НЕ перезагружает (показывается UI) — защита от петли.
+markChunkReloadResolved();

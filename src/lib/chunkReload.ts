@@ -2,28 +2,32 @@
  * Авто-восстановление при «Failed to fetch dynamically imported module».
  *
  * Причина крашей у учеников (репорт Ульяны/Софьи, 2026-07-20): lazy-чанк
- * (`React.lazy` → `import()`) не догружается — либо в кэше браузера/SW лежит
- * СТАРЫЙ index.html, ссылающийся на хэш чанка, которого уже нет на сервере
- * после деплоя, либо РФ-DPI роняет запрос. `import()` реджектится:
- *   • preload-фейл летит window-событием `vite:preloadError` ДО рендера lazy —
- *     React ErrorBoundary его НЕ видит, ловит глобальный оверлей платформы
- *     («произошла неустранимая ошибка»);
- *   • либо reject уходит в `unhandledrejection`.
- * Единственно надёжное лечение стейл-чанка — перезагрузить страницу, чтобы
- * получить свежий index.html + новые хэши. Делаем это АВТОМАТИЧЕСКИ (ученику
- * ничего нажимать не надо), но РОВНО ОДИН раз в короткое окно — иначе
- * по-настоящему битый чанк зациклил бы reload.
+ * (`React.lazy` → `import()`) не догружается — либо в кэше старый index.html
+ * ссылается на хэш, которого уже нет после деплоя, либо РФ-DPI роняет запрос.
  *
- * Инвариант rule 95: SW уже отдаёт index.html network-first и хэш-чанки
- * cache-first + `Response.error()` (не undefined). Это устраняет octet-stream,
- * но НЕ реджект `import()` при реально отсутствующем чанке — его закрывает
- * этот модуль на уровне приложения.
+ * Дизайн (после ревью ChatGPT-5.6 — НЕ упрощать обратно):
+ *  • `vite:preloadError` глобально НЕ перехватываем: он фаерится и на
+ *    спекулятивных prefetch (SideNav hover, у которых уже есть `.catch`) →
+ *    авто-reload по нему стирал бы несохранённые данные при простом наведении
+ *    курсора (P1). Реальную навигацию с битым чанком ловит `<ErrorBoundary>`
+ *    (App.tsx оборачивает все роуты) — это чистый render-time сигнал «юзер
+ *    заблокирован». Uncaught `import()` вне React — через `unhandledrejection`.
+ *  • «Ровно один reload на эпизод» через **persisted-marker в localStorage**,
+ *    снимаемый ТОЛЬКО после подтверждённой стабильной загрузки
+ *    (`markChunkReloadResolved` из main.tsx через 5с без новых chunk-ошибок),
+ *    а не окном-рейтлимитом (P1: окно лишь ограничивало частоту, петля жила).
+ *    Нет localStorage → авто-reload НЕ делаем (показываем UI), чтобы не зациклить.
+ *  • `preventDefault` — ТОЛЬКО если reload реально запущен (P1: иначе Vite
+ *    резолвит `undefined` и глушит диагностику/ErrorBoundary).
+ *  • Cache Storage НЕ чистим (P2): SW уже network-first для HTML, nginx отдаёт
+ *    index.html `no-store` → reload и так берёт свежий shell; чистка убила бы
+ *    валидные content-addressed чанки и offline-копию.
+ *
+ * Известное ограничение (нужен атомарный деплой / хранение старых assets):
+ * гард не спасает загрузку СОБСТВЕННОГО entry-чанка — его код ещё не исполнился.
  */
 
-const RELOAD_TS_KEY = "sokrat-chunk-reload-ts";
-// Окно защиты от петли: если уже перезагружались < 15с назад и снова упало —
-// значит чанк битый по-настоящему (не стейл), reload не поможет → показываем UI.
-const RELOAD_GUARD_MS = 15_000;
+const RELOAD_FLAG = "sokrat-chunk-reload-pending";
 
 const CHUNK_ERROR_SIGNATURES = [
   "failed to fetch dynamically imported module",
@@ -50,72 +54,68 @@ export function isChunkLoadError(err: unknown): boolean {
   return /loading (?:css )?chunk\s+[\w-]+\s+failed/.test(msg);
 }
 
+function safeLocalStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null; // приватный режим / storage отключён
+  }
+}
+
 /**
- * Перезагрузить страницу ОДИН раз для получения свежего index.html + чанков.
- * Чистит Cache Storage (иначе SW/браузер переотдаст стейл-shell), затем reload.
- * Возвращает true, если reload запускается; false — если сработала защита от
- * петли (уже перезагружались только что) → вызывающий должен показать UI.
+ * Перезагрузить страницу ОДИН раз за эпизод для получения свежего index.html +
+ * хэшей чанков. Возвращает true, если reload реально запускается; false — если
+ * запрещён (уже пробовали в этом эпизоде / нет localStorage) → вызывающий
+ * должен показать UI, а НЕ preventDefault'ить.
  */
 export function reloadForChunkError(): boolean {
   if (typeof window === "undefined") return false;
+  const store = safeLocalStorage();
+  if (!store) return false; // без persisted-хранилища авто-reload = риск петли
   try {
-    const last = Number(window.sessionStorage.getItem(RELOAD_TS_KEY) || "0");
-    if (Date.now() - last < RELOAD_GUARD_MS) return false; // защита от петли
-    window.sessionStorage.setItem(RELOAD_TS_KEY, String(Date.now()));
+    if (store.getItem(RELOAD_FLAG)) {
+      // Уже перезагружались в этом эпизоде и снова упало → reload не помог.
+      return false;
+    }
+    store.setItem(RELOAD_FLAG, String(Date.now()));
   } catch {
-    // sessionStorage недоступен (приватный режим и т.п.) — всё равно один reload
-    // лучше, чем краш; риск петли принимаем (редкий кейс).
+    return false;
   }
   try {
-    if ("caches" in window) {
-      window.caches
-        .keys()
-        .then((names) => Promise.all(names.map((n) => window.caches.delete(n))))
-        .catch(() => {})
-        .finally(() => window.location.reload());
-    } else {
-      window.location.reload();
-    }
+    window.location.reload();
   } catch {
-    try {
-      window.location.reload();
-    } catch {
-      /* noop */
-    }
+    return false;
   }
   return true;
 }
 
 /**
- * Ставит глобальные обработчики (вызывать один раз в main.tsx ДО рендера):
- *  • `vite:preloadError` — официальный хук Vite на сбой modulepreload lazy-чанка;
- *  • `unhandledrejection` — reject `import()`, ушедший мимо React;
- *  • `error` (capture) — некоторые браузеры отдают сбой module-script так.
- * Для chunk-ошибок гасит дефолт (`preventDefault`) — чтобы платформенный оверлей
- * «неустранимая ошибка» не показался — и авто-перезагружает.
+ * Снять reload-marker после ПОДТВЕРЖДЁННОЙ стабильной загрузки (вызвать из
+ * main.tsx после render). Флаг живёт через reload и снимается только если
+ * приложение проработало `delayMs` без новой chunk-ошибки — тогда следующий
+ * эпизод (новый деплой) снова сможет перезагрузиться ровно один раз.
+ */
+export function markChunkReloadResolved(delayMs = 5000): void {
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => {
+    try {
+      window.localStorage.removeItem(RELOAD_FLAG);
+    } catch {
+      /* noop */
+    }
+  }, delayMs);
+}
+
+/**
+ * Тонкий safety-net на uncaught `import()` вне React (prefetch'и уже с `.catch`,
+ * реальная навигация — через ErrorBoundary). Вызывать один раз в main.tsx.
  */
 export function installChunkReloadGuards(): void {
   if (typeof window === "undefined") return;
-
-  window.addEventListener("vite:preloadError", (event) => {
-    event.preventDefault(); // не даём Vite пере-бросить ошибку в оверлей
-    reloadForChunkError();
-  });
-
   window.addEventListener("unhandledrejection", (event) => {
-    if (isChunkLoadError(event.reason)) {
-      event.preventDefault();
-      reloadForChunkError();
-    }
+    if (!isChunkLoadError(event.reason)) return;
+    // preventDefault ТОЛЬКО если reload реально запущен (иначе даём ошибке
+    // всплыть — пусть покажется recovery-UI/оверлей, а не тихо потеряется).
+    if (reloadForChunkError()) event.preventDefault();
   });
-
-  window.addEventListener(
-    "error",
-    (event) => {
-      if (isChunkLoadError(event.message) || isChunkLoadError((event as ErrorEvent).error)) {
-        reloadForChunkError();
-      }
-    },
-    true,
-  );
 }
