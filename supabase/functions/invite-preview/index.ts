@@ -71,8 +71,8 @@ function buildDescription(tutorFirstName: string | null): string {
   // без цены / 200₽ / 7 дней / «не беспокоя учителя».
   const subject = tutorFirstName
     ? `${tutorFirstName} подключил тебя к Сократ AI`
-    : `Твой репетитор подключил тебя к Сократ AI`;
-  return `${subject} — AI-помощнику для домашки. Задавай вопросы по задачам, AI поможет разобраться.`;
+    : `Тебя подключили к Сократ AI`;
+  return `${subject}. Застрял на задаче? Спроси — поможет понять, а не просто даст ответ.`;
 }
 
 function buildHtml(params: {
@@ -88,16 +88,16 @@ function buildHtml(params: {
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Тебя пригласили в Сократ AI</title>
+<title>Сократ AI — разбери домашку сам, без ожидания репетитора</title>
 <meta name="description" content="${escDesc}">
 <meta name="robots" content="noindex">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Тебя пригласили в Сократ AI">
+<meta property="og:title" content="Сократ AI — разбери домашку сам, без ожидания репетитора">
 <meta property="og:description" content="${escDesc}">
 <meta property="og:image" content="${OG_IMAGE_URL}">
 <meta property="og:url" content="${PRODUCTION_URL}/invite/${escCode}">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Тебя пригласили в Сократ AI">
+<meta name="twitter:title" content="Сократ AI — разбери домашку сам, без ожидания репетитора">
 <meta name="twitter:description" content="${escDesc}">
 <meta name="twitter:image" content="${OG_IMAGE_URL}">
 <meta http-equiv="refresh" content="0; url=${escRedirect}">

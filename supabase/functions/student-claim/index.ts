@@ -83,24 +83,24 @@ function firstName(fullName: string | null | undefined): string | null {
 
 function buildPreviewHtml(tutorFirstName: string | null, redirectUrl: string): string {
   const desc = tutorFirstName
-    ? `${tutorFirstName} подключил тебя к Сократ AI — помощнику для домашки. Открой, чтобы начать.`
-    : `Твой репетитор подключил тебя к Сократ AI — помощнику для домашки. Открой, чтобы начать.`;
+    ? `${tutorFirstName} подключил тебя к Сократ AI. Застрял на задаче? Спроси — поможет понять, а не просто даст ответ.`
+    : `Тебя подключили к Сократ AI. Застрял на задаче? Спроси — поможет понять, а не просто даст ответ.`;
   const escDesc = escapeHtml(desc);
   const escRedirect = escapeHtml(redirectUrl);
   return `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<title>Тебя пригласили в Сократ AI</title>
+<title>Сократ AI — разбери домашку сам, без ожидания репетитора</title>
 <meta name="description" content="${escDesc}">
 <meta name="robots" content="noindex">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Тебя пригласили в Сократ AI">
+<meta property="og:title" content="Сократ AI — разбери домашку сам, без ожидания репетитора">
 <meta property="og:description" content="${escDesc}">
 <meta property="og:image" content="${OG_IMAGE_URL}">
 <meta property="og:url" content="${escRedirect}">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Тебя пригласили в Сократ AI">
+<meta name="twitter:title" content="Сократ AI — разбери домашку сам, без ожидания репетитора">
 <meta name="twitter:description" content="${escDesc}">
 <meta name="twitter:image" content="${OG_IMAGE_URL}">
 <meta http-equiv="refresh" content="0; url=${escRedirect}">
