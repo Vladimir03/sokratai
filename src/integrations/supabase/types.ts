@@ -1021,6 +1021,7 @@ export type Database = {
           title: string
           topic: string | null
           tutor_id: string
+          work_mode: string
         }
         Insert: {
           created_at?: string
@@ -1040,6 +1041,7 @@ export type Database = {
           title: string
           topic?: string | null
           tutor_id: string
+          work_mode?: string
         }
         Update: {
           created_at?: string
@@ -1059,6 +1061,7 @@ export type Database = {
           title?: string
           topic?: string | null
           tutor_id?: string
+          work_mode?: string
         }
         Relationships: [
           {
@@ -1439,6 +1442,7 @@ export type Database = {
           updated_at: string
           usage_count: number
           visibility: string
+          work_mode: string
         }
         Insert: {
           created_at?: string
@@ -1460,6 +1464,7 @@ export type Database = {
           updated_at?: string
           usage_count?: number
           visibility?: string
+          work_mode?: string
         }
         Update: {
           created_at?: string
@@ -1481,6 +1486,7 @@ export type Database = {
           updated_at?: string
           usage_count?: number
           visibility?: string
+          work_mode?: string
         }
         Relationships: [
           {
@@ -5015,6 +5021,10 @@ export type Database = {
           task_count: number
           template_id: string
         }[]
+      }
+      hw_thread_verdicts_visible: {
+        Args: { _thread_id: string }
+        Returns: boolean
       }
       hw_tutor_force_complete_all_tasks: {
         Args: {
