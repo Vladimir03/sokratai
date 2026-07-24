@@ -531,6 +531,70 @@ export async function getStudentThreadByAssignment(
   );
 }
 
+// ─── homework-work-modes (Ф1): самостоятельная работа ────────────────────────
+
+export interface FinishStudentWorkResponse {
+  completed: boolean;
+  zeroed_count: number;
+}
+
+/**
+ * «Сдать работу» (только work_mode='independent'): несданные задачи получают 0,
+ * тред завершается → полный reveal вердиктов. Идемпотентно.
+ */
+export async function finishStudentWork(
+  assignmentId: string,
+): Promise<FinishStudentWorkResponse> {
+  return await requestStudentHomeworkApi<FinishStudentWorkResponse>(
+    `/assignments/${encodeURIComponent(assignmentId)}/student/finish`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+}
+
+export interface StudentHomeworkResultTask {
+  task_id: string;
+  order_num: number;
+  task_text: string;
+  max_score: number;
+  task_kind?: string | null;
+  final_score: number;
+  /** Есть ли сдача ученика по задаче (false = «Без ответа», занулено finish'ем). */
+  answered: boolean;
+}
+
+export type StudentHomeworkResult =
+  | {
+      completed: false;
+      work_mode: 'homework' | 'independent';
+      assignment: { id: string; title: string; subject: string };
+    }
+  | {
+      completed: true;
+      work_mode: 'homework' | 'independent';
+      assignment: {
+        id: string;
+        title: string;
+        subject: string;
+        deadline: string | null;
+        status: string;
+        tutor_overall_comment: string | null;
+        tutor_overall_comment_at: string | null;
+      };
+      tasks: StudentHomeworkResultTask[];
+      total_score: number;
+      total_max: number;
+    };
+
+/** Экран «Результат работы» (Т6) — один round-trip, state-aware reveal. */
+export async function getStudentHomeworkResult(
+  assignmentId: string,
+): Promise<StudentHomeworkResult> {
+  return await requestStudentHomeworkApi<StudentHomeworkResult>(
+    `/assignments/${encodeURIComponent(assignmentId)}/student/result`,
+    { method: 'GET' },
+  );
+}
+
 /**
  * Upload a file from guided chat to Supabase Storage.
  * Returns a storage:// ref suitable for persisting in thread messages.
@@ -716,7 +780,14 @@ export async function saveThreadMessage(
 }
 
 /**
- * Advance to the next task in a guided homework thread.
+ * @deprecated RETIRED 2026-07-24 (ревью-фикс P0 homework-work-modes).
+ *
+ * Сервер отвечает 410 `ADVANCE_RETIRED`. Client-controlled advance закрывал
+ * задачу БЕЗ записи балла, а `computeFinalScore` трактует completed-без-баллов
+ * как полный `max_score` → ученик мог выбить максимум за нерешённую задачу.
+ * Продвижение выполняет сервер после реального грейдинга (`performTaskAdvance`).
+ *
+ * Не вызывать. Оставлено только чтобы старые импорты не падали на сборке.
  */
 export async function advanceTask(
   threadId: string,

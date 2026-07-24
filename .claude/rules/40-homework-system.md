@@ -1458,6 +1458,23 @@ Spec: `~/.claude/plans/toasty-weaving-meerkat.md`.
 
 Spec: `~/.claude/plans/1-functional-meteor.md` Phase 10.
 
+### Виды работ — `work_mode` («Самостоятельная», Ф1 минимальный срез, 2026-07-24)
+
+Третий вид работы внутри ДЗ: `homework_tutor_assignments.work_mode ∈ ('homework','independent')` (+ то же поле на `homework_tutor_templates`; миграция `20260724150000`, DEFAULT `'homework'` покрывает все существующие строки и HWDrawer path B). «Самостоятельная» = **срез без AI**: подсказки/чат/бутстрап выключены СЕРВЕРОМ, одна попытка на задачу, вердикты ученику раскрываются только после завершения работы. Спека (вкл. §3.4a/b/c — 3 раунда внешнего ревью): `docs/delivery/features/homework-work-modes/spec.md`. PRD: там же.
+
+**Инварианты (НЕ откатывать):**
+- **Anti-leak — state-aware, mirror пробников (rule 45).** До `thread.status='completed'` ученику не отдаются `assistant`/`system`-сообщения и балл-носители task_states. Единственная точка strip — **`fetchStudentThread(db, id, { workMode })`, параметр ОБЯЗАТЕЛЕН** (резолвит вызыватель; fallback внутри = дилемма fail-open/closed). **Любой новый student-facing путь чтения треда обязан идти через неё** — legacy `GET /threads/:id` эту дыру уже открывал. Второй рубеж — RESTRICTIVE RLS-политики + SECURITY DEFINER `hw_thread_verdicts_visible` (у неё ОБЯЗАНА быть admin-ветка: permissive «Admin select …» из `20260320154843` иначе перестаёт работать).
+- **`POST /threads/:id/advance` — RETIRED (410).** Client-controlled advance закрывал задачу без записи балла, а `computeFinalScore` (override → earned → ai → **status**) трактует completed-без-баллов как ПОЛНЫЙ `max_score`. Не возрождать: любой путь, закрывающий задачу, обязан писать балл явно.
+- **Запись результата грейдинга — CAS + проверка error.** Обе ветки (`CORRECT` и `independentMode`) пишут `.eq("id",…).eq("status","active").select("id")`: `error` → `throw GRADE_PERSIST_FAILED` (каждый вызыватель `runStudentAnswerGrading` обязан иметь свой catch с rule-97-фразой), 0 строк → `superseded`: **advance пропускается**, в ответ идут ФАКТИЧЕСКИЕ баллы из БД (`readTaskStateScoreSnapshot`). Победитель гонки «Сдать работу» ↔ поздний грейдинг — **finish**.
+- **Одна попытка = атомарный claim** перед AI (`UPDATE … WHERE id=… AND status='active' AND attempts=N`), проигравшие → 409. Компенсация claim (`releaseIndependentClaim`) — ТОЛЬКО на pre-provider ошибках (нет ключа / пустой буфер / превышен размер, они бросаются до `fetch` в `_shared/voice-transcribe.ts`); после ответа провайдера (в т.ч. **пустой транскрипт при 200**) НЕ компенсируем — иначе безлимитные оплаченные вызовы в обход `INDEPENDENT_MAX_ATTEMPTS` (10 → 429).
+- **Квота AI не расходуется** в самостоятельной (решение владельца PRD); грейдинг при этом вызывается, токены логируются как обычно.
+- **Смена вида работы — только до первой активности учеников** (`assignmentHasStudentInteractions` → `boolean | null`; `null` = **fail-CLOSED** 503, иначе транзиентный сбой разрешал бы переключение у работы с ответами). 409 `WORK_MODE_LOCKED`.
+- **Разграничение резолверов:** `getAssignmentWorkMode` (fail-closed `'independent'`) — ТОЛЬКО для AI-гейтов; `resolveAssignmentWorkMode` (`| null` → 5xx) — для read-путей треда (иначе сбой чтения опустошает чат ОБЫЧНОЙ домашки). `chat/index.ts` — preflight в ОБЕИХ ветках (authenticated + service-role) ДО квоты, fail-CLOSED.
+- **Экран ученика «Результат работы»** (`/student/homework/:hwId/result`) — терминальный, НИКОГДА не редиректит сам; редирект на него — строго по `thread.status='completed'` (иначе петля detail ↔ result). Включён и для обычной домашки.
+- **Не добавлять `invalidateQueries` из realtime** ради «живого» балла у репетитора (запрет действует, `task_states` нет в publication).
+
+**При расширении:** новый write-path `work_mode` → create/update/list/шаблоны (включая явный column-list форка) + student-whitelist'ы; новый AI-путь → 403-гейт ДО квоты; новый способ закрыть задачу → писать балл явно + CAS; Т7 («% самостоятельности»), Т8 (бейджи), Т9 (настройка момента разбора) и Фаза 2 (сводка ошибок) — отложены, см. spec.md §10.
+
 ### Папки для ДЗ — `homework_folders` (запрос Елены, 2026-06-17)
 
 Репетитор раскладывает ДЗ по папкам (`/tutor/homework` стал folder-first, реюз UX «Моей базы»). Миграции `20260617120000` (таблица+колонка) + `20260617140000` (owner-guard триггер).

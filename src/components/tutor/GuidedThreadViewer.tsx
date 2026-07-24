@@ -371,6 +371,14 @@ export function GuidedThreadViewer({
                   (newMessage.submission_payload as unknown as import('@/types/homework').HomeworkSubmissionPayload | null) ?? null,
               }),
           );
+          // homework-work-modes: НЕ добавлять сюда invalidateQueries ради
+          // «живого» балла. `homework_tutor_task_states` нет в publication
+          // supabase_realtime (только thread_messages), а invalidate из
+          // realtime прямо запрещён rule 40 («merge-helper, не invalidate» —
+          // иначе фликер ленты + лишние запросы). Открытый viewer live
+          // получает сообщение-вердикт; баллы/статус задачи подтягиваются при
+          // обновлении страницы. Полноценный live-скоринг = миграция
+          // publication + подписка на UPDATE task_states — отдельная задача.
           if (wasAtBottom) {
             requestAnimationFrame(() => {
               const nextElement = scrollContainerRef.current;

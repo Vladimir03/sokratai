@@ -43,8 +43,10 @@ export interface ProblemContextTask {
    *   - while `score_state='completed'` → final earned (override > earned
    *     > ai > status)
    * Parent (`HomeworkProblem`) computes the hybrid value and passes it.
+   * homework-work-modes: `null` = самостоятельная до завершения работы —
+   * балл скрыт (state-aware reveal), чип показывает «Сдано».
    */
-  task_score: number;
+  task_score: number | null;
   /** Max score for this task. */
   task_score_max: number;
   /**
@@ -165,7 +167,18 @@ export function ProblemContext({
           </span>
           {/* Score chip — hybrid (B2):
                 - active: показываем available_score (live)
-                - completed: финальный earned (зелёный, фиксированный) */}
+                - completed: финальный earned (зелёный, фиксированный)
+                - null (самостоятельная до завершения): балл скрыт → «Сдано» */}
+          {task.task_score == null ? (
+            task.score_state === 'completed' ? (
+              <span
+                className="text-[13px] font-bold text-emerald-700"
+                aria-label="Ответ сдан — балл появится после сдачи всей работы"
+              >
+                Сдано
+              </span>
+            ) : null
+          ) : (
           <span
             className={[
               'text-[13px] font-bold tabular-nums',
@@ -182,6 +195,7 @@ export function ProblemContext({
             {formatScoreNumber(task.task_score)} / {task.task_score_max}{' '}
             {task.score_state === 'completed' ? 'баллов' : 'баллов'}
           </span>
+          )}
           {/* Hint counter (B3) — visible only when > 0 to keep clean state. */}
           {(task.hint_count ?? 0) > 0 ? (
             <span

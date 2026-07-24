@@ -63,34 +63,37 @@ export default function StudentHomeworkDetail() {
       return;
     }
 
-    // Phase 12 (2026-06-07): завершённое ДЗ БОЛЬШЕ НЕ выбрасывает на список —
-    // открываем его в режиме просмотра, чтобы ученик увидел общий комментарий
-    // репетитора + свои результаты (репетитор часто комментирует уже ПОСЛЕ
-    // завершения). HomeworkProblem рендерит completed-task read-only и НЕ
-    // авто-bounce'ит на mount (навигация только на submit-CTA, а сдавать
-    // нечего) → redirect-loop'а нет. Цель: текущая → последняя по order_num.
-    //
-    // Старое поведение (Preview-QA #10): redirect на `/homework`. Тот фикс ловил
-    // «reopen task 1»; теперь HomeworkProblem корректно показывает completed-
-    // state, поэтому открывать задачу безопасно. Завершение последней задачи
-    // по-прежнему уводит на `/homework` напрямую (navigateAfterCorrect), минуя
-    // эту страницу — так что цикла submit→detail→problem нет.
+    // homework-work-modes Т6 (2026-07-24, заменяет Phase-12 «открыть последнюю
+    // задачу»): завершённая работа → экран «Результат работы» — итог «X из Y»,
+    // вердикты по задачам, общий комментарий репетитора (Phase-12-ценность
+    // переехала туда) + клик в любую задачу для read-only разбора.
+    // Loop-guard сохранён: экран результата ТЕРМИНАЛЬНЫЙ (никогда не редиректит
+    // сам), HomeworkProblem не bounce'ит на mount, завершение последней задачи
+    // уводит на результат напрямую (navigateAfterCorrect), минуя эту страницу.
+    // Ревью-фикс P1 р.1: гейт СТРОГО по `thread.status`. Раньше сюда входило
+    // «все task_states completed при активном треде» — но экран результата
+    // считает завершённость тем же `thread.status`, поэтому такое состояние
+    // (достижимо при частичном сбое advance) давало петлю
+    // detail → result(«не завершена») → «Продолжить» → detail. Рассинхрон
+    // ведём в последнюю задачу read-only, как до Т6.
     const states = thread?.homework_tutor_task_states ?? [];
-    const allCompleted =
-      thread?.status === 'completed' ||
-      (tasks.length > 0 &&
-        tasks.every((t) => {
-          const s = states.find((st) => st.task_id === t.id);
-          return s?.status === 'completed';
-        }));
-    if (allCompleted) {
+    if (thread?.status === 'completed') {
+      navigate(`/student/homework/${assignmentId}/result`, { replace: true });
+      return;
+    }
+    const allTaskStatesCompleted =
+      tasks.length > 0 &&
+      tasks.every((t) => {
+        const s = states.find((st) => st.task_id === t.id);
+        return s?.status === 'completed';
+      });
+    if (allTaskStatesCompleted) {
       let reviewTaskId: string | undefined;
       if (thread?.current_task_id) {
         const exists = tasks.find((t) => t.id === thread.current_task_id);
         if (exists) reviewTaskId = exists.id;
       }
       if (!reviewTaskId) {
-        // `tasks` отсортированы по order_num asc → последняя задача ДЗ.
         reviewTaskId = tasks[tasks.length - 1]?.id ?? tasks[0].id;
       }
       navigate(`/student/homework/${assignmentId}/problem/${reviewTaskId}`, {

@@ -1,9 +1,10 @@
 // Job: P0.1 — Собрать ДЗ по теме после урока
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams, Link } from 'react-router-dom';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { parseISO } from 'date-fns';
 import { TUTOR_PROFILE_CARD_KEY } from '@/hooks/useTutorProfile';
+import { TUTOR_FEATURE_FLAGS_QUERY_KEY } from '@/hooks/useTutorMockExamsFeatureFlag';
 import type { TutorProfile } from '@/lib/tutorProfileApi';
 import {
   readHwLastSubject,
@@ -238,6 +239,8 @@ function buildEditSnapshot(assignment: TutorHomeworkAssignmentDetails): EditSnap
           (a as { feedback_language?: unknown }).feedback_language === 'target')
           ? ((a as { feedback_language: 'russian' | 'target' }).feedback_language)
           : 'auto',
+      // homework-work-modes: вид работы (assignment-level).
+      work_mode: a.work_mode === 'independent' ? 'independent' : 'homework',
     },
     taskSignature: buildTaskSignature(assignment.tasks),
     studentIds: assignment.assigned_students.map((s) => s.student_id).sort().join(','),
@@ -273,7 +276,9 @@ function buildEditDiffState(params: {
     (meta.exam_type ?? 'ege') !== (snapshot.meta.exam_type ?? 'ege') ||
     // Phase 11 (2026-05-31): feedback_language (assignment-level). cefr_level —
     // НЕ здесь, он внутри tasksDirty (каскад в tasks).
-    (meta.feedback_language ?? 'auto') !== (snapshot.meta.feedback_language ?? 'auto');
+    (meta.feedback_language ?? 'auto') !== (snapshot.meta.feedback_language ?? 'auto') ||
+    // homework-work-modes: вид работы (assignment-level).
+    (meta.work_mode ?? 'homework') !== (snapshot.meta.work_mode ?? 'homework');
 
   const tasksDirty = buildTaskSignature(
     tasks.map((task, index) => ({
@@ -424,6 +429,9 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
       disable_ai_bootstrap: tpl.disable_ai_bootstrap ?? m.disable_ai_bootstrap,
       // feedback_language — только для языковых; иначе сохраняем текущее значение.
       feedback_language: isLang ? (tpl.feedback_language ?? 'auto') : m.feedback_language,
+      // homework-work-modes: шаблон переносит вид работы (Т1); старый шаблон
+      // без поля → 'homework'.
+      work_mode: tpl.work_mode === 'independent' ? 'independent' : 'homework',
     }),
     task: (t) => ({
       ...createEmptyTask(),
@@ -547,6 +555,8 @@ function TutorHomeworkCreateContent() {
       deadline: '',
       disable_ai_bootstrap: true,
       exam_type: resolveCreateDefaultExam(subject),
+      // homework-work-modes: дефолт — обычная домашка с Сократом.
+      work_mode: 'homework',
     };
   });
   // Ф3 (ревью 5.6 P1 №3): пока экзамен не выбран руками — смена предмета
@@ -837,6 +847,8 @@ function TutorHomeworkCreateContent() {
       cefr_level: prefilledCefr,
       feedback_language:
         rawFeedbackLang === 'russian' || rawFeedbackLang === 'target' ? rawFeedbackLang : 'auto',
+      // homework-work-modes: вид работы round-trip на edit.
+      work_mode: a.work_mode === 'independent' ? 'independent' : 'homework',
     });
 
     const newTasks = [...existingAssignment.tasks]
@@ -1349,6 +1361,8 @@ function TutorHomeworkCreateContent() {
           source_group_id: sourceGroupId,
           disable_ai_bootstrap: meta.disable_ai_bootstrap ?? true,
           exam_type: meta.exam_type ?? 'ege',
+          // homework-work-modes: вид работы (Т1/Т2).
+          work_mode: meta.work_mode ?? 'homework',
           // Phase 11 (2026-05-31): assignment-level AI feedback language.
           feedback_language: meta.feedback_language ?? 'auto',
           // Папка (create-only, запрос Елены 2026-06-17). null = «Без папки».
@@ -1677,6 +1691,8 @@ function TutorHomeworkCreateContent() {
           disable_ai_bootstrap?: boolean;
           exam_type?: 'ege' | 'oge';
           feedback_language?: 'auto' | 'russian' | 'target';
+          /** homework-work-modes: смена вида — только до первой активности учеников. */
+          work_mode?: 'homework' | 'independent';
           source_group_id?: string | null;
           tasks?: UpdateAssignmentTask[];
         } = {};
@@ -1689,6 +1705,9 @@ function TutorHomeworkCreateContent() {
           patch.exam_type = meta.exam_type ?? 'ege';
           // Phase 11 (2026-05-31): assignment-level AI feedback language.
           patch.feedback_language = meta.feedback_language ?? 'auto';
+          // homework-work-modes: вид работы (сервер 409-ит смену после первой
+          // активности учеников — WORK_MODE_LOCKED; UI дизейблит контрол).
+          patch.work_mode = meta.work_mode ?? 'homework';
         }
 
         if (editDiffState.tasksDirty) {
@@ -1888,7 +1907,7 @@ function TutorHomeworkCreateContent() {
 
     setMeta(() => {
       const subject = resolveCreateDefaultSubject();
-      return { title: '', subject, deadline: '', disable_ai_bootstrap: true, exam_type: resolveCreateDefaultExam(subject), cefr_level: null, feedback_language: 'auto' };
+      return { title: '', subject, deadline: '', disable_ai_bootstrap: true, exam_type: resolveCreateDefaultExam(subject), cefr_level: null, feedback_language: 'auto', work_mode: 'homework' };
     });
     setTasks([createEmptyTask()]);
     setMaterials([]);
@@ -1907,6 +1926,17 @@ function TutorHomeworkCreateContent() {
   // Phase 11 (2026-05-31): язык. subjects → показываем CEFR + feedback language
   // селекторы в L0; CEFR обязателен. Mirror backend LANGUAGE_SUBJECTS_REQUIRING_CEFR.
   const isLanguageSubject = subjectRequiresCefr(meta.subject);
+
+  // homework-work-modes (Т2): вид работы меняется только до первой активности
+  // учеников (сервер — авторитет: 409 WORK_MODE_LOCKED). UI-гейт по тому же
+  // сигналу, которым уже гейтится редактирование задач.
+  const workModeLocked =
+    isEditMode && Boolean(existingAssignment?.submissions_summary?.has_interactions);
+  // Ссылка «→ Пробник» — тем же флагом, что пункт SideNav. Синхронно из кэша
+  // (SideNav держит его тёплым) — НЕ новый useQuery в риск-зоне конструктора
+  // (smoke §8 write-form invariant, rule 40).
+  const mockExamsEnabled =
+    queryClient.getQueryData<boolean>(TUTOR_FEATURE_FLAGS_QUERY_KEY) === true;
 
   const submitLabel = (() => {
     if (isEditMode && !isEditSnapshotReady) {
@@ -2097,6 +2127,55 @@ function TutorHomeworkCreateContent() {
               Выберите сразу, чтобы ученик видел корректные формулировки в чате с AI.
             </p>
           </div>
+        </section>
+
+        {/* Вид работы (L0 — homework-work-modes Т2). Намеренно всегда видно,
+            НЕ в «Расширенных параметрах» — урок CEFR-инцидента «не видела опцию». */}
+        <section id="hw-work-mode" className="space-y-2">
+          <Label>Вид работы</Label>
+          <div role="group" aria-label="Вид работы" className="flex flex-wrap gap-2">
+            {([
+              { value: 'homework', label: 'Домашка с Сократом' },
+              { value: 'independent', label: 'Самостоятельная' },
+            ] as const).map((opt) => {
+              const active = (meta.work_mode ?? 'homework') === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={active}
+                  disabled={workModeLocked}
+                  onClick={() => setMeta({ ...meta, work_mode: opt.value })}
+                  className={`min-h-[44px] rounded-md border px-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors ${
+                    active
+                      ? 'bg-accent text-white border-accent'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-socrat-surface'
+                  }`}
+                  style={{ fontSize: '16px', touchAction: 'manipulation' }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {(meta.work_mode ?? 'homework') === 'independent'
+              ? 'Самостоятельная: без подсказок AI, одна попытка на задачу, разбор после сдачи работы.'
+              : 'Домашка с Сократом: AI ведёт ученика по задачам подсказками и чатом.'}
+          </p>
+          {workModeLocked && (
+            <p className="text-xs text-amber-700">
+              Вид работы нельзя менять: ученики уже начали работу.
+            </p>
+          )}
+          {mockExamsEnabled && !isEditMode && (
+            <p className="text-xs text-muted-foreground">
+              Нужен формат экзамена (части, бланки, таймер)?{' '}
+              <Link to="/tutor/mock-exams" className="text-accent underline underline-offset-2">
+                Создайте пробник
+              </Link>
+            </p>
+          )}
         </section>
 
         {/* CEFR level + feedback language (L0 — language subjects only, Phase 11).

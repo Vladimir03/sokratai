@@ -35,6 +35,8 @@ const LessonDetail = lazy(() => import("./pages/student/LessonDetail"));
 // session. Updated 2026-05-09 (codex re-review #3) — was previously
 // mock-only and outside AuthGuard during TASK-7 mock validation.
 const HomeworkProblem = lazy(() => import("./pages/student/HomeworkProblem"));
+// homework-work-modes (Т6): итог «X из Y» за работу (оба вида работ).
+const HomeworkResult = lazy(() => import("./pages/student/HomeworkResult"));
 const StudentMockExams = lazy(() => import("./pages/student/StudentMockExams"));
 const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
 const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExamResult"));
@@ -243,6 +245,18 @@ const App = () => (
                     <HomeworkProblem />
                   </Suspense>
                 </AuthGuard>
+              }
+            />
+            {/* homework-work-modes (Т6): экран «Результат работы» — итог
+                «X из Y» + вердикты по задачам. Терминальный (не редиректит
+                сам — loop-guard); страница сама оборачивается в AuthGuard
+                с обычной Navigation (как StudentHomework). */}
+            <Route
+              path="/student/homework/:hwId/result"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <HomeworkResult />
+                </Suspense>
               }
             />
             <Route

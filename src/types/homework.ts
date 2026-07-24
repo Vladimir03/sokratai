@@ -100,6 +100,11 @@ export interface StudentHomeworkAssignmentDetails {
   deadline: string | null;
   status: StudentAssignmentStatus;
   disable_ai_bootstrap?: boolean;
+  /**
+   * homework-work-modes (Ф1): 'independent' = самостоятельная (AI выключен,
+   * одна попытка, разбор после сдачи). undefined = старый бэкенд → 'homework'.
+   */
+  work_mode?: 'homework' | 'independent';
   created_at: string;
   updated_at: string;
   tasks: StudentHomeworkTask[];

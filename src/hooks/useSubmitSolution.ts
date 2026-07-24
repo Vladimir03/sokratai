@@ -1,6 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { submitSolution, type SubmitSolutionPayload } from '@/lib/studentProblemApi';
-import type { CheckAnswerResponse } from '@/types/homework';
+import {
+  submitSolution,
+  type SubmitSolutionPayload,
+  type SubmitSolutionResponse,
+} from '@/lib/studentProblemApi';
 
 /**
  * Mutation hook for the SubmitSheet single-shot solution flow.
@@ -26,7 +29,7 @@ export function useSubmitSolution(
   taskId: string,
 ) {
   const queryClient = useQueryClient();
-  return useMutation<CheckAnswerResponse, Error, SubmitSolutionPayload>({
+  return useMutation<SubmitSolutionResponse, Error, SubmitSolutionPayload>({
     mutationFn: (payload) => submitSolution(hwId, taskId, payload),
     // Return the invalidation promise so `mutateAsync` settles only AFTER the
     // refetch lands (React Query awaits a promise returned from onSuccess). Без

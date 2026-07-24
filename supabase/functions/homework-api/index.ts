@@ -421,6 +421,23 @@ const VALID_STATUS_FILTERS = ["draft", "active", "closed", "all"] as const;
 const VALID_CHECK_FORMATS = ["short_answer", "detailed_solution"] as const;
 const VALID_EXAM_TYPES = ["ege", "oge"] as const;
 const VALID_CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
+// homework-work-modes (Ф1): вид работы. 'independent' = самостоятельная —
+// AI-подсказки/чат выключены сервером, одна попытка, разбор после сдачи работы.
+const VALID_WORK_MODES = ["homework", "independent"] as const;
+type HomeworkWorkMode = (typeof VALID_WORK_MODES)[number];
+/**
+ * Верхний предел отправок по одной задаче самостоятельной (ревью-фикс P1 р.2).
+ * Продуктово попытка одна, но технические сбои (Whisper, сеть, CHECK_FAILED)
+ * законно позволяют переотправку и НЕ расходуют квоту AI — без капа это
+ * безлимитный неквотируемый вызов модели. 10 покрывает реальные сбои с запасом.
+ */
+const INDEPENDENT_MAX_ATTEMPTS = 10;
+
+function normalizeWorkMode(v: unknown): HomeworkWorkMode | null {
+  return typeof v === "string" && (VALID_WORK_MODES as readonly string[]).includes(v)
+    ? (v as HomeworkWorkMode)
+    : null;
+}
 
 /**
  * Normalize a client-supplied CEFR level for `homework_tutor_tasks.cefr_level`
@@ -1117,6 +1134,9 @@ async function handleCreateAssignment(
   if (b.exam_type !== undefined && b.exam_type !== null && !(VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string)) {
     return jsonError(cors, 400, "VALIDATION", `exam_type must be one of: ${VALID_EXAM_TYPES.join(", ")}`);
   }
+  if (b.work_mode !== undefined && b.work_mode !== null && !normalizeWorkMode(b.work_mode)) {
+    return jsonError(cors, 400, "INVALID_WORK_MODE", "Недопустимый вид работы");
+  }
   if (!Array.isArray(b.tasks) || b.tasks.length === 0) {
     return jsonError(cors, 400, "VALIDATION", "tasks must be a non-empty array");
   }
@@ -1227,6 +1247,8 @@ async function handleCreateAssignment(
       deadline: isNonEmptyString(b.deadline) ? b.deadline : null,
       status: "draft",
       exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+      // homework-work-modes: отсутствует у старых клиентов → 'homework' (DB default).
+      work_mode: normalizeWorkMode(b.work_mode) ?? "homework",
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
       // Phase 11 (2026-05-31): assignment-level AI feedback language (null → DB default 'auto').
       feedback_language: normalizeFeedbackLanguage(b.feedback_language) ?? "auto",
@@ -1355,6 +1377,8 @@ async function handleCreateAssignment(
         tasks_json: templateTasksJson,
         // Assignment-level settings parity (field-parity fix 2026-06-03).
         exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+        // homework-work-modes: шаблон переносит вид работы (Т1).
+        work_mode: normalizeWorkMode(b.work_mode) ?? "homework",
         disable_ai_bootstrap: b.disable_ai_bootstrap === true,
         // feedback_language — только для языковых (на не-языковых null).
         feedback_language: isLanguageTemplate ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
@@ -1447,7 +1471,7 @@ async function handleListAssignments(
     .from("homework_tutor_assignments")
     // folder_id — tutor-only organization (homework_folders). Безопасно для tutor
     // list; в student-эндпоинтах (handleGetStudentAssignment и т.п.) НЕ селектится.
-    .select("id, title, subject, topic, deadline, status, created_at, source_group_id, folder_id")
+    .select("id, title, subject, topic, deadline, status, created_at, source_group_id, folder_id, work_mode")
     .eq("tutor_id", tutorUserId)
     .order("created_at", { ascending: false });
 
@@ -1667,6 +1691,7 @@ async function handleListAssignments(
     source_group_name: groupMetaById[a.source_group_id ?? ""]?.name ?? null,
     source_group_color: groupMetaById[a.source_group_id ?? ""]?.color ?? null,
     folder_id: a.folder_id ?? null,
+    work_mode: a.work_mode ?? "homework",
     assigned_count: assignedMap[a.id] ?? 0,
     submitted_count: submittedMap[a.id] ?? 0,
     started_count: startedMap[a.id] ?? 0,
@@ -1999,6 +2024,46 @@ async function handleGetAssignment(
 
 // ─── Endpoint: PUT /assignments/:id ──────────────────────────────────────────
 
+/**
+ * homework-work-modes: «ученики уже начали работу» = существует хотя бы одно
+ * user-сообщение в guided-тредах ДЗ. Та же семантика, что детект destructive
+ * task changes в handleUpdateAssignment и has_interactions в handleGetAssignment.
+ *
+ * Возвращает `null`, если определить НЕ удалось (ревью-фикс P1 р.2): вызыватель
+ * обязан различать «интеракций нет» и «не смогли прочитать» — иначе транзиентный
+ * сбой SELECT'а трактовался как «нет интеракций» и позволял переключить вид
+ * работы у ДЗ, где ученик уже отвечал (лок Т2 fail-open).
+ * Для ветки задач (destructive changes) прежняя семантика сохраняется через
+ * `?? false` на стороне вызывателя — там это лишь ослабляет проверку add/remove,
+ * а не меняет вид работы.
+ */
+async function assignmentHasStudentInteractions(
+  db: SupabaseClient,
+  assignmentId: string,
+): Promise<boolean | null> {
+  const { data: existingSAs, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId);
+  if (saErr) return null;
+  const saIds = (existingSAs ?? []).map((sa) => sa.id as string);
+  if (saIds.length === 0) return false;
+  const { data: existingThreads, error: threadsErr } = await db
+    .from("homework_tutor_threads")
+    .select("id")
+    .in("student_assignment_id", saIds);
+  if (threadsErr) return null;
+  const threadIds = (existingThreads ?? []).map((t) => t.id as string);
+  if (threadIds.length === 0) return false;
+  const { count: msgCount, error: msgErr } = await db
+    .from("homework_tutor_thread_messages")
+    .select("id", { count: "exact", head: true })
+    .in("thread_id", threadIds)
+    .eq("role", "user");
+  if (msgErr) return null;
+  return (msgCount ?? 0) > 0;
+}
+
 async function handleUpdateAssignment(
   db: SupabaseClient,
   tutorUserId: string,
@@ -2050,6 +2115,38 @@ async function handleUpdateAssignment(
       return jsonError(cors, 400, "VALIDATION", `status must be one of: ${VALID_STATUSES.join(", ")}`);
     }
     patch.status = b.status;
+  }
+  // homework-work-modes (Т2): вид работы меняется только до первой активности
+  // учеников — иначе «срез с подсказками» / «домашка без подсказок» задним числом.
+  if (b.work_mode !== undefined) {
+    const nextWorkMode = normalizeWorkMode(b.work_mode);
+    if (!nextWorkMode) {
+      return jsonError(cors, 400, "INVALID_WORK_MODE", "Недопустимый вид работы");
+    }
+    const currentWorkMode =
+      normalizeWorkMode((assignmentOrErr as Record<string, unknown>).work_mode) ?? "homework";
+    if (nextWorkMode !== currentWorkMode) {
+      const hasInteractions = await assignmentHasStudentInteractions(db, assignmentId);
+      // Ревью-фикс P1 р.2: fail-CLOSED. `null` = не смогли проверить →
+      // отказываем, а не разрешаем смену вида у работы с ответами учеников.
+      if (hasInteractions === null) {
+        return jsonError(
+          cors,
+          503,
+          "WORK_MODE_CHECK_FAILED",
+          "Не удалось проверить, начали ли ученики работу. Попробуйте ещё раз.",
+        );
+      }
+      if (hasInteractions) {
+        return jsonError(
+          cors,
+          409,
+          "WORK_MODE_LOCKED",
+          "Вид работы нельзя изменить: ученики уже начали работу.",
+        );
+      }
+      patch.work_mode = nextWorkMode;
+    }
   }
   if (b.disable_ai_bootstrap !== undefined) {
     patch.disable_ai_bootstrap = b.disable_ai_bootstrap === true;
@@ -2168,29 +2265,9 @@ async function handleUpdateAssignment(
 
     // Detect if any student has interacted with the assignment via guided threads.
     // Block destructive task changes only if there are existing thread messages.
-    let hasSubmissions = false;
-    {
-      const { data: existingSAs } = await db
-        .from("homework_tutor_student_assignments")
-        .select("id")
-        .eq("assignment_id", assignmentId);
-      const existingSAIds = (existingSAs ?? []).map((sa) => sa.id as string);
-      if (existingSAIds.length > 0) {
-        const { data: existingThreads } = await db
-          .from("homework_tutor_threads")
-          .select("id")
-          .in("student_assignment_id", existingSAIds);
-        const existingThreadIds = (existingThreads ?? []).map((t) => t.id as string);
-        if (existingThreadIds.length > 0) {
-          const { count: msgCount } = await db
-            .from("homework_tutor_thread_messages")
-            .select("id", { count: "exact", head: true })
-            .in("thread_id", existingThreadIds)
-            .eq("role", "user");
-          hasSubmissions = (msgCount ?? 0) > 0;
-        }
-      }
-    }
+    // `null` (сбой чтения) → false: прежняя семантика этой ветки (она лишь
+    // ослабляет запрет add/remove задач, вида работы не меняет).
+    const hasSubmissions = (await assignmentHasStudentInteractions(db, assignmentId)) ?? false;
 
     const { data: existingTasks } = await db
       .from("homework_tutor_tasks")
@@ -5420,6 +5497,8 @@ async function handleCreateTemplate(
         tasks_json: [],
         tasks_migrated_at: new Date().toISOString(),
         exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+        // homework-work-modes: шаблон переносит вид работы (Т1).
+        work_mode: normalizeWorkMode(b.work_mode) ?? "homework",
         disable_ai_bootstrap: b.disable_ai_bootstrap === true,
         feedback_language: isLangTpl ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
       })
@@ -5489,6 +5568,8 @@ async function handleCreateTemplate(
       tags: Array.isArray(b.tags) ? b.tags.filter((t) => isString(t)) : [],
       tasks_json: normalizedTasksJson,
       exam_type: (VALID_EXAM_TYPES as readonly string[]).includes(b.exam_type as string) ? b.exam_type : "ege",
+      // homework-work-modes: отсутствует у старых клиентов → 'homework' (DB default).
+      work_mode: normalizeWorkMode(b.work_mode) ?? "homework",
       disable_ai_bootstrap: b.disable_ai_bootstrap === true,
       feedback_language: isLanguageTemplate ? (normalizeFeedbackLanguage(b.feedback_language) ?? "auto") : null,
     })
@@ -5668,6 +5749,8 @@ async function handleForkTemplate(
       exam_type: tpl.exam_type ?? null,
       feedback_language: tpl.feedback_language ?? null,
       disable_ai_bootstrap: tpl.disable_ai_bootstrap === true,
+      // homework-work-modes: форк не теряет вид работы (явный column-list).
+      work_mode: normalizeWorkMode(tpl.work_mode) ?? "homework",
       forked_from_template_id: tpl.id,
     })
     .select("id")
@@ -5889,7 +5972,7 @@ async function handleCreateTemplateFromAssignment(
     ? (b.request_id as string).trim().slice(0, 64)
     : null;
   const TEMPLATE_RETURN_SELECT =
-    "id, title, subject, topic, tags, tasks_json, created_at, exam_type, feedback_language, disable_ai_bootstrap";
+    "id, title, subject, topic, tags, tasks_json, created_at, exam_type, feedback_language, disable_ai_bootstrap, work_mode";
 
   if (requestId) {
     const { data: existing } = await db
@@ -5927,6 +6010,9 @@ async function handleCreateTemplateFromAssignment(
       feedback_language: includeAiSettings && isLanguageTemplate
         ? (normalizeFeedbackLanguage(assignment.feedback_language) ?? "auto")
         : null,
+      // homework-work-modes: шаблон переносит вид работы ДЗ-источника (Т1);
+      // не гейтится include_ai_settings — вид работы не AI-настройка задачи.
+      work_mode: normalizeWorkMode(assignment.work_mode) ?? "homework",
     })
     .select(TEMPLATE_RETURN_SELECT)
     .single();
@@ -8383,26 +8469,25 @@ async function handleGetThread(
     return jsonError(cors, 400, "VALIDATION", "Invalid thread ID");
   }
 
-  const { data: thread, error } = await db
+  // Ownership: student must own this thread (проверяем ДО загрузки контента).
+  const { data: threadRow, error } = await db
     .from("homework_tutor_threads")
-    .select(THREAD_SELECT)
+    .select("id, student_assignment_id")
     .eq("id", threadId)
-    .order("created_at", { referencedTable: "homework_tutor_thread_messages", ascending: true })
-    .single();
+    .maybeSingle();
 
-  if (error || !thread) {
-    return jsonError(cors, 404, "NOT_FOUND", "Thread not found");
+  if (error || !threadRow) {
+    return jsonError(cors, 404, "NOT_FOUND", "Тред не найден");
   }
 
-  // Verify ownership: student must own this thread
   const { data: sa } = await db
     .from("homework_tutor_student_assignments")
     .select("student_id, assignment_id")
-    .eq("id", thread.student_assignment_id)
+    .eq("id", threadRow.student_assignment_id)
     .single();
 
   if (!sa || sa.student_id !== userId) {
-    return jsonError(cors, 403, "FORBIDDEN", "Not your thread");
+    return jsonError(cors, 403, "FORBIDDEN", "Это не ваш тред");
   }
 
   const { data: tasks, error: tasksError } = await db
@@ -8412,18 +8497,29 @@ async function handleGetThread(
     .order("order_num", { ascending: true });
 
   if (tasksError) {
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load tasks for thread");
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить задачи. Попробуй ещё раз.");
   }
 
-  const tutorProfile = await resolveTutorProfileForAssignment(db, sa.assignment_id);
+  // homework-work-modes (Т5, ревью-фикс P0 р.1): legacy-роут ОБЯЗАН идти через
+  // fetchStudentThread — иначе он обходит state-aware strip самостоятельной
+  // (ученик знает свой threadId из problem-ответа и до завершения работы читал
+  // бы check_result/ai_score/earned_score/criteria этим эндпоинтом).
+  // fetchStudentThread уже отдаёт tutor_profile + оба базовых strip'а.
+  //
+  // Ревью-фикс P1 р.2: не смогли определить вид работы → 500, а НЕ fail-closed
+  // 'independent' (тот вырезал бы вердикты из обычной домашки → пустой чат).
+  const workMode = await resolveAssignmentWorkMode(db, sa.assignment_id);
+  if (!workMode) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить работу. Попробуй ещё раз.");
+  }
+  const thread = await fetchStudentThread(db, threadId, { workMode });
+  if (!thread) {
+    return jsonError(cors, 404, "NOT_FOUND", "Тред не найден");
+  }
 
-  // Filter out hidden tutor notes (service-role bypasses RLS)
   return jsonOk(cors, {
-    ...stripStudentSensitiveTaskStateFields(
-      stripHiddenMessages(thread as Record<string, unknown>),
-    ),
+    ...thread,
     tasks: tasks ?? [],
-    tutor_profile: tutorProfile,
   });
 }
 
@@ -8484,7 +8580,14 @@ async function handleGetStudentThreadByAssignment(
     return jsonOk(cors, null);
   }
 
-  const studentThread = await fetchStudentThread(db, threadId);
+  // homework-work-modes (Т5): state-aware reveal — вид работы резолвит вызыватель.
+  // Ревью-фикс P1 р.2: горячий read-путь при неопределённом режиме отдаёт 500,
+  // а не fail-closed 'independent' (иначе обычная домашка выглядела бы пустой).
+  const workMode = await resolveAssignmentWorkMode(db, assignmentId);
+  if (!workMode) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить работу. Попробуй ещё раз.");
+  }
+  const studentThread = await fetchStudentThread(db, threadId, { workMode });
   return jsonOk(cors, studentThread);
 }
 
@@ -8517,7 +8620,7 @@ async function handleGetStudentAssignment(
 
   const { data: assignment, error: assignmentError } = await db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, topic, description, deadline, status, disable_ai_bootstrap, exam_type, created_at")
+    .select("id, title, subject, topic, description, deadline, status, disable_ai_bootstrap, exam_type, work_mode, created_at")
     .eq("id", assignmentId)
     .single();
 
@@ -8556,6 +8659,227 @@ async function handleGetStudentAssignment(
     tutor_overall_comment_at: (assigned.tutor_overall_comment_at as string | null) ?? null,
     tasks: tasks ?? [],
     materials: materials ?? [],
+  });
+}
+
+// ─── Endpoint: POST /assignments/:id/student/finish (student) ────────────────
+//
+// homework-work-modes (Т5): «Сдать работу» в самостоятельной. Несданные задачи
+// получают 0 (явный earned_score=0 — НЕ голый status='completed': computeFinalScore
+// при completed-без-баллов отдал бы max), тред завершается → полный reveal.
+// Идемпотентен: повторный вызов на завершённом треде — 200 без изменений.
+
+async function handleStudentFinishWork(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Некорректная ссылка на работу");
+  }
+
+  const { data: sa, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+  if (saError) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить доступ к работе. Попробуй ещё раз.");
+  }
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Работа не найдена");
+  }
+
+  // Явный SELECT (не getAssignmentWorkMode): его fail-closed 'independent'
+  // здесь ОПАСЕН — транзиентная ошибка чтения занулила бы обычную домашку.
+  const { data: assignmentRow, error: assignmentErr } = await db
+    .from("homework_tutor_assignments")
+    .select("work_mode")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (assignmentErr || !assignmentRow) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить работу. Попробуй ещё раз.");
+  }
+  if ((normalizeWorkMode(assignmentRow.work_mode) ?? "homework") !== "independent") {
+    return jsonError(cors, 409, "WORK_NOT_INDEPENDENT", "Эту работу не нужно сдавать отдельно.");
+  }
+
+  const { data: threadRow, error: threadErr } = await db
+    .from("homework_tutor_threads")
+    .select("id, status")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+  if (threadErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить работу. Попробуй ещё раз.");
+  }
+  if (!threadRow) {
+    return jsonError(cors, 404, "THREAD_NOT_FOUND", "Работа ещё не начата.");
+  }
+  if (threadRow.status === "completed") {
+    return jsonOk(cors, { completed: true, zeroed_count: 0 });
+  }
+  const threadId = threadRow.id as string;
+  const nowIso = new Date().toISOString();
+
+  const { data: zeroedRows, error: zeroErr } = await db
+    .from("homework_tutor_task_states")
+    .update({ status: "completed", earned_score: 0, updated_at: nowIso })
+    .eq("thread_id", threadId)
+    .neq("status", "completed")
+    .select("id");
+  if (zeroErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось завершить работу. Попробуй ещё раз.");
+  }
+
+  const { error: threadUpdateErr } = await db
+    .from("homework_tutor_threads")
+    .update({ status: "completed", current_task_id: null, updated_at: nowIso })
+    .eq("id", threadId);
+  if (threadUpdateErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось завершить работу. Попробуй ещё раз.");
+  }
+
+  console.log("homework_api_request_success", {
+    route: "POST /assignments/:id/student/finish",
+    assignment_id: assignmentId,
+    zeroed: (zeroedRows ?? []).length,
+  });
+  return jsonOk(cors, { completed: true, zeroed_count: (zeroedRows ?? []).length });
+}
+
+// ─── Endpoint: GET /assignments/:id/student/result (student) ─────────────────
+//
+// homework-work-modes (Т6): экран «Результат работы» — один round-trip.
+// До завершения работы (thread.status !== 'completed') баллы НЕ отдаются
+// (state-aware, mirror пробников). Anti-leak: whitelist без solution/rubric.
+
+async function handleGetStudentResult(
+  db: SupabaseClient,
+  userId: string,
+  assignmentId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (!isUUID(assignmentId)) {
+    return jsonError(cors, 400, "INVALID_ID", "Некорректная ссылка на работу");
+  }
+
+  const { data: sa, error: saError } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, tutor_overall_comment, tutor_overall_comment_at")
+    .eq("assignment_id", assignmentId)
+    .eq("student_id", userId)
+    .maybeSingle();
+  if (saError) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось проверить доступ к работе. Попробуй ещё раз.");
+  }
+  if (!sa) {
+    return jsonError(cors, 404, "NOT_FOUND", "Работа не найдена");
+  }
+
+  const { data: assignment, error: assignmentError } = await db
+    .from("homework_tutor_assignments")
+    .select("id, title, subject, deadline, status, work_mode")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (assignmentError || !assignment) {
+    return jsonError(cors, 404, "NOT_FOUND", "Работа не найдена");
+  }
+  const workMode = normalizeWorkMode(
+    (assignment as Record<string, unknown>).work_mode,
+  ) ?? "homework";
+
+  const { data: tasksRaw, error: tasksError } = await db
+    .from("homework_tutor_tasks")
+    .select("id, order_num, task_text, max_score, task_kind, check_format")
+    .eq("assignment_id", assignmentId)
+    .order("order_num", { ascending: true });
+  if (tasksError) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить задачи. Попробуй ещё раз.");
+  }
+  const tasks = tasksRaw ?? [];
+
+  const { data: threadRow, error: threadErr } = await db
+    .from("homework_tutor_threads")
+    .select("id")
+    .eq("student_assignment_id", sa.id)
+    .maybeSingle();
+  if (threadErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить работу. Попробуй ещё раз.");
+  }
+  const thread = threadRow
+    ? await fetchStudentThread(db, threadRow.id as string, { workMode })
+    : null;
+  const completed = thread?.status === "completed";
+
+  if (!completed) {
+    // Работа не завершена — баллов в ответе нет вовсе (state-aware reveal).
+    return jsonOk(cors, {
+      completed: false,
+      work_mode: workMode,
+      assignment: { id: assignment.id, title: assignment.title, subject: assignment.subject },
+    });
+  }
+
+  const taskStates = Array.isArray(thread?.homework_tutor_task_states)
+    ? (thread!.homework_tutor_task_states as Record<string, unknown>[])
+    : [];
+  const stateByTaskId = new Map(
+    taskStates
+      .filter((ts) => typeof ts?.task_id === "string")
+      .map((ts) => [ts.task_id as string, ts]),
+  );
+  const messages = Array.isArray(thread?.homework_tutor_thread_messages)
+    ? (thread!.homework_tutor_thread_messages as Record<string, unknown>[])
+    : [];
+  const answeredTaskIds = new Set(
+    messages
+      .filter(
+        (m) =>
+          m?.role === "user" &&
+          (m?.message_kind === "submission" || m?.message_kind === "answer") &&
+          typeof m?.task_id === "string",
+      )
+      .map((m) => m.task_id as string),
+  );
+
+  let totalScore = 0;
+  let totalMax = 0;
+  const resultTasks = tasks.map((t) => {
+    const maxScore = Number(t.max_score) || 0;
+    const state = stateByTaskId.get(t.id as string);
+    const finalScore = state
+      ? computeFinalScore(state as unknown as TaskStateScoreFields, maxScore)
+      : 0;
+    totalScore += finalScore;
+    totalMax += maxScore;
+    return {
+      task_id: t.id,
+      order_num: t.order_num,
+      task_text: t.task_text,
+      max_score: maxScore,
+      task_kind: t.task_kind,
+      final_score: finalScore,
+      answered: answeredTaskIds.has(t.id as string),
+    };
+  });
+
+  return jsonOk(cors, {
+    completed: true,
+    work_mode: workMode,
+    assignment: {
+      id: assignment.id,
+      title: assignment.title,
+      subject: assignment.subject,
+      deadline: assignment.deadline,
+      status: assignment.status,
+      tutor_overall_comment: (sa.tutor_overall_comment as string | null) ?? null,
+      tutor_overall_comment_at: (sa.tutor_overall_comment_at as string | null) ?? null,
+    },
+    tasks: resultTasks,
+    total_score: Math.round(totalScore * 100) / 100,
+    total_max: Math.round(totalMax * 100) / 100,
   });
 }
 
@@ -8661,7 +8985,7 @@ async function handleGetStudentProblem(
   // 3. Assignment meta (whitelist — no leak fields).
   const { data: assignment, error: assignmentError } = await db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, deadline, status")
+    .select("id, title, subject, deadline, status, work_mode")
     .eq("id", hwId)
     .single();
   if (assignmentError || !assignment) {
@@ -8783,14 +9107,21 @@ async function handleGetStudentProblem(
   // 7. Hydrate thread for the student.
   //    fetchStudentThread = fetchFullThread + stripHiddenMessages
   //                       + stripStudentSensitiveTaskStateFields
+  //                       + independent-режимный state-aware strip (Т5)
   //                       + tutor_profile (resolveTutorProfileForAssignment).
   //    Single canonical path — do not duplicate the strip logic here.
-  const thread = threadId ? await fetchStudentThread(db, threadId) : null;
+  const assignmentWorkMode = normalizeWorkMode(
+    (assignment as Record<string, unknown>).work_mode,
+  ) ?? "homework";
+  const thread = threadId
+    ? await fetchStudentThread(db, threadId, { workMode: assignmentWorkMode })
+    : null;
 
   // 8. task_score + hints_used for the target task only.
   //    Walks the already-fetched task_states from `thread` instead of a
   //    second SELECT — keeps hot-path round-trip count low.
-  let taskScore = 0;
+  //    В самостоятельной до завершения работы балл не раскрывается (null).
+  let taskScore: number | null = 0;
   let hintsUsed = 0;
   if (thread) {
     const taskStates = Array.isArray(thread.homework_tutor_task_states)
@@ -8808,6 +9139,9 @@ async function handleGetStudentProblem(
       hintsUsed = typeof hc === "number" ? hc : 0;
     }
   }
+  if (assignmentWorkMode === "independent" && thread?.status !== "completed") {
+    taskScore = null;
+  }
 
   // 9. Student identity (name + gender) — same canonical chain as the AI
   //    prompt path. Phase 8 (2026-05-20): also returns gender для AI
@@ -8821,6 +9155,8 @@ async function handleGetStudentProblem(
       subject: assignment.subject,
       deadline: assignment.deadline,
       status: assignment.status,
+      // homework-work-modes: клиентский гейт AI-входов (сервер — авторитет).
+      work_mode: assignmentWorkMode,
       // Phase 12: общий комментарий репетитора к ДЗ (per-student wrap-up).
       tutor_overall_comment: (sa.tutor_overall_comment as string | null) ?? null,
       tutor_overall_comment_at: (sa.tutor_overall_comment_at as string | null) ?? null,
@@ -8976,6 +9312,54 @@ async function handleTranscribeThreadVoice(
   return jsonOk(cors, { text });
 }
 
+/**
+ * homework-work-modes: резолв вида работы. `null` = определить НЕ удалось.
+ * Вызыватель обязан выбрать политику осознанно (ревью-фикс P1 р.2):
+ *  - AI-гейты (hint/check/messages) → `getAssignmentWorkMode` ниже, fail-CLOSED;
+ *  - read-эндпоинты треда → 5xx, НЕ трактовать сбой как 'independent' (иначе
+ *    транзиентная ошибка вырезала бы вердикты из ОБЫЧНОЙ домашки → пустой чат).
+ */
+async function resolveAssignmentWorkMode(
+  db: SupabaseClient,
+  assignmentId: string,
+): Promise<HomeworkWorkMode | null> {
+  const { data, error } = await db
+    .from("homework_tutor_assignments")
+    .select("work_mode")
+    .eq("id", assignmentId)
+    .maybeSingle();
+  if (error || !data) {
+    console.error("homework_api_work_mode_lookup_failed", {
+      assignment_id: assignmentId,
+      error: error?.message ?? "not_found",
+    });
+    return null;
+  }
+  return normalizeWorkMode(data.work_mode) ?? "homework";
+}
+
+/**
+ * homework-work-modes (Т3): резолв вида работы для серверных AI-гейтов.
+ * Fail-closed: сбой чтения → 'independent' (лучше ложно отказать в подсказке,
+ * чем выдать AI-помощь в срезе). Ставится ДО checkAiQuota — заблокированный
+ * запрос не должен списывать квоту.
+ */
+async function getAssignmentWorkMode(
+  db: SupabaseClient,
+  assignmentId: string,
+): Promise<HomeworkWorkMode> {
+  return (await resolveAssignmentWorkMode(db, assignmentId)) ?? "independent";
+}
+
+function independentAiDisabledError(cors: Record<string, string>): Response {
+  return jsonError(
+    cors,
+    403,
+    "INDEPENDENT_AI_DISABLED",
+    "В самостоятельной работе подсказки и чат с Сократом недоступны.",
+  );
+}
+
 async function handlePostThreadMessage(
   db: SupabaseClient,
   userId: string,
@@ -8986,6 +9370,13 @@ async function handlePostThreadMessage(
   const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
   if (ownershipResult instanceof Response) return ownershipResult;
   const { thread, studentAssignment } = ownershipResult;
+
+  // homework-work-modes (Т3): в самостоятельной студентский thread-чат закрыт
+  // целиком (сдача идёт отдельным submission-эндпоинтом; tutor-путь — отдельный
+  // handleTutorPostMessage и не задет).
+  if (await getAssignmentWorkMode(db, studentAssignment.assignment_id) === "independent") {
+    return independentAiDisabledError(cors);
+  }
 
   if (!body || typeof body !== "object") {
     return jsonError(cors, 400, "INVALID_BODY", "Request body must be a JSON object");
@@ -9148,59 +9539,34 @@ async function handlePostThreadMessage(
   }, 201);
 }
 
-// ─── Endpoint: POST /threads/:id/advance (student) ──────────────────────────
-
-async function handleAdvanceTask(
-  db: SupabaseClient,
-  userId: string,
-  threadId: string,
-  body: unknown,
-  cors: Record<string, string>,
-): Promise<Response> {
-  const ownershipResult = await verifyThreadOwnership(db, threadId, userId, cors);
-  if (ownershipResult instanceof Response) return ownershipResult;
-  const { thread, studentAssignment } = ownershipResult;
-
-  if (thread.status === "completed") {
-    return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
-  }
-
-  const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
-  // Clamp score to 0-100 if provided
-  const rawScore = typeof b.score === "number" ? b.score : null;
-  const score = rawScore !== null ? Math.max(0, Math.min(100, rawScore)) : null;
-
-  // Guard: require at least 1 AI reply for the current task before allowing advance.
-  // Use task_id (immutable) instead of task_order (positional, can change on reorder).
-  const currentTaskId = typeof thread.current_task_id === "string" ? thread.current_task_id : null;
-  const guardQuery = db
-    .from("homework_tutor_thread_messages")
-    .select("id", { count: "exact", head: true })
-    .eq("thread_id", threadId)
-    .eq("role", "assistant");
-
-  const { count: assistantMsgCount } = currentTaskId
-    ? await guardQuery.eq("task_id", currentTaskId)
-    : await guardQuery.eq("task_order", thread.current_task_order as number);
-
-  if (!assistantMsgCount || assistantMsgCount < 1) {
-    return jsonError(cors, 400, "NO_INTERACTION", "Complete at least one exchange with the AI before advancing");
-  }
-
-  // Load advance context using shared helper
-  const ctx = await loadAdvanceContext(db, threadId, thread);
-  if (!ctx) {
-    return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to advance from");
-  }
-
-  // Perform advance using shared helper
-  await performTaskAdvance(
-    db, threadId, ctx.currentState, ctx.stateByOrder, ctx.sortedOrders, ctx.currentOrder, score,
+// ─── Endpoint: POST /threads/:id/advance (student) — RETIRED ────────────────
+//
+// Ревью-фикс P0 р.1 (homework-work-modes, 2026-07-24): роут закрыт навсегда.
+//
+// Он позволял КЛИЕНТУ закрыть задачу без проверки: guard требовал лишь ≥1
+// assistant-сообщения по текущей задаче (а AI-интро создаётся само при первом
+// открытии), после чего `performTaskAdvance` ставил `status='completed'`,
+// НЕ записывая earned_score/ai_score → `computeFinalScore` (rule 40:
+// override → earned → ai → status) трактует completed-без-баллов как ПОЛНЫЙ
+// max_score. То есть ученик мог вручную выбить максимум за нерешённую задачу —
+// и в обычной домашке, и (после переключения вида) в самостоятельной, где это
+// вдобавок ломает целостность среза.
+//
+// Клиент роут не вызывает: `advanceTask` в `src/lib/studentHomeworkApi.ts`
+// остался определением без call-site'ов (legacy `GuidedHomeworkWorkspace`
+// отключён с Phase 3 cutover, 2026-05-12). Продвижение по задачам выполняет
+// сервер внутри `performTaskAdvance` после РЕАЛЬНОГО грейдинга.
+//
+// Восстанавливать этот путь нельзя: любой client-controlled advance обязан
+// писать балл явно, иначе completed-без-баллов = max.
+function handleAdvanceTaskRetired(cors: Record<string, string>): Response {
+  console.warn(JSON.stringify({ event: "homework_advance_route_retired_hit" }));
+  return jsonError(
+    cors,
+    410,
+    "ADVANCE_RETIRED",
+    "Переход к следующей задаче теперь выполняется автоматически после проверки ответа. Обнови страницу.",
   );
-
-  // Return updated thread (student-facing: filter hidden notes)
-  const updatedThread = await fetchStudentThread(db, threadId);
-  return jsonOk(cors, updatedThread ?? { id: threadId });
 }
 
 // ─── Helper: fetch full thread with nested data ─────────────────────────────
@@ -9252,6 +9618,50 @@ function stripStudentSensitiveTaskStateFields(
   };
 }
 
+/**
+ * homework-work-modes (Т5): state-aware reveal самостоятельной работы.
+ * До `thread.status === 'completed'` ученик не видит вердикты:
+ *  - assistant/system-сообщения (check_result / ai_reply / интро) фильтруются;
+ *    остаются свои user-сообщения и человеческие tutor-сообщения;
+ *  - в task_states зануляются все балл/вердикт-носители. Остаются
+ *    id/task_id/status/attempts/hint_count — status нужен UI для «Сдано»/лока
+ *    ввода, вердикт из него не выводится (задача закрывается ЛЮБЫМ вердиктом).
+ * После завершения — полный reveal (эта функция не вызывается).
+ */
+function stripIndependentPreRevealFields(
+  thread: Record<string, unknown>,
+): Record<string, unknown> {
+  const messages = Array.isArray(thread.homework_tutor_thread_messages)
+    ? (thread.homework_tutor_thread_messages as Record<string, unknown>[])
+    : [];
+  const taskStates = Array.isArray(thread.homework_tutor_task_states)
+    ? (thread.homework_tutor_task_states as Record<string, unknown>[])
+    : [];
+  return {
+    ...thread,
+    homework_tutor_thread_messages: messages.filter(
+      (m) => m && typeof m === "object" && (m.role === "user" || m.role === "tutor"),
+    ),
+    homework_tutor_task_states: taskStates.map((ts) => {
+      if (!ts || typeof ts !== "object") return ts;
+      return {
+        ...ts,
+        // required-number поля клиентского типа → 0 (не null), optional → null.
+        best_score: 0,
+        wrong_answer_count: 0,
+        available_score: null,
+        earned_score: null,
+        ai_score: null,
+        tutor_score_override: null,
+        tutor_score_override_comment: null,
+        tutor_score_override_at: null,
+        ai_criteria_json: null,
+        ai_nodes_json: null,
+      };
+    }),
+  };
+}
+
 async function fetchFullThread(
   db: SupabaseClient,
   threadId: string,
@@ -9284,10 +9694,20 @@ async function fetchFullThread(
 async function fetchStudentThread(
   db: SupabaseClient,
   threadId: string,
+  opts: {
+    /**
+     * homework-work-modes (Т5): вид работы assignment'а. Параметр ОБЯЗАТЕЛЬНЫЙ
+     * и резолвится вызывателем (он и так грузит assignment). Ревью-фикс р.1:
+     * раньше был опциональным с fallback-резолвом внутри, и транзиентный сбой
+     * этого резолва трактовался как 'independent' → пустой чат в ОБЫЧНОЙ
+     * домашке. Явный параметр убирает и fail-open, и fail-closed дилемму.
+     */
+    workMode: HomeworkWorkMode;
+  },
 ): Promise<Record<string, unknown> | null> {
   const thread = await fetchFullThread(db, threadId);
   if (!thread) return null;
-  const stripped = stripStudentSensitiveTaskStateFields(stripHiddenMessages(thread));
+  let stripped = stripStudentSensitiveTaskStateFields(stripHiddenMessages(thread));
 
   const studentAssignmentId = typeof stripped.student_assignment_id === "string"
     ? stripped.student_assignment_id
@@ -9303,6 +9723,12 @@ async function fetchStudentThread(
     if (assignmentId) {
       tutorProfile = await resolveTutorProfileForAssignment(db, assignmentId);
     }
+  }
+
+  // homework-work-modes (Т5): state-aware reveal — до завершения самостоятельной
+  // вердикты/баллы ученику не отдаются.
+  if (opts.workMode === "independent" && stripped.status !== "completed") {
+    stripped = stripIndependentPreRevealFields(stripped);
   }
 
   return { ...stripped, tutor_profile: tutorProfile };
@@ -9386,6 +9812,39 @@ interface AdvanceResult {
   threadCompleted: boolean;
 }
 
+/**
+ * homework-work-modes (ревью-фикс P2 р.3): фактическое состояние балла задачи.
+ * Нужен, когда CAS-запись результата не применилась (задачу финализировал
+ * другой путь) — в ответ клиенту идут значения ИЗ БД, а не вычисленные.
+ * Сбой чтения → null (клиент всё равно рефетчит тред после мутации).
+ */
+async function readTaskStateScoreSnapshot(
+  db: SupabaseClient,
+  taskStateId: string,
+): Promise<
+  | { status: string | null; earned_score: number | null; ai_score: number | null; available_score: number | null }
+  | null
+> {
+  const { data, error } = await db
+    .from("homework_tutor_task_states")
+    .select("status, earned_score, ai_score, available_score")
+    .eq("id", taskStateId)
+    .maybeSingle();
+  if (error || !data) {
+    console.error("homework_api_task_state_snapshot_failed", {
+      task_state_id: taskStateId,
+      error: error?.message ?? "not_found",
+    });
+    return null;
+  }
+  return data as {
+    status: string | null;
+    earned_score: number | null;
+    ai_score: number | null;
+    available_score: number | null;
+  };
+}
+
 async function performTaskAdvance(
   db: SupabaseClient,
   threadId: string,
@@ -9420,7 +9879,11 @@ async function performTaskAdvance(
   const nextTaskId = typeof nextState?.task_id === "string" ? nextState.task_id as string : null;
 
   if (nextOrder !== null) {
-    // Update thread current_task_order
+    // Update thread current_task_order.
+    // homework-work-modes (ревью-фикс P1 р.1): `.eq("status","active")` — поздний
+    // грейдинг НЕ должен «воскрешать» тред, уже завершённый через «Сдать работу»
+    // (handleStudentFinishWork ставит status='completed' + current_task_id=null).
+    // Для обычной домашки no-op: активный тред матчится как раньше.
     await db
       .from("homework_tutor_threads")
       .update({
@@ -9428,7 +9891,8 @@ async function performTaskAdvance(
         current_task_order: nextOrder,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", threadId);
+      .eq("id", threadId)
+      .eq("status", "active");
 
     // Insert system message about task transition
     await db
@@ -9634,6 +10098,12 @@ async function runStudentAnswerGrading(args: {
     message_kind?: string | null;
   }>;
   feedbackKind: "ai_reply" | "check_result";
+  /**
+   * homework-work-modes (Т4): самостоятельная работа — одна попытка, задача
+   * закрывается ЛЮБЫМ graded-вердиктом (кроме CHECK_FAILED), штрафные
+   * деградации (computeAvailableScore) не применяются: балл = результат проверки.
+   */
+  independentMode?: boolean;
 }): Promise<Record<string, unknown>> {
   const {
     db,
@@ -9646,6 +10116,7 @@ async function runStudentAnswerGrading(args: {
     studentAnswer,
     recentMessages,
     feedbackKind,
+    independentMode = false,
   } = args;
   // Шаг-1 инструментирование (2026-07-12): сквозная латентность грейдинга
   // (резолв фото + OCR + вызов модели + вердикт) → hw_ai_check_events.latency_ms.
@@ -9847,41 +10318,88 @@ async function runStudentAnswerGrading(args: {
       ? Math.min(currentAvailableScore, effectiveAiScore)
       : currentAvailableScore;
 
-    await db.from("homework_tutor_task_states").update({
-      attempts: nextAttemptCount,
-      status: "completed",
-      earned_score: earnedScore,
-      available_score: currentAvailableScore,
-      ai_score: effectiveAiScore,
-      ai_score_comment: effectiveAiScoreComment,
-      ai_criteria_json: criteriaBreakdown,
-      ai_nodes_json: nodesJson,
-      best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
-      last_ai_feedback: result.feedback,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentState.id);
+    // Ревью-фикс P0 р.2: проверяем error И применённость строки. Раньше сбой
+    // этого UPDATE игнорировался, а performTaskAdvance всё равно ставил
+    // status='completed' → computeFinalScore (rule 40: override → earned → ai →
+    // status) трактует completed-без-баллов как ПОЛНЫЙ max_score. Для
+    // criteria-grading это прямая порча балла: CORRECT с cascade К1=0 даёт
+    // earned 14/22, а после сбоя ученик получал бы 22/22.
+    // `.eq("status","active")` дополнительно делает запись CAS-ом: 0 строк =
+    // задачу уже финализировал кто-то другой (finish / tutor force-complete) —
+    // его результат НЕ перетираем (см. независимую ветку ниже).
+    const { data: correctUpdatedRows, error: correctUpdateError } = await db
+      .from("homework_tutor_task_states")
+      .update({
+        attempts: nextAttemptCount,
+        status: "completed",
+        earned_score: earnedScore,
+        available_score: currentAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", currentState.id)
+      .eq("status", "active")
+      .select("id");
+    if (correctUpdateError) {
+      console.error("homework_api_grade_persist_failed", {
+        verdict: "CORRECT",
+        task_state_id: currentState.id,
+        error: correctUpdateError.message,
+      });
+      throw new Error("GRADE_PERSIST_FAILED");
+    }
+    const correctSuperseded = !correctUpdatedRows || correctUpdatedRows.length === 0;
 
-    const advanceResult = await performTaskAdvance(
-      db, threadId, currentState, stateByOrder, sortedOrders, currentOrder, Math.round(earnedScore),
-    );
+    // `threadCompleted: false` при superseded — НЕ выдумываем завершение треда
+    // (задачу мог закрыть tutor force-complete, а остальные задачи ещё активны;
+    // сказать «работа завершена» = увести ученика с живой работы). Реальную
+    // завершённость independent-ответ определяет по перечитанному thread.status,
+    // обычная домашка это поле не использует.
+    const advanceResult = correctSuperseded
+      ? { nextOrder: null, nextTaskId: null, threadCompleted: false }
+      : await performTaskAdvance(
+          db, threadId, currentState, stateByOrder, sortedOrders, currentOrder, Math.round(earnedScore),
+        );
+    // Ревью-фикс P2 р.3: при CAS-miss в ответ идут ФАКТИЧЕСКИЕ баллы из БД, а не
+    // вычисленные (их записал другой финализатор — tutor force-complete / finish).
+    // Иначе payload расходился с базой: ученик/телеметрия видели балл, которого нет.
+    const supersededState = correctSuperseded
+      ? await readTaskStateScoreSnapshot(db, currentState.id as string)
+      : null;
+    if (correctSuperseded) {
+      console.warn("homework_api_grade_superseded", {
+        verdict: "CORRECT",
+        task_state_id: currentState.id,
+      });
+    }
 
     responseData = {
       verdict: "CORRECT",
       feedback: result.feedback,
-      ai_score: effectiveAiScore,
+      ai_score: correctSuperseded ? (supersededState?.ai_score ?? null) : effectiveAiScore,
       ai_score_comment: effectiveAiScoreComment,
       criteria_breakdown: criteriaBreakdown,
       flowchart_trace: nodesJson,
-      earned_score: earnedScore,
-      available_score: currentAvailableScore,
+      earned_score: correctSuperseded ? (supersededState?.earned_score ?? null) : earnedScore,
+      available_score: correctSuperseded
+        ? (supersededState?.available_score ?? currentAvailableScore)
+        : currentAvailableScore,
       max_score: maxScore,
       wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
       hint_count: (currentState.hint_count as number) ?? 0,
-      task_completed: true,
+      task_completed: correctSuperseded
+        ? supersededState?.status === "completed"
+        : true,
       next_task_order: advanceResult.nextOrder,
       next_task_id: advanceResult.nextTaskId,
       thread_completed: advanceResult.threadCompleted,
       total_tasks: totalTasks,
+      ...(correctSuperseded ? { superseded: true } : {}),
     };
   } else if (effectiveVerdict === "CHECK_FAILED") {
     await db.from("homework_tutor_task_states").update({
@@ -9904,6 +10422,98 @@ async function runStudentAnswerGrading(args: {
       next_task_id: null,
       thread_completed: false,
       total_tasks: totalTasks,
+    };
+  } else if (independentMode) {
+    // homework-work-modes (Т4): самостоятельная — одна попытка. ON_TRACK и
+    // INCORRECT тоже ЗАКРЫВАЮТ задачу; earned_score = AI-балл (или 0), БЕЗ
+    // computeAvailableScore-штрафов. CORRECT/CHECK_FAILED идут ветками выше
+    // (CORRECT первой попыткой без подсказок и так даёт полный балл;
+    // CHECK_FAILED не сжигает попытку — ученик пересдаёт).
+    const earnedScore = typeof effectiveAiScore === "number" ? effectiveAiScore : 0;
+
+    const { data: independentUpdatedRows, error: independentUpdateError } = await db
+      .from("homework_tutor_task_states")
+      .update({
+        attempts: nextAttemptCount,
+        status: "completed",
+        earned_score: earnedScore,
+        available_score: currentAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        best_score: Math.max((currentState.best_score as number) ?? 0, Math.round(earnedScore)),
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", currentState.id)
+      // Ревью-фикс P1 р.2 (гонка finish ↔ поздний грейдинг): CAS по status.
+      // «Сдать работу» из другой вкладки уже поставил completed + earned_score=0
+      // и завершил тред — поздний AI НЕ должен переписывать зафиксированный
+      // ученику итог (иначе результат меняется ПОСЛЕ показа). Победитель
+      // определён детерминированно: finish.
+      .eq("status", "active")
+      .select("id");
+
+    // Ревью-фикс P0 р.1: НЕ продвигаться при сбое записи балла. performTaskAdvance
+    // сам ставит status='completed', а computeFinalScore трактует completed
+    // без earned/ai как ПОЛНЫЙ max_score (rule 40) → транзиентный сбой на
+    // INCORRECT подарил бы ученику максимум вместо нуля. Бросаем — вызыватель
+    // вернёт 500, ученик повторит сдачу (задача осталась active).
+    if (independentUpdateError) {
+      console.error("homework_api_independent_grade_persist_failed", {
+        task_state_id: currentState.id,
+        error: independentUpdateError.message,
+      });
+      throw new Error("INDEPENDENT_GRADE_PERSIST_FAILED");
+    }
+    const independentSuperseded =
+      !independentUpdatedRows || independentUpdatedRows.length === 0;
+    if (independentSuperseded) {
+      console.warn("homework_api_grade_superseded", {
+        verdict: effectiveVerdict,
+        task_state_id: currentState.id,
+      });
+    }
+
+    // `threadCompleted: false` — см. комментарий в CORRECT-ветке: завершение
+    // треда не выдумываем, independent-ответ перечитывает реальный thread.status.
+    const advanceResult = independentSuperseded
+      ? { nextOrder: null, nextTaskId: null, threadCompleted: false }
+      : await performTaskAdvance(
+          db, threadId, currentState, stateByOrder, sortedOrders, currentOrder, Math.round(earnedScore),
+        );
+
+    // Ревью-фикс P2 р.3 (зеркало CORRECT-ветки): при CAS-miss отдаём фактическое
+    // состояние из БД. Ученику в самостоятельной баллы всё равно приглушены до
+    // завершения, но payload не должен расходиться с базой (телеметрия, tutor-
+    // поверхности, будущие клиенты).
+    const supersededState = independentSuperseded
+      ? await readTaskStateScoreSnapshot(db, currentState.id as string)
+      : null;
+
+    responseData = {
+      verdict: effectiveVerdict,
+      feedback: result.feedback,
+      ai_score: independentSuperseded ? (supersededState?.ai_score ?? null) : effectiveAiScore,
+      ai_score_comment: effectiveAiScoreComment,
+      criteria_breakdown: criteriaBreakdown,
+      flowchart_trace: nodesJson,
+      earned_score: independentSuperseded ? (supersededState?.earned_score ?? null) : earnedScore,
+      available_score: independentSuperseded
+        ? (supersededState?.available_score ?? currentAvailableScore)
+        : currentAvailableScore,
+      max_score: maxScore,
+      wrong_answer_count: (currentState.wrong_answer_count as number) ?? 0,
+      hint_count: (currentState.hint_count as number) ?? 0,
+      task_completed: independentSuperseded
+        ? supersededState?.status === "completed"
+        : true,
+      next_task_order: advanceResult.nextOrder,
+      next_task_id: advanceResult.nextTaskId,
+      thread_completed: advanceResult.threadCompleted,
+      total_tasks: totalTasks,
+      ...(independentSuperseded ? { superseded: true } : {}),
     };
   } else if (effectiveVerdict === "ON_TRACK") {
     // Correct step but NOT the final answer — keep task open
@@ -10042,6 +10652,12 @@ async function handleCheckAnswer(
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
   }
 
+  // homework-work-modes (Т3): в самостоятельной legacy-проверка ответа с AI-фидбэком
+  // закрыта (единственный путь сдачи — handleStudentSubmission). Гейт ДО квоты.
+  if (await getAssignmentWorkMode(db, studentAssignment.assignment_id) === "independent") {
+    return independentAiDisabledError(cors);
+  }
+
   // AI-quota gate. Free-students with a paying tutor get 50/day (vs 10) in homework context.
   // Mirrors chat/index.ts — single source of truth is checkAiQuota / get_subscription_status RPC.
   const quotaResult = await checkAiQuota(userId, db, {
@@ -10154,7 +10770,14 @@ async function handleCheckAnswer(
   // The chat path uses message_kind="ai_reply" for the feedback bubble; the
   // student-side submit-sheet path (handleStudentSubmission) passes
   // "check_result" instead.
-  const responseData = await runStudentAnswerGrading({
+  //
+  // Ревью-фикс P1 р.3: helper бросает `GRADE_PERSIST_FAILED`, когда балл не
+  // записался (см. CORRECT-ветку) — ловим здесь тем же контрактом, что в
+  // handleStudentSubmission. Без catch запрос падал в общий обработчик и отдавал
+  // generic «Internal server error» (нарушение rule 97: русская фраза + код).
+  let responseData: Record<string, unknown>;
+  try {
+    responseData = await runStudentAnswerGrading({
     db,
     threadId,
     userId,
@@ -10170,7 +10793,20 @@ async function handleCheckAnswer(
       message_kind?: string | null;
     }>,
     feedbackKind: "ai_reply",
-  });
+    });
+  } catch (gradingError) {
+    console.error("homework_api_check_answer_grading_failed", {
+      thread_id: threadId,
+      task_id: currentState.task_id,
+      error: gradingError instanceof Error ? gradingError.message : String(gradingError),
+    });
+    return jsonError(
+      cors,
+      500,
+      "GRADING_FAILED",
+      "Не удалось сохранить результат проверки. Отправь ответ ещё раз.",
+    );
+  }
 
   // Воронка (v2.1 W4): первая сдача ученика на numeric-inline answer-пути.
   // logAnalyticsEventOnce со scope student_id дедупит с handleStudentSubmission
@@ -10214,8 +10850,14 @@ async function handleCheckAnswer(
     );
   }
 
-  // Return updated thread (student-facing: filter hidden notes)
-  const updatedThread = await fetchStudentThread(db, threadId);
+  // Return updated thread (student-facing: filter hidden notes).
+  // homework-work-modes (ревью-фикс P1 р.2): режим ПЕРЕЧИТЫВАЕМ перед ответом,
+  // а не хардкодим 'homework'. Гейт стоит в начале хендлера, но между ним и
+  // ответом репетитор мог переключить работу в 'independent' — тогда ученику
+  // нельзя отдавать вердикты. Сбой резолва → fail-closed 'independent'
+  // (в этом пути осторожность безопасна: тред всё равно уже загружен клиентом).
+  const revealWorkMode = await getAssignmentWorkMode(db, studentAssignment.assignment_id);
+  const updatedThread = await fetchStudentThread(db, threadId, { workMode: revealWorkMode });
   if (
     updatedThread &&
     Array.isArray(updatedThread.homework_tutor_thread_messages)
@@ -10451,18 +11093,115 @@ async function handleStudentSubmission(
   //    student actually submitted, not whatever the thread cursor says.
   const ctx = await loadAdvanceContext(db, threadId, threadRow, undefined, taskId);
   if (!ctx) {
+    // homework-work-modes (Т4): в самостоятельной повторная сдача закрытой
+    // задачи — явный 409 «одна попытка», а не generic NO_ACTIVE_TASK
+    // (loadAdvanceContext возвращает null для не-active task_state).
+    if (await getAssignmentWorkMode(db, hwId) === "independent") {
+      const { data: targetState } = await db
+        .from("homework_tutor_task_states")
+        .select("status")
+        .eq("thread_id", threadId)
+        .eq("task_id", taskId)
+        .maybeSingle();
+      if (targetState?.status === "completed") {
+        return jsonError(
+          cors,
+          409,
+          "TASK_ALREADY_SUBMITTED",
+          "Ответ уже сдан — в самостоятельной работе одна попытка на задачу.",
+        );
+      }
+    }
     return jsonError(cors, 400, "NO_ACTIVE_TASK", "No active task to submit");
   }
   const { currentState, currentOrder } = ctx;
 
-  // 9. Assignment subject + exam_type (for AI subject-rubric resolver, Phase 2 2026-05-15).
+  // 9. Assignment subject + exam_type (for AI subject-rubric resolver, Phase 2 2026-05-15)
+  //    + work_mode (homework-work-modes: квота/грейдинг/response ветвятся ниже).
   const { data: assignment, error: assignmentError } = await db
     .from("homework_tutor_assignments")
-    .select("subject, exam_type, feedback_language")
+    .select("subject, exam_type, feedback_language, work_mode")
     .eq("id", hwId)
     .single();
   if (assignmentError || !assignment) {
     return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
+  }
+  const workMode = normalizeWorkMode(
+    (assignment as Record<string, unknown>).work_mode,
+  ) ?? "homework";
+  const isIndependent = workMode === "independent";
+
+  // 9b. homework-work-modes (Т4, ревью-фикс P0 р.1): АТОМАРНЫЙ claim попытки.
+  //     Проверка «status='active'» в loadAdvanceContext (шаг 8) — это read,
+  //     а AI-вызов длится десятки секунд: два параллельных сабмита обa видели
+  //     бы active, оба грейдились и второй перетирал балл первого (= вторая
+  //     попытка вопреки инварианту «одна попытка», плюс неквотируемый
+  //     дублирующий AI-вызов). Conditional UPDATE по (id, status, attempts)
+  //     атомарен в Postgres: ровно один запрос получит строку, остальные — 0.
+  //
+  //     `attempts` инкрементим здесь; runStudentAnswerGrading ниже пишет
+  //     АБСОЛЮТНОЕ значение (currentState.attempts + 1) — то же самое число,
+  //     задвоения нет. CHECK_FAILED оставляет status='active', поэтому
+  //     следующая попытка успешно заклеймит строку с новым attempts.
+  //     Ревью-фикс P1 р.2: claim ОСВОБОЖДАЕТСЯ на технических выходах ДО AI
+  //     (`releaseIndependentClaim`) — сбой подписи/скачивания/Whisper или
+  //     INSERT'а сообщения не должен «съедать» попытку и раздувать attempts.
+  //     После вызова AI компенсации нет намеренно: модель отработала (деньги
+  //     потрачены), а безлимитный retry без квоты — вектор абьюза. Верхний
+  //     предел технических повторов — INDEPENDENT_MAX_ATTEMPTS.
+  let releaseIndependentClaim: (() => Promise<void>) | null = null;
+  if (isIndependent) {
+    const claimAttempts = ((currentState.attempts as number) ?? 0);
+    if (claimAttempts >= INDEPENDENT_MAX_ATTEMPTS) {
+      console.warn("homework_api_independent_attempts_capped", {
+        task_state_id: currentState.id,
+        attempts: claimAttempts,
+      });
+      return jsonError(
+        cors,
+        429,
+        "TOO_MANY_ATTEMPTS",
+        "Слишком много попыток отправки по этой задаче. Напиши репетитору — он поможет.",
+      );
+    }
+    const { data: claimedRows, error: claimError } = await db
+      .from("homework_tutor_task_states")
+      .update({ attempts: claimAttempts + 1, updated_at: new Date().toISOString() })
+      .eq("id", currentState.id as string)
+      .eq("status", "active")
+      .eq("attempts", claimAttempts)
+      .select("id");
+    if (claimError) {
+      console.error("homework_api_submission_claim_failed", {
+        task_state_id: currentState.id,
+        error: claimError.message,
+      });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось принять ответ. Попробуй ещё раз.");
+    }
+    if (!claimedRows || claimedRows.length === 0) {
+      return jsonError(
+        cors,
+        409,
+        "TASK_ALREADY_SUBMITTED",
+        "Ответ уже сдан — в самостоятельной работе одна попытка на задачу.",
+      );
+    }
+    releaseIndependentClaim = async () => {
+      // Откат ТОЛЬКО своего инкремента и только если строка не ушла дальше
+      // (status всё ещё active, attempts всё ещё наш) — иначе no-op.
+      const { error: releaseError } = await db
+        .from("homework_tutor_task_states")
+        .update({ attempts: claimAttempts, updated_at: new Date().toISOString() })
+        .eq("id", currentState.id as string)
+        .eq("status", "active")
+        .eq("attempts", claimAttempts + 1);
+      if (releaseError) {
+        console.error("homework_api_submission_claim_release_failed", {
+          task_state_id: currentState.id,
+          error: releaseError.message,
+        });
+      }
+    };
   }
 
   // 10. Conversation history for the target task (last 15 messages).
@@ -10478,20 +11217,27 @@ async function handleStudentSubmission(
   // fully-validated submission, immediately before the first AI operation
   // (Whisper for speaking; Gemini grading for numeric/extended/proof). One unit
   // covers both AI calls. Free-students with a paying tutor get 50/day (vs 10).
-  const quotaResult = await checkAiQuota(userId, db, {
-    incrementUsage: true,
-    context: "homework",
-  });
-  if (!quotaResult.allowed) {
-    console.warn(JSON.stringify({
-      event: "homework_ai_quota_reached",
-      handler: "handleStudentSubmission",
-      userId,
-      limit: quotaResult.limit,
-      messagesUsed: quotaResult.messagesUsed,
-      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
-    }));
-    return buildLimitReachedResponse(quotaResult, cors);
+  //
+  // homework-work-modes: самостоятельная НЕ расходует квоту AI-сообщений
+  // (анти-требование PRD — free-ученик не должен упереться в 429 посреди среза;
+  // объём ограничен одной попыткой на задачу). AI-грейдинг при этом вызывается,
+  // токены логируются в token_usage_logs как обычно.
+  if (!isIndependent) {
+    const quotaResult = await checkAiQuota(userId, db, {
+      incrementUsage: true,
+      context: "homework",
+    });
+    if (!quotaResult.allowed) {
+      console.warn(JSON.stringify({
+        event: "homework_ai_quota_reached",
+        handler: "handleStudentSubmission",
+        userId,
+        limit: quotaResult.limit,
+        messagesUsed: quotaResult.messagesUsed,
+        tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+      }));
+      return buildLimitReachedResponse(quotaResult, cors);
+    }
   }
 
   // 11. Determine the answer text the AI will grade.
@@ -10511,6 +11257,8 @@ async function handleStudentSubmission(
     // USA, гонять аудио через Москву = +200-400ms без пользы (rule 95).
     const signedUrl = await createSignedStorageUrl(db, voiceRef, "homework-submissions");
     if (!signedUrl) {
+      // Технический выход ДО AI — попытка не расходуется (ревью-фикс P1 р.2).
+      await releaseIndependentClaim?.();
       return jsonError(cors, 502, "VOICE_URL_FAILED", "Не удалось получить запись для распознавания. Попробуй ещё раз.");
     }
     let audioBuffer: ArrayBuffer;
@@ -10525,6 +11273,7 @@ async function handleStudentSubmission(
         taskId,
         error: err instanceof Error ? err.message : String(err),
       });
+      await releaseIndependentClaim?.();
       return jsonError(cors, 502, "VOICE_FETCH_FAILED", "Не удалось загрузить запись для распознавания. Попробуй ещё раз.");
     }
 
@@ -10543,6 +11292,15 @@ async function handleStudentSubmission(
     } catch (err) {
       const code = err instanceof VoiceTranscriptionError ? err.code : "TRANSCRIPTION_FAILED";
       console.error("homework_voice_transcribe_failed", { taskId, code });
+      // Ревью-фикс P1 р.3: компенсируем попытку ТОЛЬКО для pre-provider ошибок.
+      // MISSING_API_KEY / EMPTY_AUDIO / AUDIO_TOO_LARGE бросаются в
+      // `_shared/voice-transcribe.ts` ДО fetch к Groq (нет ключа / пустой буфер /
+      // превышен размер) — вызова не было, попытка не должна сгорать.
+      // TRANSCRIPTION_FAILED = провайдер уже дёрнут (в т.ч. ретраи) → НЕ
+      // компенсируем: иначе безлимитные оплаченные вызовы Whisper в обход cap.
+      if (code === "MISSING_API_KEY" || code === "EMPTY_AUDIO" || code === "AUDIO_TOO_LARGE") {
+        await releaseIndependentClaim?.();
+      }
       if (code === "MISSING_API_KEY") {
         return jsonError(cors, 503, "VOICE_UNAVAILABLE", "Распознавание речи временно недоступно. Попробуй позже.");
       }
@@ -10556,6 +11314,10 @@ async function handleStudentSubmission(
       // Пустой транскрипт (тишина / нераспознанное): НЕ зовём Gemini, задачу НЕ
       // закрываем, submission НЕ персистим — ученик перезаписывает (Spec §6
       // «никакой отправки вслепую» + AC TASK-8 «пустой STT → задача не закрыта»).
+      //
+      // Ревью-фикс P1 р.3: попытку НЕ возвращаем. Groq ответил 200 — вызов
+      // оплачен (см. `_shared/voice-transcribe.ts`), а компенсация здесь давала
+      // бы безлимитную отправку тишины в обход INDEPENDENT_MAX_ATTEMPTS.
       return jsonError(cors, 422, "VOICE_EMPTY_TRANSCRIPT", "Не удалось распознать речь. Запиши ответ ещё раз — говори чуть громче и ближе к микрофону.");
     }
     answerText = transcript;
@@ -10606,7 +11368,9 @@ async function handleStudentSubmission(
       taskId,
       error: saveSubmissionError?.message,
     });
-    return jsonError(cors, 500, "DB_ERROR", "Failed to save submission message");
+    // Технический выход ДО грейдинга — попытка не расходуется (ревью-фикс P1 р.2).
+    await releaseIndependentClaim?.();
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить ответ. Попробуй ещё раз.");
   }
 
   // 13. Update thread timestamps (mirror handleCheckAnswer).
@@ -10656,29 +11420,51 @@ async function handleStudentSubmission(
   // 14. Run shared grading helper. feedbackKind="check_result" so the
   //     verdict bubble is semantically distinct from an ongoing dialog
   //     ai_reply.
-  const responseData = await runStudentAnswerGrading({
-    db,
-    threadId,
-    userId,
-    studentAssignment,
-    ctx,
-    task,
-    assignment,
-    studentAnswer: answerText,
-    recentMessages: (recentMessages ?? []) as Array<{
-      role?: string | null;
-      content?: string | null;
-      visible_to_student?: boolean | null;
-      message_kind?: string | null;
-    }>,
-    feedbackKind: "check_result",
-  });
+  let responseData: Record<string, unknown>;
+  try {
+    responseData = await runStudentAnswerGrading({
+      db,
+      threadId,
+      userId,
+      studentAssignment,
+      ctx,
+      task,
+      assignment,
+      studentAnswer: answerText,
+      recentMessages: (recentMessages ?? []) as Array<{
+        role?: string | null;
+        content?: string | null;
+        visible_to_student?: boolean | null;
+        message_kind?: string | null;
+      }>,
+      feedbackKind: "check_result",
+      independentMode: isIndependent,
+    });
+  } catch (gradingError) {
+    // homework-work-modes (ревью-фикс P0 р.1): сбой ПЕРСИСТА балла в
+    // самостоятельной бросает — задача остаётся active (без completed-без-баллов,
+    // который computeFinalScore трактует как max). Ученик повторяет сдачу.
+    // Текст исключения — только в лог (rule 100: наружу generic-фраза).
+    console.error("homework_api_submission_grading_failed", {
+      thread_id: threadId,
+      task_id: taskId,
+      independent: isIndependent,
+      error: gradingError instanceof Error ? gradingError.message : String(gradingError),
+    });
+    return jsonError(
+      cors,
+      500,
+      "GRADING_FAILED",
+      "Не удалось сохранить результат проверки. Отправь ответ ещё раз.",
+    );
+  }
 
   // 15. Return the same shape as handleCheckAnswer + the freshly-fetched
   //     thread (which already includes the submission message + AI feedback
   //     + updated task_state, all stripped of tutor-only fields by
-  //     fetchStudentThread).
-  const updatedThread = await fetchStudentThread(db, threadId);
+  //     fetchStudentThread; independent-режим дополнительно стрипается
+  //     state-aware до завершения работы).
+  const updatedThread = await fetchStudentThread(db, threadId, { workMode });
   if (
     updatedThread &&
     Array.isArray(updatedThread.homework_tutor_thread_messages)
@@ -10707,6 +11493,36 @@ async function handleStudentSubmission(
     }
   }
 
+  // homework-work-modes (Т5): до завершения самостоятельной ученик НЕ получает
+  // вердикт/фидбэк/баллы — только факт принятия + навигацию. thread выше уже
+  // застрипан state-aware. Сдача последней задачи завершает тред → в ТОМ ЖЕ
+  // ответе thread приходит полным (reveal) — клиент уводит на «Результат работы».
+  if (isIndependent && updatedThread?.status !== "completed") {
+    return jsonOk(cors, {
+      independent: true,
+      task_completed: responseData.task_completed === true,
+      // CHECK_FAILED = сбой AI-проверки (не вердикт): задача осталась active,
+      // попытка НЕ сгорела — клиент просит отправить ещё раз, не рисует «Сдано».
+      check_failed: responseData.verdict === "CHECK_FAILED",
+      thread_completed: false,
+      next_task_order: responseData.next_task_order ?? null,
+      next_task_id: responseData.next_task_id ?? null,
+      total_tasks: responseData.total_tasks ?? null,
+      thread: updatedThread,
+    });
+  }
+  if (isIndependent) {
+    return jsonOk(cors, {
+      independent: true,
+      task_completed: responseData.task_completed === true,
+      thread_completed: true,
+      next_task_order: null,
+      next_task_id: null,
+      total_tasks: responseData.total_tasks ?? null,
+      thread: updatedThread,
+    });
+  }
+
   return jsonOk(cors, { ...responseData, thread: updatedThread });
 }
 
@@ -10725,6 +11541,11 @@ async function handleRequestHint(
 
   if (thread.status === "completed") {
     return jsonError(cors, 400, "ALREADY_COMPLETED", "Thread is already completed");
+  }
+
+  // homework-work-modes (Т3): в самостоятельной подсказки закрыты. Гейт ДО квоты.
+  if (await getAssignmentWorkMode(db, studentAssignment.assignment_id) === "independent") {
+    return independentAiDisabledError(cors);
   }
 
   // AI-quota gate (same contract as handleCheckAnswer). Free-students with a paying tutor
@@ -10918,8 +11739,11 @@ async function handleRequestHint(
     updated_at: new Date().toISOString(),
   }).eq("id", activeState.id);
 
-  // Return updated thread (student-facing: filter hidden notes)
-  const updatedThread = await fetchStudentThread(db, threadId);
+  // Return updated thread (student-facing: filter hidden notes).
+  // homework-work-modes (ревью-фикс P1 р.2): перечитываем режим (репетитор мог
+  // переключить работу пока генерировалась подсказка), fail-closed на сбое.
+  const revealWorkMode = await getAssignmentWorkMode(db, studentAssignment.assignment_id);
+  const updatedThread = await fetchStudentThread(db, threadId, { workMode: revealWorkMode });
   return jsonOk(cors, {
     hint: hintResult.hint,
     available_score: newAvailableScore,
@@ -11931,10 +12755,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handlePostThreadMessage(db, userId, seg[1], body, cors);
     }
 
-    // POST /threads/:id/advance (student endpoint)
+    // POST /threads/:id/advance — RETIRED (ревью-фикс P0 р.1, см. хендлер).
     if (seg.length === 3 && seg[0] === "threads" && seg[2] === "advance" && route.method === "POST") {
-      const body = await parseJsonBody(req);
-      return await handleAdvanceTask(db, userId, seg[1], body, cors);
+      return handleAdvanceTaskRetired(cors);
     }
 
     // POST /threads/:id/check (student endpoint — Phase 3)
@@ -11968,6 +12791,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/student (student endpoint)
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "student" && route.method === "GET") {
       return await handleGetStudentAssignment(db, userId, seg[1], cors);
+    }
+
+    // POST /assignments/:id/student/finish — «Сдать работу» (самостоятельная).
+    // homework-work-modes Т5; spec: docs/delivery/features/homework-work-modes/spec.md §3.6
+    if (
+      seg.length === 4 && seg[0] === "assignments" && seg[2] === "student" &&
+      seg[3] === "finish" && route.method === "POST"
+    ) {
+      return await handleStudentFinishWork(db, userId, seg[1], cors);
+    }
+
+    // GET /assignments/:id/student/result — экран «Результат работы».
+    // homework-work-modes Т6; spec §3.7
+    if (
+      seg.length === 4 && seg[0] === "assignments" && seg[2] === "student" &&
+      seg[3] === "result" && route.method === "GET"
+    ) {
+      return await handleGetStudentResult(db, userId, seg[1], cors);
     }
 
     // GET /assignments/:id/identity (student endpoint) — Phase 8 regression fix

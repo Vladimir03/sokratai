@@ -17,6 +17,12 @@ export interface StudentProblemAssignment {
   deadline: string | null;
   status: StudentAssignmentStatus;
   /**
+   * homework-work-modes (Ф1): 'independent' = самостоятельная — клиент прячет
+   * AI-входы (подсказка/чат), сервер — авторитет (403 INDEPENDENT_AI_DISABLED).
+   * undefined = старый бэкенд (deploy-skew) → трактуем как 'homework'.
+   */
+  work_mode?: 'homework' | 'independent';
+  /**
    * Phase 12 (2026-06-07): общий комментарий репетитора ко ВСЕМУ ДЗ для этого
    * ученика (per-student wrap-up, напр. «Вася, ты молодец, но было две ошибки
    * на закон Ома…»). `null` = комментария нет. Student-visible by design.
@@ -57,8 +63,12 @@ export interface StudentProblemResponse {
   task: StudentProblemTask;
   /** Total number of tasks in the assignment — drives step indicator. */
   task_total: number;
-  /** Computed final_score for this task (override > earned > ai > status). */
-  task_score: number;
+  /**
+   * Computed final_score for this task (override > earned > ai > status).
+   * homework-work-modes: `null` в самостоятельной до завершения работы
+   * (state-aware reveal — балл не раскрывается).
+   */
+  task_score: number | null;
   /** Hydrated thread for the assignment (with task_states + messages). */
   thread: HomeworkThread | null;
   student: StudentProblemStudent;
@@ -104,16 +114,42 @@ export async function getStudentProblem(
 }
 
 /**
+ * homework-work-modes (Т5): приглушённый ответ сабмита в самостоятельной —
+ * до завершения работы сервер НЕ возвращает вердикт/фидбэк/баллы, только факт
+ * принятия + навигацию. `check_failed` = сбой AI-проверки (задача осталась
+ * active, попытка не сгорела — предложить отправить ещё раз).
+ */
+export interface IndependentSubmissionAck {
+  independent: true;
+  task_completed: boolean;
+  check_failed?: boolean;
+  thread_completed: boolean;
+  next_task_order: number | null;
+  next_task_id: string | null;
+  total_tasks: number | null;
+  thread: HomeworkThread | null;
+}
+
+export type SubmitSolutionResponse = CheckAnswerResponse | IndependentSubmissionAck;
+
+export function isIndependentSubmissionAck(
+  r: SubmitSolutionResponse,
+): r is IndependentSubmissionAck {
+  return (r as IndependentSubmissionAck).independent === true;
+}
+
+/**
  * Submit a single-shot solution. Returns the canonical
  * `CheckAnswerResponse` shape so the verdict overlay can reuse the existing
- * verdict-handling code paths from chat-side `checkAnswer`.
+ * verdict-handling code paths from chat-side `checkAnswer` — или
+ * `IndependentSubmissionAck` для самостоятельной работы.
  */
 export async function submitSolution(
   hwId: string,
   taskId: string,
   payload: SubmitSolutionPayload,
-): Promise<CheckAnswerResponse> {
-  return requestStudentHomeworkApi<CheckAnswerResponse>(
+): Promise<SubmitSolutionResponse> {
+  return requestStudentHomeworkApi<SubmitSolutionResponse>(
     `/student/problem/${encodeURIComponent(hwId)}/${encodeURIComponent(taskId)}/submission`,
     {
       method: 'POST',

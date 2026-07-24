@@ -837,6 +837,55 @@ async function checkSubscriptionAndLimits(
   return checkAiQuota(userId, adminSupabase, options);
 }
 
+/**
+ * homework-work-modes (Т3): work_mode-preflight ДО списания квоты.
+ *
+ * Гейт внутри `processAIRequest` отбивает запрос уже ПОСЛЕ инкремента дневного
+ * лимита — старый бандл (deploy-skew) или доверенный service-role вызыватель на
+ * самостоятельной сжигал бы квоту ученика и лишал его AI в обычной домашке.
+ * Один лёгкий SELECT и только на guided-пути; обычный чат не затронут.
+ *
+ * FAIL-CLOSED (ревью-фикс P1 р.3): сбой SELECT'а или отсутствие строки → 503, а
+ * НЕ «считаем homework». Иначе транзиентная ошибка на самостоятельной пропускала
+ * запрос, списывала квоту, а при повторном сбое внутреннего гейта дотягивалась
+ * до модели. Продолжаем только с ПОДТВЕРЖДЁННЫМ режимом 'homework'.
+ *
+ * Возвращает готовый Response (403 / 503), если идти дальше нельзя, иначе null.
+ */
+async function independentWorkModeBlockResponse(
+  adminSupabase: any,
+  guidedHomeworkAssignmentId: string | undefined | null,
+  corsHeaders: Record<string, string>,
+): Promise<Response | null> {
+  if (!guidedHomeworkAssignmentId) return null;
+  const { data, error } = await adminSupabase
+    .from("homework_tutor_assignments")
+    .select("work_mode")
+    .eq("id", guidedHomeworkAssignmentId)
+    .maybeSingle();
+  if (error || !data) {
+    console.error("chat_work_mode_lookup_failed", {
+      assignment_id: guidedHomeworkAssignmentId,
+      error: error?.message ?? "not_found",
+    });
+    return new Response(
+      JSON.stringify({
+        error: "Не удалось проверить вид работы. Попробуй ещё раз через минуту.",
+        code: "WORK_MODE_CHECK_FAILED",
+      }),
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+  if ((data as { work_mode?: unknown }).work_mode !== "independent") return null;
+  return new Response(
+    JSON.stringify({
+      error: "В самостоятельной работе подсказки и чат с Сократом недоступны.",
+      code: "INDEPENDENT_AI_DISABLED",
+    }),
+    { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+}
+
 async function transcribeVoiceMessage(req: Request, userId: string, adminSupabase: any): Promise<Response> {
   const contentType = req.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("multipart/form-data")) {
@@ -1012,6 +1061,17 @@ serve(async (req) => {
       const responseMode = normalizeResponseMode(body.responseMode);
       const maxChars = normalizeMaxChars(body.maxChars);
 
+      // homework-work-modes (Т3, ревью-фикс P2 р.2): тот же preflight и в
+      // service-role-ветке — иначе доверенный вызыватель (Telegram-бот) с
+      // guidedHomeworkAssignmentId самостоятельной инкрементил бы квоту ученика
+      // и только потом получал 403 из processAIRequest.
+      const independentBlock = await independentWorkModeBlockResponse(
+        adminSupabase,
+        guidedHomeworkAssignmentId,
+        corsHeaders,
+      );
+      if (independentBlock) return independentBlock;
+
       // Apply the same limits for Telegram/service callers. Context = 'homework' when the
       // caller is talking about a guided homework task (bootstrap intro, discuss step) so
       // free-students of paying tutors get the 50/day cap instead of 10.
@@ -1071,6 +1131,14 @@ serve(async (req) => {
         ? [...messages].reverse().find((message) => message?.role === "user")
         : null;
       const shouldIncrementUsage = latestUserMessage?.input_method !== "voice";
+
+      // homework-work-modes (Т3): work_mode-preflight ДО квоты (см. хелпер).
+      const independentBlock = await independentWorkModeBlockResponse(
+        adminSupabase,
+        guidedHomeworkAssignmentId,
+        corsHeaders,
+      );
+      if (independentBlock) return independentBlock;
 
       // Check subscription and daily limits. Context = 'homework' when guidedHomeworkAssignmentId
       // is present (chat-discuss + bootstrap intro inside ДЗ) → free students of paying tutors
@@ -1361,11 +1429,29 @@ async function processAIRequest(
             .maybeSingle(),
           adminSupabase
             .from("homework_tutor_assignments")
-            .select("subject, exam_type, tutor_id, feedback_language")
+            .select("subject, exam_type, tutor_id, feedback_language, work_mode")
             .eq("id", guidedHomeworkAssignmentId)
             .maybeSingle(),
         ]);
         const { data: taskRow, error: taskErr } = taskRowResp;
+        // homework-work-modes (Т3): в самостоятельной guided-чат (включая
+        // bootstrap-интро) закрыт сервером ДО любого AI-вызова. Плоский JSON,
+        // не SSE (образец — fail-closed гард task_image_missing ниже).
+        if (
+          (assignmentMetaResp.data as { work_mode?: unknown } | null)?.work_mode ===
+            "independent"
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: "В самостоятельной работе подсказки и чат с Сократом недоступны.",
+              code: "INDEPENDENT_AI_DISABLED",
+            }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            },
+          );
+        }
         if (assignmentMetaResp.error) {
           console.warn("guided_chat_subject_db_error", {
             assignment_id: guidedHomeworkAssignmentId,

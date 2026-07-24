@@ -64,6 +64,21 @@ import {
 } from '@/lib/studentHomeworkApi';
 import { serializeThreadAttachmentRefs } from '@/lib/homeworkThreadAttachments';
 import {
+  isIndependentSubmissionAck,
+  type IndependentSubmissionAck,
+} from '@/lib/studentProblemApi';
+import { finishStudentWork } from '@/lib/studentHomeworkApi';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   looksLikeBareAnswer,
   extractAnswerCandidate,
   stripSubmitMarker,
@@ -71,6 +86,7 @@ import {
   SUBMIT_CTA_MARKER,
 } from '@/lib/answerLikeHeuristic';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 
 /**
  * Student homework-problem screen — Phase 1.1 (mobile, post preview-QA #2).
@@ -150,6 +166,11 @@ export default function HomeworkProblem() {
   // voice-speaking-mvp: устный монолог. Driver для рекордера + suppression
   // chat/numeric composers + transcript «Распознанная речь» label.
   const isSpeaking = data?.task.task_kind === 'speaking';
+  // homework-work-modes (Ф1): самостоятельная — AI-входы (подсказка/чат)
+  // скрыты; сервер — авторитет (403 INDEPENDENT_AI_DISABLED). Undefined
+  // (старый бэкенд) → обычная домашка.
+  const isIndependent = data?.assignment.work_mode === 'independent';
+  const isWorkCompleted = data?.thread?.status === 'completed';
 
   // Lock html/body overflow while the problem screen is mounted —
   // prevents an outer page-level scrollbar on mobile when
@@ -477,6 +498,9 @@ export default function HomeworkProblem() {
   // ─── Chat send: discussion through /chat endpoint (Q3) ────────────────────
   const handleChatSend = useCallback(async () => {
     if (!data || !threadId) return;
+    // homework-work-modes (Т3): в самостоятельной чат закрыт (UI скрыт;
+    // защитный return на случай гонки/старого стейта — сервер всё равно 403).
+    if (isIndependent) return;
     if (isStreaming) return;
     const trimmed = chatDraft.trim();
     if (!trimmed && attachmentRefs.length === 0) return;
@@ -716,6 +740,7 @@ export default function HomeworkProblem() {
     chatDraft,
     attachmentRefs,
     isStreaming,
+    isIndependent,
     isCurrentCompleted,
     persistedMessages,
     queryClient,
@@ -736,6 +761,9 @@ export default function HomeworkProblem() {
 
   const handleHintClick = useCallback(async () => {
     if (!data || !threadId) return;
+    // homework-work-modes (Т3): в самостоятельной подсказок нет (UI скрыт;
+    // защитный return — сервер всё равно 403).
+    if (isIndependent) return;
     if (isCurrentCompleted) {
       toast.message('Задача уже сдана. Подсказка не нужна.');
       return;
@@ -803,7 +831,7 @@ export default function HomeworkProblem() {
     } finally {
       setIsRequestingHint(false);
     }
-  }, [data, threadId, isCurrentCompleted, isRequestingHint, hintCount, queryClient, hwId, taskId]);
+  }, [data, threadId, isIndependent, isCurrentCompleted, isRequestingHint, hintCount, queryClient, hwId, taskId]);
 
   const handleMicClick = useCallback(async () => {
     if (!threadId) return;
@@ -935,6 +963,49 @@ export default function HomeworkProblem() {
     taskId ?? data?.task.id ?? '',
   );
 
+  // ─── homework-work-modes (Т5): обработка ack сдачи в самостоятельной ──────
+  // Вердикт скрыт до завершения работы; показываем «Ответ сдан», по
+  // thread_completed уводим на «Результат работы». check_failed = сбой
+  // AI-проверки — задача осталась active, попытка не сгорела.
+  const handleIndependentAck = useCallback(
+    (response: IndependentSubmissionAck): boolean => {
+      if (response.check_failed) {
+        toast.error('Не удалось проверить ответ — попробуй отправить ещё раз.');
+        return false;
+      }
+      if (response.thread_completed) {
+        toast.success('Работа сдана!');
+        const effectiveHwId = hwId ?? data?.assignment.id;
+        if (effectiveHwId) {
+          navigate(`/student/homework/${effectiveHwId}/result`);
+        }
+      } else {
+        toast.success('Ответ сдан');
+      }
+      return true;
+    },
+    [hwId, data, navigate],
+  );
+
+  // ─── homework-work-modes (Т5): «Сдать работу» (только самостоятельная) ─────
+  const [finishConfirmOpen, setFinishConfirmOpen] = useState(false);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const handleFinishWork = useCallback(async () => {
+    const effectiveHwId = hwId ?? data?.assignment.id;
+    if (!effectiveHwId || isFinishing) return;
+    setIsFinishing(true);
+    try {
+      await finishStudentWork(effectiveHwId);
+      toast.success('Работа сдана!');
+      navigate(`/student/homework/${effectiveHwId}/result`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось сдать работу');
+    } finally {
+      setIsFinishing(false);
+      setFinishConfirmOpen(false);
+    }
+  }, [hwId, data, isFinishing, navigate]);
+
   const handleSubmissionSubmit = useCallback(
     async (payload: SubmitSheetSubmissionPayload) => {
       if (!data) return;
@@ -990,13 +1061,6 @@ export default function HomeworkProblem() {
 
       try {
         const response = await submitMutation.mutateAsync(payload);
-        trackGuidedHomeworkEvent('student_submission_verdict', {
-          assignmentId: data.assignment.id,
-          taskId: data.task.id,
-          verdict: response.verdict,
-          aiScore: response.earned_score ?? 0,
-          maxScore: response.max_score,
-        });
 
         // Remove optimistic temp messages — persisted submission +
         // check_result land via React Query refetch (useSubmitSolution
@@ -1004,6 +1068,25 @@ export default function HomeworkProblem() {
         setOptimisticMessages((prev) =>
           prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
         );
+
+        // homework-work-modes (Т5): самостоятельная — приглушённый ack без
+        // вердикта. «Ответ сдан» / переход на «Результат работы».
+        if (isIndependentSubmissionAck(response)) {
+          const accepted = handleIndependentAck(response);
+          if (accepted) {
+            clearSubmitSheetDraft(taskId ?? data.task.id);
+            setPwaNudgeTick((t) => t + 1);
+          }
+          return;
+        }
+
+        trackGuidedHomeworkEvent('student_submission_verdict', {
+          assignmentId: data.assignment.id,
+          taskId: data.task.id,
+          verdict: response.verdict,
+          aiScore: response.earned_score ?? 0,
+          maxScore: response.max_score,
+        });
 
         // CORRECT verdict — clear autosave draft (студент закрыл задачу,
         // черновик больше не нужен). Не auto-navigate'им: студент должен
@@ -1027,7 +1110,7 @@ export default function HomeworkProblem() {
         );
       }
     },
-    [data, submitMutation, taskId],
+    [data, submitMutation, taskId, handleIndependentAck],
   );
 
   // ─── Speaking submission flow (voice-speaking-mvp, 2026-05-29) ───────────
@@ -1068,13 +1151,18 @@ export default function HomeworkProblem() {
           text: '',
           voice_ref: voiceRef,
         });
-        trackGuidedHomeworkEvent('student_submission_verdict', {
-          assignmentId: data.assignment.id,
-          taskId: data.task.id,
-          verdict: response.verdict,
-          aiScore: response.earned_score ?? 0,
-          maxScore: response.max_score,
-        });
+        if (isIndependentSubmissionAck(response)) {
+          // homework-work-modes (Т5): вердикт скрыт до завершения работы.
+          handleIndependentAck(response);
+        } else {
+          trackGuidedHomeworkEvent('student_submission_verdict', {
+            assignmentId: data.assignment.id,
+            taskId: data.task.id,
+            verdict: response.verdict,
+            aiScore: response.earned_score ?? 0,
+            maxScore: response.max_score,
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Не удалось отправить запись';
         toast.error(msg);
@@ -1083,7 +1171,7 @@ export default function HomeworkProblem() {
         setSpeakingPhase(null);
       }
     },
-    [data, hwId, submitMutation],
+    [data, hwId, submitMutation, handleIndependentAck],
   );
 
   // ─── Inline numeric answer flow (Phase 1.3, preview-QA #8 2026-05-11) ────
@@ -1143,6 +1231,24 @@ export default function HomeworkProblem() {
     });
 
     try {
+      // homework-work-modes (Т4): в самостоятельной numeric-ответ идёт через
+      // submission-эндпоинт (одна попытка, вердикт скрыт), НЕ через legacy
+      // checkAnswer (тот 403-гейтится сервером).
+      if (isIndependent) {
+        const ack = await submitMutation.mutateAsync({
+          numeric: trimmed,
+          photos: [],
+          text: '',
+        });
+        setOptimisticMessages((prev) =>
+          prev.filter((m) => m.id !== userTempId && m.id !== typingTempId),
+        );
+        if (isIndependentSubmissionAck(ack)) {
+          const accepted = handleIndependentAck(ack);
+          if (!accepted) setAnswerDraft(trimmed);
+        }
+        return;
+      }
       const response = await checkAnswerApi(threadId, trimmed, taskOrder, targetTaskId);
       trackGuidedHomeworkEvent('student_submission_verdict', {
         assignmentId: data.assignment.id,
@@ -1177,6 +1283,9 @@ export default function HomeworkProblem() {
     answerDraft,
     isInlineAnswerSubmitting,
     isStreaming,
+    isIndependent,
+    submitMutation,
+    handleIndependentAck,
     queryClient,
     hwId,
     taskId,
@@ -1290,12 +1399,10 @@ export default function HomeworkProblem() {
       if (target) {
         navigate(`/student/homework/${hwId}/problem/${target}`);
       } else {
-        // Preview-QA #10 (2026-05-11) fix: codex review #3. Все задачи
-        // решены → возврат на список ДЗ `/homework` (НЕ `/homework/:hwId`
-        // — StudentHomeworkDetail на mobile теперь сам редиректит туда
-        // при all-completed, но идём напрямую чтобы не было mount/unmount
-        // bounce через detail page).
-        navigate('/homework');
+        // homework-work-modes (Т6): все задачи решены → экран «Результат
+        // работы» (X из Y + разбор), оба вида работ. Экран терминальный
+        // (никогда не редиректит сам) — mount/unmount bounce нет.
+        navigate(`/student/homework/${hwId}/result`);
       }
     },
     [hwId, navigate, nextTaskId],
@@ -1399,6 +1506,33 @@ export default function HomeworkProblem() {
     !isTranscribing &&
     (chatDraft.trim().length > 0 || attachmentRefs.length > 0);
 
+  // ─── homework-work-modes: плашка правил + «Сдать работу» ──────────────────
+  // Critical-кейс №1 PRD: ученик застрял без подсказок → явные правила при
+  // входе + легальный пропуск задач + сдача работы с пропусками (они получат 0).
+  const completedTasksCount = taskStates.filter((s) => s.status === 'completed').length;
+  const unansweredCount = Math.max(0, data.task_total - completedTasksCount);
+  const independentPanel = isIndependent && !isWorkCompleted ? (
+    <div className="rounded-[12px] border border-amber-200 bg-amber-50 px-3.5 py-3 space-y-2">
+      <p className="m-0 text-[12.5px] leading-snug text-amber-900">
+        <strong>Самостоятельная работа:</strong> подсказки и чат с Сократом отключены,
+        на каждую задачу — одна попытка. Результат появится после сдачи всей работы.
+        Задачи можно решать в любом порядке и пропускать.
+      </p>
+      {/* Ревью-фикс P1 р.1: блокируем во время активной сдачи задачи — иначе
+          finish зануляет её параллельно с грейдингом (гонка «0 vs балл»). */}
+      <button
+        type="button"
+        onClick={() => setFinishConfirmOpen(true)}
+        disabled={isFinishing || submitMutation.isPending || speakingPhase !== null}
+        className="inline-flex items-center justify-center min-h-[40px] px-3.5 rounded-[10px] bg-white border border-amber-300 text-amber-900 text-sm font-bold hover:bg-amber-100 touch-manipulation transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {submitMutation.isPending || speakingPhase !== null
+          ? 'Проверяем ответ…'
+          : `Сдать работу${unansweredCount > 0 ? ` · без ответа: ${unansweredCount}` : ''}`}
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div
       className="
@@ -1446,6 +1580,8 @@ export default function HomeworkProblem() {
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
           {/* Phase 12: общий комментарий репетитора к ДЗ (per-student wrap-up). */}
           <TutorOverallCommentCard comment={data.assignment.tutor_overall_comment} />
+          {/* homework-work-modes: правила самостоятельной + «Сдать работу». */}
+          {independentPanel}
           {problemContextTask ? (
             <ProblemContext
               task={problemContextTask}
@@ -1528,6 +1664,11 @@ export default function HomeworkProblem() {
           <div className="md:hidden px-3 pt-3 shrink-0">
             <TutorOverallCommentCard comment={data.assignment.tutor_overall_comment} />
           </div>
+        ) : null}
+
+        {/* homework-work-modes (mobile): правила самостоятельной + «Сдать работу». */}
+        {independentPanel ? (
+          <div className="md:hidden px-3 pt-3 shrink-0">{independentPanel}</div>
         ) : null}
 
         {/* Mobile-only Problem context peek/expanded — hidden at md+
@@ -1740,7 +1881,8 @@ export default function HomeworkProblem() {
           group). The math button is supplied as a slot so MathQuickPicker
           can use it as the popover anchor (cursor position preserved). */}
       {/* voice-speaking-mvp: speaking has no hint/math chips — one primary CTA. */}
-      {!isSpeaking ? (
+      {/* homework-work-modes (Т3): в самостоятельной чип-ряд скрыт (нет чата/подсказок). */}
+      {!isSpeaking && !isIndependent ? (
       <ChatChipRow
         className="hidden md:flex"
         hintCount={hintCount}
@@ -1773,7 +1915,7 @@ export default function HomeworkProblem() {
           Триггеры: эвристика «голый ответ» (numeric) / AI-маркер [[SUBMIT_CTA]]
           / выбор намерения при фото (extended/proof). Никакого авто-зачёта —
           primary маршрутизирует в checkAnswer / SubmitSheet. */}
-      {nudgeContent && submitNudge && !isCurrentCompleted && !isSpeaking ? (
+      {nudgeContent && submitNudge && !isCurrentCompleted && !isSpeaking && !isIndependent ? (
         <div className="bg-white border-t border-socrat-border-light px-2.5 pt-2">
           <SubmitNudgeBanner
             message={nudgeContent.message}
@@ -1813,7 +1955,7 @@ export default function HomeworkProblem() {
           isCurrentCompleted={isCurrentCompleted}
           hasNextTask={Boolean(nextTaskId)}
           onNavigateNext={() => navigateAfterCorrect()}
-          hideDiscussion={isTabletPlus}
+          hideDiscussion={isTabletPlus || isIndependent}
         />
       ) : null}
 
@@ -1828,7 +1970,9 @@ export default function HomeworkProblem() {
           The big-CTA «Сдать решение задачи» button below is mobile-only and
           extended/proof-only (numeric submits via inline answer; tablet+
           uses SubmitCtaBar in the left aside). */}
-      {(!isSpeaking && (data.task.task_kind !== 'numeric' || isTabletPlus)) ? (
+      {/* homework-work-modes: numeric+tablet рендерил этот блок только ради
+          discussion-композера — в самостоятельной он не нужен вовсе. */}
+      {(!isSpeaking && (data.task.task_kind !== 'numeric' || (isTabletPlus && !isIndependent))) ? (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
         {/* Primary CTA — mobile-only AND extended/proof-only.
             - Tablet/desktop: SubmitCtaBar in the left aside owns it
@@ -1887,8 +2031,8 @@ export default function HomeworkProblem() {
         </button>
         ) : null}
 
-        {/* Attachment previews */}
-        {attachmentRefs.length > 0 ? (
+        {/* Attachment previews (chat-вложения — в самостоятельной чата нет) */}
+        {!isIndependent && attachmentRefs.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap">
             {attachmentRefs.map((ref) => (
               <span
@@ -1916,14 +2060,18 @@ export default function HomeworkProblem() {
         ) : null}
 
         {/* Микрокопия (2026-06-10): пилотные ученики писали финальные ответы
-            в обсуждение, ожидая проверки. Явно проговариваем семантику поля. */}
+            в обсуждение, ожидая проверки. Явно проговариваем семантику поля.
+            homework-work-modes: в самостоятельной обсуждения нет вовсе. */}
+        {!isIndependent ? (
         <span className="text-[11px] font-medium text-socrat-muted px-1">
           Обсуждение с Сократом — не идёт на проверку
         </span>
+        ) : null}
 
         {/* Chat row — paperclip + input + hint/mic group + send.
             NB: hidden file input живёт выше conditional (preview-QA #9),
             оба composer'а используют один и тот же fileInputRef. */}
+        {!isIndependent ? (
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -2038,6 +2186,7 @@ export default function HomeworkProblem() {
             )}
           </button>
         </div>
+        ) : null}
       </div>
       ) : null}
 
@@ -2079,11 +2228,31 @@ export default function HomeworkProblem() {
           // never opened for it — narrow to a valid SubmitSheetTaskKind.
           task_kind: data.task.task_kind === 'speaking' ? 'extended' : data.task.task_kind,
           homework_title: data.assignment.title,
-          current_score: liveScore,
+          current_score: liveScore ?? undefined,
         }}
         subject={data.assignment.subject}
         onSubmit={handleSubmissionSubmit}
       />
+
+      {/* homework-work-modes (Т5): подтверждение сдачи работы с пропусками. */}
+      <AlertDialog open={finishConfirmOpen} onOpenChange={setFinishConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Сдать работу?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {unansweredCount > 0
+                ? `${unansweredCount} ${pluralizeRu(unansweredCount, ['задача', 'задачи', 'задач'])} без ответа — они получат 0 баллов. После сдачи изменить ответы будет нельзя.`
+                : 'После сдачи изменить ответы будет нельзя.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isFinishing}>Отмена</AlertDialogCancel>
+            <AlertDialogAction onClick={handleFinishWork} disabled={isFinishing}>
+              {isFinishing ? 'Сдаём…' : 'Сдать работу'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PostSubmissionNudge tick={pwaNudgeTick} />
     </div>
   );

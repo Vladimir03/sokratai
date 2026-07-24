@@ -187,6 +187,12 @@ export interface MetaState {
    * Только для языковых subjects. null → 'auto'.
    */
   feedback_language?: 'auto' | 'russian' | 'target';
+  /**
+   * Вид работы (homework-work-modes, Ф1): 'homework' — обычная домашка с
+   * Сократом; 'independent' — самостоятельная (AI выключен сервером, одна
+   * попытка, разбор после сдачи работы). undefined → 'homework'.
+   */
+  work_mode?: 'homework' | 'independent';
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

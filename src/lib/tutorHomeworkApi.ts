@@ -153,6 +153,11 @@ export interface CreateAssignmentPayload {
   save_as_template?: boolean;
   disable_ai_bootstrap?: boolean;
   exam_type?: 'ege' | 'oge';
+  /**
+   * homework-work-modes (Ф1): вид работы. 'independent' — самостоятельная
+   * (AI выключен сервером, одна попытка, разбор после сдачи). undefined → 'homework'.
+   */
+  work_mode?: 'homework' | 'independent';
   /** Phase 11 (2026-05-31): assignment-level AI feedback language (language subjects). */
   feedback_language?: 'auto' | 'russian' | 'target';
   /** Папка-организация (homework_folders). null/undefined → «Без папки». Запрос Елены 2026-06-17. */
@@ -239,6 +244,8 @@ export interface HomeworkTemplate {
   exam_type?: 'ege' | 'oge' | null;
   feedback_language?: 'auto' | 'russian' | 'target' | null;
   disable_ai_bootstrap?: boolean | null;
+  /** homework-work-modes: вид работы (optional — старые шаблоны/бэкенд без поля). */
+  work_mode?: 'homework' | 'independent' | null;
   /**
    * unified-task-model (2026-07-05): ссылки шаблона на живые kb-задачи.
    * Присутствует только у мигрированных (ссылочных) шаблонов. `unavailable`
@@ -265,6 +272,8 @@ export interface CreateTemplatePayload {
   exam_type?: 'ege' | 'oge' | null;
   feedback_language?: 'auto' | 'russian' | 'target' | null;
   disable_ai_bootstrap?: boolean | null;
+  /** homework-work-modes: вид работы (optional — старые шаблоны/бэкенд без поля). */
+  work_mode?: 'homework' | 'independent' | null;
 }
 
 // ─── Materials ───────────────────────────────────────────────────────────────
@@ -716,6 +725,8 @@ export interface TutorHomeworkAssignmentDetails {
     status: HomeworkAssignmentStatus;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    /** homework-work-modes: вид работы (optional — deploy-skew со старым бэкендом). */
+    work_mode?: 'homework' | 'independent';
     /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
     feedback_language?: 'auto' | 'russian' | 'target' | null;
     source_group_id?: string | null;
@@ -1550,6 +1561,8 @@ export async function updateTutorHomeworkAssignment(
     status?: string;
     disable_ai_bootstrap?: boolean;
     exam_type?: 'ege' | 'oge';
+    /** homework-work-modes: смена вида — только до первой активности (409 WORK_MODE_LOCKED). */
+    work_mode?: 'homework' | 'independent';
     /** Phase 11 (2026-05-31): assignment-level AI feedback language. */
     feedback_language?: 'auto' | 'russian' | 'target';
     source_group_id?: string | null;
