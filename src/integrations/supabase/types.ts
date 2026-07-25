@@ -74,6 +74,33 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_gateway_errors: {
+        Row: {
+          alert_sent: boolean
+          error_code: string | null
+          http_status: number | null
+          id: number
+          occurred_at: string
+          source: string
+        }
+        Insert: {
+          alert_sent?: boolean
+          error_code?: string | null
+          http_status?: number | null
+          id?: number
+          occurred_at?: string
+          source: string
+        }
+        Update: {
+          alert_sent?: boolean
+          error_code?: string | null
+          http_status?: number | null
+          id?: number
+          occurred_at?: string
+          source?: string
+        }
+        Relationships: []
+      }
       analytics_events: {
         Row: {
           actor_user_id: string | null
@@ -1220,12 +1247,14 @@ export type Database = {
       homework_tutor_task_states: {
         Row: {
           ai_criteria_json: Json | null
+          ai_help_events: number | null
           ai_nodes_json: Json | null
           ai_score: number | null
           ai_score_comment: string | null
           attempts: number
           available_score: number | null
           await_mode: string
+          best_earned_score: number | null
           best_score: number | null
           context_summary: string | null
           created_at: string
@@ -1250,12 +1279,14 @@ export type Database = {
         }
         Insert: {
           ai_criteria_json?: Json | null
+          ai_help_events?: number | null
           ai_nodes_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
           available_score?: number | null
           await_mode?: string
+          best_earned_score?: number | null
           best_score?: number | null
           context_summary?: string | null
           created_at?: string
@@ -1280,12 +1311,14 @@ export type Database = {
         }
         Update: {
           ai_criteria_json?: Json | null
+          ai_help_events?: number | null
           ai_nodes_json?: Json | null
           ai_score?: number | null
           ai_score_comment?: string | null
           attempts?: number
           available_score?: number | null
           await_mode?: string
+          best_earned_score?: number | null
           best_score?: number | null
           context_summary?: string | null
           created_at?: string
@@ -4751,6 +4784,18 @@ export type Database = {
         Args: { p_email: string; p_note?: string }
         Returns: Json
       }
+      ai_credit_usage_summary: {
+        Args: { _day_start: string; _month_start: string }
+        Returns: Json
+      }
+      ai_gateway_error_log: {
+        Args: {
+          p_error_code?: string
+          p_http_status?: number
+          p_source: string
+        }
+        Returns: boolean
+      }
       book_lesson_slot: {
         Args: {
           _booking_link: string
@@ -4979,6 +5024,10 @@ export type Database = {
       homework_folder_owned_by: {
         Args: { _folder_id: string; _tutor_id: string }
         Returns: boolean
+      }
+      hw_bump_ai_help_events: {
+        Args: { _delta?: number; _task_state_id: string }
+        Returns: number
       }
       hw_materialize_legacy_templates: {
         Args: never
