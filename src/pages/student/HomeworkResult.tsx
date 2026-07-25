@@ -137,12 +137,18 @@ const HomeworkResult = () => {
                           мотивирует решать самому, при этом балл не срезается.
                           В самостоятельной работе бэкенд присылает null. */}
                       {data.independence_pct != null ? (
-                        <span
-                          className="mt-1 text-sm font-semibold tabular-nums text-socrat-primary"
-                          title="100% минус 10% за каждое обращение к помощи Сократа (разбор ошибки, подсказка, ответ в обсуждении). На балл это не влияет."
-                        >
-                          Самостоятельность: {data.independence_pct}%
-                        </span>
+                        <>
+                          <span className="mt-1 text-sm font-semibold tabular-nums text-socrat-primary">
+                            Самостоятельность: {data.independence_pct}%
+                          </span>
+                          {/* Ревью-фикс P1: формула видима, а не только в
+                              `title` — на телефоне тултип недоступен. */}
+                          <span className="max-w-[36ch] text-xs leading-relaxed text-slate-500">
+                            100% минус 10% за каждое обращение к помощи Сократа.
+                            На балл это не влияет — балл считается по лучшей
+                            попытке.
+                          </span>
+                        </>
                       ) : null}
                     </CardContent>
                   </Card>
@@ -182,8 +188,11 @@ const HomeworkResult = () => {
                                 {NUM.format(t.final_score)}/{NUM.format(t.max_score)}
                               </span>
                               {t.independence_pct != null ? (
-                                <span className="text-[11px] tabular-nums text-slate-400">
-                                  сам-но {t.independence_pct}%
+                                // Ревью-фикс P2: slate-400 на белом ≈2.5:1 —
+                                // ниже WCAG AA и плохо читается на старом
+                                // iPhone. Плюс единая терминология «Самост.».
+                                <span className="text-xs tabular-nums text-slate-600">
+                                  Самост. {t.independence_pct}%
                                 </span>
                               ) : null}
                             </span>

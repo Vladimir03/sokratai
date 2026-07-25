@@ -10750,18 +10750,24 @@ async function runStudentAnswerGrading(args: {
     const newHintCount = (currentState.hint_count as number) ?? 0;
     const onTrackAvailableScore = task.max_score ?? 1;
 
-    await db.from("homework_tutor_task_states").update({
-      attempts: nextAttemptCount,
-      hint_count: newHintCount,
-      available_score: onTrackAvailableScore,
-      ai_score: effectiveAiScore,
-      ai_score_comment: effectiveAiScoreComment,
-      ai_criteria_json: criteriaBreakdown,
-      ai_nodes_json: nodesJson,
-      last_ai_feedback: result.feedback,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentState.id);
-    await bumpAiHelpEvents(db, currentState.id as string);
+    // Ревью-фикс P2 (2026-07-25): инкремент счётчика идёт ПАРАЛЛЕЛЬНО с UPDATE,
+    // а не после — иначе ученик ждал бы лишний round-trip к БД уже после того,
+    // как AI ответил. Fire-and-forget здесь нельзя: клиент сразу инвалидирует
+    // problem-query и получил бы старый процент.
+    await Promise.all([
+      db.from("homework_tutor_task_states").update({
+        attempts: nextAttemptCount,
+        hint_count: newHintCount,
+        available_score: onTrackAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      }).eq("id", currentState.id),
+      bumpAiHelpEvents(db, currentState.id as string),
+    ]);
 
     responseData = {
       verdict: "ON_TRACK",
@@ -10790,18 +10796,21 @@ async function runStudentAnswerGrading(args: {
     const newHintCount = (currentState.hint_count as number) ?? 0;
     const newAvailableScore = task.max_score ?? 1;
 
-    await db.from("homework_tutor_task_states").update({
-      attempts: nextAttemptCount,
-      wrong_answer_count: newWrongCount,
-      available_score: newAvailableScore,
-      ai_score: effectiveAiScore,
-      ai_score_comment: effectiveAiScoreComment,
-      ai_criteria_json: criteriaBreakdown,
-      ai_nodes_json: nodesJson,
-      last_ai_feedback: result.feedback,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentState.id);
-    await bumpAiHelpEvents(db, currentState.id as string);
+    // Параллельно с UPDATE — см. комментарий в ветке ON_TRACK.
+    await Promise.all([
+      db.from("homework_tutor_task_states").update({
+        attempts: nextAttemptCount,
+        wrong_answer_count: newWrongCount,
+        available_score: newAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      }).eq("id", currentState.id),
+      bumpAiHelpEvents(db, currentState.id as string),
+    ]);
 
     responseData = {
       verdict: "INCORRECT",
@@ -11954,12 +11963,16 @@ async function handleRequestHint(
   const newHintCount = ((activeState.hint_count as number) ?? 0) + 1;
   const newAvailableScore = task.max_score ?? 1;
 
-  await db.from("homework_tutor_task_states").update({
-    hint_count: newHintCount,
-    available_score: newAvailableScore,
-    updated_at: new Date().toISOString(),
-  }).eq("id", activeState.id);
-  await bumpAiHelpEvents(db, activeState.id as string);
+  // Параллельно (ревью-фикс P2): счётчик не должен добавлять round-trip после
+  // того, как подсказка уже сгенерирована и ученик её ждёт.
+  await Promise.all([
+    db.from("homework_tutor_task_states").update({
+      hint_count: newHintCount,
+      available_score: newAvailableScore,
+      updated_at: new Date().toISOString(),
+    }).eq("id", activeState.id),
+    bumpAiHelpEvents(db, activeState.id as string),
+  ]);
 
   // Return updated thread (student-facing: filter hidden notes).
   // homework-work-modes (ревью-фикс P1 р.2): перечитываем режим (репетитор мог
@@ -12490,62 +12503,67 @@ async function handleGetRecentDialogs(
     task_order: number | null;
     created_at: string;
   };
-  const latestMsgResults = await Promise.all(
-    pickedThreadIds.map(async (tid) => {
-      const { data, error } = await db
-        .from("homework_tutor_thread_messages")
-        .select("thread_id, content, image_url, message_kind, task_order, created_at")
-        .eq("thread_id", tid)
-        .eq("role", "user")
-        .neq("visible_to_student", false)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) {
-        // Non-fatal: a single bad thread must not blank the whole feed.
-        console.error("recent_dialogs_latest_msg_error", {
-          thread_id: tid,
-          error: error.message,
-        });
-        return null;
-      }
-      return data as MessageRow | null;
-    }),
-  );
-  const latestStudentMsgByThread = new Map<string, MessageRow>();
-  for (const m of latestMsgResults) {
-    if (m) latestStudentMsgByThread.set(m.thread_id, m);
-  }
-
   // 5b. Сбой автопроверки как отдельный сигнал репетитору (T0, 2026-07-25;
   //     репорт Ульяны: ответ ученика повис непроверенным, а репетитор узнал
   //     случайно). Смотрим ПОСЛЕДНЮЮ реакцию AI по треду: если это
   //     `check_failed`, значит успешной проверки после сбоя не было → задача
-  //     ждёт ручной проверки. Один .limit(1) на picked-тред (≤ 5) — та же
-  //     форма, что и запросы выше.
-  const failedCheckResults = await Promise.all(
-    pickedThreadIds.map(async (tid) => {
-      const { data, error } = await db
-        .from("homework_tutor_thread_messages")
-        .select("thread_id, message_kind, task_order")
-        .eq("thread_id", tid)
-        .eq("role", "assistant")
-        .in("message_kind", ["check_failed", "check_result", "ai_reply"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) {
-        // Non-fatal: без этого сигнала лента просто покажет «Сдал задачу».
-        console.error("recent_dialogs_failed_check_error", {
-          thread_id: tid,
-          error: error.message,
-        });
-        return null;
-      }
-      const row = data as { thread_id: string; message_kind: string | null; task_order: number | null } | null;
-      return row && row.message_kind === "check_failed" ? row : null;
-    }),
-  );
+  //     ждёт ручной проверки.
+  //
+  // Ревью-фикс P2 (2026-07-25): оба набора (последнее сообщение ученика + сбой
+  // проверки) стартуют ОДНИМ Promise.all. Раньше второй пакет ждал завершения
+  // первого — это добавляло целый последовательный round-trip к БД в загрузку
+  // главной репетитора, хотя запросы независимы.
+  const [latestMsgResults, failedCheckResults] = await Promise.all([
+    Promise.all(
+      pickedThreadIds.map(async (tid) => {
+        const { data, error } = await db
+          .from("homework_tutor_thread_messages")
+          .select("thread_id, content, image_url, message_kind, task_order, created_at")
+          .eq("thread_id", tid)
+          .eq("role", "user")
+          .neq("visible_to_student", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          // Non-fatal: a single bad thread must not blank the whole feed.
+          console.error("recent_dialogs_latest_msg_error", {
+            thread_id: tid,
+            error: error.message,
+          });
+          return null;
+        }
+        return data as MessageRow | null;
+      }),
+    ),
+    Promise.all(
+      pickedThreadIds.map(async (tid) => {
+        const { data, error } = await db
+          .from("homework_tutor_thread_messages")
+          .select("thread_id, message_kind, task_order")
+          .eq("thread_id", tid)
+          .eq("role", "assistant")
+          .in("message_kind", ["check_failed", "check_result", "ai_reply"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          // Non-fatal: без этого сигнала лента просто покажет «Сдал задачу».
+          console.error("recent_dialogs_failed_check_error", {
+            thread_id: tid,
+            error: error.message,
+          });
+          return null;
+        }
+        const row = data as { thread_id: string; message_kind: string | null; task_order: number | null } | null;
+        return row && row.message_kind === "check_failed" ? row : null;
+      }),
+    ),
+  ]);
+  const latestStudentMsgByThread = new Map<string, MessageRow>();
+  for (const m of latestMsgResults) {
+    if (m) latestStudentMsgByThread.set(m.thread_id, m);
+  }
   const failedCheckByThread = new Map<string, { task_order: number | null }>();
   for (const r of failedCheckResults) {
     if (r) failedCheckByThread.set(r.thread_id, { task_order: r.task_order });

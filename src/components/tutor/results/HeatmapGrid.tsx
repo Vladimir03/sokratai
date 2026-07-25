@@ -493,6 +493,18 @@ export function HeatmapGrid({
             {assigned_students.length} × {taskCount}
           </Badge>
         </CardTitle>
+        {/* Видимая легенда метрики (ревью-фикс P1, 2026-07-25): формула жила
+            только в `title` заголовка колонки, а на планшете его не показать.
+            Здесь же объясняется «—», иначе оно читается как «ноль». */}
+        {showIndependence ? (
+          <p className="text-xs leading-relaxed text-slate-500">
+            <b>Самост.</b> — самостоятельность: 100% минус 10% за каждое обращение
+            ученика к помощи AI (разбор ошибки, подсказка, ответ в обсуждении).
+            Балл за задачу от этого не снижается, и ваша правка балла метрику не
+            меняет. <b>«—»</b> — данных нет: работа выполнялась до появления
+            метрики или задачи закрыты массово.
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent className="p-0">
         {/* `touch-pan-x` allows native horizontal swipe on iOS Safari even
@@ -557,7 +569,7 @@ export function HeatmapGrid({
                     title={INDEPENDENCE_TOOLTIP}
                     className="border-b border-slate-200 text-right px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
                   >
-                    Сам-но
+                    Самост.
                   </th>
                 )}
                 <th

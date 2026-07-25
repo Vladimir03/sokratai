@@ -72,12 +72,19 @@ const StudentHomework = () => {
                   return (
                     <Card key={assignment.id}>
                       <CardHeader>
-                        <div className="flex items-start justify-between gap-2">
-                          <CardTitle>{assignment.title}</CardTitle>
-                          <div className="flex shrink-0 items-center gap-1.5">
+                        {/* Ревью-фикс P1 (2026-07-25): на 360px два бейджа в
+                            `shrink-0` не оставляли месту заголовку — длинное
+                            название переполняло карточку. Теперь ряд переносится
+                            (`flex-wrap`), заголовок сжимается (`min-w-0`), а
+                            бейджи уходят на свою строку. */}
+                        <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1.5">
+                          <CardTitle className="min-w-0 flex-1 basis-full break-words sm:basis-auto">
+                            {assignment.title}
+                          </CardTitle>
+                          <div className="flex flex-wrap items-center gap-1.5">
                             {/* Вид работы: ученик должен знать ДО открытия, что
                                 подсказок и обсуждения не будет. */}
-                            <WorkModeChip workMode={assignment.work_mode} />
+                            <WorkModeChip workMode={assignment.work_mode} withNoHelpNote />
                             <Badge className={STATUS_COLORS[uiStatus]}>{STATUS_LABELS[uiStatus]}</Badge>
                           </div>
                         </div>

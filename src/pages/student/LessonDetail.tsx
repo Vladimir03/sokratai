@@ -183,8 +183,10 @@ const LessonDetail = () => {
                                 <Badge className={HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].className}>
                                   {HW_REF_STATUS_CONFIG[hw.status ?? 'assigned'].label}
                                 </Badge>
-                                {/* Вид работы (Т8): «без подсказок» видно до открытия. */}
-                                <WorkModeChip workMode={hw.work_mode} />
+                                {/* Вид работы (Т8): «без подсказок» видно до
+                                    открытия — примечание видимое, не в title
+                                    (ревью-фикс P1: на телефоне title мёртв). */}
+                                <WorkModeChip workMode={hw.work_mode} withNoHelpNote />
                                 {hw.title && (
                                   <span className="truncate text-sm text-slate-700">{hw.title}</span>
                                 )}

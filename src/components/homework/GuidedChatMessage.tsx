@@ -288,9 +288,16 @@ const GuidedChatMessage = memo(({
   if (isCheckFailedNotice) {
     return (
       <div className="flex justify-center my-2">
-        <div className="flex items-start gap-2 max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left">
+        {/* Ревью-фикс P2 (2026-07-25): `text-sm` вместо caption-размера (это
+            важное сообщение, а не подпись) + `role="status"`/`aria-live`, иначе
+            VoiceOver не объявит появившийся сбой. */}
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2 max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left"
+        >
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" aria-hidden="true" />
-          <p className="text-xs text-amber-900 whitespace-pre-wrap break-words">
+          <p className="text-sm leading-relaxed text-amber-900 whitespace-pre-wrap break-words">
             {message.content}
           </p>
         </div>
