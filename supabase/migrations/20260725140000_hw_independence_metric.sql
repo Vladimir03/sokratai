@@ -60,12 +60,20 @@ UPDATE public.homework_tutor_task_states
 --    без неверных попыток и не более одной попытки. Всё остальное остаётся
 --    NULL: восстановить историю обращений из логов нельзя, а догадка испортила
 --    бы первую же метрику, которую увидит репетитор.
+--
+--    ⚠️ `tutor_force_completed_at IS NULL` (фикс 2026-07-25, найден на проде
+--    после первого прогона): задача, закрытая репетитором вручную без единой
+--    попытки ученика, проходила по `attempts <= 1` и получала 0 → «100%
+--    самостоятельно» за работу, которую ученик даже не открывал, плюс
+--    завышение средневзвешенного агрегата. Такие строки обязаны остаться NULL
+--    («—»). На проде 39 строк исправлены отдельным UPDATE.
 UPDATE public.homework_tutor_task_states
    SET ai_help_events = 0
  WHERE ai_help_events IS NULL
    AND COALESCE(hint_count, 0) = 0
    AND COALESCE(wrong_answer_count, 0) = 0
-   AND COALESCE(attempts, 0) <= 1;
+   AND COALESCE(attempts, 0) <= 1
+   AND tutor_force_completed_at IS NULL;
 
 -- ─── Инкремент счётчика ─────────────────────────────────────────────────────
 -- Отдельная RPC вместо read-modify-write из edge: два AI-пути могут писать
