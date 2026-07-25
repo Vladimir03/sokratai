@@ -5,11 +5,18 @@ import { registerServiceWorker } from "./registerServiceWorker";
 import { ensurePushSubscriptionSaved, listenForSubscriptionChanges } from "./lib/pushApi";
 import { initPwaInstallCapture } from "./lib/pwaInstall";
 import { installChunkReloadGuards, markChunkReloadResolved } from "./lib/chunkReload";
+import { reportClientError } from "./lib/clientErrorReport";
+import { installGlobalErrorReporter } from "./lib/globalErrorReporter";
 
 // Авто-восстановление при «Failed to fetch dynamically imported module» — ДО
 // всего остального: стейл-чанк после деплоя / DPI-обрыв → тихая перезагрузка,
 // а не краш-оверлей «неустранимая ошибка» (репорт Ульяны/Софьи, rule 95).
-installChunkReloadGuards();
+// Колбэк, а не импорт внутри модуля: последний рубеж не должен тянуть supabase.
+installChunkReloadGuards((message) => reportClientError(message, "chunk"));
+
+// Глобальная телеметрия uncaught-ошибок. Ставится ПОСЛЕ chunk-гарда: chunk-
+// ошибками владеет он, репортер их пропускает (иначе двойные записи).
+installGlobalErrorReporter();
 
 // Регистрируем Service Worker для offline работы
 registerServiceWorker();

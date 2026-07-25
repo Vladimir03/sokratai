@@ -41,7 +41,18 @@ const MESSAGE_MAX = 400;
 const UA_MAX = 300;
 const ROUTE_MAX = 200;
 const MAX_BODY_BYTES = 8 * 1024;
-const VALID_KINDS = new Set(["screen", "markdown_bubble"]);
+// Неизвестный kind вырождается в "screen" (см. ниже) — поэтому фронт можно
+// катить раньше этой функции (edge деплоит Lovable-синк, rule 95).
+const VALID_KINDS = new Set([
+  "screen",
+  "markdown_bubble",
+  "chunk", // сбой загрузки lazy-чанка (стейл-деплой / DPI-обрыв)
+  "window", // uncaught из window 'error'
+  "promise", // unhandledrejection
+  "query", // React Query: у пользователя реально пусто
+  "mutation", // React Query: упавшая мутация
+  "net", // сетевой класс, лимитирован на клиенте 1/10 мин на сессию
+]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Per-IP окно в памяти isolate — первая линия (обходится cold isolates,
@@ -102,17 +113,44 @@ function sanitizeRoute(raw: unknown): string {
 }
 
 /**
+ * Имя собранного vite-ассета: `Name-<hash8+>.js|css|mjs`. Такие имена ОБЯЗАНЫ
+ * дожить до /admin — это и есть ответ на «какой чанк не загрузился».
+ */
+const VITE_ASSET_RE = /\b[A-Za-z0-9_$]+-[A-Za-z0-9_-]{8,}\.(?:js|css|mjs)\b/g;
+
+/**
  * Скраб потенциального PII/токенов в тексте ошибки (ревью P1). Порядок
  * важен: сначала query внутри URL (там живут signed-URL токены), потом
  * email/JWT/длинные токены. Origin+path URL сохраняем — «какой чанк не
  * загрузился» = основная диагностика chunk-ошибок.
  */
-function scrubMessage(raw: string): string {
+function scrubChain(raw: string): string {
   return raw
     .replace(/((?:https?|wss?):\/\/[^\s?"'<>]+)\?[^\s"'<>]*/gi, "$1?[…]")
     .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]")
     .replace(/eyJ[A-Za-z0-9_-]{8,}(?:\.[A-Za-z0-9_-]{4,}){0,2}/g, "[jwt]")
     .replace(/[A-Za-z0-9_-]{24,}/g, "[token]");
+}
+
+/**
+ * Скраб с изъятием имён vite-ассетов ИЗ-ПОД цепочки.
+ *
+ * ЗАЧЕМ: правило `[A-Za-z0-9_-]{24,}` → "[token]" съедало ровно то, за чем мы
+ * пришли: `TutorHomeworkCreate-CkNpqM_c` (28 символов) превращался в `[token]`,
+ * и в /admin висело «Failed to fetch dynamically imported module:
+ * /assets/[token].js» — недиагностируемо. Ослаблять правило нельзя, поэтому
+ * имена ассетов вырезаются ПО ФОРМЕ до прогона, а цепочка применяется к
+ * остальным сегментам без изменений (все текущие редакции в полной силе).
+ */
+function scrubMessage(raw: string): string {
+  let out = "";
+  let lastIndex = 0;
+  VITE_ASSET_RE.lastIndex = 0;
+  for (let m = VITE_ASSET_RE.exec(raw); m !== null; m = VITE_ASSET_RE.exec(raw)) {
+    out += scrubChain(raw.slice(lastIndex, m.index)) + m[0];
+    lastIndex = m.index + m[0].length;
+  }
+  return out + scrubChain(raw.slice(lastIndex));
 }
 
 function clampText(raw: unknown, max: number): string {

@@ -1,13 +1,19 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { lazy, Suspense } from "react";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import AuthGuard from "@/components/AuthGuard";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { defaultQueryRetry, defaultRetryDelay } from "@/lib/queryResilience";
+import { reportMutationError, reportQueryError } from "@/lib/globalErrorReporter";
 
-// Lazy load UI providers to reduce initial bundle
+// Lazy load UI providers to reduce initial bundle.
+// TooltipProvider намеренно НЕ ленивый: он рендерится на 100% роутов, поэтому
+// ленивость давала только водопад + режим отказа. Раньше он стоял РОДИТЕЛЕМ
+// ErrorBoundary, то есть сбой его чанка был неперехватываемым (пустая страница
+// без reload и без репорта).
 const LazyToaster = lazy(() => import("@/components/ui/toaster").then(m => ({ default: m.Toaster })));
 const LazySonner = lazy(() => import("@/components/ui/sonner").then(m => ({ default: m.Toaster })));
-const LazyTooltipProvider = lazy(() => import("@/components/ui/tooltip").then(m => ({ default: m.TooltipProvider })));
 
 // Lazy load analytics tracker
 const AnalyticsTracker = lazy(() => import("@/components/AnalyticsTracker"));
@@ -116,17 +122,64 @@ const PageLoader = () => (
   </div>
 );
 
-const queryClient = new QueryClient();
+/**
+ * Раньше здесь было буквально `new QueryClient()` — все запросы жили на дефолтах
+ * библиотеки (retry 3 без различения классов ошибок, никакой телеметрии).
+ * Настройки сознательно ТОЛЬКО сетевые: поведение данных (`staleTime`,
+ * `refetchOnWindowFocus`) не меняем, чтобы не задеть инвалидацию, realtime-merge
+ * и refetchInterval-поллеры — это отдельный этап со своим QA.
+ */
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error, query) => {
+      // Репортим ТОЛЬКО когда у пользователя реально пусто. Сбой фонового
+      // рефетча поверх отрисованных данных — не инцидент (rule 95: degraded ≠
+      // critical), иначе завалим /admin шумом.
+      if (query.state.data === undefined) reportQueryError(error, query.queryKey);
+    },
+  }),
+  mutationCache: new MutationCache({
+    onError: (error, _vars, _ctx, mutation) =>
+      reportMutationError(error, mutation.options.mutationKey),
+  }),
+  defaultOptions: {
+    queries: {
+      retry: defaultQueryRetry,
+      retryDelay: defaultRetryDelay,
+      // 5 минут по умолчанию: ученик, свернувший PWA на 10 минут, возвращался к
+      // пустому кэшу и полному шторму рефетчей — под DPI, на мобильном.
+      gcTime: 30 * 60 * 1000,
+      // navigator.onLine остаётся true, пока DPI рвёт TLS, поэтому 'online'
+      // защиты не даёт; зато его ложные срабатывания (хендовер сети, VPN)
+      // ПРИОСТАНАВЛИВАЮТ запрос — вечный спиннер без ошибки и без репорта.
+      networkMode: "always",
+    },
+    mutations: {
+      // НИКОГДА не ретраить мутации на транспортном уровне: ответ, съеденный
+      // DPI, неотличим от неотправленного запроса → двойная запись (ledger,
+      // rule 60). Идемпотентность отдельных RPC тут предполагать нельзя.
+      retry: 0,
+      networkMode: "always",
+    },
+  },
+});
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <Suspense fallback={null}>
-      <LazyTooltipProvider>
-        <ErrorBoundary>
+  // ErrorBoundary — САМЫЙ внешний: любой ленивый провайдер выше него был бы
+  // неперехватываемым.
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        {/* Тостеры — косметика. Своя бандари без авто-reload: падение
+            2-килобайтного чанка sonner не должно ни ронять приложение (одна из
+            семи ошибок в /admin была ровно такой), ни стирать несохранённую
+            форму перезагрузкой. */}
+        <ErrorBoundary fallback={null} autoReloadOnChunkError={false}>
           <Suspense fallback={null}>
             <LazyToaster />
             <LazySonner />
           </Suspense>
+        </ErrorBoundary>
           <BrowserRouter>
             <Suspense fallback={null}>
               <AnalyticsTracker />
@@ -526,10 +579,9 @@ const App = () => (
             />
           </Routes>
           </BrowserRouter>
-        </ErrorBoundary>
-      </LazyTooltipProvider>
-    </Suspense>
-  </QueryClientProvider>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;
