@@ -27,6 +27,26 @@ export const TOKENS_PER_CREDIT = 293_000;
 export const CREDIT_ALERT_THRESHOLD_PCT = 90;
 
 /**
+ * Цена одного кредита в долларах на нашем плане (Lovable **Pro**): 100 кредитов
+ * за $25 = $0.25. Докупка сверх плана (top-up) дороже — $0.30/кредит на Pro,
+ * поэтому «прогноз выше 100%» = переход на дорогую цену, а не просто перерасход.
+ * (Business: $0.50 в плане / $0.60 top-up — если план сменится, поправить здесь.)
+ *
+ * СПРАВОЧНО (сверка 2026-07-25, чтобы понимать наценку шлюза): июль,
+ * 4,73 М входных + 0,58 М выходных токенов на `google/gemini-3-flash-preview`
+ * по прайсу Google ($0.25/М вход, $1.50/М выход) = **≈$2.05 «сырой»
+ * себестоимости**, а Lovable списал за это 18 кредитов = **$4.50** ⇒ наценка
+ * шлюза ≈ **2,2×**. Прямой вызов Google был бы дешевле, но упирается в
+ * RU-доступ (шлюз Lovable мы и выбрали из-за этого) — отдельное решение.
+ */
+export const USD_PER_CREDIT = 0.25;
+
+/** Кредиты → доллары (по цене кредита в составе плана). */
+export function creditsToUsd(credits: number): number {
+  return credits * USD_PER_CREDIT;
+}
+
+/**
  * `token_usage_logs.source` → подпись для владельца. Неизвестный source
  * показываем как есть: новый AI-путь не должен ронять дайджест.
  */
@@ -74,8 +94,8 @@ export interface AiCreditsSnapshot {
     /** Номер МСК-месяца (1..12) — для подписи «прогноз к 31.07». */
     monthNumber: number;
   };
-  /** Топ источников за месяц (доля в % от месячных токенов). */
-  top: Array<{ label: string; pct: number }>;
+  /** Топ источников за месяц: доля в % от месячных токенов + деньги. */
+  top: Array<{ label: string; pct: number; usd: number }>;
   /** true — расход перевалил CREDIT_ALERT_THRESHOLD_PCT. */
   overThreshold: boolean;
 }
@@ -162,21 +182,26 @@ export async function computeAiCreditsSnapshot(
     const forecastPct = dayOfMonth > 0 ? (pct * daysInMonth) / dayOfMonth : pct;
 
     const bySource = Array.isArray(payload.month?.by_source) ? payload.month!.by_source! : [];
-    const top: Array<{ label: string; pct: number }> = [];
+    const top: Array<{ label: string; pct: number; usd: number }> = [];
     if (monthTokens > 0) {
+      const usdOfTokens = (tokens: number) => creditsToUsd(tokens / TOKENS_PER_CREDIT);
       const sorted = [...bySource].sort((a, b) => Number(b.tokens ?? 0) - Number(a.tokens ?? 0));
       const head = sorted.slice(0, 3);
       for (const row of head) {
+        const tokens = Number(row.tokens ?? 0);
         top.push({
           label: aiSourceLabel(row.source),
-          pct: (Number(row.tokens ?? 0) / monthTokens) * 100,
+          pct: (tokens / monthTokens) * 100,
+          usd: usdOfTokens(tokens),
         });
       }
       const restTokens = sorted
         .slice(3)
         .reduce((acc, row) => acc + Number(row.tokens ?? 0), 0);
       const restPct = (restTokens / monthTokens) * 100;
-      if (restPct >= 1) top.push({ label: "прочее", pct: restPct });
+      if (restPct >= 1) {
+        top.push({ label: "прочее", pct: restPct, usd: usdOfTokens(restTokens) });
+      }
     }
 
     return {
@@ -219,6 +244,17 @@ function fmtCredits(credits: number): string {
   return credits.toFixed(1).replace(".", ",");
 }
 
+/**
+ * Деньги. Разрядность плавающая: суммы ниже $1 без второго знака выглядят как
+ * «$0» и не отвечают на вопрос «сколько мы тратим», поэтому < $1 → 2 знака
+ * (а < $0.1 → 3), выше — 1–2 знака.
+ */
+function fmtUsd(usd: number): string {
+  const abs = Math.abs(usd);
+  const digits = abs < 0.1 ? 3 : abs < 10 ? 2 : 1;
+  return `$${usd.toFixed(digits).replace(".", ",")}`;
+}
+
 function pluralCalls(n: number): string {
   const mod100 = n % 100;
   const mod10 = n % 10;
@@ -229,19 +265,32 @@ function pluralCalls(n: number): string {
 }
 
 /**
- * Блок для ежедневного дайджеста. Формат согласован владельцем дословно:
- *   🤖 AI за сутки: 43 вызова · 180к токенов · ошибок шлюза 0
- *   📊 Месяц: ≈12,4 из 30 кредитов (41%) · прогноз к 31.07 — 78%
- *   Топ: обсуждение в ДЗ 48% · загрузчик задач 26% · проверка ДЗ 25%
+ * Блок для ежедневного дайджеста. Формат согласован владельцем дословно
+ * (2026-07-25), деньги добавлены его же вторым запросом «добавь инфу по $»:
+ *   🤖 AI за сутки: 43 вызова · 180к токенов · ≈$0,15 · ошибок шлюза 0
+ *   📊 Месяц: ≈12,4 из 30 кредитов (41%) ≈ $3,1 из $7,5 · прогноз к 31.07 — 78% (≈$5,9)
+ *   Топ: обсуждение в ДЗ 48% (≈$1,5) · загрузчик задач 26% (≈$0,8) · проверка ДЗ 25% (≈$0,8)
+ *   Средний вызов ≈$0,004
  */
 export function formatAiCreditsBlock(s: AiCreditsSnapshot): string[] {
   const { day, month, top } = s;
+  const dayUsd = creditsToUsd(day.tokens / TOKENS_PER_CREDIT);
+  const monthUsd = creditsToUsd(month.credits);
+  const limitUsd = creditsToUsd(MONTHLY_CREDIT_LIMIT);
+  const forecastUsd = limitUsd * (month.forecastPct / 100);
   const lines: string[] = [
-    `🤖 AI за сутки: ${day.calls} ${pluralCalls(day.calls)} · ${fmtTokens(day.tokens)} токенов · ошибок шлюза ${day.errors}`,
-    `📊 Месяц: ≈${fmtCredits(month.credits)} из ${MONTHLY_CREDIT_LIMIT} кредитов (${Math.round(month.pct)}%) · прогноз к ${pad2(month.daysInMonth)}.${pad2(month.monthNumber)} — ${Math.round(month.forecastPct)}%`,
+    `🤖 AI за сутки: ${day.calls} ${pluralCalls(day.calls)} · ${fmtTokens(day.tokens)} токенов · ≈${fmtUsd(dayUsd)} · ошибок шлюза ${day.errors}`,
+    `📊 Месяц: ≈${fmtCredits(month.credits)} из ${MONTHLY_CREDIT_LIMIT} кредитов (${Math.round(month.pct)}%) ≈ ${fmtUsd(monthUsd)} из ${fmtUsd(limitUsd)} · прогноз к ${pad2(month.daysInMonth)}.${pad2(month.monthNumber)} — ${Math.round(month.forecastPct)}% (≈${fmtUsd(forecastUsd)})`,
   ];
   if (top.length > 0) {
-    lines.push(`Топ: ${top.map((t) => `${t.label} ${Math.round(t.pct)}%`).join(" · ")}`);
+    lines.push(
+      `Топ: ${top.map((t) => `${t.label} ${Math.round(t.pct)}% (≈${fmtUsd(t.usd)})`).join(" · ")}`,
+    );
+  }
+  // Цена одного AI-вызова — юнит-экономика: с ней видно, сколько стоит один
+  // разбор/проверка, и можно сравнивать с ценой тарифа репетитора.
+  if (month.calls > 0) {
+    lines.push(`Средний вызов ≈${fmtUsd(monthUsd / month.calls)}`);
   }
   if (s.overThreshold) {
     lines.push(
@@ -249,14 +298,14 @@ export function formatAiCreditsBlock(s: AiCreditsSnapshot): string[] {
     );
   } else if (month.forecastPct >= 100) {
     lines.push(
-      `⚠️ По текущему темпу лимит кончится до конца месяца — проверь Lovable (Settings → Usage).`,
+      `⚠️ По текущему темпу лимит кончится до конца месяца — проверь Lovable (Settings → Usage). Докупка дороже плана: $0,30 за кредит против $0,25.`,
     );
   }
   // Дисклеймер показываем, когда цифра начинает влиять на решения: до 60%
   // лимита точность коэффициента не важна и строка была бы шумом.
   if (month.pct >= 60) {
     lines.push(
-      `Оценка приблизительная (калибровка 24.07: 1 кредит ≈ 293к токенов) — сверь с Lovable → Settings → Usage.`,
+      `Оценка приблизительная (калибровка 24.07: 1 кредит ≈ 293к токенов ≈ ${fmtUsd(USD_PER_CREDIT)}) — сверь с Lovable → Settings → Usage.`,
     );
   }
   return lines;
