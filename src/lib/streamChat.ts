@@ -109,6 +109,23 @@ export async function streamChat({
     : (studentImageUrl ? [studentImageUrl] : [])
   ).filter(Boolean);
 
+  // ПОСЛЕ первой доставленной дельты авто-ретрай ЗАПРЕЩЁН (ревью 5.6 P1).
+  //
+  // Раньше обрыв `reader.read()` посреди SSE (типично под РФ-DPI) уходил в
+  // catch и начинал НОВЫЙ POST, а вызывающий продолжал добавлять дельты в тот
+  // же `fullContent` — ученик получал «половину первого ответа + полный
+  // второй». Плюс edge инкрементит дневную квоту на КАЖДОЙ попытке, то есть до
+  // трёх списаний за одно действие.
+  //
+  // Безопасный ретрай до первой дельты требует стабильного request_id и
+  // серверной дедупликации квоты — этого пока нет, поэтому ретраим только то,
+  // что ещё ничего не отдало пользователю.
+  let deliveredAnyDelta = false;
+  const emitDelta = (text: string) => {
+    deliveredAnyDelta = true;
+    onDelta(text);
+  };
+
   for (let attempt = 0; attempt < retries; attempt++) {
     const controller = new AbortController();
     // Safari < 16 doesn't support AbortSignal.timeout() — use manual setTimeout
@@ -213,7 +230,7 @@ export async function streamChat({
           try {
             const parsed = JSON.parse(jsonStr);
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) onDelta(content);
+            if (content) emitDelta(content);
           } catch {
             // Incomplete JSON — put line back into buffer and wait for more data
             textBuffer = line + '\n' + textBuffer;
@@ -234,7 +251,7 @@ export async function streamChat({
           try {
             const parsed = JSON.parse(jsonStr);
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) onDelta(content);
+            if (content) emitDelta(content);
           } catch {
             // ignore malformed trailing data
           }
@@ -254,9 +271,9 @@ export async function streamChat({
         throw err;
       }
 
-      // AbortError = timeout — retry
+      // AbortError = timeout — retry (только если пользователю ещё ничего не отдали)
       if (err.name === 'AbortError') {
-        if (attempt < retries - 1) {
+        if (attempt < retries - 1 && !deliveredAnyDelta) {
           const delay = Math.pow(2, attempt) * 1000;
           console.warn(`⏱️ Request timeout, retrying in ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
@@ -270,8 +287,9 @@ export async function streamChat({
         throw timeoutErr;
       }
 
-      // Network errors — retry
-      if (attempt < retries - 1) {
+      // Network errors — retry (только до первой дельты: иначе склеим два ответа
+      // в один и спишем квоту повторно)
+      if (attempt < retries - 1 && !deliveredAnyDelta) {
         const delay = Math.pow(2, attempt) * 1000;
         console.warn(`🌐 Network error, retrying in ${delay}ms...`);
         await new Promise((resolve) => setTimeout(resolve, delay));

@@ -57,6 +57,13 @@ export interface StudentHomeworkAssignment {
    * списка. Текст комментария на список не грузится — читается на экране ДЗ.
    */
   has_tutor_comment?: boolean;
+  /**
+   * Вид работы (homework-work-modes, 2026-07-25). `independent` = самостоятельная:
+   * AI выключен, разбор после сдачи. Драйвит чип «Самостоятельная» в списке —
+   * ученик должен видеть ДО открытия, что подсказок не будет. Optional:
+   * приходит из вложенного select'а, старый бандл/старая строка → undefined.
+   */
+  work_mode?: 'homework' | 'independent';
 }
 
 export interface StudentHomeworkTask {
@@ -147,7 +154,14 @@ export type GuidedMessageKind =
    * `.claude/rules/40-homework-system.md` § «Student Homework Problem Screen
    * — single-task surface + submission contract» for the structured contract.
    */
-  | 'submission';
+  | 'submission'
+  /**
+   * T0 (2026-07-25): сбой автопроверки (AI-шлюз недоступен / невалидный ответ).
+   * НЕ вердикт по решению ученика — рендерится нейтральной системной плашкой,
+   * а не пузырём Сократа (репорт Ульяны: ученица приняла сбой за оценку).
+   * Миграция `20260725120000_ai_gateway_errors_and_credit_usage.sql`.
+   */
+  | 'check_failed';
 
 /**
  * Structured payload for `message_kind='submission'` rows. Stored in

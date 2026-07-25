@@ -39,7 +39,11 @@ function WorkRow({ work }: { work: ReportWork }) {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-slate-900">{work.title}</p>
         <p className="text-xs text-muted-foreground">
-          {work.kind === 'mock' ? 'Пробник' : 'Домашнее задание'}
+          {work.kind === 'mock'
+            ? 'Пробник'
+            : work.work_mode === 'independent'
+              ? 'Самостоятельная работа'
+              : 'Домашнее задание'}
           {' · '}
           {format(parseISO(work.date), 'd MMMM', { locale: ru })}
         </p>
@@ -96,6 +100,11 @@ export function ReportBody({ data }: { data: PublicStudentReportData }) {
 
   const trend = summary.trend ?? [];
   const trendDelta = trend.length >= 2 ? trend[trend.length - 1] - trend[trend.length - 2] : null;
+
+  // Т8: разделение работ. `work_mode` optional (старый edge) → всё уезжает в
+  // guided-ветку, и рендерится прежний единый список (см. ниже).
+  const independentWorks = works.filter((w) => w.work_mode === 'independent');
+  const guidedWorks = works.filter((w) => w.work_mode !== 'independent');
 
   // v2 (ОС Елены) — все поля optional: старый edge их не шлёт, фронт деградирует мягко.
   const metrics = data.metrics ?? { mock_score: true, hw_done: true, hw_success: true };
@@ -241,9 +250,34 @@ export function ReportBody({ data }: { data: PublicStudentReportData }) {
             Подробнее: работы ({works.length})
           </summary>
           <p className="mt-2 text-xs text-muted-foreground">Сдано {summary.done} из {summary.total}</p>
-          <div className="mt-1 divide-y divide-slate-100">
-            {works.map((w, i) => <WorkRow key={i} work={w} />)}
-          </div>
+          {/* Т8 (2026-07-25, запрос репетиторов): «родителям интереснее
+              самостоятельный результат» → самостоятельные первым блоком.
+              Если самостоятельных нет (или старый edge не отдал work_mode) —
+              рендерится один прежний список, без пустых заголовков. */}
+          {independentWorks.length > 0 ? (
+            <>
+              <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Самостоятельные работы
+              </p>
+              <div className="mt-1 divide-y divide-slate-100">
+                {independentWorks.map((w, i) => <WorkRow key={`ind-${i}`} work={w} />)}
+              </div>
+              {guidedWorks.length > 0 && (
+                <>
+                  <p className="mt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    С помощью Сократа
+                  </p>
+                  <div className="mt-1 divide-y divide-slate-100">
+                    {guidedWorks.map((w, i) => <WorkRow key={`gui-${i}`} work={w} />)}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="mt-1 divide-y divide-slate-100">
+              {works.map((w, i) => <WorkRow key={i} work={w} />)}
+            </div>
+          )}
         </details>
       )}
 

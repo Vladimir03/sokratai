@@ -23,6 +23,7 @@ import { Users, BarChart3, Clock, CheckCircle2, WifiOff, MoreVertical, FolderInp
 import { cn } from '@/lib/utils';
 import { getSubjectLabel } from '@/types/homework';
 import { HOMEWORK_STATUS_CONFIG, formatHomeworkScore } from '@/lib/homeworkStatus';
+import { WorkModeChip } from '@/components/homework/WorkModeChip';
 import type { TutorHomeworkAssignmentListItem } from '@/lib/tutorHomeworkApi';
 import { getGroupBadgeStyle } from './homeworkListShared';
 
@@ -52,6 +53,9 @@ export const AssignmentCard = memo(function AssignmentCard({ item, onMoveToFolde
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 {subjectLabel}
               </span>
+              {/* Вид работы (запрос репетиторов 2026-07-25): «Самостоятельная»
+                  видна прямо в списке, чтобы не прописывать её в названии. */}
+              <WorkModeChip workMode={item.work_mode} />
               {showGroupBadge && (
                 <Badge
                   variant="outline"

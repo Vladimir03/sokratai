@@ -1,8 +1,10 @@
-const CACHE_NAME = 'math-tutor-cache-v4';
+// ВАЖНО: меняешь логику кэширования → бампай версию (activate вычищает все
+// остальные кэши). Минимум сверяется smoke-check §20 (MIN_SW_CACHE_VERSION).
+const CACHE_NAME = 'math-tutor-cache-v5';
 
-// Only cache files that definitely exist and are stable
+// Оффлайн-копия шелла. Только '/index.html': ключ '/' был дублем, к которому
+// `caches.match('/index.html')` никогда не обращался.
 const STATIC_ASSETS = [
-  '/',
   '/index.html',
 ];
 
@@ -70,9 +72,34 @@ async function fetchWithRetry(request, retries) {
 
 // Check if request is for a document/HTML page
 function isDocumentRequest(request) {
-  return request.destination === 'document' || 
+  return request.destination === 'document' ||
          request.mode === 'navigate' ||
          request.headers.get('accept')?.includes('text/html');
+}
+
+// Можно ли положить этот ответ в кэш как АССЕТ.
+//
+// Зачем: ветка hashed-assets — cache-first, а CACHE_NAME не меняется на каждый
+// деплой ⇒ ОДНА неверная запись живёт вечно. Раньше кэшировался любой
+// `status === 200` без проверки типа: если бы прокси/фолбэк когда-нибудь отдал
+// HTML вместо JS, он бы намертво прописался под URL чанка. `type === 'basic'`
+// заодно отсекает opaque cross-origin ответы.
+function isCacheableAssetResponse(request, response) {
+  if (!response || response.status !== 200 || response.type !== 'basic') return false;
+  const ct = (response.headers.get('content-type') || '').toLowerCase();
+  if (/\.js(\?|$)/.test(request.url)) return ct.includes('javascript') || ct.includes('ecmascript');
+  if (/\.css(\?|$)/.test(request.url)) return ct.includes('css');
+  return !ct.includes('text/html'); // HTML вместо ассета — всегда отравление
+}
+
+// Можно ли обновить оффлайн-копию шелла этим ответом.
+function isCacheableDocumentResponse(response) {
+  return Boolean(
+    response &&
+    response.ok &&
+    response.type === 'basic' &&
+    (response.headers.get('content-type') || '').toLowerCase().includes('text/html')
+  );
 }
 
 // Fetch event - smart caching strategies
@@ -108,13 +135,35 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // DOCUMENT REQUESTS (HTML pages): Network-first, fallback to cached index.html
-  // IMPORTANT: Do NOT cache HTML responses to avoid stale content after deployments
+  // DOCUMENT REQUESTS (HTML pages): Network-first. Ответ ОТДАЁМ сетевой (стейл
+  // HTML не подсовываем), но параллельно ОБНОВЛЯЕМ оффлайн-копию шелла.
+  //
+  // Зачем обновлять: раньше фолбэчный '/index.html' записывался только в
+  // `install`, а install перезапускается лишь при смене БАЙТОВ этого файла —
+  // т.е. копия могла быть месячной. Один сорванный DPI-хендшейк отдавал такой
+  // шелл, а он ссылается на хэши, которых на сервере уже нет → 404 на каждом
+  // lazy-import и белый экран. Теперь копия не старше последнего визита.
+  //
+  // Ключ ФИКСИРОВАННЫЙ '/index.html', а не event.request: иначе кэш растёт по
+  // записи на каждый роут, и `caches.match('/index.html')` их не увидит.
   if (isDocumentRequest(event.request)) {
     event.respondWith(
-      fetch(event.request)
+      fetchWithRetry(event.request, 1)
         .then((fetchResponse) => {
-          // Return fresh response, don't cache it
+          if (isCacheableDocumentResponse(fetchResponse)) {
+            const responseToCache = fetchResponse.clone();
+            // waitUntil ОБЯЗАТЕЛЕН (ревью 5.6 P2): respondWith продлевает жизнь
+            // воркера только для ВОЗВРАЩАЕМОГО promise. Незачейненная запись в
+            // кэш могла быть убита вместе с воркером сразу после отдачи ответа —
+            // и оффлайн-копия шелла осталась бы старой, хотя пользователь только
+            // что успешно открыл новую версию. Это ровно то, что этот блок и
+            // должен был починить.
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put('/index.html', responseToCache))
+                .catch(() => { /* кэш недоступен — не роняем навигацию */ })
+            );
+          }
           return fetchResponse;
         })
         .catch(async () => {
@@ -142,12 +191,22 @@ self.addEventListener('fetch', (event) => {
 
         try {
           const fetchResponse = await fetchWithRetry(event.request, 1);
-          // Only cache successful responses
-          if (fetchResponse && fetchResponse.status === 200) {
+          if (isCacheableAssetResponse(event.request, fetchResponse)) {
             const responseToCache = fetchResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
+            // waitUntil, а не «выстрелил и забыл» — см. комментарий в ветке
+            // документов: иначе запись может не дожить до конца воркера.
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put(event.request, responseToCache))
+                .catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ })
+            );
+          } else if (fetchResponse && fetchResponse.status === 200) {
+            // 200, но не тот тип (HTML вместо JS/CSS) — НЕ кэшируем и НЕ отдаём:
+            // отдав, мы бы получили «Expected a JavaScript-or-Wasm module
+            // script…». Возвращаем сетевую ошибку — её ловит chunkReload и
+            // перезагружает страницу за свежим шеллом.
+            console.error('Service Worker: wrong content-type for asset:', event.request.url);
+            return Response.error();
           }
           return fetchResponse;
         } catch (error) {
@@ -169,12 +228,15 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetchWithRetry(event.request, 1)
       .then((fetchResponse) => {
-        // Cache successful responses for offline use
-        if (fetchResponse && fetchResponse.status === 200) {
+        // Cache successful responses for offline use (тот же тип-гард: сюда
+        // попадают шрифты/иконки/manifest, и HTML под их URL — тоже отравление).
+        if (isCacheableAssetResponse(event.request, fetchResponse)) {
           const responseToCache = fetchResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+          event.waitUntil(
+            caches.open(CACHE_NAME)
+              .then((cache) => cache.put(event.request, responseToCache))
+              .catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ })
+          );
         }
         return fetchResponse;
       })

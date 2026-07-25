@@ -133,6 +133,23 @@ const HomeworkResult = () => {
                         </span>
                       </span>
                       <span className="text-sm text-slate-500">баллов за работу</span>
+                      {/* Самостоятельность (2026-07-25) — открыто ученику: она
+                          мотивирует решать самому, при этом балл не срезается.
+                          В самостоятельной работе бэкенд присылает null. */}
+                      {data.independence_pct != null ? (
+                        <>
+                          <span className="mt-1 text-sm font-semibold tabular-nums text-socrat-primary">
+                            Самостоятельность: {data.independence_pct}%
+                          </span>
+                          {/* Ревью-фикс P1: формула видима, а не только в
+                              `title` — на телефоне тултип недоступен. */}
+                          <span className="max-w-[36ch] text-xs leading-relaxed text-slate-500">
+                            100% минус 10% за каждое обращение к помощи Сократа.
+                            На балл это не влияет — балл считается по лучшей
+                            попытке.
+                          </span>
+                        </>
+                      ) : null}
                     </CardContent>
                   </Card>
 
@@ -166,8 +183,18 @@ const HomeworkResult = () => {
                                 </span>
                               ) : null}
                             </span>
-                            <span className="text-sm font-bold tabular-nums text-slate-700 shrink-0">
-                              {NUM.format(t.final_score)}/{NUM.format(t.max_score)}
+                            <span className="flex flex-col items-end shrink-0">
+                              <span className="text-sm font-bold tabular-nums text-slate-700">
+                                {NUM.format(t.final_score)}/{NUM.format(t.max_score)}
+                              </span>
+                              {t.independence_pct != null ? (
+                                // Ревью-фикс P2: slate-400 на белом ≈2.5:1 —
+                                // ниже WCAG AA и плохо читается на старом
+                                // iPhone. Плюс единая терминология «Самост.».
+                                <span className="text-xs tabular-nums text-slate-600">
+                                  Самост. {t.independence_pct}%
+                                </span>
+                              ) : null}
                             </span>
                           </Link>
                         );

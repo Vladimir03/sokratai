@@ -3,11 +3,22 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw, AlertTriangle, Copy, Check } from 'lucide-react';
 import { reportClientError } from '@/lib/clientErrorReport';
 import { copyTextToClipboard } from '@/lib/copyToClipboard';
-import { isChunkLoadError, reloadForChunkError } from '@/lib/chunkReload';
+import {
+  canReloadForChunkError,
+  isChunkLoadError,
+  noteChunkError,
+  reloadForChunkError,
+} from '@/lib/chunkReload';
 
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  /**
+   * Позволить авто-reload при chunk-ошибке (default true). `false` — для
+   * косметических поддеревьев (тостеры): падение 2-килобайтного чанка не должно
+   * перезагружать страницу и стирать несохранённую форму.
+   */
+  autoReloadOnChunkError?: boolean;
 }
 
 interface State {
@@ -43,10 +54,22 @@ class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     // Chunk-ошибка, дошедшая до рендера (не перехваченная window-гардами) —
     // авто-перезагружаемся за свежим index.html + чанками, без клика ученика.
-    // reloadForChunkError сам защищён от петли (15с окно): если уже
-    // перезагружались только что, вернёт false → показываем UI ниже.
-    if (isChunkLoadError(error) && reloadForChunkError()) {
-      return; // reload запущен — репорт не нужен (это стейл-деплой, не баг)
+    // reloadForChunkError защищён от петли (marker + circuit breaker): если
+    // reload запрещён, вернёт false → показываем UI ниже.
+    if (isChunkLoadError(error)) {
+      noteChunkError();
+      const willReload =
+        this.props.autoReloadOnChunkError !== false && canReloadForChunkError();
+      // Репорт ВСЕГДА и ДО reload. Раньше здесь был ранний return: успешно
+      // вылеченные chunk-фейлы не попадали в /admin вовсе, и класс ошибок
+      // выглядел решённым, будучи живым.
+      reportClientError(
+        willReload ? error.message : `[recovery-failed] ${error.message}`,
+        'chunk',
+      );
+      if (willReload && reloadForChunkError()) return;
+      console.error('ErrorBoundary chunk error (recovery declined):', error.message);
+      return; // не дублируем репорт вторым kind'ом 'screen'
     }
     console.error('ErrorBoundary caught an error:', error.message);
     console.error('Error stack:', error.stack);
@@ -98,7 +121,12 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      if (this.props.fallback) {
+      // `!== undefined`, а НЕ truthy-проверка (ревью 5.6 P1): `fallback={null}`
+      // означает «отрендерить ничего» — именно так подключены тостеры в App.tsx.
+      // При truthy-проверке `null` проваливался дальше, и падение 2-килобайтного
+      // чанка sonner показывало полноэкранный краш-экран поверх приложения,
+      // ровно то, что этот проп и должен был предотвратить.
+      if (this.props.fallback !== undefined) {
         return this.props.fallback;
       }
 

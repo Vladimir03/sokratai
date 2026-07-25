@@ -1,8 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Download, AlertTriangle, TrendingDown, Users, MessageSquare, Target } from "lucide-react";
+import { AlertTriangle, TrendingDown, Users, MessageSquare, Target } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 
 // Данные анализа
@@ -85,10 +84,6 @@ const recommendations = [
 ];
 
 const RetentionAnalysis = () => {
-  const handleDownloadCSV = () => {
-    window.open('/churned_users_analysis.csv', '_blank');
-  };
-
   return (
     <div className="min-h-screen bg-background p-6">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -100,10 +95,13 @@ const RetentionAnalysis = () => {
               Детальный анализ причин ухода пользователей с D1 retention = 0%
             </p>
           </div>
-          <Button onClick={handleDownloadCSV} className="gap-2">
-            <Download className="h-4 w-4" />
-            Скачать CSV
-          </Button>
+          {/* Кнопка «Скачать CSV» убрана 2026-07-25. Файл лежал в public/ и
+              поэтому отдавался с прода ЛЮБОМУ по прямой ссылке (200, без
+              авторизации) — а внутри user_id, класс, предмет и свободный текст
+              вопросов реальных учеников. Датасет переехал в репозиторий:
+              docs/discovery/research/churned-users-analysis-50.csv.
+              НЕ возвращать сырые данные учеников в public/ — всё оттуда
+              попадает в докрут дословно. */}
         </div>
 
         {/* Key Metrics */}

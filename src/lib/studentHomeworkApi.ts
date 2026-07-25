@@ -287,7 +287,8 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         description,
         deadline,
         status,
-        created_at
+        created_at,
+        work_mode
       )
     `)
     .eq('student_id', studentId);
@@ -310,9 +311,17 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
       deadline: string | null;
       status: string;
       created_at: string;
+      // homework-work-modes (2026-07-25): вид работы для чипа «Самостоятельная».
+      // Может отсутствовать при deploy-skew (старый бандл ← новая колонка).
+      work_mode?: string | null;
     };
   };
-  const assignmentRows = ((data ?? []) as AssignmentJoinRow[]).filter((row) => {
+  // `as unknown as` (не прямой каст): сгенерированный `integrations/supabase/
+  // types.ts` ещё не знает колонку `work_mode` (Lovable регенерит типы после
+  // применения миграции `20260724150000`), поэтому PostgREST-типизация отдаёт
+  // на этот select `SelectQueryError`. Колонка в БД есть — рантайм корректен.
+  // Убрать escape-hatch, когда types.ts будет перегенерирован.
+  const assignmentRows = ((data ?? []) as unknown as AssignmentJoinRow[]).filter((row) => {
     const status = row?.homework_tutor_assignments?.status;
     return status === 'active' || status === 'closed';
   });
@@ -351,6 +360,7 @@ export async function listStudentAssignments(): Promise<StudentHomeworkAssignmen
         created_at: assignment.created_at,
         // Phase 12: бейдж «есть комментарий репетитора» на карточке списка.
         has_tutor_comment: Boolean(row.tutor_overall_comment),
+        work_mode: assignment.work_mode === 'independent' ? 'independent' : 'homework',
       } satisfies StudentHomeworkAssignment;
     })
     .sort((a, b) => {
@@ -560,6 +570,13 @@ export interface StudentHomeworkResultTask {
   final_score: number;
   /** Есть ли сдача ученика по задаче (false = «Без ответа», занулено finish'ем). */
   answered: boolean;
+  /**
+   * «% самостоятельности» по задаче (2026-07-25). `null` = данных нет (работа
+   * до релиза / задача закрыта массово) → в UI не показываем.
+   */
+  independence_pct?: number | null;
+  /** Сырое число обращений к помощи AI по задаче. */
+  ai_help_events?: number | null;
 }
 
 export type StudentHomeworkResult =
@@ -583,6 +600,14 @@ export type StudentHomeworkResult =
       tasks: StudentHomeworkResultTask[];
       total_score: number;
       total_max: number;
+      /**
+       * Агрегат «% самостоятельности» по работе — средневзвешенный по max_score
+       * задач. `null` в самостоятельной работе (AI выключен → метрика
+       * бессмысленна) и когда ни по одной задаче нет данных.
+       */
+      independence_pct?: number | null;
+      /** Σ обращений к помощи AI по работе. */
+      ai_help_total?: number;
     };
 
 /** Экран «Результат работы» (Т6) — один round-trip, state-aware reveal. */

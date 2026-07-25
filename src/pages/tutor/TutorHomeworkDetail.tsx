@@ -728,6 +728,7 @@ function TutorHomeworkDetailContent() {
                       tasks={details.tasks}
                       perStudent={expandedPerStudent}
                       initialTaskId={drillDownTaskId}
+                      workMode={details.assignment.work_mode ?? undefined}
                     />
                   </CardContent>
                 </Card>

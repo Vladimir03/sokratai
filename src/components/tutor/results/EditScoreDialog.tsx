@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { formatIndependence, INDEPENDENCE_TOOLTIP } from './heatmapStyles';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -68,6 +69,13 @@ interface EditScoreDialogProps {
   };
   /** AI-evaluated raw score (read-only). May be null on tasks not yet checked. */
   aiScore: number | null;
+  /**
+   * Метрика самостоятельности (2026-07-25). `aiHelpEvents === null` → данных
+   * нет (работа до релиза / массовый force-complete): показываем legacy-текст
+   * про деградацию, потому что там спред балла возник именно из неё.
+   */
+  aiHelpEvents?: number | null;
+  independencePct?: number | null;
   /** AI's comment to its own score. Tutor-facing only (never sent to student). */
   aiScoreComment: string | null;
   /**
@@ -113,6 +121,8 @@ export function EditScoreDialog({
   studentId,
   task,
   aiScore,
+  aiHelpEvents = null,
+  independencePct = null,
   aiScoreComment,
   finalScore,
   currentOverride,
@@ -181,14 +191,21 @@ export function EditScoreDialog({
   // Difference between current displayed score and AI raw score — if any,
   // explain it in the header. earned_score-driven degradation is the only
   // reason for the spread today (override is exposed separately).
+  //
+  // 2026-07-25: для НОВЫХ работ фраза «снижено за подсказки» стала неверной —
+  // деградация балла отменена, помощь AI штрафует отдельную метрику
+  // самостоятельности. Поэтому: есть данные метрики (`aiHelpEvents != null`) →
+  // показываем «Помощь AI: N → самостоятельность NN%»; нет данных (legacy) →
+  // прежний текст, потому что там спред действительно возник из деградации.
   const aiDegradationText = useMemo(() => {
     if (currentOverride !== null) return null; // already a manual override
+    if (aiHelpEvents != null) return null; // новая модель — своя строка ниже
     if (aiScore == null || finalScore == null) return null;
     const drop = Math.round((aiScore - finalScore) * 100) / 100;
     if (drop <= 0) return null;
     const dropText = formatScore(drop);
-    return `снижено на ${dropText} за подсказки/неверные попытки`;
-  }, [aiScore, finalScore, currentOverride]);
+    return `снижено на ${dropText} за подсказки/неверные попытки (старая модель)`;
+  }, [aiScore, finalScore, currentOverride, aiHelpEvents]);
 
   // 2026-05-16: derived flags для force-complete UX.
   const isForceCompletedByTutor =
@@ -397,6 +414,18 @@ export function EditScoreDialog({
                   <span className="text-slate-500"> · AI: {formatScore(aiScore)}/{task.max_score}</span>
                 ) : null}
               </div>
+              {/* Метрика самостоятельности (2026-07-25). Балл и метрика —
+                  независимы: правка балла её НЕ меняет, о чём прямо сказано в
+                  тултипе (иначе репетитор будет ждать пересчёта). */}
+              {aiHelpEvents != null ? (
+                <div className="text-xs text-slate-600" title={INDEPENDENCE_TOOLTIP}>
+                  Помощь AI: <span className="font-medium tabular-nums">{aiHelpEvents}</span>
+                  {' → самостоятельность '}
+                  <span className="font-medium tabular-nums">
+                    {formatIndependence(independencePct)}
+                  </span>
+                </div>
+              ) : null}
               {aiScoreComment ? (
                 <div className="text-xs text-slate-500">
                   <span className="font-medium">AI:</span> {aiScoreComment}

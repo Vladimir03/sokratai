@@ -11,9 +11,11 @@
 // don't touch the critical homework AI path for a non-functional refactor).
 // This module is the forward-looking shared version; future callers use it.
 //
-// Zero cross-function dependencies — only Deno/fetch/btoa + `./proxy-url.ts`.
+// Zero cross-function dependencies — only Deno/fetch/btoa + `./proxy-url.ts`
+// + `./ai-gateway-errors.ts` (тоже fetch-only, без SDK).
 
 import { rewriteToDirect } from "./proxy-url.ts";
+import { classifyAiGatewayError, logAiGatewayError } from "./ai-gateway-errors.ts";
 
 // ─── Types (wire-compatible with homework-api/ai_shared.ts) ──────────────────
 
@@ -244,6 +246,13 @@ export async function callLovableJson(
           error: errorMessage,
         });
         continue;
+      }
+      // T0 (2026-07-25): фиксируем ФИНАЛЬНЫЙ отказ (после ретраев) в
+      // `ai_gateway_errors` — единственный источник, по которому видно исчерпание
+      // AI-кредитов (`token_usage_logs` пишет только успехи). Fire-and-forget.
+      {
+        const { code, httpStatus } = classifyAiGatewayError(error);
+        void logAiGatewayError({ source: telemetryTag, code, httpStatus });
       }
       throw error;
     } finally {

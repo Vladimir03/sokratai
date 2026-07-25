@@ -66,6 +66,10 @@ import {
   type PushSubscriptionData,
 } from "../_shared/push-sender.ts";
 import { makeUsageLogger, type TokenUsage } from "../_shared/token-usage.ts";
+import {
+  classifyAiGatewayError,
+  logAiGatewayError,
+} from "../_shared/ai-gateway-errors.ts";
 
 // ─── Env ────────────────────────────────────────────────────────────────────
 
@@ -524,6 +528,11 @@ async function callLovableJson(
           error: error instanceof Error ? error.message : "unknown error",
         });
         continue;
+      }
+      // T0 (2026-07-25): финальный отказ → `ai_gateway_errors`. Fire-and-forget.
+      {
+        const { code, httpStatus } = classifyAiGatewayError(error);
+        void logAiGatewayError({ source: telemetryTag, code, httpStatus });
       }
       throw error;
     } finally {

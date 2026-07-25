@@ -1,5 +1,6 @@
 import { memo, type ComponentType, type KeyboardEvent } from 'react';
 import {
+  AlertTriangle,
   BookOpen,
   CheckCircle2,
   ChevronRight,
@@ -64,6 +65,16 @@ function kindMeta(chat: DialogItem): KindMeta {
         chipLabel: `Нужна помощь${numDot}`,
         muted: false,
       };
+    case 'check_failed':
+      // T0 (2026-07-25): сдал, но AI-проверка упала — единственное событие в
+      // ленте, которое требует РУЧНОГО действия репетитора. Янтарный (как
+      // «нужна помощь»), не красный: виноват наш шлюз, а не ученик.
+      return {
+        Icon: AlertTriangle,
+        chipClass: 't-chip t-chip--warning',
+        chipLabel: `Проверьте вручную${numDot}`,
+        muted: false,
+      };
     case 'submitted':
       return {
         Icon: Send,
@@ -107,6 +118,8 @@ function eventDescription(chat: DialogItem): string {
       return `завершил ДЗ «${chat.hwTitle}»`;
     case 'stuck':
       return `нужна помощь на задаче${num} в «${chat.hwTitle}»`;
+    case 'check_failed':
+      return `сдал задачу${num} в «${chat.hwTitle}», автопроверка не сработала — нужна ваша проверка`;
     case 'submitted':
       return `сдал задачу${num} в «${chat.hwTitle}»`;
     case 'opened':

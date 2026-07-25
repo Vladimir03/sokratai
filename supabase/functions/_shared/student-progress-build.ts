@@ -69,13 +69,16 @@ export async function loadHomeworkForStudents(
   if (studentIds.length === 0) return empty as never;
 
   // Tutor's assignments (ownership via auth.users.id).
+  // Т8 (2026-07-25): `work_mode` — родителю интереснее самостоятельный
+  // результат, поэтому работы разделяются на «самостоятельные» и «с Сократом».
+  // Anti-leak (§5) не нарушается: это вид работы, а не подсказки/решения.
   const { data: assignments } = await db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, status, deadline, created_at")
+    .select("id, title, subject, status, deadline, created_at, work_mode")
     .eq("tutor_id", tutorUserId)
     .in("status", ["active", "closed"]);
   const assignmentIds = (assignments ?? []).map((a) => a.id as string);
-  const assignmentById = new Map<string, { deadline: string | null; title: string; subject: string | null; status: string; created_at: string }>();
+  const assignmentById = new Map<string, { deadline: string | null; title: string; subject: string | null; status: string; created_at: string; work_mode: string }>();
   for (const a of assignments ?? []) {
     assignmentById.set(a.id as string, {
       deadline: (a.deadline as string | null) ?? null,
@@ -83,6 +86,7 @@ export async function loadHomeworkForStudents(
       subject: (a.subject as string | null) ?? null,
       status: (a.status as string) ?? "active",
       created_at: (a.created_at as string) ?? "",
+      work_mode: a.work_mode === "independent" ? "independent" : "homework",
     });
   }
   if (assignmentIds.length === 0) {
@@ -122,7 +126,7 @@ export async function loadHomeworkForStudents(
   for (const list of tasksByAssignment.values()) list.sort((a, b) => a.order_num - b.order_num);
 
   const threadById = new Map<string, { saId: string; status: string }>();
-  const statesByThread = new Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>();
+  const statesByThread = new Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>();
   if (saIds.length > 0) {
     const { data: threadRows } = await db
       .from("homework_tutor_threads")
@@ -138,7 +142,11 @@ export async function loadHomeworkForStudents(
     if (threadIds.length > 0) {
       const { data: stateRows } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, status, ai_score, earned_score, tutor_score_override, tutor_reviewed_at")
+        // `best_earned_score` — часть цепочки computeFinalScore (2026-07-25):
+        // без неё балл здесь разошёлся бы с экраном результатов. `ai_help_events`
+        // НЕ селектим: этот билдер шарится с ПУБЛИЧНЫМ отчётом родителю, а
+        // видимость метрики самостоятельности там — отдельное решение.
+        .select("thread_id, task_id, status, ai_score, earned_score, best_earned_score, tutor_score_override, tutor_reviewed_at")
         .in("thread_id", threadIds);
       for (const s of stateRows ?? []) {
         const tid = s.thread_id as string;
@@ -148,6 +156,7 @@ export async function loadHomeworkForStudents(
           status: (s.status as string | null) ?? null,
           ai_score: s.ai_score != null ? Number(s.ai_score) : null,
           earned_score: s.earned_score != null ? Number(s.earned_score) : null,
+          best_earned_score: s.best_earned_score != null ? Number(s.best_earned_score) : null,
           tutor_score_override: s.tutor_score_override != null ? Number(s.tutor_score_override) : null,
           tutor_reviewed_at: (s.tutor_reviewed_at as string | null) ?? null,
         });
@@ -273,7 +282,7 @@ export async function buildStudentProgress(
 
   // ── Homework works ──
   const hw = await loadHomeworkForStudents(db, tutorUserId, [studentId]);
-  type HwState = { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null };
+  type HwState = { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null };
   // saId list for this student (all, since loadHomeworkForStudents narrowed to [studentId])
   const saThread = new Map<string, { threadStatus: string; states: HwState[] }>();
   for (const [tid, th] of hw.threadById) {
@@ -321,6 +330,9 @@ export async function buildStudentProgress(
     works.push({
       id: sa.assignmentId,
       kind: "homework",
+      // Т8: клиент (отчёт родителю / панель прогресса) делит список по этому
+      // полю. Старый клиент поле игнорирует → прежний единый список.
+      work_mode: assignment.work_mode,
       title: assignment.title,
       subject: assignment.subject,
       date: deadline ?? assignment.created_at,

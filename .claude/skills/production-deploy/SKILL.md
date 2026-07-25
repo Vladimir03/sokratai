@@ -1,3 +1,12 @@
+---
+name: production-deploy
+description: Прод SokratAI (Selectel VPS): подробности деплоя и откатa, OG-варианты приглашений в nginx, инцидент Service Worker с octet-stream и его диагностика, авто-reload chunk-load, tiered-статус ошибок tutor-кабинета, топология деплоя edge-функций через Lovable, массовая потеря функций и probe-скрипт, pg_cron и SCHEDULER_SECRET. Загружай при работе с деплоем, service worker, nginx или диагностикой прода.
+---
+
+<!-- Извлечено из .claude/rules/95-production-deploy.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее
+     содержимое, которое грузилось в каждую сессию. Инварианты, нарушаемые первой
+     же правкой, оставлены в rules. См. AGENTS.md «Бюджет контекста». -->
+
 # Production Deploy Procedure (Selectel VPS, post-2026-05-03)
 
 ## Контекст
@@ -52,7 +61,7 @@ Lovable preview (`sokratai.lovable.app`) обновится автоматиче
 - `supabase/functions/**` — edge functions (Lovable Cloud деплоит в Supabase)
 - `supabase/config.toml`
 - `docs/**`, `.claude/**`, `AGENTS.md`, `CLAUDE.md`, `README.md` — документация
-- `scripts/**` — dev-only скрипты, не входят в production bundle
+- `scripts/**` — dev-only скрипты, не входят в production bundle. **ИСКЛЮЧЕНИЕ: `scripts/deploy/**` — прод-влияющий** (тело `deploy-sokratai`, подхватывается `git pull`'ом на VPS при следующем запуске). Правка там не требует `deploy-sokratai`-напоминания, но требует внимания: сломанный `deploy.sh` = сломанный деплой. Гейт — `bash -n` в стабе + smoke-check §21.
 - `.github/**` — CI/CD конфиги
 
 ### ⚠️ Mixed случаи (обычная разработка)
@@ -88,18 +97,41 @@ ssh root@185.161.65.182 'cd /opt/sokratai && git log -1 --oneline'
 
 Сравнить с локальным `git log -1 --oneline` или GitHub HEAD. Если хеши **разные** — прод отстаёт от main, нужен `deploy-sokratai`.
 
-## Скрипт `/usr/local/bin/deploy-sokratai`
+## Скрипт `deploy-sokratai` — атомарный деплой + retention ассетов (2026-07-25)
 
-Скрипт на VPS делает:
+**Тело деплоя живёт В РЕПО: `scripts/deploy/deploy.sh`.** `/usr/local/bin/deploy-sokratai` — тонкий стаб (`scripts/deploy/deploy-sokratai.stub.sh`): `git pull` → `bash -n` тела → `exec`. **Следствие: правка логики деплоя НЕ требует ops-шага** — следующий запуск сам подтянет новое тело из main. Переустанавливать стаб нужно только если менялся он сам.
 
-1. `git pull --ff-only` в `/opt/sokratai`
-2. `npm ci --prefer-offline --no-audit --no-fund`
-3. `npm run build` (с `NODE_OPTIONS="--max-old-space-size=2048"` — у VPS 1 GB RAM + 2 GB swap)
-4. `rm -rf /var/www/sokratai/* && cp -r dist/* /var/www/sokratai/`
-5. `nginx -t && systemctl reload nginx`
-6. `curl https://sokratai.ru/` — healthcheck
+Шаги: `git pull` → `npm ci` → `build` → **валидация dist** → merge ассетов → атомарная замена корня → снапшот шелла → nginx + верификация → GC.
 
-Полный исходник скрипта: при необходимости `cat /usr/local/bin/deploy-sokratai` через SSH.
+### Инварианты (НЕ нарушать)
+
+- **`/var/www/sokratai/assets` — append-only. `rm -rf` докрута ЗАПРЕЩЁН.** Прежний шаг 4 (`rm -rf /var/www/sokratai/* && cp -r dist/*`) стирал ВСЕ ранее отданные hashed-чанки → любой клиент со старым `index.html` (вкладка открыта через деплой, SW-кэш, bfcache) получал 404 на каждый lazy-import = **белый экран**. Именно это давало отчёты «Failed to fetch dynamically imported module» в `/admin` (проверено curl'ом 24.07: все 4 чанка из отчётов → 404).
+- **GC только по mtime, и КАЖДЫЙ деплой обязан `touch` весь текущий набор ассетов.** `rsync --size-only` пропускает идентичные файлы, не обновляя mtime; без явного `touch`-прохода стабильный, но **живой** чанк (`react-vendor`, `pdf.worker`) состарится и будет удалён. Это самое опасное место дизайна.
+- **Порядок: ассеты → корень.** Новый `index.html` не должен ссылаться на ещё не залитый чанк; старый ссылается на чанки, которые не удаляются. Любое переплетение безопасно.
+- **`--exclude='/.*'` обязателен.** Старый `rm -rf .../*` не матчил дотфайлы, и `/.well-known/acme-challenge` выживал случайно. `rsync --delete` съел бы его и тихо сломал продление TLS через ~60 дней.
+- **Валидация `dist` ДО касания прода** (непустые `index.html`+`invite-og.html`, ≥50 JS-чанков, все `/assets/…` из HTML существуют, нет `data:application/octet-stream`). Упавший/OOM-нутый билд (VPS = 1 GB RAM + 2 GB swap) обязан оставить прод байт-в-байт.
+- **`RETENTION_DAYS = 30` — это контракт: сколько живёт устаревшая вкладка пользователя.** Меняешь число — меняешь обещание.
+- **Атомарность корня — из `rsync`** (пишет temp-файл + `rename(2)`), поэтому обрезанный `index.html` не виден никогда. Корневые файлы НЕ требуют транзакции: пул ассетов — надмножество старого и нового билда, поэтому скос между `index.html` и `invite-og.html` безвреден. **Новый корневой файл, который обязан быть согласован с `index.html` (напр. `version.json`), кладём в `assets/` с контент-хэшем** — либо принимаем скос осознанно.
+- `flock` — два деплоя не переплетают merge.
+
+### Проверка деплоя
+
+Скрипт **само-верифицируется** на шаге 9: `/` = 200, новый entry = 200 и **прошлый entry = 200** (`RETENTION СЛОМАН` иначе). Начиная со второго деплоя каждый запуск доказывает, что retention жив.
+
+Ручная приёмка: задеплоить дважды, затем `curl -sI https://sokratai.ru/assets/index-<хэш-из-первого-деплоя>.js` → **200** (до фикса было 404).
+
+### Разовая установка на VPS
+
+```bash
+cd /opt/sokratai && git pull --ff-only
+command -v rsync >/dev/null || apt-get install -y rsync
+mkdir -p /var/www/sokratai-releases
+cp /usr/local/bin/deploy-sokratai /root/deploy-sokratai.bak.$(date +%F)
+install -m 0755 scripts/deploy/deploy-sokratai.stub.sh /usr/local/bin/deploy-sokratai
+deploy-sokratai
+```
+
+Диск: живой набор ассетов ~8.5 МБ; типичный PR перехэширует 0.5–2 МБ, бамп зависимости — до 8.5 МБ. При ~1.5 деплоя/день ≈ 50–90 МБ установившееся (скрипт печатает `du -sh` и свободное место каждый запуск). Нужно ≥3 ГБ свободных.
 
 ## OG-варианты `/invite/` и `/c/` — студенческое превью ссылок (№47, 2026-07-20)
 
@@ -122,20 +154,22 @@ location = /signup   { try_files /invite-og.html /index.html; }
 
 `nginx -t && systemctl reload nginx`. Браузер и бот получают ОДИН файл: боты читают метатеги, браузер грузит тот же SPA (asset-пути абсолютные `/assets/*`), редиректов нет. `/login`/`/signup` — точный `=`-матч (не префикс), `/tutor/login` не задет. При пересборке VPS — восстановить эти location из этого файла. Известное ограничение: Telegram кэширует OG per-URL — ранее расшаренные ссылки обновятся при пере-скрейпе (форс — @WebpageBot), новые — сразу.
 
-## Откат сломанного деплоя
+## Откат сломанного деплоя — снапшот шелла (секунды, без пересборки)
 
-Если после `deploy-sokratai` прод упал:
+Деплой хранит последние 10 шеллов в `/var/www/sokratai-releases/<ts>-<sha>/`, а ассеты живут в append-only пуле → **откат = копирование двух HTML-файлов**, пересборка не нужна:
 
 ```bash
-ssh root@185.161.65.182
-cd /opt/sokratai
-git log --oneline | head -5
-git checkout <hash-предыдущего-рабочего-коммита>
-NODE_OPTIONS="--max-old-space-size=2048" npm ci
-NODE_OPTIONS="--max-old-space-size=2048" npm run build
-cp -r dist/* /var/www/sokratai/
-systemctl reload nginx
+ssh -i "$HOME\.ssh\sokratai_proxy" root@185.161.65.182
+ls -1 /var/www/sokratai-releases/          # выбрать предыдущий <ts>-<sha>
+snap=/var/www/sokratai-releases/<ts>-<sha>
+cat "$snap/manifest.txt"                    # какие ассеты нужны этому шеллу
+rsync -a "$snap/index.html" "$snap/invite-og.html" /var/www/sokratai/
+curl -sI https://sokratai.ru/ | head -1     # 200
 ```
+
+Ассеты откатываемого релиза ещё в пуле (retention 30 дней), поэтому шелл сразу рабочий. **НЕ делать `rm -rf` докрута** и **НЕ откатывать `git` в `/opt/sokratai`** без нужды: следующий `deploy-sokratai` всё равно соберёт `main`, так что после отката нужно либо починить main, либо ревертнуть коммит.
+
+Если снапшотов ещё нет (первый деплой после установки скрипта) — старый путь: `git checkout <sha> && npm ci && npm run build`, затем **`bash scripts/deploy/deploy.sh`** (не `cp -r`, иначе потеряешь retention).
 
 ## Tutor data-fetch errors — tiered status, без ложного «VPN»-алярма
 
@@ -182,11 +216,19 @@ SW-фикс выше устраняет octet-stream, но НЕ реджект `
 
 **Фикс — `src/lib/chunkReload.ts` (дизайн после ревью ChatGPT-5.6, НЕ упрощать обратно):**
 - **`vite:preloadError` глобально НЕ трогаем.** Он фаерится и на спекулятивных **prefetch** (`SideNav` hover, у которых уже `.catch`) → авто-reload по нему **стирал бы несохранённые данные при наведении курсора** (P1). Реальную навигацию с битым чанком ловит **`<ErrorBoundary>`** (`App.tsx` оборачивает все роуты) — чистый render-time сигнал «юзер заблокирован»; он зовёт `reloadForChunkError()` в `componentDidCatch`. Uncaught `import()` вне React — `unhandledrejection` (тонкий safety-net) в `installChunkReloadGuards()`.
-- **«Ровно один reload на эпизод» — persisted-marker в `localStorage`** (`sokrat-chunk-reload-pending`), снимаемый ТОЛЬКО после подтверждённой стабильной загрузки (`markChunkReloadResolved()` из `main.tsx` через 5с без новой chunk-ошибки), НЕ окном-рейтлимитом (P1: окно лишь ограничивало частоту — петля жила). Нет `localStorage` → авто-reload НЕ делаем (показываем UI), чтобы не зациклить.
+- **«Ровно один reload на эпизод» — persisted-marker в `localStorage`** (`sokrat-chunk-reload-pending`), снимаемый ТОЛЬКО после подтверждённой стабильной загрузки, НЕ окном-рейтлимитом (P1: окно лишь ограничивало частоту — петля жила). Нет `localStorage` → авто-reload НЕ делаем (показываем UI), чтобы не зациклить.
+  - **Починено 2026-07-25:** `markChunkReloadResolved` была голым `setTimeout`, снимавшим флаг **безусловно** через 5с — то есть «один reload на эпизод» на практике означало «один reload на 5-секундное окно», и любой chunk-фейл при навигации молча перезагружал страницу, стирая несохранённую форму. Теперь окно тишины реальное: `noteChunkError()` пишет `lastChunkErrorAt`, а таймер **пере-взводится** на остаток, если ошибка пришла внутри окна. **Каждая точка входа обязана звать `noteChunkError()`** — иначе сбойная страница считается стабильной.
+  - **Плюс durable circuit breaker** (`sokrat-chunk-reload-log`): ≤3 авто-reload за 10 минут. Гарантия от петли не должна зависеть от того, верно ли определена граница «эпизода» — роут, падающий чуть позже окна тишины, иначе крутил бы reload по кругу.
+  - **`canReloadForChunkError()`** — side-effect-free предикат: вызывающий выбирает формулировку репорта до того, как страница уедет в reload.
 - **`preventDefault` — ТОЛЬКО если reload реально запущен** (P1: иначе Vite резолвит `undefined` → глушит ErrorBoundary-диагностику; сигнатура/URL должны сохраниться для репорта при неудачном recovery).
 - **Cache Storage НЕ чистим** (P2): SW уже network-first для HTML, nginx отдаёт `index.html` `no-store` → reload берёт свежий shell; чистка убила бы валидные content-addressed чанки и offline-копию.
 - **Инвариант:** ошибка-сигнатура чанка (`failed to fetch dynamically imported module`, `loading chunk … failed`, `importing a module script failed`) → авто-reload ОДИН раз/эпизод, НЕ краш-экран; повтор в том же эпизоде → `ErrorBoundary` «Доступна новая версия» + ручной reload + репорт.
-- **Известное ограничение (ops):** гард не спасает загрузку СОБСТВЕННОГО entry-чанка (его код ещё не исполнился) — нужен атомарный деплой / хранение прошлых hashed-assets. `index.html` на nginx — `no-store` (проверено live 24.07: `no-store, must-revalidate, no-cache`).
+- **Репорт ВСЕГДА и ДО reload (2026-07-25).** Раньше `ErrorBoundary` делал ранний `return` при успешном авто-reload — успешно вылеченные chunk-фейлы не попадали в `/admin` вовсе, и класс ошибок выглядел решённым, будучи живым (в отчётах были видны только «вторые удары» внутри 5-секундного окна). Теперь `reportClientError(msg, 'chunk')` вызывается всегда; при запрещённом reload сообщение получает префикс `[recovery-failed]`. **Для `kind === 'chunk'` репорт отправляется БЕЗ ожидания `getSession()`** — синхронный `location.reload()` убивает ещё не выпущенный запрос (`keepalive` защищает выпущенный, не отложенный внутрь `.then()`); `user_id` там диагностический.
+- **Троттл репортов — per-kind, не глобальный.** При одном общем 30-секундном окне всплеск РАЗНЫХ ошибок терял все кроме первой: chunk-репорт заглушал настоящий краш и наоборот.
+- **`TooltipProvider` НЕ ленивый и `ErrorBoundary` — самый внешний** (`src/App.tsx`). Ленивый провайдер выше бандари = неперехватываемый сбой чанка (пустая страница, без reload и без репорта). Тостеры остаются ленивыми, но в своей бандари с `autoReloadOnChunkError={false}`: падение 2-килобайтного `sonner` (одна из семи ошибок в `/admin`) не должно ни ронять приложение, ни стирать форму перезагрузкой.
+- **`controllerchange` больше НЕ перезагружает страницу** (`src/registerServiceWorker.ts`): был безусловный `location.reload()` = гарантированная потеря несохранённых данных при каждом обновлении SW. SW и так делает `clients.claim()`, ассеты иммутабельны → новый SW поверх старой страницы безвреден.
+- **Гарды:** smoke-check **§20** (SW: версия кэша, `isHashedAsset` против реальных vite-хэшей, `cache.put` только за тип-гардом, retry в ветке документов, байпас API выше кэширования) и **§21** (нет `modulepreload` на `/src/*`, `dist/index.html` без octet-stream, `deploy.sh` не вернул `rm -rf /var/www` и сохранил `--size-only`/`touch -c`/`--exclude='/.*'`).
+- **Бывшее ограничение — ЗАКРЫТО 2026-07-25 (`scripts/deploy/deploy.sh`).** Гард не спасает загрузку СОБСТВЕННОГО entry-чанка (его код ещё не исполнился), поэтому требовался атомарный деплой + хранение прошлых hashed-assets — теперь это сделано (retention 30 дней, append-only пул, см. §«Скрипт `deploy-sokratai`»). Клиентский гард стал вторым рубежом для остаточных DPI-обрывов, а не единственной защитой. `index.html` на nginx — `no-store` (проверено live 24.07: `no-store, must-revalidate, no-cache`); ассеты — `public, immutable, max-age=31536000` (проверено live 24.07).
 - **Ops-хвост:** `index.html` на nginx должен отдаваться `no-cache` (иначе стейл-shell живёт в HTTP-кэше браузера дольше). SW уже network-first для HTML; проверить nginx-заголовок для `/` и `/index.html`.
 
 ## Anti-patterns для AI агентов

@@ -13,6 +13,12 @@ const PUBLIC_HEADERS = {
 
 export interface ReportWork {
   kind: 'homework' | 'mock';
+  /**
+   * Т8 (2026-07-25): вид работы для ДЗ. Родителю интереснее самостоятельный
+   * результат, поэтому список делится на два блока. Optional — приходит только
+   * для `kind='homework'` и только с новой версией edge (deploy-skew).
+   */
+  work_mode?: 'homework' | 'independent';
   title: string;
   subject: string | null;
   date: string;

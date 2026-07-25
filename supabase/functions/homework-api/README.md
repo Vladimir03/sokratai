@@ -388,7 +388,7 @@ Check the student's answer for the current task.
 - `CHECK_FAILED` — automatic evaluation did not complete reliably. The student sees neutral feedback, but `attempts`, `wrong_answer_count`, `hint_count`, `earned_score`, and `available_score` stay unchanged.
 
 **Scoring notes:**
-- Score degradation uses the same `computeAvailableScore()` rule as hints/wrong answers: `maxScore * max(0.5, 1 - 0.1 * (wrong + hints))`.
+- **Score degradation removed (2026-07-25).** `computeAvailableScore()` is gone: `available_score` now always equals `max_score`, and the price of AI help is reported by a separate metric — «% самостоятельности» = `100 − 10 × ai_help_events` (see `_shared/score-compute.ts`). Task score = **best across all attempts** (`best_earned_score`, ranked above `earned_score` in `computeFinalScore`).
 - `attempts` are incremented only for real learning verdicts (`CORRECT`, `ON_TRACK`, `INCORRECT`), not for `CHECK_FAILED`.
 
 ### POST /threads/:id/hint

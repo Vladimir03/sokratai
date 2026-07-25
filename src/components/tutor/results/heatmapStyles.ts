@@ -12,6 +12,27 @@ export function formatScore(n: number): string {
   return Number.isInteger(n) ? n.toString() : n.toFixed(1);
 }
 
+/**
+ * «% самостоятельности» (2026-07-25). `null` = данных нет (работа до релиза или
+ * массовый force-complete) → «—», а НЕ «100%»: «неизвестно» нельзя показывать
+ * как «сделал сам».
+ */
+export function formatIndependence(pct: number | null | undefined): string {
+  if (pct == null || !Number.isFinite(Number(pct))) return '—';
+  return `${Math.round(Number(pct))}%`;
+}
+
+/**
+ * Формула метрики — в тултипе рядом с числом (конвенция: считаемая величина
+ * всегда объясняется на месте, см. `PulseMetricCard`). Текст один и тот же на
+ * всех поверхностях, чтобы репетитор и ученик читали одно правило.
+ */
+export const INDEPENDENCE_TOOLTIP =
+  'Самостоятельность = 100% − 10% за каждое обращение к помощи AI ' +
+  '(разбор ошибки, подсказка, ответ Сократа в обсуждении). ' +
+  'Подтверждение верного ответа и сообщения репетитора не считаются. ' +
+  'Балл за задачу от этого не снижается, и правка балла репетитором метрику не меняет.';
+
 export type CellStyle = {
   className: string;
   text: string;

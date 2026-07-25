@@ -54,7 +54,10 @@ export default defineConfig(({ mode }) => ({
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',
             '@radix-ui/react-slot',
-            '@radix-ui/react-toast'
+            '@radix-ui/react-toast',
+            // TooltipProvider рендерится на 100% роутов (App.tsx, не ленивый) —
+            // отдельный ~8KB чанк давал лишний запрос на каждой загрузке.
+            '@radix-ui/react-tooltip'
           ],
           // Supabase - loaded on auth pages
           'supabase': ['@supabase/supabase-js'],

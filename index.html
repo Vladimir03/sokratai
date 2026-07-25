@@ -25,9 +25,19 @@
     <link rel="dns-prefetch" href="https://api.sokratai.ru">
     <link rel="dns-prefetch" href="https://mc.yandex.ru">
     
-    <!-- Preload critical entry point for faster Speed Index -->
-    <link rel="modulepreload" href="/src/main.tsx">
-    
+    <!-- NO modulepreload of /src/*.tsx here. Vite resolves such a link as an ASSET
+         and inlines the raw, un-transpiled source as a
+         `data:application/octet-stream;base64,…` URL: zero preload benefit, ~3KB of
+         source shipped to every visitor, and it emits the exact console line
+         («Expected a JavaScript-or-Wasm module script … "application/octet-stream"»)
+         that rule 95 documents as the fingerprint of a broken service worker — a
+         permanent false positive in the runbook. That string is also in
+         CHUNK_ERROR_SIGNATURES (src/lib/chunkReload.ts), so any future path funnelling
+         console errors into isChunkLoadError would auto-reload every visitor.
+         Vite already emits correct modulepreload links for react-vendor /
+         ui-components / supabase, and the real entry below carries fetchpriority=high.
+         Guarded by smoke-check §21. -->
+
     <link rel="icon" href="/sokrat-logo.png" type="image/png">
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#1B6B4A">

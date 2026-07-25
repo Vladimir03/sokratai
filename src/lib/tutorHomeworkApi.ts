@@ -52,6 +52,12 @@ export interface TutorHomeworkAssignmentListItem {
    * >0 → «N на проверку». Optional (backward-compat). Запрос Елены 2026-06-18.
    */
   review_pending_count?: number;
+  /**
+   * Вид работы (homework-work-modes, 2026-07-25). Драйвит чип «Самостоятельная»
+   * в списке ДЗ — репетиторы просили отличать её от «ДЗ с Сократом», не
+   * прописывая вид в названии. Optional: старый edge поле не отдаёт.
+   */
+  work_mode?: 'homework' | 'independent';
   avg_score: number | null;
   /** Sum of max_score for all tasks in this assignment. Used to display "X/Y" format. */
   max_score_total?: number | null;
@@ -833,6 +839,20 @@ export interface TutorHomeworkResultsPerStudent {
     final_score: number;
     hint_count: number;
     /**
+     * «% самостоятельности» (2026-07-25): `100 − 10 × ai_help_events`, floor 0.
+     * Обращение к помощи AI = разбор ошибки (одна сдача = один минус) /
+     * подсказка по кнопке / ответ Сократа в обсуждении. НЕ считается:
+     * подтверждение верного ответа, авто-вступление, техсбой проверки, реплики
+     * живого репетитора.
+     *
+     * `null` = данных нет (работа до релиза или массовый force-complete) — в UI
+     * «—», и такая задача НЕ входит в агрегат по работе. Формулу НЕ дублировать:
+     * бэкенд считает через `_shared/score-compute.ts`.
+     */
+    independence_pct?: number | null;
+    /** Сырое число обращений к помощи AI (для тултипа «помощь AI: N»). */
+    ai_help_events?: number | null;
+    /**
      * True if `tutor_score_override` is set on the underlying task_state.
      * Drives the small "правка репетитора" indicator on TaskMiniCard
      * (Homework Results v2 P0-5). `final_score` already reflects the override.
@@ -916,6 +936,18 @@ export interface TutorHomeworkResultsPerStudent {
   tutor_overall_comment?: string | null;
   /** Когда комментарий последний раз сохранён/изменён (ISO). `null` если нет. */
   tutor_overall_comment_at?: string | null;
+
+  /**
+   * Агрегат «% самостоятельности» по работе — средневзвешенный по `max_score`
+   * задач (решение владельца: сложные задачи весят больше). Задачи без данных
+   * не входят ни в числитель, ни в знаменатель. `null` = данных нет вообще
+   * (не приступал / legacy) → в UI «—». Optional: старый edge поле не отдаёт.
+   */
+  independence_pct?: number | null;
+  /** Σ обращений к помощи AI по всем задачам работы. */
+  ai_help_total?: number;
+  /** Сколько задач имеют данные для метрики (знаменатель прозрачности). */
+  independence_task_count?: number;
 }
 
 // ─── Manual score override (Homework Results v2 P0-5 / AC-5) ─────────────────
@@ -1039,6 +1071,12 @@ export interface TutorHomeworkResultsResponse {
   };
   per_task: TutorHomeworkResultsPerTask[];
   per_student: TutorHomeworkResultsPerStudent[];
+  /**
+   * Вид работы (2026-07-25). Нужен, чтобы СКРЫТЬ колонку «Сам-но» в
+   * самостоятельной: там AI выключен и метрика всегда 100% — показывать её
+   * значит утверждать, будто мы что-то измерили. Optional (старый edge).
+   */
+  work_mode?: 'homework' | 'independent';
 }
 
 export interface TutorStudentGuidedThreadResponse {
@@ -1168,7 +1206,12 @@ export type RecentDialogKind =
   | 'wrote'
   | 'submitted'
   | 'completed'
-  | 'stuck';
+  | 'stuck'
+  /**
+   * T0 (2026-07-25): ученик сдал, но автопроверка упала (сбой AI-шлюза) —
+   * ответ ждёт РУЧНОЙ проверки репетитора. Приоритет выше 'submitted'.
+   */
+  | 'check_failed';
 
 export interface RecentDialogItem {
   /** Discriminator — см. `RecentDialogKind`. Optional for backward compat. */

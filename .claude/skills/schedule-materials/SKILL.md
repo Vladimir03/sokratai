@@ -1,3 +1,12 @@
+---
+name: schedule-materials
+description: Материалы занятий («Занятия»): крепление записи/конспекта/ссылки на ДЗ, edge lesson-materials-api и student-lessons-api, групповая модель через participants, one-hop переход в ДЗ, notify-дайджест, несколько ДЗ на урок, attach=assign. Загружай при работе с материалами занятий или вкладкой «Занятия» ученика.
+---
+
+<!-- Извлечено из .claude/rules/98-schedule-materials.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее
+     содержимое, которое грузилось в каждую сессию. Инварианты, нарушаемые первой
+     же правкой, оставлены в rules. См. AGENTS.md «Бюджет контекста». -->
+
 # Schedule Materials — «Занятия» (`tutor_lesson_materials`)
 
 Репетитор крепит к занятию материалы (запись-URL / PDF-конспект / ссылку на существующее ДЗ); ученик читает их в новой вкладке **«Занятия»** (лента + деталка). Spec: `docs/delivery/features/schedule-materials/spec.md`. Build-лог: memory `project_schedule_materials.md`. P0 shipped 2026-06-02; P1 (notify/create-ДЗ/нудж) — отложено.

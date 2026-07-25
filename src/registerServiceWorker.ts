@@ -80,13 +80,21 @@ export const registerServiceWorker = async (): Promise<void> => {
         });
       });
 
-      // When the new SW takes over, reload the page to get fresh content
-      let refreshing = false;
+      // Новый SW взял управление. НЕ перезагружаем страницу.
+      //
+      // Раньше здесь был безусловный `window.location.reload()` — гарантированная
+      // потеря несохранённых данных (репетитор посреди формы ДЗ, ученик посреди
+      // сдачи) при каждом обновлении SW, без спроса. Перезагрузка не нужна:
+      // SW уже делает `clients.claim()`, а ассеты content-addressed и
+      // иммутабельны, поэтому новый SW поверх старой страницы безвреден —
+      // свежая логика применится на следующей навигации, которая и так возьмёт
+      // свежий шелл (index.html отдаётся `no-store`).
+      //
+      // Стейл-чанк, если он всё-таки случится, ловит `src/lib/chunkReload.ts`
+      // (один reload за эпизод + circuit breaker) — там это осознанное решение,
+      // а не побочный эффект обновления SW.
       navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        refreshing = true;
-        console.log('Service Worker: Controller changed, reloading...');
-        window.location.reload();
+        console.log('Service Worker: Controller changed (no reload — see registerServiceWorker.ts)');
       });
 
     } catch (error) {

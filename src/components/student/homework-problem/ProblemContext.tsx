@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronUp, Info, Lightbulb } from 'lucide-react';
-import { lazy, Suspense } from 'react';
+import { ChevronDown, ChevronUp, HelpCircle, Info, Lightbulb } from 'lucide-react';
+import { lazy, Suspense, useState } from 'react';
 import { StepIndicator } from './StepIndicator';
 import { TaskImagesGallery } from './TaskImagesGallery';
 import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
@@ -49,6 +49,14 @@ export interface ProblemContextTask {
   task_score: number | null;
   /** Max score for this task. */
   task_score_max: number;
+  /**
+   * «% самостоятельности» по задаче (2026-07-25): 100% − 10% за каждое
+   * обращение к помощи AI. Ученик видит метрику открыто — она мотивирует
+   * думать самому, не пряча при этом балл. `null` = данных нет (работа до
+   * релиза) ИЛИ самостоятельная работа (там AI выключен → всегда 100%,
+   * показывать бессмысленно) → чип не рендерится.
+   */
+  independence_pct?: number | null;
   /**
    * Active vs completed task — drives chip styling. `'completed'` makes
    * the score green to telegraph «зафиксировано». Default `'active'`.
@@ -142,6 +150,12 @@ export function ProblemContext({
 }: ProblemContextProps) {
   const headerId = `problem-context-${task.task_id}`;
   const panelId = `problem-context-panel-${task.task_id}`;
+  // Ревью-фикс P1 (2026-07-25): формула метрики жила только в `title`, который
+  // на телефоне и планшете недоступен — то есть у ВСЕХ учеников. Чип стал
+  // кнопкой: тап раскрывает объяснение под рядом чипов. Локальный useState, без
+  // popover-зависимостей (rule performance.md — ничего тяжёлого в hot-path).
+  const [independenceOpen, setIndependenceOpen] = useState(false);
+  const independenceHintId = `independence-hint-${task.task_id}`;
   return (
     <section
       aria-labelledby={headerId}
@@ -196,6 +210,24 @@ export function ProblemContext({
             {task.score_state === 'completed' ? 'баллов' : 'баллов'}
           </span>
           )}
+          {/* Самостоятельность (2026-07-25) — ученику ОТКРЫТО, решение
+              владельца: «мы именно его мотивируем через эту систему думать
+              головой». Чип появляется, только когда данные есть; в
+              самостоятельной работе бэкенд присылает null (там всегда 100%). */}
+          {task.independence_pct != null ? (
+            <button
+              type="button"
+              onClick={() => setIndependenceOpen((v) => !v)}
+              aria-expanded={independenceOpen}
+              aria-controls={independenceHintId}
+              className="inline-flex items-center gap-1 rounded-full border border-socrat-border bg-socrat-surface px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-700 transition-colors hover:bg-slate-100"
+              style={{ touchAction: 'manipulation' }}
+              aria-label={`Самостоятельность ${task.independence_pct} процентов — как считается`}
+            >
+              Самост. {task.independence_pct}%
+              <HelpCircle className="h-3 w-3 shrink-0 text-slate-400" aria-hidden="true" />
+            </button>
+          ) : null}
           {/* Hint counter (B3) — visible only when > 0 to keep clean state. */}
           {(task.hint_count ?? 0) > 0 ? (
             <span
@@ -225,6 +257,22 @@ export function ProblemContext({
           </button>
         ) : null}
       </div>
+
+      {/* Раскрываемое объяснение метрики (ревью-фикс P1): доступно тапом, а не
+          только наведением. Три факта, которые иначе выглядят произвольно:
+          формула, что считается обращением, и что балл от этого не страдает. */}
+      {independenceOpen && task.independence_pct != null ? (
+        <p
+          id={independenceHintId}
+          className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600"
+        >
+          <b>Самостоятельность</b> — 100% минус 10% за каждое обращение к помощи
+          Сократа: разбор твоей ошибки, подсказка или ответ в обсуждении.
+          Подтверждение верного ответа и сообщения репетитора не считаются.
+          <b> На балл за задачу это не влияет</b> — балл остаётся лучшим из твоих
+          попыток.
+        </p>
+      ) : null}
 
       {!collapsed ? (
         <div id={panelId} className="flex flex-col gap-2.5">

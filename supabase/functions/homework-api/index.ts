@@ -1,8 +1,8 @@
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import {
-  computeAvailableScore,
   evaluateStudentAnswer,
   generateHint,
+  isCheckFailedFeedbackText,
   renormalizeCriteriaToScore,
 } from "./guided_ai.ts";
 import { sendPushNotification, type PushSubscriptionData, type PushPayload } from "../_shared/push-sender.ts";
@@ -21,7 +21,11 @@ import {
 } from "../_shared/attachment-refs.ts";
 import { rewriteToDirect, rewriteToProxy, SUPABASE_PROXY_URL } from "../_shared/proxy-url.ts";
 import type { SubjectCriterionTemplate } from "../_shared/subject-rubrics/index.ts";
-import { computeFinalScore } from "../_shared/score-compute.ts";
+import {
+  aggregateIndependencePct,
+  computeFinalScore,
+  computeIndependencePct,
+} from "../_shared/score-compute.ts";
 import { buildLearningContext, type LearningContext } from "../_shared/learning-context.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
 import {
@@ -1424,6 +1428,12 @@ interface TaskStateScoreFields {
   thread_id: string;
   task_id: string;
   earned_score: number | null;
+  // Метрика «% самостоятельности» (2026-07-25): лучший балл за все попытки —
+  // стоит в `computeFinalScore` ВЫШЕ `earned_score`. Забыть колонку в SELECT
+  // не опасно (fail-safe: undefined → прежнее поведение), но тогда балл на
+  // этой поверхности будет расходиться с остальными.
+  best_earned_score: number | null;
+  ai_help_events: number | null;
   status: string | null;
   ai_score: number | null;
   tutor_score_override: number | null;
@@ -1602,7 +1612,7 @@ async function handleListAssignments(
       // contribute 0/max to the average, matching handleGetResults behaviour).
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score, ai_score, tutor_score_override, status, tutor_reviewed_at, tutor_force_completed_at")
+        .select("thread_id, task_id, earned_score, best_earned_score, ai_help_events, ai_score, tutor_score_override, status, tutor_reviewed_at, tutor_force_completed_at")
         .in("thread_id", threadIds);
 
       // Fetch max_score from tasks for guided assignments
@@ -2919,6 +2929,9 @@ async function notifyHomeworkStudentAssigned(
   subject: string,
   deadline: string | null,
   tutorName: string | null,
+  // homework-work-modes (Т8, 2026-07-25): вид работы в тексте уведомления —
+  // ученик должен узнать про «без подсказок» ДО того, как откроет задачу.
+  workMode?: HomeworkWorkMode | null,
 ): Promise<QuickAssignCascadeResult> {
   const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
     "https://sokratai.ru";
@@ -2926,10 +2939,15 @@ async function notifyHomeworkStudentAssigned(
   const deadlineHint = deadline
     ? ` Дедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}.`
     : "";
+  const isIndependent = workMode === "independent";
   const tutorHint = tutorName ? `${tutorName} назначил` : "Тебе назначили";
+  const workLabel = isIndependent ? "самостоятельную работу" : "домашнее задание";
+  const modeHint = isIndependent ? " Подсказок и обсуждения не будет." : "";
   const pushPayload: PushPayload = {
-    title: `Новое ДЗ: ${assignmentTitle}`,
-    body: `${tutorHint} домашнее задание по ${subject}.${deadlineHint}`,
+    title: isIndependent
+      ? `Самостоятельная: ${assignmentTitle}`
+      : `Новое ДЗ: ${assignmentTitle}`,
+    body: `${tutorHint} ${workLabel} по ${subject}.${modeHint}${deadlineHint}`,
     url,
   };
 
@@ -2979,12 +2997,17 @@ async function notifyHomeworkStudentAssigned(
     if (chatId) {
       try {
         const text =
-          `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n` +
+          (isIndependent
+            ? `📝 Самостоятельная работа: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n`
+            : `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n`) +
           `Предмет: ${escapeHtmlEntities(subject)}` +
+          (isIndependent
+            ? "\nБез подсказок и обсуждения — разбор будет после сдачи."
+            : "") +
           (deadline
             ? `\nДедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}`
             : "") +
-          `\n\n<a href="${escapeHtmlEntities(url)}">Открыть ДЗ</a>`;
+          `\n\n<a href="${escapeHtmlEntities(url)}">${isIndependent ? "Открыть работу" : "Открыть ДЗ"}</a>`;
         const tgResp = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
           {
@@ -3291,6 +3314,7 @@ async function handleQuickAssignStudentsWithNotify(
           subject,
           deadlineStr,
           tutorName,
+          normalizeWorkMode(assignment.work_mode),
         ).catch((err): QuickAssignCascadeResult => {
           console.warn("homework_assign_quick_notify_student_failed", {
             student_id: sid,
@@ -3703,12 +3727,22 @@ async function handleNotifyStudents(
 
   const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.ru";
   const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
-  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
+  // homework-work-modes (Т8, 2026-07-25): вид работы в тексте — зеркало
+  // quick-assign-каскада (`notifyHomeworkStudentAssigned`). Кастомный
+  // `messageTemplate` репетитора не трогаем: он пишет текст сам.
+  const bulkIsIndependent = normalizeWorkMode(assignment.work_mode) === "independent";
+  const defaultMessage = bulkIsIndependent
+    ? `📝 Самостоятельная работа: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\nБез подсказок и обсуждения — разбор будет после сдачи.\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть работу</a>`
+    : `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
   const tgText = messageTemplate ?? defaultMessage;
 
   const pushPayload: PushPayload = {
-    title: `Новое ДЗ: ${assignment.title as string}`,
-    body: `Новое задание по ${assignment.subject as string}`,
+    title: bulkIsIndependent
+      ? `Самостоятельная: ${assignment.title as string}`
+      : `Новое ДЗ: ${assignment.title as string}`,
+    body: bulkIsIndependent
+      ? `Самостоятельная работа по ${assignment.subject as string} — без подсказок`
+      : `Новое задание по ${assignment.subject as string}`,
     url: homeworkUrl,
   };
 
@@ -4469,6 +4503,9 @@ async function handleGetResults(
       task_id: string;
       final_score: number;
       hint_count: number;
+      // Метрика «% самостоятельности» (2026-07-25). null = нет данных → «—».
+      ai_help_events: number | null;
+      independence_pct: number | null;
       has_override: boolean;
       ai_score: number | null;
       ai_score_comment: string | null;
@@ -4486,6 +4523,11 @@ async function handleGetResults(
     total_score: number;
     total_max: number;
     total_time_minutes: number | null;
+    // Агрегат самостоятельности по работе — средневзвешенный по max_score задач.
+    // null = ни по одной задаче нет данных (не приступал / legacy).
+    independence_pct: number | null;
+    ai_help_total: number;
+    independence_task_count: number;
     // Phase 12 (2026-06-07): общий комментарий репетитора к ДЗ для этого ученика.
     // Прикрепляется post-pass'ом ниже (optional, чтобы 3 push-сайта не трогать).
     tutor_overall_comment?: string | null;
@@ -4647,9 +4689,17 @@ async function handleGetResults(
 
             const forceCompletedAtRaw = (ts as { tutor_force_completed_at?: string | null }).tutor_force_completed_at;
             const reviewedAtRaw = (ts as { tutor_reviewed_at?: string | null }).tutor_reviewed_at;
+            // Метрика «% самостоятельности» (2026-07-25). `null` — нет данных
+            // (работа до релиза / массовый force-complete): в UI «—», и в
+            // агрегат по работе такая задача НЕ входит (ни в числитель, ни в
+            // знаменатель) — иначе «неизвестно» читалось бы как «сделал сам».
+            const aiHelpEventsRaw = (ts as { ai_help_events?: number | null }).ai_help_events;
+            const aiHelpEvents = aiHelpEventsRaw != null ? Number(aiHelpEventsRaw) : null;
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
+              ai_help_events: aiHelpEvents,
+              independence_pct: computeIndependencePct(aiHelpEvents),
               has_override: ts.tutor_score_override != null,
               ai_score: aiScoreRounded,
               ai_score_comment: typeof aiCommentRaw === "string" && aiCommentRaw.trim().length > 0
@@ -4778,6 +4828,8 @@ async function handleGetResults(
         task_id,
         final_score: cell.final_score,
         hint_count: cell.hint_count,
+        ai_help_events: cell.ai_help_events,
+        independence_pct: cell.independence_pct,
         has_override: cell.has_override,
         ai_score: cell.ai_score,
         ai_score_comment: cell.ai_score_comment,
@@ -4787,6 +4839,27 @@ async function handleGetResults(
         tutor_reviewed_at: cell.tutor_reviewed_at,
         status: cell.status,
       }));
+
+      // Агрегат «% самостоятельности» по работе — средневзвешенный по max_score
+      // задач (решение владельца: «сложные задачи занимают много времени и
+      // усилий», поэтому весят больше). Единственный источник формулы —
+      // `_shared/score-compute.ts`; здесь только подача весов.
+      const independencePct = aggregateIndependencePct(
+        taskScores.map((t) => ({
+          pct: t.independence_pct,
+          weight: taskMap[t.task_id]?.max_score ?? 0,
+        })),
+      );
+      const aiHelpTotal = taskScores.reduce(
+        (sum, t) => sum + (t.ai_help_events ?? 0),
+        0,
+      );
+      const independenceTaskCount = taskScores.filter((t) => t.independence_pct != null).length;
+      const independenceFields = {
+        independence_pct: independencePct != null ? Math.round(independencePct) : null,
+        ai_help_total: aiHelpTotal,
+        independence_task_count: independenceTaskCount,
+      };
 
       if (acc) {
         // Completed thread: submitted=true, full aggregates.
@@ -4803,6 +4876,7 @@ async function handleGetResults(
           total_score: totalMaxForAll === 0 ? 0 : Math.round(acc.final * 100) / 100,
           total_max: totalMaxForAll,
           total_time_minutes: totalTimeMinutes,
+          ...independenceFields,
         });
       } else if (activeAcc) {
         // Active thread with partial progress: submitted=false (frontend
@@ -4821,6 +4895,7 @@ async function handleGetResults(
           total_score: partialScore,
           total_max: totalMaxForAll,
           total_time_minutes: totalTimeMinutes,
+          ...independenceFields,
         });
       } else {
         // No thread at all: not started.
@@ -4835,6 +4910,10 @@ async function handleGetResults(
           total_score: 0,
           total_max: totalMaxForAll,
           total_time_minutes: totalTimeMinutes,
+          // Не приступал → метрики нет (не 100%): «—» в UI.
+          independence_pct: null,
+          ai_help_total: 0,
+          independence_task_count: 0,
         });
       }
     }
@@ -4881,7 +4960,17 @@ async function handleGetResults(
     assignment_id: assignmentId,
   });
 
-  return jsonOk(cors, { summary, per_task: perTask, per_student: perStudent });
+  // `work_mode` в корне (2026-07-25): UI обязан СКРЫВАТЬ колонку «Сам-но» в
+  // самостоятельной работе — там AI выключен и метрика всегда 100%, показывать
+  // её значит утверждать, будто мы что-то измерили.
+  return jsonOk(cors, {
+    summary,
+    per_task: perTask,
+    per_student: perStudent,
+    work_mode: normalizeWorkMode(
+      (assignmentOrErr as { work_mode?: unknown }).work_mode,
+    ) ?? "homework",
+  });
 }
 
 // ─── Endpoint: PATCH /assignments/:id/students/:sid/tasks/:tid/score-override
@@ -4973,7 +5062,7 @@ async function handleSetTutorScoreOverride(
 
   const { data: existing, error: tsErr } = await db
     .from("homework_tutor_task_states")
-    .select("id, ai_score, tutor_score_override, earned_score, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
+    .select("id, ai_score, tutor_score_override, earned_score, best_earned_score, ai_help_events, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
     .eq("thread_id", thread.id)
     .eq("task_id", taskId)
     .maybeSingle();
@@ -5128,7 +5217,7 @@ async function handleSetTutorScoreOverride(
     .from("homework_tutor_task_states")
     .update(updatePayload)
     .eq("id", existing.id)
-    .select("id, ai_score, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, earned_score, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
+    .select("id, ai_score, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, earned_score, best_earned_score, ai_help_events, status, hint_count, attempts, thread_id, task_id, tutor_force_completed_at")
     .maybeSingle();
   if (updErr || !updated) {
     console.error("homework_api_request_error", { route: "PATCH score-override", error: updErr?.message });
@@ -8854,6 +8943,8 @@ async function handleGetStudentResult(
       : 0;
     totalScore += finalScore;
     totalMax += maxScore;
+    const helpRaw = state ? (state as { ai_help_events?: unknown }).ai_help_events : null;
+    const aiHelpEvents = typeof helpRaw === "number" ? helpRaw : null;
     return {
       task_id: t.id,
       order_num: t.order_num,
@@ -8862,12 +8953,25 @@ async function handleGetStudentResult(
       task_kind: t.task_kind,
       final_score: finalScore,
       answered: answeredTaskIds.has(t.id as string),
+      // Метрика самостоятельности (2026-07-25). В самостоятельной работе не
+      // показывается (там AI выключен → всегда 100%), поэтому агрегат ниже
+      // считается только для обычной домашки.
+      ai_help_events: aiHelpEvents,
+      independence_pct: computeIndependencePct(aiHelpEvents),
     };
   });
+
+  const independenceTotal = workMode === "independent"
+    ? null
+    : aggregateIndependencePct(
+      resultTasks.map((t) => ({ pct: t.independence_pct, weight: t.max_score })),
+    );
 
   return jsonOk(cors, {
     completed: true,
     work_mode: workMode,
+    independence_pct: independenceTotal != null ? Math.round(independenceTotal) : null,
+    ai_help_total: resultTasks.reduce((sum, t) => sum + (t.ai_help_events ?? 0), 0),
     assignment: {
       id: assignment.id,
       title: assignment.title,
@@ -9123,6 +9227,12 @@ async function handleGetStudentProblem(
   //    В самостоятельной до завершения работы балл не раскрывается (null).
   let taskScore: number | null = 0;
   let hintsUsed = 0;
+  // Метрика «% самостоятельности» (2026-07-25): ученик видит её ОТКРЫТО —
+  // владелец: «мы именно его мотивируем через эту систему думать головой».
+  // Второе поле — максимальный балл за задачу (`available_score`, теперь = max).
+  let taskIndependencePct: number | null = null;
+  let taskAiHelpEvents: number | null = null;
+  let taskScoreCeiling: number | null = Number(targetTask.max_score) || 0;
   if (thread) {
     const taskStates = Array.isArray(thread.homework_tutor_task_states)
       ? (thread.homework_tutor_task_states as Record<string, unknown>[])
@@ -9137,10 +9247,20 @@ async function handleGetStudentProblem(
       );
       const hc = targetState.hint_count;
       hintsUsed = typeof hc === "number" ? hc : 0;
+      const helpRaw = (targetState as { ai_help_events?: unknown }).ai_help_events;
+      taskAiHelpEvents = typeof helpRaw === "number" ? helpRaw : null;
+      taskIndependencePct = computeIndependencePct(taskAiHelpEvents);
+      const ceilingRaw = (targetState as { available_score?: unknown }).available_score;
+      if (typeof ceilingRaw === "number") taskScoreCeiling = ceilingRaw;
     }
   }
   if (assignmentWorkMode === "independent" && thread?.status !== "completed") {
     taskScore = null;
+    // В самостоятельной метрика не показывается вообще (AI выключен → всегда
+    // 100%), а до сдачи не раскрываем и потолок балла — он часть результата.
+    taskIndependencePct = null;
+    taskAiHelpEvents = null;
+    taskScoreCeiling = null;
   }
 
   // 9. Student identity (name + gender) — same canonical chain as the AI
@@ -9172,6 +9292,11 @@ async function handleGetStudentProblem(
     },
     task_total: tasks.length,
     task_score: taskScore,
+    // Два открытых ученику поля (решение владельца): «Самостоятельность NN%» и
+    // «Максимальный балл за задачу». `null` = нет данных / не раскрыто.
+    task_independence_pct: taskIndependencePct,
+    task_ai_help_events: taskAiHelpEvents,
+    task_score_ceiling: taskScoreCeiling,
     thread,
     student: {
       id: userId,
@@ -9523,6 +9648,27 @@ async function handlePostThreadMessage(
     }
   }
 
+  // Ответ Сократа в обсуждении = обращение к помощи AI (решение владельца
+  // 2026-07-25: «разницы особой нет» с подсказкой). Этот путь — единственное
+  // место, где ответ обсуждения попадает в БД: его персистит КЛИЕНТ после
+  // стрима из edge `chat`. Обсуждение остаётся scoring-neutral (балл не
+  // трогаем, rule 40) — штрафуется только метрика самостоятельности.
+  //
+  // Гейты: `kind='ai_reply'` (не 'system' — авто-вступление к задаче помощью
+  // НЕ считается) и задача ещё открыта (после закрытия метрика зафиксирована).
+  if (role === "assistant" && messageKind === "ai_reply") {
+    const { data: openState } = await db
+      .from("homework_tutor_task_states")
+      .select("id")
+      .eq("thread_id", threadId)
+      .eq("task_id", taskId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (openState?.id) {
+      await bumpAiHelpEvents(db, openState.id as string);
+    }
+  }
+
   if (role === "user") {
     await db
       .from("homework_tutor_threads")
@@ -9575,7 +9721,7 @@ const THREAD_SELECT = `
   id, status, current_task_order, current_task_id, created_at, updated_at,
   student_assignment_id, last_student_message_at, last_tutor_message_at,
   homework_tutor_thread_messages(id, role, content, image_url, task_id, task_order, message_kind, submission_payload, created_at, author_user_id, visible_to_student),
-  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, tutor_reviewed_at, tutor_reviewed_by, ai_criteria_json, ai_nodes_json)
+  homework_tutor_task_states(id, task_id, status, attempts, best_score, available_score, earned_score, best_earned_score, ai_help_events, wrong_answer_count, hint_count, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, tutor_force_completed_by, tutor_reviewed_at, tutor_reviewed_by, ai_criteria_json, ai_nodes_json)
 `;
 
 /**
@@ -9651,6 +9797,13 @@ function stripIndependentPreRevealFields(
         wrong_answer_count: 0,
         available_score: null,
         earned_score: null,
+        // P0 anti-leak (2026-07-25): `best_earned_score` — такой же носитель
+        // балла, как `earned_score`. Без зануления балл самостоятельной утёк бы
+        // ученику ДО сдачи работы прямо в payload'е треда.
+        best_earned_score: null,
+        // `ai_help_events` в самостоятельной всегда 0 и метрика не показывается,
+        // но зануляем ради инварианта «до раскрытия — ни одного балл-носителя».
+        ai_help_events: null,
         ai_score: null,
         tutor_score_override: null,
         tutor_score_override_comment: null,
@@ -9827,7 +9980,7 @@ async function readTaskStateScoreSnapshot(
 > {
   const { data, error } = await db
     .from("homework_tutor_task_states")
-    .select("status, earned_score, ai_score, available_score")
+    .select("status, earned_score, best_earned_score, ai_help_events, ai_score, available_score")
     .eq("id", taskStateId)
     .maybeSingle();
   if (error || !data) {
@@ -9843,6 +9996,37 @@ async function readTaskStateScoreSnapshot(
     ai_score: number | null;
     available_score: number | null;
   };
+}
+
+/**
+ * +1 к счётчику обращений к помощи AI по задаче (метрика «% самостоятельности»,
+ * 2026-07-25). Атомарно, через SECURITY DEFINER RPC `hw_bump_ai_help_events`
+ * (миграция `20260725140000`): два AI-пути могут писать одновременно, а
+ * read-modify-write из edge потерял бы инкремент.
+ *
+ * НИКОГДА не бросает: метрика процесса не должна ломать проверку ответа —
+ * сбой инкремента означает лишь чуть завышенную самостоятельность у одной
+ * задачи. Считать N SQL-каунтом по `homework_tutor_thread_messages` НЕЛЬЗЯ:
+ * вердикты и подсказки пишутся одним `kind='ai_reply'` → счёт дал бы 2–3×.
+ */
+async function bumpAiHelpEvents(db: SupabaseClient, taskStateId: string): Promise<void> {
+  try {
+    const { error } = await db.rpc("hw_bump_ai_help_events", {
+      _task_state_id: taskStateId,
+      _delta: 1,
+    });
+    if (error) {
+      console.warn("homework_api_ai_help_bump_failed", {
+        task_state_id: taskStateId,
+        code: error.code ?? null,
+      });
+    }
+  } catch (err) {
+    console.warn("homework_api_ai_help_bump_exception", {
+      task_state_id: taskStateId,
+      error: err instanceof Error ? err.name : "unknown",
+    });
+  }
 }
 
 async function performTaskAdvance(
@@ -9952,7 +10136,7 @@ async function loadAdvanceContext(
 } | null> {
   const { data: allStates, error: statesErr } = await db
     .from("homework_tutor_task_states")
-    .select("id, task_id, status, attempts, best_score, available_score, earned_score, wrong_answer_count, hint_count")
+    .select("id, task_id, status, attempts, best_score, available_score, earned_score, best_earned_score, ai_help_events, wrong_answer_count, hint_count")
     .eq("thread_id", threadId);
 
   if (statesErr || !allStates || allStates.length === 0) return null;
@@ -10291,16 +10475,33 @@ async function runStudentAnswerGrading(args: {
       ? result.flowchart_trace
       : null;
 
+  // UX сбоя проверки (T0, 2026-07-25; репорт Ульяны). Второй сбой подряд по той
+  // же задаче → добавляем «мы уже знаем», чтобы ученик не долбил кнопку (она
+  // нажала дважды и получила тот же текст). Детект без новой колонки и без
+  // доп. запроса: `last_ai_feedback` уже хранит предыдущий фидбэк, а
+  // `isCheckFailedFeedbackText` опознаёт наши сбойные тексты.
+  const isCheckFailed = effectiveVerdict === "CHECK_FAILED";
+  const repeatedFailure = isCheckFailed &&
+    typeof currentState.last_ai_feedback === "string" &&
+    isCheckFailedFeedbackText(currentState.last_ai_feedback as string);
+  const feedbackForStudent = repeatedFailure
+    ? `${result.feedback} Мы уже знаем о проблеме и починим её — можно вернуться к задаче позже.`
+    : result.feedback;
+
   // Save AI feedback message (caller-controlled kind: ai_reply for chat,
   // check_result for explicit submission so the submission flow gets a
   // semantically distinct verdict bubble).
+  //
+  // CHECK_FAILED — свой kind (`check_failed`, миграция 20260725120000): это НЕ
+  // оценка ответа, и клиент обязан отрисовать его нейтральной системной плашкой,
+  // а не пузырём Сократа (ученица приняла сбой за вердикт по своему решению).
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
     role: "assistant",
-    content: result.feedback,
+    content: feedbackForStudent,
     task_id: currentState.task_id as string,
     task_order: currentOrder,
-    message_kind: feedbackKind,
+    message_kind: isCheckFailed ? "check_failed" : feedbackKind,
   });
 
   let responseData: Record<string, unknown>;
@@ -10313,10 +10514,18 @@ async function runStudentAnswerGrading(args: {
     // recorded grade matches the per-criterion table the student sees. Without
     // this, a CORRECT verdict with К1=0 (cascade zeroes К2,К3 → ai_score 14/22)
     // would still award full 22/22 — contradicting the visible criteria table.
-    // Penalty model preserved: hint/wrong degradation can still lower it further.
+    // 2026-07-25: деградации больше нет (`currentAvailableScore` === max_score),
+    // поэтому `min(available, ai_score)` работает ровно как criteria-cap.
     const earnedScore = criteriaBreakdown && effectiveAiScore != null
       ? Math.min(currentAvailableScore, effectiveAiScore)
       : currentAvailableScore;
+    // Балл задачи = ЛУЧШИЙ за все попытки (решение владельца 2026-07-25):
+    // повторный, менее удачный прогон не должен понижать уже заработанное.
+    // NULL в prev (работы до релиза) → просто берём текущий балл.
+    const prevBestEarned = currentState.best_earned_score as number | null | undefined;
+    const bestEarnedScore = prevBestEarned != null
+      ? Math.max(Number(prevBestEarned), earnedScore)
+      : earnedScore;
 
     // Ревью-фикс P0 р.2: проверяем error И применённость строки. Раньше сбой
     // этого UPDATE игнорировался, а performTaskAdvance всё равно ставил
@@ -10333,6 +10542,10 @@ async function runStudentAnswerGrading(args: {
         attempts: nextAttemptCount,
         status: "completed",
         earned_score: earnedScore,
+        best_earned_score: bestEarnedScore,
+        // Материализуем счётчик: CORRECT с первой попытки оставил бы NULL, и
+        // метрика показала бы «—» вместо честных 100% самостоятельности.
+        ai_help_events: (currentState.ai_help_events as number | null) ?? 0,
         available_score: currentAvailableScore,
         ai_score: effectiveAiScore,
         ai_score_comment: effectiveAiScoreComment,
@@ -10403,13 +10616,13 @@ async function runStudentAnswerGrading(args: {
     };
   } else if (effectiveVerdict === "CHECK_FAILED") {
     await db.from("homework_tutor_task_states").update({
-      last_ai_feedback: result.feedback,
+      last_ai_feedback: feedbackForStudent,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
 
     responseData = {
       verdict: "CHECK_FAILED",
-      feedback: result.feedback,
+      feedback: feedbackForStudent,
       ai_score: null,
       ai_score_comment: null,
       earned_score: null,
@@ -10437,6 +10650,13 @@ async function runStudentAnswerGrading(args: {
         attempts: nextAttemptCount,
         status: "completed",
         earned_score: earnedScore,
+        // Самостоятельная: попытка одна, поэтому «лучший» == этот балл. Пишем
+        // явно, чтобы цепочка computeFinalScore не разошлась между режимами.
+        best_earned_score: earnedScore,
+        // AI выключен режимом → обращений к помощи ноль по определению
+        // (метрику самостоятельности в этом режиме не показываем, но данные
+        // должны быть консистентны, а не NULL = «неизвестно»).
+        ai_help_events: 0,
         available_score: currentAvailableScore,
         ai_score: effectiveAiScore,
         ai_score_comment: effectiveAiScoreComment,
@@ -10516,33 +10736,38 @@ async function runStudentAnswerGrading(args: {
       ...(independentSuperseded ? { superseded: true } : {}),
     };
   } else if (effectiveVerdict === "ON_TRACK") {
-    // Correct step but NOT the final answer — keep task open
-    // First 2 ON_TRACKs are free; from 3rd onward, count as hint (degrades score)
-    const currentAttempts = nextAttemptCount;
+    // Correct step but NOT the final answer — keep task open.
+    //
+    // Метрика «% самостоятельности» (2026-07-25) заменила деградацию балла:
+    //  • `available_score` больше НЕ срезается (= max) — балл должен отражать
+    //    то, что ученик реально решил по критериям ФИПИ, а помощь штрафует
+    //    отдельную метрику процесса;
+    //  • хак «3-й+ ON_TRACK считаем подсказкой» УДАЛЁН — он существовал только
+    //    ради деградации, а `hint_count` теперь означает буквально «нажал
+    //    кнопку „Подсказка“»;
+    //  • разбор ошибки = ОДНО обращение к помощи AI (одна сдача → один минус).
     const wrongCount = (currentState.wrong_answer_count as number) ?? 0;
-    const prevOnTrackCount = currentAttempts - wrongCount - 1; // past ON_TRACK-like attempts
-    let newHintCount = (currentState.hint_count as number) ?? 0;
-    let onTrackAvailableScore = currentAvailableScore;
+    const newHintCount = (currentState.hint_count as number) ?? 0;
+    const onTrackAvailableScore = task.max_score ?? 1;
 
-    if (prevOnTrackCount >= 2) {
-      // 3rd+ ON_TRACK: count as hint, degrade score
-      newHintCount += 1;
-      onTrackAvailableScore = computeAvailableScore(
-        task.max_score ?? 1, wrongCount, newHintCount,
-      );
-    }
-
-    await db.from("homework_tutor_task_states").update({
-      attempts: nextAttemptCount,
-      hint_count: newHintCount,
-      available_score: onTrackAvailableScore,
-      ai_score: effectiveAiScore,
-      ai_score_comment: effectiveAiScoreComment,
-      ai_criteria_json: criteriaBreakdown,
-      ai_nodes_json: nodesJson,
-      last_ai_feedback: result.feedback,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentState.id);
+    // Ревью-фикс P2 (2026-07-25): инкремент счётчика идёт ПАРАЛЛЕЛЬНО с UPDATE,
+    // а не после — иначе ученик ждал бы лишний round-trip к БД уже после того,
+    // как AI ответил. Fire-and-forget здесь нельзя: клиент сразу инвалидирует
+    // problem-query и получил бы старый процент.
+    await Promise.all([
+      db.from("homework_tutor_task_states").update({
+        attempts: nextAttemptCount,
+        hint_count: newHintCount,
+        available_score: onTrackAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      }).eq("id", currentState.id),
+      bumpAiHelpEvents(db, currentState.id as string),
+    ]);
 
     responseData = {
       verdict: "ON_TRACK",
@@ -10563,24 +10788,29 @@ async function runStudentAnswerGrading(args: {
       total_tasks: totalTasks,
     };
   } else {
-    // Increment wrong_answer_count, degrade score
+    // INCORRECT: считаем неверную попытку, но балл НЕ срезаем (см. комментарий
+    // в ветке ON_TRACK — деградация заменена метрикой самостоятельности).
+    // `wrong_answer_count` остаётся: он всё ещё драйвит сигнал «застрял» в
+    // ленте репетитора (`RECENT_DIALOGS_STUCK_WRONG`).
     const newWrongCount = ((currentState.wrong_answer_count as number) ?? 0) + 1;
     const newHintCount = (currentState.hint_count as number) ?? 0;
-    const newAvailableScore = computeAvailableScore(
-      task.max_score ?? 1, newWrongCount, newHintCount,
-    );
+    const newAvailableScore = task.max_score ?? 1;
 
-    await db.from("homework_tutor_task_states").update({
-      attempts: nextAttemptCount,
-      wrong_answer_count: newWrongCount,
-      available_score: newAvailableScore,
-      ai_score: effectiveAiScore,
-      ai_score_comment: effectiveAiScoreComment,
-      ai_criteria_json: criteriaBreakdown,
-      ai_nodes_json: nodesJson,
-      last_ai_feedback: result.feedback,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentState.id);
+    // Параллельно с UPDATE — см. комментарий в ветке ON_TRACK.
+    await Promise.all([
+      db.from("homework_tutor_task_states").update({
+        attempts: nextAttemptCount,
+        wrong_answer_count: newWrongCount,
+        available_score: newAvailableScore,
+        ai_score: effectiveAiScore,
+        ai_score_comment: effectiveAiScoreComment,
+        ai_criteria_json: criteriaBreakdown,
+        ai_nodes_json: nodesJson,
+        last_ai_feedback: result.feedback,
+        updated_at: new Date().toISOString(),
+      }).eq("id", currentState.id),
+      bumpAiHelpEvents(db, currentState.id as string),
+    ]);
 
     responseData = {
       verdict: "INCORRECT",
@@ -11726,18 +11956,23 @@ async function handleRequestHint(
     message_kind: "ai_reply",
   });
 
-  // Update scoring
+  // Подсказка = обращение к помощи AI: штрафует «% самостоятельности», а не
+  // балл (2026-07-25 — деградация `computeAvailableScore` отменена, доступный
+  // балл остаётся полным max_score). `hint_count` теперь означает буквально
+  // «сколько раз нажал кнопку „Подсказка“».
   const newHintCount = ((activeState.hint_count as number) ?? 0) + 1;
-  const newWrongCount = (activeState.wrong_answer_count as number) ?? 0;
-  const newAvailableScore = computeAvailableScore(
-    task.max_score ?? 1, newWrongCount, newHintCount,
-  );
+  const newAvailableScore = task.max_score ?? 1;
 
-  await db.from("homework_tutor_task_states").update({
-    hint_count: newHintCount,
-    available_score: newAvailableScore,
-    updated_at: new Date().toISOString(),
-  }).eq("id", activeState.id);
+  // Параллельно (ревью-фикс P2): счётчик не должен добавлять round-trip после
+  // того, как подсказка уже сгенерирована и ученик её ждёт.
+  await Promise.all([
+    db.from("homework_tutor_task_states").update({
+      hint_count: newHintCount,
+      available_score: newAvailableScore,
+      updated_at: new Date().toISOString(),
+    }).eq("id", activeState.id),
+    bumpAiHelpEvents(db, activeState.id as string),
+  ]);
 
   // Return updated thread (student-facing: filter hidden notes).
   // homework-work-modes (ревью-фикс P1 р.2): перечитываем режим (репетитор мог
@@ -11999,7 +12234,14 @@ const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
 const RECENT_DIALOGS_STUCK_WRONG = 3;
 const RECENT_DIALOGS_STUCK_HINT = 3;
 
-type RecentDialogKind = "opened" | "wrote" | "submitted" | "completed" | "stuck";
+type RecentDialogKind =
+  | "opened"
+  | "wrote"
+  | "submitted"
+  | "completed"
+  | "stuck"
+  // T0 (2026-07-25): сдал, но автопроверка упала → ждёт РУЧНОЙ проверки.
+  | "check_failed";
 type RecentDialogAuthor = "student" | "tutor" | "ai";
 
 interface RecentDialogItem {
@@ -12261,31 +12503,70 @@ async function handleGetRecentDialogs(
     task_order: number | null;
     created_at: string;
   };
-  const latestMsgResults = await Promise.all(
-    pickedThreadIds.map(async (tid) => {
-      const { data, error } = await db
-        .from("homework_tutor_thread_messages")
-        .select("thread_id, content, image_url, message_kind, task_order, created_at")
-        .eq("thread_id", tid)
-        .eq("role", "user")
-        .neq("visible_to_student", false)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) {
-        // Non-fatal: a single bad thread must not blank the whole feed.
-        console.error("recent_dialogs_latest_msg_error", {
-          thread_id: tid,
-          error: error.message,
-        });
-        return null;
-      }
-      return data as MessageRow | null;
-    }),
-  );
+  // 5b. Сбой автопроверки как отдельный сигнал репетитору (T0, 2026-07-25;
+  //     репорт Ульяны: ответ ученика повис непроверенным, а репетитор узнал
+  //     случайно). Смотрим ПОСЛЕДНЮЮ реакцию AI по треду: если это
+  //     `check_failed`, значит успешной проверки после сбоя не было → задача
+  //     ждёт ручной проверки.
+  //
+  // Ревью-фикс P2 (2026-07-25): оба набора (последнее сообщение ученика + сбой
+  // проверки) стартуют ОДНИМ Promise.all. Раньше второй пакет ждал завершения
+  // первого — это добавляло целый последовательный round-trip к БД в загрузку
+  // главной репетитора, хотя запросы независимы.
+  const [latestMsgResults, failedCheckResults] = await Promise.all([
+    Promise.all(
+      pickedThreadIds.map(async (tid) => {
+        const { data, error } = await db
+          .from("homework_tutor_thread_messages")
+          .select("thread_id, content, image_url, message_kind, task_order, created_at")
+          .eq("thread_id", tid)
+          .eq("role", "user")
+          .neq("visible_to_student", false)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          // Non-fatal: a single bad thread must not blank the whole feed.
+          console.error("recent_dialogs_latest_msg_error", {
+            thread_id: tid,
+            error: error.message,
+          });
+          return null;
+        }
+        return data as MessageRow | null;
+      }),
+    ),
+    Promise.all(
+      pickedThreadIds.map(async (tid) => {
+        const { data, error } = await db
+          .from("homework_tutor_thread_messages")
+          .select("thread_id, message_kind, task_order")
+          .eq("thread_id", tid)
+          .eq("role", "assistant")
+          .in("message_kind", ["check_failed", "check_result", "ai_reply"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          // Non-fatal: без этого сигнала лента просто покажет «Сдал задачу».
+          console.error("recent_dialogs_failed_check_error", {
+            thread_id: tid,
+            error: error.message,
+          });
+          return null;
+        }
+        const row = data as { thread_id: string; message_kind: string | null; task_order: number | null } | null;
+        return row && row.message_kind === "check_failed" ? row : null;
+      }),
+    ),
+  ]);
   const latestStudentMsgByThread = new Map<string, MessageRow>();
   for (const m of latestMsgResults) {
     if (m) latestStudentMsgByThread.set(m.thread_id, m);
+  }
+  const failedCheckByThread = new Map<string, { task_order: number | null }>();
+  for (const r of failedCheckResults) {
+    if (r) failedCheckByThread.set(r.thread_id, { task_order: r.task_order });
   }
 
   // 4. Resolve student names via tutor_students (display_name) + profiles.username fallback.
@@ -12385,9 +12666,19 @@ async function handleGetRecentDialogs(
     let kind: RecentDialogKind;
     let taskOrder: number | undefined;
     let preview: string;
+    const failedCheck = failedCheckByThread.get(t.id);
     if (e.isCompleted) {
       kind = "completed";
       preview = "Завершил ДЗ";
+    } else if (failedCheck) {
+      // Приоритет выше «сдал»: ученик сдал, но AI не проверил — это требует
+      // РУЧНОГО действия репетитора, а не просто «есть новая сдача».
+      kind = "check_failed";
+      const failedOrder = typeof failedCheck.task_order === "number"
+        ? failedCheck.task_order
+        : null;
+      taskOrder = (failedOrder ?? fallbackOrder) ?? undefined;
+      preview = `Автопроверка не сработала${taskSuffix(taskOrder)} — нужна ваша проверка`;
     } else if (
       agg &&
       (agg.maxWrong >= RECENT_DIALOGS_STUCK_WRONG ||

@@ -26,6 +26,12 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { computePulse, resolveChannel, type PulsePayload, type PulseTutor } from "../_shared/ceo-pulse.ts";
 import { sendTelegramMessage } from "../_shared/telegram-send.ts";
+import {
+  computeAiCreditsSnapshot,
+  formatAiCreditsBlock,
+  MONTHLY_CREDIT_LIMIT,
+  type AiCreditsSnapshot,
+} from "../_shared/ai-credits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -270,7 +276,7 @@ async function collectDailyEvents(
   return { newTutors, payments, newTrials };
 }
 
-function buildDailyMessage(events: DailyEvents): string {
+function buildDailyMessage(events: DailyEvents, credits: AiCreditsSnapshot | null): string {
   const lines: string[] = ["📌 <b>SokratAI · за сутки</b>"];
   if (events.newTutors.length > 0) {
     lines.push(
@@ -284,6 +290,12 @@ function buildDailyMessage(events: DailyEvents): string {
   }
   if (events.newTrials.length > 0) {
     lines.push(`🚀 Новый триал: ${events.newTrials.map(escapeHtml).join(", ")}`);
+  }
+  // T0 (2026-07-25): расход AI-кредитов. Отдельным блоком внизу — это не
+  // «событие дня», а состояние. Снапшот может быть null (сбой RPC) — дайджест
+  // обязан уйти без него, а не упасть.
+  if (credits) {
+    lines.push("", ...formatAiCreditsBlock(credits));
   }
   return lines.join("\n");
 }
@@ -351,15 +363,48 @@ Deno.serve(async (req) => {
       message = buildWeeklyMessage(pulse, now);
     } else {
       const events = await collectDailyEvents(db, now);
+      // T0 (2026-07-25): расход AI-кредитов — владелец просил присылать % от
+      // лимита КАЖДЫЙ день. Поэтому непустой AI-расход сам делает дайджест
+      // «непустым»: инцидент 24.07 (лимит кончился) шёл 20+ часов незамеченным
+      // именно потому, что молчание выглядело нормой.
+      const credits = await computeAiCreditsSnapshot(db, now);
       const hasEvents =
-        events.newTutors.length > 0 || events.payments.length > 0 || events.newTrials.length > 0;
+        events.newTutors.length > 0 ||
+        events.payments.length > 0 ||
+        events.newTrials.length > 0 ||
+        (credits !== null && (credits.day.calls > 0 || credits.month.tokens > 0));
       if (!hasEvents) {
         // Тишина = ничего не произошло (решение владельца). Период помечен.
         await db.from("ceo_digest_log").update({ outcome: "empty" }).eq("id", claimId);
         console.log("ceo_digest_daily_empty", periodKey);
         return jsonResponse(200, { sent: 0, empty: true, period: periodKey });
       }
-      message = buildDailyMessage(events);
+      message = buildDailyMessage(events, credits);
+
+      // Однократный (за календарный МСК-месяц) алерт при 90% лимита — отдельным
+      // сообщением: жирную строку внутри сводки легко пролистать, а это звонок.
+      if (credits?.overThreshold) {
+        const monthKey = mskDay(now).slice(0, 7); // YYYY-MM
+        const { data: alertClaim } = await db
+          .from("ceo_digest_log")
+          .upsert(
+            { mode: "credit_alert", period_key: monthKey, outcome: "sent" },
+            { onConflict: "mode,period_key", ignoreDuplicates: true },
+          )
+          .select("id");
+        if (alertClaim && alertClaim.length > 0) {
+          const alertText = [
+            "🚨 <b>AI-кредиты Lovable на исходе</b>",
+            `Израсходовано ≈${Math.round(credits.month.pct)}% месячного лимита (${MONTHLY_CREDIT_LIMIT} кредитов).`,
+            "Когда лимит кончится, у учеников встанет автопроверка ДЗ и обсуждение с Сократом — молча, с ошибкой «не сработало».",
+            "Подними лимит: Lovable → Settings → Usage.",
+          ].join("\n");
+          for (const chatId of recipients) {
+            await sendTelegramMessage(chatId, alertText);
+          }
+          console.warn("ceo_digest_credit_alert_sent", { month: monthKey });
+        }
+      }
     }
 
     // ── Отправка ──

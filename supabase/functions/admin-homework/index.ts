@@ -655,7 +655,10 @@ async function threadDetails(admin: SupabaseClient, threadId: string) {
     admin
       .from("homework_tutor_task_states")
       .select(
-        "id, status, hint_count, wrong_answer_count, earned_score, available_score, attempts, best_score, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, task_id",
+        // `best_earned_score` / `ai_help_events` (2026-07-25) — админский просмотр
+        // треда должен показывать те же баллы и ту же самостоятельность, что и
+        // репетиторский экран, иначе диагностика жалоб идёт по другим числам.
+        "id, status, hint_count, wrong_answer_count, earned_score, best_earned_score, ai_help_events, available_score, attempts, best_score, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, tutor_score_override_at, tutor_force_completed_at, task_id",
       )
       .eq("thread_id", threadId),
     admin

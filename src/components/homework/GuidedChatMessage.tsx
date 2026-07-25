@@ -183,6 +183,8 @@ const GuidedChatMessage = memo(({
   const isSystem = message.role === 'system';
   const isTutor = message.role === 'tutor';
   const isTutorPerspective = perspective === 'tutor';
+  // T0 (2026-07-25): сбой автопроверки — системная плашка, не реплика Сократа.
+  const isCheckFailedNotice = message.message_kind === 'check_failed';
   const kindLabel = formatMessageKind(message.message_kind, subject);
   const isFailed = message.message_delivery_status === 'failed';
   const isSending = message.message_delivery_status === 'sending';
@@ -272,6 +274,32 @@ const GuidedChatMessage = memo(({
       <div className="flex justify-center my-2">
         <div className="text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-full max-w-[85%] text-center">
           {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Сбой автопроверки (T0, 2026-07-25) ─────────────────────────────────
+  // НЕ пузырь Сократа: сбой шлюза не имеет отношения к решению ученика, а
+  // прежний рендер обычной репликой ученица приняла за оценку своей работы
+  // (репорт Ульяны). Нейтральная системная плашка с иконкой предупреждения,
+  // без аватара и подписи AI. Тот же вид на обеих perspective — репетитор в
+  // просмотре треда тоже должен сразу понимать, что AI не проверил.
+  if (isCheckFailedNotice) {
+    return (
+      <div className="flex justify-center my-2">
+        {/* Ревью-фикс P2 (2026-07-25): `text-sm` вместо caption-размера (это
+            важное сообщение, а не подпись) + `role="status"`/`aria-live`, иначе
+            VoiceOver не объявит появившийся сбой. */}
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-start gap-2 max-w-[92%] rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" aria-hidden="true" />
+          <p className="text-sm leading-relaxed text-amber-900 whitespace-pre-wrap break-words">
+            {message.content}
+          </p>
         </div>
       </div>
     );

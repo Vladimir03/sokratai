@@ -1429,6 +1429,9 @@ export default function HomeworkProblem() {
       task_total: data.task_total,
       task_score: liveScore, // B2 hybrid: available_score (active) → earned (completed)
       task_score_max: data.task.max_score,
+      // Второе открытое ученику поле (2026-07-25). Считает бэкенд —
+      // формулу на клиенте не дублируем.
+      independence_pct: data.task_independence_pct ?? null,
       task_kind: data.task.task_kind,
       body: data.task.task_text,
       image_url: data.task.task_image_url,
@@ -1436,7 +1439,14 @@ export default function HomeworkProblem() {
       hint_count: hintCount,
       score_state: isCurrentCompleted ? 'completed' : 'active',
     };
-  }, [data, taskStates, liveScore, hintCount, isCurrentCompleted]);
+    // orderForState ОБЯЗАН быть в deps (2026-07-25): он производный от
+    // assignmentDetails.tasks (через taskByIdMap), а assignmentDetails приходит
+    // ДРУГИМ запросом, чем data. Если он резолвится вторым, первый прогон мемо
+    // видит пустую taskByIdMap → orderForState возвращает undefined для всех →
+    // doneIndices = [] → StepIndicator показывает НОЛЬ выполненных задач, хотя
+    // они выполнены. Без этой зависимости мемо больше не пересчитается, пока не
+    // изменится что-то другое.
+  }, [data, taskStates, liveScore, hintCount, isCurrentCompleted, orderForState]);
 
   // ─── Loading + error states ──────────────────────────────────────────────
   if (isPending || (!data && isFetching)) {

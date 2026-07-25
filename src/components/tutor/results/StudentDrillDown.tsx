@@ -28,6 +28,7 @@ import { isTaskScoreReviewed } from '@/lib/homeworkReview';
 import { invalidateAfterReview } from '@/lib/tutorReviewCacheSync';
 import { trackGuidedHomeworkEvent } from '@/lib/homeworkTelemetry';
 import { useAutoResizeTextarea } from '@/hooks/useAutoResizeTextarea';
+import { formatIndependence, INDEPENDENCE_TOOLTIP } from './heatmapStyles';
 
 const OVERALL_COMMENT_MAX = 2000;
 
@@ -213,6 +214,12 @@ interface StudentDrillDownProps {
   perStudent: TutorHomeworkResultsPerStudent | null;
   /** Task selected from a HeatmapGrid cell click. `null` = show all tasks. */
   initialTaskId: string | null;
+  /**
+   * Вид работы (2026-07-25). В самостоятельной строка «Самостоятельность» не
+   * показывается — AI выключен, метрика всегда 100%. Optional: отсутствие
+   * трактуем как обычную домашку (совместимость со старым edge).
+   */
+  workMode?: 'homework' | 'independent';
 }
 
 export function StudentDrillDown({
@@ -223,6 +230,7 @@ export function StudentDrillDown({
   tasks,
   perStudent,
   initialTaskId,
+  workMode,
 }: StudentDrillDownProps) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -250,6 +258,9 @@ export function StudentDrillDown({
         tutor_force_completed_at: string | null;
         tutor_reviewed_at: string | null;
         status: string;
+        // Метрика самостоятельности (2026-07-25): null = данных нет → «—».
+        ai_help_events: number | null;
+        independence_pct: number | null;
       }
     >();
     for (const ts of perStudent?.task_scores ?? []) {
@@ -264,6 +275,8 @@ export function StudentDrillDown({
         tutor_force_completed_at: ts.tutor_force_completed_at ?? null,
         tutor_reviewed_at: ts.tutor_reviewed_at ?? null,
         status: ts.status ?? 'active',
+        ai_help_events: ts.ai_help_events ?? null,
+        independence_pct: ts.independence_pct ?? null,
       });
     }
     return tasks.map((task) => {
@@ -281,6 +294,8 @@ export function StudentDrillDown({
         tutor_score_override_comment: cell?.tutor_score_override_comment ?? null,
         tutor_force_completed_at: cell?.tutor_force_completed_at ?? null,
         tutor_reviewed_at: cell?.tutor_reviewed_at ?? null,
+        ai_help_events: cell?.ai_help_events ?? null,
+        independence_pct: cell?.independence_pct ?? null,
         // Если cell отсутствует — это provisionGuidedThread-stub: status='active'.
         // Если cell есть — берём его status (может быть 'completed' или 'active').
         status: cell?.status ?? 'active',
@@ -304,6 +319,20 @@ export function StudentDrillDown({
     () => taskMeta.filter((t) => t.ai_score != null && t.tutor_reviewed_at == null).length,
     [taskMeta],
   );
+
+  // Строка «Самостоятельность …» под мини-карточками (2026-07-25). Скрыта в
+  // самостоятельной работе: там AI выключен и метрика всегда 100%.
+  const showIndependence = workMode !== 'independent';
+  const independenceLine = useMemo(() => {
+    if (selectedTaskId !== null) {
+      const task = taskMeta.find((t) => t.id === selectedTaskId);
+      if (!task || task.independence_pct == null) return null;
+      return `Задача №${task.order_num}: самостоятельность ${formatIndependence(task.independence_pct)} · помощь AI: ${task.ai_help_events ?? 0}`;
+    }
+    const aggregate = perStudent?.independence_pct;
+    if (aggregate == null) return null;
+    return `Самостоятельность по работе: ${formatIndependence(aggregate)} · помощь AI: ${perStudent?.ai_help_total ?? 0}`;
+  }, [selectedTaskId, taskMeta, perStudent]);
 
   // Selected task order_num for GuidedThreadViewer initial filter.
   const selectedTaskOrder = useMemo<number | 'all'>(() => {
@@ -450,6 +479,20 @@ export function StudentDrillDown({
         ) : null}
       </div>
 
+      {/* Самостоятельность — отдельной строкой под рядом мини-карточек
+          (2026-07-25). В карточку не лезем: все четыре её угла уже заняты
+          (балл / подсказки / правка / «проверено»). При выбранной задаче
+          показываем её метрику, при «Все задачи» — агрегат по работе
+          (взвешенный по max_score задач, считает бэкенд). */}
+      {showIndependence && independenceLine ? (
+        <p
+          className="-mt-1 text-xs text-slate-600"
+          title={INDEPENDENCE_TOOLTIP}
+        >
+          {independenceLine}
+        </p>
+      ) : null}
+
 
       <AlertDialog
         open={bulkConfirmOpen}
@@ -536,6 +579,8 @@ export function StudentDrillDown({
             max_score: editingTask.max_score,
           }}
           aiScore={editingTask.ai_score}
+          aiHelpEvents={editingTask.ai_help_events}
+          independencePct={editingTask.independence_pct}
           aiScoreComment={editingTask.ai_score_comment}
           finalScore={editingTask.score}
           currentOverride={editingTask.tutor_score_override}

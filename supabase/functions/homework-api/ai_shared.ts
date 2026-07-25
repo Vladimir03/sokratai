@@ -3,6 +3,11 @@
  * Extracted from the removed vision_checker.ts for use by guided_ai.ts.
  */
 
+import {
+  classifyAiGatewayError,
+  logAiGatewayError,
+} from "../_shared/ai-gateway-errors.ts";
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export type HomeworkAiErrorType =
@@ -242,6 +247,12 @@ export async function callLovableJson(
           error: errorMessage,
         });
         continue;
+      }
+      // T0 (2026-07-25): финальный отказ → `ai_gateway_errors` (единственный
+      // источник, по которому видно исчерпание AI-кредитов). Fire-and-forget.
+      {
+        const { code, httpStatus } = classifyAiGatewayError(error);
+        void logAiGatewayError({ source: telemetryTag, code, httpStatus });
       }
       throw error;
     } finally {

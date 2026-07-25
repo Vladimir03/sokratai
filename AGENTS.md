@@ -2,7 +2,13 @@
 
 Canonical guidance for AI coding agents (Claude Code, Codex, Cursor). **Single source of truth — read this first.** Claude Code imports it via `@AGENTS.md` in `CLAUDE.md` and adds only Claude-Code-specific notes there.
 
-Deep domain detail lives in `.claude/rules/*` (index at the bottom). Feature history, round-by-round fix logs, and commit archaeology live in `docs/delivery/features/<feature>/` and `~/.claude/plans/` — read on demand, **not** duplicated here.
+Deep domain detail lives in `.claude/skills/*` (loaded **on demand**) — index at the bottom. Feature history, round-by-round fix logs, and commit archaeology live in `docs/delivery/features/<feature>/` and `~/.claude/plans/` — read on demand, **not** duplicated here.
+
+> **Бюджет контекста — жёсткое правило (2026-07-25).** `.claude/rules/*` грузятся В КАЖДОЙ сессии целиком, ДО начала работы (Anthropic: «Rules without `paths` frontmatter are loaded at launch with the same priority as `.claude/CLAUDE.md`»). Прежняя формулировка «rules — read on demand» была **фактически неверна**, и именно она позволила им вырасти до 773 КБ ≈ **163 000 токенов**, из которых один файл (rule 40) занимал 57 700.
+>
+> Последствие не «дорого», а **функционально**: Anthropic прямо предупреждает — «bloated files cause Claude to ignore your actual instructions» и «target under 200 lines per file. Longer files consume more context and reduce adherence». То есть раздутые правила НЕ соблюдаются, и потерянным оказывается ровно то, что дороже всего — инвариант, купленный прод-инцидентом.
+>
+> Поэтому: **в `.claude/rules/` живут ТОЛЬКО инварианты, нарушение которых можно совершить ПЕРВОЙ же правкой, не успев подумать** (anti-leak, dual write-path, «никогда не X»). Глубина, история фич и пошаговые разборы ревью — в `.claude/skills/<тема>/SKILL.md`, они подгружаются по описанию, когда релевантны. Каждый rule-файл — **≤200 строк**. Добавляешь абзац в rules → сначала спроси: «нужно ли это Claude в КАЖДОЙ сессии?» Если нет — это skill.
 
 **Cross-references:** link to a rule file by path/name (`.claude/rules/45-mock-exams.md`, `rule 45`) or a section title — **never** by `CLAUDE.md §N`. Section numbers don't survive a CLAUDE.md edit; a path or title does.
 
@@ -140,7 +146,7 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `10-safe-change-policy.md` | Minimal-change policy, high-risk files |
 | `20-commands-and-validation.md` | Validation command sequence |
 | `30-docs-structure.md` | Discovery/Delivery doc layout |
-| `40-homework-system.md` | Homework: guided chat, write-paths, anti-leak, scoring, subject prompts, constructor QA |
+| `40-homework-system.md` | Homework — **только инварианты** (dual write-path, anti-leak ×3 слоя, шаги баллов 0.5/0.1, task identity, 3 AI-пути, QA-гейт конструктора). Глубина → skill **`homework-system`** |
 | `45-mock-exams.md` | Mock exams: state-aware anti-leak, AI grader, Part 1 OCR/checker, pause mode, seed |
 | `50-kb-module.md` | Knowledge base, moderation, Source→Copy, fingerprint dedup, storage protection |
 | `60-telegram-bot.md` | Telegram bot, /pay, invite flow, reliability |
@@ -154,7 +160,19 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `99-ai-quota-subscriptions.md` | AI daily-message quota (10/50), `get_subscription_status`, paid-tutor boost gate, admin grant-tutor-plan mechanism |
 | `100-tutor-student-chat.md` | Чат репетитор↔ученик: realtime, atomic `tsc_post_message`, SELECT-only RLS, @СократAI, уведомления, PWA-наджи установки |
 | `101-ceo-analytics.md` | CEO-аналитика `/admin`: «Пульс» (воронка активации поимённо, NSM, каналы, MRR run-rate), инварианты расчётов, аудит «Аналитики», МСК-бакеты |
-| `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser |
+| `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser, почему `exhaustive-deps` не чинят пачкой |
+
+**Каждый rule-файл ≤200 строк.** Перерос — вынеси глубину в skill (см. «Бюджет контекста» выше). Текущие нарушители, ждущие выноса: `50-kb-module` (400), `96-auth-ru-bypass` (454), `60-telegram-bot` (331), `95-production-deploy` (274).
+
+## Skills index — `.claude/skills/` (глубина, грузится по надобности)
+
+Домены, вынесенные из always-loaded rules. Инварианты остались в rules; здесь — специфика, история фич и пошаговые разборы.
+
+| Skill | Домен | Инварианты в |
+|---|---|---|
+| `homework-system` | ДЗ: грейдинг по предметам/критериям, CEFR/языки, физика Ч2 flowchart, голос, экран задачи ученика, шаблоны и Банк ДЗ, папки, share/preview, «требует проверки», полный QA-чеклист конструктора | `40-homework-system.md` |
+
+Прочие skills (`sokratai-formula-loader`, `fipi-task-loader`, дизайн-скиллы, AJTBD/NMT-скиллы) — рабочие процессы, не выжимки из rules.
 
 ---
 

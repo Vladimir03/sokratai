@@ -82,6 +82,7 @@ function normalizeKind(raw: RecentDialogItem['kind']): RecentDialogKind {
     case 'submitted':
     case 'completed':
     case 'stuck':
+    case 'check_failed':
       return raw;
     case 'task_opened':
       return 'opened';

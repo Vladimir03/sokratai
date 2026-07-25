@@ -177,11 +177,15 @@ interface HwState {
   status: string | null;
   ai_score: number | null;
   earned_score: number | null;
+  /** Лучший балл за все попытки — часть цепочки computeFinalScore (2026-07-25). */
+  best_earned_score: number | null;
   tutor_score_override: number | null;
   tutor_reviewed_at: string | null;
 }
 interface HwInfo {
   title: string;
+  /** Т8 (2026-07-25): вид работы — чип «Самостоятельная» на карточке занятия. */
+  work_mode: "homework" | "independent";
   status: "assigned" | "submitted" | "reviewed";
   score: number | null;
   max: number;
@@ -202,10 +206,17 @@ async function loadHomeworkInfo(
 
   const { data: assignments } = await db
     .from("homework_tutor_assignments")
-    .select("id, title")
+    .select("id, title, work_mode")
     .in("id", hwIds);
   const titleById = new Map<string, string>();
-  for (const a of assignments ?? []) titleById.set(a.id as string, (a.title as string) ?? "");
+  const workModeById = new Map<string, "homework" | "independent">();
+  for (const a of assignments ?? []) {
+    titleById.set(a.id as string, (a.title as string) ?? "");
+    workModeById.set(
+      a.id as string,
+      a.work_mode === "independent" ? "independent" : "homework",
+    );
+  }
 
   // Student-assignments scoped to uid (anti cross-student leak).
   const { data: saRows } = await db
@@ -257,7 +268,9 @@ async function loadHomeworkInfo(
     if (threadIds.length > 0) {
       const { data: stateRows } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, status, ai_score, earned_score, tutor_score_override, tutor_reviewed_at")
+        // `best_earned_score` — часть цепочки computeFinalScore (2026-07-25):
+        // чип балла на карточке занятия обязан совпадать с экраном ДЗ.
+        .select("thread_id, task_id, status, ai_score, earned_score, best_earned_score, tutor_score_override, tutor_reviewed_at")
         .in("thread_id", threadIds);
       for (const s of stateRows ?? []) {
         const tid = s.thread_id as string;
@@ -267,6 +280,7 @@ async function loadHomeworkInfo(
           status: (s.status as string | null) ?? null,
           ai_score: s.ai_score != null ? Number(s.ai_score) : null,
           earned_score: s.earned_score != null ? Number(s.earned_score) : null,
+          best_earned_score: s.best_earned_score != null ? Number(s.best_earned_score) : null,
           tutor_score_override: s.tutor_score_override != null ? Number(s.tutor_score_override) : null,
           tutor_reviewed_at: (s.tutor_reviewed_at as string | null) ?? null,
         });
@@ -319,6 +333,7 @@ async function loadHomeworkInfo(
 
     result.set(hwId, {
       title: titleById.get(hwId) ?? "",
+      work_mode: workModeById.get(hwId) ?? "homework",
       status,
       score: submitted && anySignal ? Math.round(score * 100) / 100 : null,
       max,
@@ -472,6 +487,7 @@ async function assembleFeedItems(
           kind: "homework_ref",
           assignment_id: m.homework_assignment_id,
           title: info.title,
+          work_mode: info.work_mode,
           status: info.status,
           score: info.score,
           max: info.max,
