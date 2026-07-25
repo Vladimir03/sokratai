@@ -773,5 +773,223 @@ if (subjectsGenResult.status !== 0) {
   console.error(subjectsGenResult.stderr ?? "");
   fail("subjects mirror stale — запусти `npm run generate:subjects` и закоммить результат");
 }
+// ── 20. Service Worker инварианты (2026-07-25) ─────────────────────────────
+//
+// Гард, который rule 95 рекомендует с инцидента 2026-06-29 («SW отдавал
+// respondWith(undefined) → пустой модуль → octet-stream → чанк не исполнялся»)
+// и который никто не написал. Тот же инцидент содержал вторую ошибку:
+// isHashedAsset был /[a-f0-9]{8,}/ и не матчил НИ ОДИН реальный vite-хэш
+// (они mixed-case base62) — все чанки шли по хрупкому network-first пути.
+const MIN_SW_CACHE_VERSION = 5;
+
+console.log("");
+console.log("20. Service Worker invariants (кэш-версия, isHashedAsset, тип-гарды)...");
+const swPath = path.join(rootDir, "public", "service-worker.js");
+if (!fs.existsSync(swPath)) {
+  fail("public/service-worker.js missing");
+}
+const swSource = fs.readFileSync(swPath, "utf8");
+
+// Проверки ФОРМЫ КОДА идут по source БЕЗ комментариев: этот файл документирует
+// анти-паттерны своими словами («respondWith(undefined) throws…»), и матч по
+// сырому тексту ложно срабатывал бы на собственной документации.
+//
+// Общий stripComments здесь НЕ подходит по двум причинам:
+//  1. Он режет `//` внутри строк-URL (`'://api.sokratai.ru/'`) как line-коммент
+//     и сносит остаток строки → байпас API «исчезает».
+//  2. Блочные комментарии нельзя вырезать ПЕРВЫМИ: в этом файле есть
+//     line-комментарий с текстом `/storage/*`, и его `/*` (при non-greedy
+//     матче до ближайшего `*/`) съедал ~40 строк РЕАЛЬНОГО кода вместе с
+//     веткой документов. Поэтому: сначала line-комментарии (protocol-safe),
+//     потом блочные.
+function stripJsCommentsUrlSafe(source) {
+  return source
+    .replace(/(^|[^:\\])\/\/[^\n]*/g, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+}
+const swCode = stripJsCommentsUrlSafe(swSource);
+
+// Сам стриппер — эвристика, поэтому проверяем, что он не съел код: иначе
+// «не найдено» ниже читалось бы как регресс SW, хотя виноват гард.
+for (const landmark of [
+  "self.addEventListener('fetch'",
+  "isDocumentRequest(event.request)",
+  "isHashedAsset(event.request.url)",
+  "api.sokratai.ru",
+]) {
+  if (!swCode.includes(landmark)) {
+    fail(
+      `smoke-check §20: стриппер комментариев съел «${landmark}» — починить ` +
+        "stripJsCommentsUrlSafe, а НЕ service-worker.js",
+    );
+  }
+}
+
+if (/respondWith\s*\(\s*undefined/.test(swCode)) {
+  fail("service-worker.js: respondWith(undefined) — пустой модуль читается как octet-stream (инцидент 2026-06-29)");
+}
+
+// Версия кэша: меняешь логику кэширования → бампай (activate чистит остальные).
+const swVersionMatch = swSource.match(/math-tutor-cache-v(\d+)/);
+if (!swVersionMatch) {
+  fail("service-worker.js: не найден CACHE_NAME вида math-tutor-cache-v<N>");
+}
+const swVersion = Number(swVersionMatch[1]);
+if (swVersion < MIN_SW_CACHE_VERSION) {
+  fail(
+    `service-worker.js: CACHE_NAME v${swVersion} < MIN_SW_CACHE_VERSION v${MIN_SW_CACHE_VERSION} — ` +
+      "менял кэширование? бампни версию и MIN_SW_CACHE_VERSION в этом файле",
+  );
+}
+
+// isHashedAsset обязан матчить РЕАЛЬНЫЕ vite-хэши и не хватать статику.
+const hashedFnMatch = swCode.match(/function isHashedAsset\(url\)\s*\{\s*return\s*(\/.+\/)[a-z]*\.test\(url\)/);
+if (!hashedFnMatch) {
+  fail("service-worker.js: не удалось извлечь регэксп isHashedAsset — правь гард синхронно с реализацией");
+}
+let isHashedAssetProbe;
+try {
+  isHashedAssetProbe = new Function("url", `return ${hashedFnMatch[1]}.test(url);`);
+} catch (err) {
+  fail(`service-worker.js: регэксп isHashedAsset не компилируется: ${err.message}`);
+}
+const hashedMustMatch = [
+  "/assets/index-CqLFP3xM.js",
+  "/assets/HomeworkProblem-4cjyIRNK.js",
+  "/assets/index-DlQ2sOZg.css",
+  "/assets/pdf.worker.min-BYB2VeqW.js",
+];
+const hashedMustNotMatch = ["/sokrat-logo.png", "/service-worker.js", "/manifest.json", "/index.html"];
+for (const url of hashedMustMatch) {
+  if (!isHashedAssetProbe(url)) {
+    fail(`service-worker.js: isHashedAsset НЕ матчит реальный vite-чанк ${url} (инцидент 2026-06-29)`);
+  }
+}
+for (const url of hashedMustNotMatch) {
+  if (isHashedAssetProbe(url)) {
+    fail(`service-worker.js: isHashedAsset ошибочно матчит ${url}`);
+  }
+}
+
+// Каждый cache.put ассетов обязан быть за тип-гардом: cache-first + вечный
+// CACHE_NAME ⇒ одна запись «HTML под URL чанка» живёт вечно.
+if (!swCode.includes("isCacheableAssetResponse(")) {
+  fail("service-worker.js: нет isCacheableAssetResponse — cache.put без проверки content-type");
+}
+const putIndices = [];
+for (let i = swCode.indexOf("cache.put("); i !== -1; i = swCode.indexOf("cache.put(", i + 1)) {
+  putIndices.push(i);
+}
+if (putIndices.length === 0) {
+  fail("service-worker.js: не найдено ни одного cache.put — гард потерял смысл, проверь реализацию");
+}
+for (const idx of putIndices) {
+  const before = swCode.slice(Math.max(0, idx - 500), idx);
+  if (!/isCacheable(Asset|Document)Response\(/.test(before)) {
+    fail("service-worker.js: cache.put без предшествующего isCacheable*Response — возможное отравление кэша");
+  }
+}
+
+// Ветка документов обязана ретраить (один сорванный DPI-хендшейк иначе отдаёт
+// оффлайн-копию шелла со ссылками на удалённые хэши → белый экран).
+const docBranchStart = swCode.indexOf("isDocumentRequest(event.request)");
+if (docBranchStart === -1) {
+  fail("service-worker.js: не найдена ветка isDocumentRequest(event.request)");
+}
+const docBranch = swCode.slice(docBranchStart, docBranchStart + 600);
+if (!docBranch.includes("fetchWithRetry")) {
+  fail("service-worker.js: ветка документов без fetchWithRetry — один DPI-обрыв отдаст стейл-шелл");
+}
+
+// Байпас нашего API обязан стоять ВЫШЕ любой кэширующей ветки.
+const apiBypassIdx = swCode.indexOf("://api.sokratai.ru/");
+if (apiBypassIdx === -1) {
+  fail("service-worker.js: нет байпаса api.sokratai.ru — запросы к API попадут в кэш");
+}
+if (apiBypassIdx > docBranchStart) {
+  fail("service-worker.js: байпас api.sokratai.ru ПОСЛЕ кэширующих ветвей — переставь выше");
+}
+ok(`service-worker.js invariants pass (v${swVersion}, isHashedAsset матчит vite-хэши, cache.put за тип-гардом)`);
+
+// ── 21. Шелл + деплой инварианты (2026-07-25) ──────────────────────────────
+//
+// (а) modulepreload на /src/*: Vite резолвит его как АССЕТ и инлайнит сырой
+//     нетранспилированный исходник как data:application/octet-stream — нулевая
+//     польза и ПОСТОЯННЫЙ ложноположительный на диагностике rule 95 «сломан SW».
+// (б) деплой: retention старых hashed-assets — единственное, что спасает
+//     клиента со стейл-шеллом. Возврат `rm -rf /var/www` = возврат белых
+//     экранов (проверено curl'ом 24.07: все чанки из /admin отдавали 404).
+console.log("");
+console.log("21. Shell + deploy invariants (modulepreload, retention деплоя)...");
+const indexHtmlPath = path.join(rootDir, "index.html");
+if (!fs.existsSync(indexHtmlPath)) {
+  fail("index.html missing");
+}
+// HTML-комментарии вырезаем: и index.html, и его билд ДОКУМЕНТИРУЮТ этот
+// анти-паттерн своими словами (в т.ч. цитируя строку `data:application/
+// octet-stream`), поэтому матч по сырому тексту ловил бы сам комментарий.
+const stripHtmlComments = (html) => html.replace(/<!--[\s\S]*?-->/g, "");
+
+const indexHtmlMarkup = stripHtmlComments(fs.readFileSync(indexHtmlPath, "utf8"));
+if (/<link[^>]+rel=["']modulepreload["'][^>]+href=["']\/src\//.test(indexHtmlMarkup)) {
+  fail(
+    "index.html: modulepreload на /src/* — Vite заинлайнит сырой исходник как " +
+      "data:application/octet-stream (см. rule 95). Удали строку.",
+  );
+}
+
+const builtIndexPath = path.join(rootDir, "dist", "index.html");
+if (fs.existsSync(builtIndexPath)) {
+  const builtIndex = stripHtmlComments(fs.readFileSync(builtIndexPath, "utf8"));
+  if (builtIndex.includes("data:application/octet-stream;base64")) {
+    fail("dist/index.html: инлайн data:application/octet-stream — источник ложного «сломан SW»");
+  }
+  // Ни одна ссылка собранного шелла не должна указывать в исходники.
+  if (/(?:src|href)=["']\/src\//.test(builtIndex)) {
+    fail("dist/index.html: ссылка на /src/* в собранном шелле — Vite не переписал тег");
+  }
+  ok("dist/index.html без octet-stream-инлайнов и ссылок на /src/*");
+} else {
+  warn("dist/index.html отсутствует — пропускаю проверку собранного шелла (запусти npm run build)");
+}
+
+const deployScriptPath = path.join(rootDir, "scripts", "deploy", "deploy.sh");
+if (!fs.existsSync(deployScriptPath)) {
+  fail("scripts/deploy/deploy.sh missing — тело deploy-sokratai обязано жить в репо (rule 95)");
+}
+const deploySource = fs.readFileSync(deployScriptPath, "utf8");
+// Проверка ФОРМЫ КОДА — по строкам без shell-комментариев: шапка скрипта
+// объясняет, ПОЧЕМУ `rm -rf /var/www` запрещён, и цитирует его дословно.
+// Режем только цельные строки-комментарии (`^\s*#`), не инлайновые `#`, чтобы
+// не задеть возможные `${VAR#pattern}`.
+const deployCode = deploySource
+  .split(/\r?\n/)
+  .filter((line) => !/^\s*#/.test(line))
+  .join("\n");
+if (/rm\s+-rf[^\n]*\/var\/www/.test(deployCode)) {
+  fail(
+    "scripts/deploy/deploy.sh: `rm -rf /var/www...` вернулся — это удаляет старые hashed-assets " +
+      "и гарантирует белый экран каждому, у кого открыта вкладка через деплой",
+  );
+}
+for (const [needle, why] of [
+  ["--size-only", "merge ассетов обязан быть append-only (content-addressed)"],
+  ["--exclude='/.*'", "без исключения дотфайлов --delete съест /.well-known/acme-challenge (TLS)"],
+  ["touch -c", "GC-keepalive: без touch текущего набора GC удалит живой react-vendor"],
+  ["RETENTION СЛОМАН", "само-верификация retention (прошлый entry обязан отдавать 200)"],
+]) {
+  if (!deploySource.includes(needle)) {
+    fail(`scripts/deploy/deploy.sh: потерян «${needle}» — ${why}`);
+  }
+}
+const bashProbe = spawnSync("bash", ["-n", deployScriptPath], { cwd: rootDir, encoding: "utf8" });
+if (bashProbe.error) {
+  warn("bash недоступен — пропускаю синтаксическую проверку deploy.sh (на VPS её делает стаб)");
+} else if (bashProbe.status !== 0) {
+  console.error(bashProbe.stderr ?? "");
+  fail("scripts/deploy/deploy.sh: синтаксическая ошибка (bash -n)");
+}
+ok("shell + deploy invariants pass (нет modulepreload /src/*, деплой сохраняет retention)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");
