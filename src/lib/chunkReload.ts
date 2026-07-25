@@ -74,7 +74,18 @@ function safeLocalStorage(): Storage | null {
   }
 }
 
-/** Время последней chunk-ошибки в ЭТОЙ жизни страницы (0 = не было). */
+/**
+ * Монотонные часы для окна тишины. `Date.now()` здесь непригоден: коррекция
+ * часов НАЗАД делала `quietFor` отрицательным, и таймер вставал на сутки
+ * (ревью 5.6 P2). `performance.now()` есть в Safari 15.
+ */
+function nowMono(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+/** Время последней chunk-ошибки в ЭТОЙ жизни страницы (монотонное; 0 = не было). */
 let lastChunkErrorAt = 0;
 let resolveTimer: number | null = null;
 
@@ -84,18 +95,26 @@ let resolveTimer: number | null = null;
  * сбойную страницу стабильной и снимет анти-петлевой флаг.
  */
 export function noteChunkError(): void {
-  lastChunkErrorAt = Date.now();
+  lastChunkErrorAt = nowMono();
 }
 
-/** Разобрать журнал авто-reload'ов, отбросив всё старше окна. */
+/**
+ * Разобрать журнал авто-reload'ов, отбросив всё вне окна.
+ *
+ * Журнал персистится, поэтому timestamps — wall-clock. Отбрасываем и слишком
+ * старые, и записи «из будущего»: после перевода часов назад они иначе никогда
+ * не выпадут из окна и залипят circuit breaker (ревью 5.6 P2).
+ */
 function readRecentReloads(store: Storage): number[] {
   const raw = store.getItem(RELOAD_LOG);
   if (!raw) return [];
-  const cutoff = Date.now() - CIRCUIT_WINDOW_MS;
+  const now = Date.now();
+  const cutoff = now - CIRCUIT_WINDOW_MS;
+  const skew = 60 * 1000; // допуск на рассинхрон часов
   return raw
     .split(",")
     .map((s) => Number(s))
-    .filter((n) => Number.isFinite(n) && n > cutoff);
+    .filter((n) => Number.isFinite(n) && n > cutoff && n <= now + skew);
 }
 
 /**
@@ -135,17 +154,28 @@ export function reloadForChunkError(): boolean {
       return false;
     }
     const now = Date.now();
-    store.setItem(RELOAD_FLAG, String(now));
+    // ПОРЯДОК ВАЖЕН (ревью 5.6 P2): длинный RELOAD_LOG пишем ПЕРВЫМ. Если
+    // упрёмся в quota, исключение прилетит до записи RELOAD_FLAG, и мы вернём
+    // false с ЧИСТЫМ состоянием. При обратном порядке флаг оставался бы
+    // навсегда (reload не случился, а снять его уже некому — стартовый таймер
+    // отработал), и авто-восстановление умирало бы для этого браузера.
     store.setItem(
       RELOAD_LOG,
       [...recent, now].slice(-CIRCUIT_LOG_MAX).join(","),
     );
+    store.setItem(RELOAD_FLAG, String(now));
   } catch {
     return false;
   }
   try {
     window.location.reload();
   } catch {
+    // reload не стартовал — снимаем флаг, иначе он залипнет без перезагрузки.
+    try {
+      store.removeItem(RELOAD_FLAG);
+    } catch {
+      /* noop */
+    }
     return false;
   }
   return true;
@@ -160,11 +190,29 @@ export function reloadForChunkError(): boolean {
  */
 export function markChunkReloadResolved(delayMs = 5000): void {
   if (typeof window === "undefined") return;
+  const store = safeLocalStorage();
+  if (!store) return;
+
+  // Захватываем ЗНАЧЕНИЕ маркера на момент взвода таймера (ревью 5.6 P1).
+  //
+  // localStorage общий на все вкладки. Раньше вкладка B, загрузившаяся без
+  // ошибок, через 5с БЕЗУСЛОВНО удаляла маркер — включая свежий маркер,
+  // который вкладка A поставила секунду назад перед своим reload. «Один reload
+  // на эпизод» вырождался в «до трёх по circuit breaker».
+  //
+  // Нет маркера на старте → снимать нечего, таймер не взводим вовсе.
+  let captured: string | null;
+  try {
+    captured = store.getItem(RELOAD_FLAG);
+  } catch {
+    return;
+  }
+  if (captured === null) return;
 
   const clearIfQuiet = () => {
     resolveTimer = null;
     if (lastChunkErrorAt !== 0) {
-      const quietFor = Date.now() - lastChunkErrorAt;
+      const quietFor = nowMono() - lastChunkErrorAt;
       if (quietFor < delayMs) {
         // Ошибка была недавно — страница НЕ стабильна, ждём остаток окна.
         resolveTimer = window.setTimeout(clearIfQuiet, delayMs - quietFor);
@@ -172,7 +220,11 @@ export function markChunkReloadResolved(delayMs = 5000): void {
       }
     }
     try {
-      window.localStorage.removeItem(RELOAD_FLAG);
+      // Снимаем ТОЛЬКО свой маркер: если значение изменилось, его поставила
+      // другая вкладка уже после нас — это её эпизод, не наш.
+      if (store.getItem(RELOAD_FLAG) === captured) {
+        store.removeItem(RELOAD_FLAG);
+      }
     } catch {
       /* noop */
     }

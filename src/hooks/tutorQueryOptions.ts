@@ -78,7 +78,9 @@ export function createTutorRetry(queryKey: TutorQueryKey) {
     // попытку и быстро отдаём ошибку наверх, чтобы UI показал
     // правильное сообщение и не висел в «восстановлении».
     if (isTutorNetworkError(error)) {
-      if (failureCount <= TUTOR_NETWORK_MAX_RETRIES) {
+      // Строго `<` (ревью 5.6 P2): retry() получает failureCount=0 на первом
+      // решении, поэтому `<=` давал на один ретрай больше, чем обещает константа.
+      if (failureCount < TUTOR_NETWORK_MAX_RETRIES) {
         console.warn("tutor_query_network_retry", {
           queryKey: key,
           failureCount,
@@ -94,7 +96,7 @@ export function createTutorRetry(queryKey: TutorQueryKey) {
       return false;
     }
 
-    if (failureCount <= TUTOR_MAX_RETRIES) {
+    if (failureCount < TUTOR_MAX_RETRIES) {
       console.warn("tutor_query_retry", {
         queryKey: key,
         failureCount,

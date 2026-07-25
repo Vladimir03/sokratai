@@ -829,6 +829,41 @@ if (/respondWith\s*\(\s*undefined/.test(swCode)) {
   fail("service-worker.js: respondWith(undefined) — пустой модуль читается как octet-stream (инцидент 2026-06-29)");
 }
 
+// Литеральный `respondWith(undefined)` — НЕ тот вид, в котором баг реально
+// случается (ревью 5.6 P2: гард давал ложный проход). Инцидент 2026-06-29 был
+// `return cached` — при cache miss это undefined, и respondWith получал его
+// неявно. Поэтому требуем явный терминатор `|| Response.error()` в КАЖДОЙ
+// fallback-ветви и общее число терминаторов.
+const cachedFallbacks = (swCode.match(/cached\s*\|\|\s*Response\.error\(\)/g) ?? []).length;
+if (cachedFallbacks < 2) {
+  fail(
+    `service-worker.js: найдено ${cachedFallbacks} из ≥2 fallback'ов вида ` +
+      "`cached || Response.error()` (ветка документов + generic). Голый `return cached` " +
+      "при cache miss отдаёт undefined → octet-stream (инцидент 2026-06-29)",
+  );
+}
+const errorTerminators = (swCode.match(/Response\.error\(\)/g) ?? []).length;
+if (errorTerminators < 3) {
+  fail(
+    `service-worker.js: только ${errorTerminators} из ≥3 Response.error() — ` +
+      "каждая ветка respondWith обязана иметь валидный терминатор вместо undefined",
+  );
+}
+
+// Запись в кэш обязана продлевать жизнь воркера: respondWith продлевает её
+// только для ВОЗВРАЩАЕМОГО promise, поэтому «выстрелил и забыл» cache.put может
+// не дожить до конца (ревью 5.6 P2 — оффлайн-копия шелла оставалась старой).
+const waitUntilCount = (swCode.match(/event\.waitUntil\(/g) ?? []).length;
+if (waitUntilCount < putIndicesEarly(swCode)) {
+  fail(
+    "service-worker.js: cache.put вне event.waitUntil — запись может быть убита " +
+      "вместе с воркером сразу после отдачи ответа",
+  );
+}
+function putIndicesEarly(code) {
+  return (code.match(/cache\.put\(/g) ?? []).length;
+}
+
 // Версия кэша: меняешь логику кэширования → бампай (activate чистит остальные).
 const swVersionMatch = swSource.match(/math-tutor-cache-v(\d+)/);
 if (!swVersionMatch) {
@@ -966,21 +1001,67 @@ const deployCode = deploySource
   .split(/\r?\n/)
   .filter((line) => !/^\s*#/.test(line))
   .join("\n");
-if (/rm\s+-rf[^\n]*\/var\/www/.test(deployCode)) {
-  fail(
-    "scripts/deploy/deploy.sh: `rm -rf /var/www...` вернулся — это удаляет старые hashed-assets " +
-      "и гарантирует белый экран каждому, у кого открыта вкладка через деплой",
-  );
+// Запрет destructive-удаления докрута. Ловим и литеральный путь, и переменные:
+// `rm -rf "$DOCROOT"` / `"$ASSETS"` разрушительны ровно так же (ревью 5.6 P2).
+// Исключение — GC снапшотов (`$SNAPSHOTS`), он легитимен.
+for (const line of deployCode.split("\n")) {
+  if (!/\brm\s+-rf\b/.test(line)) continue;
+  if (/\$\{?SNAPSHOTS\b/.test(line)) continue; // ротация снапшотов — ок
+  if (/\/var\/www|\$\{?DOCROOT\b|\$\{?ASSETS\b/.test(line)) {
+    fail(
+      `scripts/deploy/deploy.sh: destructive «${line.trim()}» — удаление докрута/пула ассетов ` +
+        "стирает старые hashed-assets и гарантирует белый экран каждому, у кого открыта вкладка через деплой",
+    );
+  }
+}
+
+// Инварианты ищем в КОДЕ, а не в исходнике целиком (ревью 5.6 P2: раньше
+// использовался deploySource, и строки находились в шапке комментариев — удаление
+// реального `--size-only` из rsync-команды давало ложный проход, воспроизведено).
+const rsyncLines = deployCode.split("\n").filter((l) => /\brsync\b/.test(l));
+const rsyncBlock = deployCode; // флаги могут быть на продолжении строки (\)
+if (rsyncLines.length < 2) {
+  fail(`scripts/deploy/deploy.sh: найдено ${rsyncLines.length} rsync-команд, ожидалось ≥2 (ассеты + корень)`);
 }
 for (const [needle, why] of [
   ["--size-only", "merge ассетов обязан быть append-only (content-addressed)"],
   ["--exclude='/.*'", "без исключения дотфайлов --delete съест /.well-known/acme-challenge (TLS)"],
   ["touch -c", "GC-keepalive: без touch текущего набора GC удалит живой react-vendor"],
   ["RETENTION СЛОМАН", "само-верификация retention (прошлый entry обязан отдавать 200)"],
+  ["--delete", "замена корня обязана удалять исчезнувшие файлы"],
 ]) {
-  if (!deploySource.includes(needle)) {
-    fail(`scripts/deploy/deploy.sh: потерян «${needle}» — ${why}`);
+  if (!rsyncBlock.includes(needle)) {
+    fail(`scripts/deploy/deploy.sh: потерян «${needle}» в КОДЕ (не в комментарии) — ${why}`);
   }
+}
+// Порядок «ассеты → корень»: merge пула обязан идти раньше замены корня, иначе
+// новый index.html может сослаться на ещё не залитый чанк.
+const assetsRsyncIdx = deployCode.indexOf("--size-only");
+const rootRsyncIdx = deployCode.indexOf("--delete");
+if (assetsRsyncIdx === -1 || rootRsyncIdx === -1 || assetsRsyncIdx > rootRsyncIdx) {
+  fail("scripts/deploy/deploy.sh: нарушен порядок «ассеты → корень» (merge пула должен идти до --delete корня)");
+}
+// Lock обязан браться до git pull — либо в стабе (наследуется), либо здесь.
+const stubPath = path.join(rootDir, "scripts", "deploy", "deploy-sokratai.stub.sh");
+if (fs.existsSync(stubPath)) {
+  const stubCode = fs.readFileSync(stubPath, "utf8")
+    .split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join("\n");
+  const lockIdx = stubCode.indexOf("flock");
+  const pullIdx = stubCode.indexOf("git pull");
+  if (lockIdx === -1 || pullIdx === -1 || lockIdx > pullIdx) {
+    fail(
+      "deploy-sokratai.stub.sh: flock обязан браться ДО git pull — иначе второй запуск " +
+        "меняет рабочее дерево под сборкой первого (смешанный bundle со старым SHA)",
+    );
+  }
+  if (!/--abbrev-ref HEAD/.test(stubCode) || !/status --porcelain/.test(stubCode)) {
+    fail(
+      "deploy-sokratai.stub.sh: нет проверки «чистый main» — `git pull --ff-only` " +
+        "не проверяет ни имя ветки, ни чистоту дерева, и в прод уедет feature/dirty-код",
+    );
+  }
+} else {
+  warn("scripts/deploy/deploy-sokratai.stub.sh отсутствует — пропускаю проверку lock/branch-гардов");
 }
 const bashProbe = spawnSync("bash", ["-n", deployScriptPath], { cwd: rootDir, encoding: "utf8" });
 if (bashProbe.error) {

@@ -143,14 +143,30 @@ function scrubChain(raw: string): string {
  * остальным сегментам без изменений (все текущие редакции в полной силе).
  */
 function scrubMessage(raw: string): string {
+  // ПОРЯДОК КРИТИЧЕН (ревью 5.6 P2). Query-строку срезаем ПЕРВОЙ, по ЦЕЛОМУ
+  // тексту. Раньше сначала вынимались имена ассетов, и signed URL вида
+  // `.../Chunk-abcdefgh.js?X-Amz-Credential=…&X-Amz-Signature=…` разрывался на
+  // куски — URL-регэксп больше не видел целого URL, длинная подпись гасилась
+  // generic-правилом, а 20-символьный credential ВЫЖИВАЛ.
+  const queryStripped = raw.replace(
+    /((?:https?|wss?):\/\/[^\s?"'<>]+)\?[^\s"'<>]*/gi,
+    "$1?[…]",
+  );
+
+  // Теперь можно безопасно изъять имена ассетов из-под остальной цепочки:
+  // они и есть ответ на «какой чанк не загрузился».
   let out = "";
   let lastIndex = 0;
   VITE_ASSET_RE.lastIndex = 0;
-  for (let m = VITE_ASSET_RE.exec(raw); m !== null; m = VITE_ASSET_RE.exec(raw)) {
-    out += scrubChain(raw.slice(lastIndex, m.index)) + m[0];
+  for (
+    let m = VITE_ASSET_RE.exec(queryStripped);
+    m !== null;
+    m = VITE_ASSET_RE.exec(queryStripped)
+  ) {
+    out += scrubChain(queryStripped.slice(lastIndex, m.index)) + m[0];
     lastIndex = m.index + m[0].length;
   }
-  return out + scrubChain(raw.slice(lastIndex));
+  return out + scrubChain(queryStripped.slice(lastIndex));
 }
 
 function clampText(raw: unknown, max: number): string {

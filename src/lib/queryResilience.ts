@@ -102,8 +102,13 @@ export function withJitter(delayMs: number, maxMs = delayMs): number {
 export function defaultQueryRetry(failureCount: number, error: unknown): boolean {
   if (isNotFoundError(error)) return false;
   if (isAuthRejection(error)) return false;
-  if (isNetworkError(error)) return failureCount <= DEFAULT_NETWORK_MAX_RETRIES;
-  return failureCount <= DEFAULT_SERVER_MAX_RETRIES;
+  // Строго `<`, не `<=` (ревью 5.6 P2, проверено по query-core/retryer):
+  // `let failureCount = 0` и `retry(failureCount, error)` вызывается ДО
+  // инкремента, поэтому первое решение приходит с 0. При `<=` каждый кап давал
+  // на один ретрай больше заявленного. Тот же идиом у самого TanStack для
+  // числового `retry`: `failureCount < retry`.
+  if (isNetworkError(error)) return failureCount < DEFAULT_NETWORK_MAX_RETRIES;
+  return failureCount < DEFAULT_SERVER_MAX_RETRIES;
 }
 
 /**

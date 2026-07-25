@@ -121,7 +121,12 @@ class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      if (this.props.fallback) {
+      // `!== undefined`, а НЕ truthy-проверка (ревью 5.6 P1): `fallback={null}`
+      // означает «отрендерить ничего» — именно так подключены тостеры в App.tsx.
+      // При truthy-проверке `null` проваливался дальше, и падение 2-килобайтного
+      // чанка sonner показывало полноэкранный краш-экран поверх приложения,
+      // ровно то, что этот проп и должен был предотвратить.
+      if (this.props.fallback !== undefined) {
         return this.props.fallback;
       }
 

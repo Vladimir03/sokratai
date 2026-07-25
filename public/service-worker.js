@@ -152,9 +152,17 @@ self.addEventListener('fetch', (event) => {
         .then((fetchResponse) => {
           if (isCacheableDocumentResponse(fetchResponse)) {
             const responseToCache = fetchResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put('/index.html', responseToCache);
-            }).catch(() => { /* кэш недоступен — не роняем навигацию */ });
+            // waitUntil ОБЯЗАТЕЛЕН (ревью 5.6 P2): respondWith продлевает жизнь
+            // воркера только для ВОЗВРАЩАЕМОГО promise. Незачейненная запись в
+            // кэш могла быть убита вместе с воркером сразу после отдачи ответа —
+            // и оффлайн-копия шелла осталась бы старой, хотя пользователь только
+            // что успешно открыл новую версию. Это ровно то, что этот блок и
+            // должен был починить.
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put('/index.html', responseToCache))
+                .catch(() => { /* кэш недоступен — не роняем навигацию */ })
+            );
           }
           return fetchResponse;
         })
@@ -185,9 +193,13 @@ self.addEventListener('fetch', (event) => {
           const fetchResponse = await fetchWithRetry(event.request, 1);
           if (isCacheableAssetResponse(event.request, fetchResponse)) {
             const responseToCache = fetchResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(event.request, responseToCache);
-            }).catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ });
+            // waitUntil, а не «выстрелил и забыл» — см. комментарий в ветке
+            // документов: иначе запись может не дожить до конца воркера.
+            event.waitUntil(
+              caches.open(CACHE_NAME)
+                .then((cache) => cache.put(event.request, responseToCache))
+                .catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ })
+            );
           } else if (fetchResponse && fetchResponse.status === 200) {
             // 200, но не тот тип (HTML вместо JS/CSS) — НЕ кэшируем и НЕ отдаём:
             // отдав, мы бы получили «Expected a JavaScript-or-Wasm module
@@ -220,9 +232,11 @@ self.addEventListener('fetch', (event) => {
         // попадают шрифты/иконки/manifest, и HTML под их URL — тоже отравление).
         if (isCacheableAssetResponse(event.request, fetchResponse)) {
           const responseToCache = fetchResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          }).catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ });
+          event.waitUntil(
+            caches.open(CACHE_NAME)
+              .then((cache) => cache.put(event.request, responseToCache))
+              .catch(() => { /* кэш недоступен — отдаём сетевой ответ как есть */ })
+          );
         }
         return fetchResponse;
       })

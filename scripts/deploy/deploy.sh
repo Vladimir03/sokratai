@@ -37,14 +37,32 @@ log() { printf '\n=== %s ===\n' "$*"; }
 die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
 
 # Два деплоя не должны переплетать merge ассетов.
-exec 9>/var/lock/deploy-sokratai.lock
-flock -n 9 || die "деплой уже идёт (lock занят)"
+#
+# Стаб уже держит lock на FD 9 (взят ДО его `git pull` — ревью 5.6 P1) и
+# наследует его через exec. Переоткрывать здесь НЕЛЬЗЯ: `exec 9>file` создаёт
+# новый дескриптор и теряет блокировку стаба. Берём lock сами только при прямом
+# запуске тела (напр. `bash scripts/deploy/deploy.sh` при ручном откате).
+if [ -z "${DEPLOY_LOCK_HELD:-}" ]; then
+  exec 9>/var/lock/deploy-sokratai.lock
+  flock -n 9 || die "деплой уже идёт (lock занят)"
+  export DEPLOY_LOCK_HELD=1
+fi
 
 command -v rsync >/dev/null || die "нужен rsync: apt-get install -y rsync"
 
-log "1/10 git pull"
 cd "$REPO"
-git pull --ff-only
+# Pull уже сделан стабом (он же проверил чистый main). При прямом запуске тела
+# подтягиваем сами — но с теми же гардами, иначе ручной откат уедет с
+# feature-ветки.
+if [ -z "${DEPLOY_PULLED:-}" ]; then
+  log "1/10 git pull (тело запущено напрямую)"
+  cur=$(git rev-parse --abbrev-ref HEAD)
+  [ "$cur" = "main" ] || die "HEAD на «$cur», а не «main» — деплой остановлен"
+  [ -z "$(git status --porcelain --untracked-files=no)" ] || die "рабочее дерево не чистое — деплой остановлен"
+  git pull --ff-only origin main
+else
+  log "1/10 git pull — уже выполнен стабом"
+fi
 SHA=$(git rev-parse --short HEAD)
 
 log "2/10 npm ci"
