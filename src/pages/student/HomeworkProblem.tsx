@@ -1436,7 +1436,14 @@ export default function HomeworkProblem() {
       hint_count: hintCount,
       score_state: isCurrentCompleted ? 'completed' : 'active',
     };
-  }, [data, taskStates, liveScore, hintCount, isCurrentCompleted]);
+    // orderForState ОБЯЗАН быть в deps (2026-07-25): он производный от
+    // assignmentDetails.tasks (через taskByIdMap), а assignmentDetails приходит
+    // ДРУГИМ запросом, чем data. Если он резолвится вторым, первый прогон мемо
+    // видит пустую taskByIdMap → orderForState возвращает undefined для всех →
+    // doneIndices = [] → StepIndicator показывает НОЛЬ выполненных задач, хотя
+    // они выполнены. Без этой зависимости мемо больше не пересчитается, пока не
+    // изменится что-то другое.
+  }, [data, taskStates, liveScore, hintCount, isCurrentCompleted, orderForState]);
 
   // ─── Loading + error states ──────────────────────────────────────────────
   if (isPending || (!data && isFetching)) {
