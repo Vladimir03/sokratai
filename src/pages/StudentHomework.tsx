@@ -10,6 +10,7 @@ import { parseISO } from 'date-fns';
 import { MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import NotificationsNudge from '@/components/pwa/NotificationsNudge';
+import { WorkModeChip } from '@/components/homework/WorkModeChip';
 import { InAppBrowserNudge } from '@/components/InAppBrowserNudge';
 
 function formatStatus(status: string | null, deadline: string | null) {
@@ -73,7 +74,12 @@ const StudentHomework = () => {
                       <CardHeader>
                         <div className="flex items-start justify-between gap-2">
                           <CardTitle>{assignment.title}</CardTitle>
-                          <Badge className={STATUS_COLORS[uiStatus]}>{STATUS_LABELS[uiStatus]}</Badge>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            {/* Вид работы: ученик должен знать ДО открытия, что
+                                подсказок и обсуждения не будет. */}
+                            <WorkModeChip workMode={assignment.work_mode} />
+                            <Badge className={STATUS_COLORS[uiStatus]}>{STATUS_LABELS[uiStatus]}</Badge>
+                          </div>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">

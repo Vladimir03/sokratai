@@ -69,13 +69,16 @@ export async function loadHomeworkForStudents(
   if (studentIds.length === 0) return empty as never;
 
   // Tutor's assignments (ownership via auth.users.id).
+  // Т8 (2026-07-25): `work_mode` — родителю интереснее самостоятельный
+  // результат, поэтому работы разделяются на «самостоятельные» и «с Сократом».
+  // Anti-leak (§5) не нарушается: это вид работы, а не подсказки/решения.
   const { data: assignments } = await db
     .from("homework_tutor_assignments")
-    .select("id, title, subject, status, deadline, created_at")
+    .select("id, title, subject, status, deadline, created_at, work_mode")
     .eq("tutor_id", tutorUserId)
     .in("status", ["active", "closed"]);
   const assignmentIds = (assignments ?? []).map((a) => a.id as string);
-  const assignmentById = new Map<string, { deadline: string | null; title: string; subject: string | null; status: string; created_at: string }>();
+  const assignmentById = new Map<string, { deadline: string | null; title: string; subject: string | null; status: string; created_at: string; work_mode: string }>();
   for (const a of assignments ?? []) {
     assignmentById.set(a.id as string, {
       deadline: (a.deadline as string | null) ?? null,
@@ -83,6 +86,7 @@ export async function loadHomeworkForStudents(
       subject: (a.subject as string | null) ?? null,
       status: (a.status as string) ?? "active",
       created_at: (a.created_at as string) ?? "",
+      work_mode: a.work_mode === "independent" ? "independent" : "homework",
     });
   }
   if (assignmentIds.length === 0) {
@@ -321,6 +325,9 @@ export async function buildStudentProgress(
     works.push({
       id: sa.assignmentId,
       kind: "homework",
+      // Т8: клиент (отчёт родителю / панель прогресса) делит список по этому
+      // полю. Старый клиент поле игнорирует → прежний единый список.
+      work_mode: assignment.work_mode,
       title: assignment.title,
       subject: assignment.subject,
       date: deadline ?? assignment.created_at,

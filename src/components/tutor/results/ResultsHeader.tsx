@@ -24,6 +24,7 @@ import type {
   TutorHomeworkAssignmentDetails,
   TutorHomeworkResultsResponse,
 } from '@/lib/tutorHomeworkApi';
+import { WorkModeChip } from '@/components/homework/WorkModeChip';
 
 interface ResultsHeaderProps {
   assignment: TutorHomeworkAssignmentDetails['assignment'] | null;
@@ -112,6 +113,9 @@ export const ResultsHeader = memo(function ResultsHeader({
                   <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-slate-900 truncate">
                     {assignment.title}
                   </h1>
+                  {/* Вид работы (запрос репетиторов 2026-07-25) — рядом с
+                      названием, чтобы не приходилось писать его в заголовке. */}
+                  <WorkModeChip workMode={assignment.work_mode} size="md" />
                   <DeadlineBadge deadline={assignment.deadline} />
                 </div>
                 <p className="text-sm text-slate-500 mt-1">

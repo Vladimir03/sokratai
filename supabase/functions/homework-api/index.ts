@@ -3,6 +3,7 @@ import {
   computeAvailableScore,
   evaluateStudentAnswer,
   generateHint,
+  isCheckFailedFeedbackText,
   renormalizeCriteriaToScore,
 } from "./guided_ai.ts";
 import { sendPushNotification, type PushSubscriptionData, type PushPayload } from "../_shared/push-sender.ts";
@@ -2919,6 +2920,9 @@ async function notifyHomeworkStudentAssigned(
   subject: string,
   deadline: string | null,
   tutorName: string | null,
+  // homework-work-modes (Т8, 2026-07-25): вид работы в тексте уведомления —
+  // ученик должен узнать про «без подсказок» ДО того, как откроет задачу.
+  workMode?: HomeworkWorkMode | null,
 ): Promise<QuickAssignCascadeResult> {
   const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ??
     "https://sokratai.ru";
@@ -2926,10 +2930,15 @@ async function notifyHomeworkStudentAssigned(
   const deadlineHint = deadline
     ? ` Дедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}.`
     : "";
+  const isIndependent = workMode === "independent";
   const tutorHint = tutorName ? `${tutorName} назначил` : "Тебе назначили";
+  const workLabel = isIndependent ? "самостоятельную работу" : "домашнее задание";
+  const modeHint = isIndependent ? " Подсказок и обсуждения не будет." : "";
   const pushPayload: PushPayload = {
-    title: `Новое ДЗ: ${assignmentTitle}`,
-    body: `${tutorHint} домашнее задание по ${subject}.${deadlineHint}`,
+    title: isIndependent
+      ? `Самостоятельная: ${assignmentTitle}`
+      : `Новое ДЗ: ${assignmentTitle}`,
+    body: `${tutorHint} ${workLabel} по ${subject}.${modeHint}${deadlineHint}`,
     url,
   };
 
@@ -2979,12 +2988,17 @@ async function notifyHomeworkStudentAssigned(
     if (chatId) {
       try {
         const text =
-          `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n` +
+          (isIndependent
+            ? `📝 Самостоятельная работа: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n`
+            : `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignmentTitle)}</b>\n`) +
           `Предмет: ${escapeHtmlEntities(subject)}` +
+          (isIndependent
+            ? "\nБез подсказок и обсуждения — разбор будет после сдачи."
+            : "") +
           (deadline
             ? `\nДедлайн: ${new Date(deadline).toLocaleDateString("ru-RU")}`
             : "") +
-          `\n\n<a href="${escapeHtmlEntities(url)}">Открыть ДЗ</a>`;
+          `\n\n<a href="${escapeHtmlEntities(url)}">${isIndependent ? "Открыть работу" : "Открыть ДЗ"}</a>`;
         const tgResp = await fetch(
           `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
           {
@@ -3291,6 +3305,7 @@ async function handleQuickAssignStudentsWithNotify(
           subject,
           deadlineStr,
           tutorName,
+          normalizeWorkMode(assignment.work_mode),
         ).catch((err): QuickAssignCascadeResult => {
           console.warn("homework_assign_quick_notify_student_failed", {
             student_id: sid,
@@ -3703,12 +3718,22 @@ async function handleNotifyStudents(
 
   const appUrl = Deno.env.get("PUBLIC_APP_URL")?.trim().replace(/\/$/, "") ?? "https://sokratai.ru";
   const homeworkUrl = `${appUrl}/homework/${assignmentId}`;
-  const defaultMessage = `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
+  // homework-work-modes (Т8, 2026-07-25): вид работы в тексте — зеркало
+  // quick-assign-каскада (`notifyHomeworkStudentAssigned`). Кастомный
+  // `messageTemplate` репетитора не трогаем: он пишет текст сам.
+  const bulkIsIndependent = normalizeWorkMode(assignment.work_mode) === "independent";
+  const defaultMessage = bulkIsIndependent
+    ? `📝 Самостоятельная работа: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\nБез подсказок и обсуждения — разбор будет после сдачи.\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть работу</a>`
+    : `📚 Новое домашнее задание: <b>${escapeHtmlEntities(assignment.title as string)}</b>\n\nПредмет: ${escapeHtmlEntities(assignment.subject as string)}\n<a href="${escapeHtmlEntities(homeworkUrl)}">Открыть ДЗ</a>`;
   const tgText = messageTemplate ?? defaultMessage;
 
   const pushPayload: PushPayload = {
-    title: `Новое ДЗ: ${assignment.title as string}`,
-    body: `Новое задание по ${assignment.subject as string}`,
+    title: bulkIsIndependent
+      ? `Самостоятельная: ${assignment.title as string}`
+      : `Новое ДЗ: ${assignment.title as string}`,
+    body: bulkIsIndependent
+      ? `Самостоятельная работа по ${assignment.subject as string} — без подсказок`
+      : `Новое задание по ${assignment.subject as string}`,
     url: homeworkUrl,
   };
 
@@ -10291,16 +10316,33 @@ async function runStudentAnswerGrading(args: {
       ? result.flowchart_trace
       : null;
 
+  // UX сбоя проверки (T0, 2026-07-25; репорт Ульяны). Второй сбой подряд по той
+  // же задаче → добавляем «мы уже знаем», чтобы ученик не долбил кнопку (она
+  // нажала дважды и получила тот же текст). Детект без новой колонки и без
+  // доп. запроса: `last_ai_feedback` уже хранит предыдущий фидбэк, а
+  // `isCheckFailedFeedbackText` опознаёт наши сбойные тексты.
+  const isCheckFailed = effectiveVerdict === "CHECK_FAILED";
+  const repeatedFailure = isCheckFailed &&
+    typeof currentState.last_ai_feedback === "string" &&
+    isCheckFailedFeedbackText(currentState.last_ai_feedback as string);
+  const feedbackForStudent = repeatedFailure
+    ? `${result.feedback} Мы уже знаем о проблеме и починим её — можно вернуться к задаче позже.`
+    : result.feedback;
+
   // Save AI feedback message (caller-controlled kind: ai_reply for chat,
   // check_result for explicit submission so the submission flow gets a
   // semantically distinct verdict bubble).
+  //
+  // CHECK_FAILED — свой kind (`check_failed`, миграция 20260725120000): это НЕ
+  // оценка ответа, и клиент обязан отрисовать его нейтральной системной плашкой,
+  // а не пузырём Сократа (ученица приняла сбой за вердикт по своему решению).
   await db.from("homework_tutor_thread_messages").insert({
     thread_id: threadId,
     role: "assistant",
-    content: result.feedback,
+    content: feedbackForStudent,
     task_id: currentState.task_id as string,
     task_order: currentOrder,
-    message_kind: feedbackKind,
+    message_kind: isCheckFailed ? "check_failed" : feedbackKind,
   });
 
   let responseData: Record<string, unknown>;
@@ -10403,13 +10445,13 @@ async function runStudentAnswerGrading(args: {
     };
   } else if (effectiveVerdict === "CHECK_FAILED") {
     await db.from("homework_tutor_task_states").update({
-      last_ai_feedback: result.feedback,
+      last_ai_feedback: feedbackForStudent,
       updated_at: new Date().toISOString(),
     }).eq("id", currentState.id);
 
     responseData = {
       verdict: "CHECK_FAILED",
-      feedback: result.feedback,
+      feedback: feedbackForStudent,
       ai_score: null,
       ai_score_comment: null,
       earned_score: null,
@@ -11999,7 +12041,14 @@ const RECENT_DIALOGS_DISPLAY_LIMIT = 5;
 const RECENT_DIALOGS_STUCK_WRONG = 3;
 const RECENT_DIALOGS_STUCK_HINT = 3;
 
-type RecentDialogKind = "opened" | "wrote" | "submitted" | "completed" | "stuck";
+type RecentDialogKind =
+  | "opened"
+  | "wrote"
+  | "submitted"
+  | "completed"
+  | "stuck"
+  // T0 (2026-07-25): сдал, но автопроверка упала → ждёт РУЧНОЙ проверки.
+  | "check_failed";
 type RecentDialogAuthor = "student" | "tutor" | "ai";
 
 interface RecentDialogItem {
@@ -12288,6 +12337,40 @@ async function handleGetRecentDialogs(
     if (m) latestStudentMsgByThread.set(m.thread_id, m);
   }
 
+  // 5b. Сбой автопроверки как отдельный сигнал репетитору (T0, 2026-07-25;
+  //     репорт Ульяны: ответ ученика повис непроверенным, а репетитор узнал
+  //     случайно). Смотрим ПОСЛЕДНЮЮ реакцию AI по треду: если это
+  //     `check_failed`, значит успешной проверки после сбоя не было → задача
+  //     ждёт ручной проверки. Один .limit(1) на picked-тред (≤ 5) — та же
+  //     форма, что и запросы выше.
+  const failedCheckResults = await Promise.all(
+    pickedThreadIds.map(async (tid) => {
+      const { data, error } = await db
+        .from("homework_tutor_thread_messages")
+        .select("thread_id, message_kind, task_order")
+        .eq("thread_id", tid)
+        .eq("role", "assistant")
+        .in("message_kind", ["check_failed", "check_result", "ai_reply"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        // Non-fatal: без этого сигнала лента просто покажет «Сдал задачу».
+        console.error("recent_dialogs_failed_check_error", {
+          thread_id: tid,
+          error: error.message,
+        });
+        return null;
+      }
+      const row = data as { thread_id: string; message_kind: string | null; task_order: number | null } | null;
+      return row && row.message_kind === "check_failed" ? row : null;
+    }),
+  );
+  const failedCheckByThread = new Map<string, { task_order: number | null }>();
+  for (const r of failedCheckResults) {
+    if (r) failedCheckByThread.set(r.thread_id, { task_order: r.task_order });
+  }
+
   // 4. Resolve student names via tutor_students (display_name) + profiles.username fallback.
   //    tutor_students.tutor_id references public.tutors.id (not auth.uid) — we need
   //    the tutor row id here. Reuse the standard lookup.
@@ -12385,9 +12468,19 @@ async function handleGetRecentDialogs(
     let kind: RecentDialogKind;
     let taskOrder: number | undefined;
     let preview: string;
+    const failedCheck = failedCheckByThread.get(t.id);
     if (e.isCompleted) {
       kind = "completed";
       preview = "Завершил ДЗ";
+    } else if (failedCheck) {
+      // Приоритет выше «сдал»: ученик сдал, но AI не проверил — это требует
+      // РУЧНОГО действия репетитора, а не просто «есть новая сдача».
+      kind = "check_failed";
+      const failedOrder = typeof failedCheck.task_order === "number"
+        ? failedCheck.task_order
+        : null;
+      taskOrder = (failedOrder ?? fallbackOrder) ?? undefined;
+      preview = `Автопроверка не сработала${taskSuffix(taskOrder)} — нужна ваша проверка`;
     } else if (
       agg &&
       (agg.maxWrong >= RECENT_DIALOGS_STUCK_WRONG ||

@@ -47,8 +47,65 @@ const MAX_SCORE_COMMENT_LENGTH = 280;
 const MAX_PROMPT_IMAGE_BYTES = 5 * 1024 * 1024;
 const SAFE_FEEDBACK_NO_ANSWER =
   "Проверь ход решения шаг за шагом и попробуй исправить первую найденную ошибку самостоятельно.";
-const CHECK_FAILED_FEEDBACK =
-  "Автопроверка сейчас не сработала, но баллы не списаны. Попробуй ещё раз или перейди в режим «Обсудить», и я помогу по шагам.";
+// UX сбоя автопроверки (T0, 2026-07-25; репорт Ульяны). Прежний единый текст
+// советовал «попробуй ещё раз или перейди в режим „Обсудить“» — при мёртвом
+// шлюзе оба совета вредны: повтор даёт ту же ошибку (ученица нажала дважды),
+// а обсуждение идёт через ТОТ ЖЕ шлюз (упадёт так же) и в самостоятельной
+// работе его вообще нет. Поэтому текстов два — по природе сбоя.
+//
+// Инвариант: сбой НЕ должен читаться как оценка ответа. Клиент рендерит его
+// системной плашкой (не пузырём Сократа), а `verdict: 'CHECK_FAILED'` —
+// сигнал этой развилки.
+const CHECK_FAILED_FEEDBACK_OUTAGE =
+  "Сократ сейчас недоступен — это на нашей стороне, не в твоём решении. Твой ответ сохранён, репетитор его увидит. Баллы не списаны.";
+const CHECK_FAILED_FEEDBACK_RETRYABLE =
+  "Автопроверка не сработала, но баллы не списаны. Твой ответ сохранён — попробуй отправить ещё раз.";
+
+/** Сбои на нашей стороне, где повтор бесполезен (шлюз/таймаут/пустой ответ). */
+const OUTAGE_FAILURE_REASONS = new Set<GuidedCheckFailureReason>([
+  "gateway_error",
+  "timeout",
+  "empty_model_response",
+]);
+
+function checkFailedFeedback(reason: GuidedCheckFailureReason): string {
+  return OUTAGE_FAILURE_REASONS.has(reason)
+    ? CHECK_FAILED_FEEDBACK_OUTAGE
+    : CHECK_FAILED_FEEDBACK_RETRYABLE;
+}
+
+/**
+ * Был ли этот фидбэк сбоем автопроверки. Нужен вызывающему, чтобы опознать
+ * ВТОРОЙ сбой подряд по задаче (`task_states.last_ai_feedback`) и не советовать
+ * ученику пробовать снова в третий раз. Матч по началу строки — к сбойному
+ * тексту может быть дописан хвост «мы уже знаем о проблеме».
+ */
+export function isCheckFailedFeedbackText(text: string | null | undefined): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  return (
+    trimmed.startsWith(CHECK_FAILED_FEEDBACK_OUTAGE) ||
+    trimmed.startsWith(CHECK_FAILED_FEEDBACK_RETRYABLE) ||
+    trimmed.startsWith("Не удалось загрузить картинку с условием задачи")
+  );
+}
+
+/**
+ * Единственный конструктор CHECK_FAILED-результата: текст ВСЕГДА выводится из
+ * причины. Не собирать `{ ...CHECK_FALLBACK, failure_reason }` вручную — иначе
+ * при отказе шлюза ученик снова получит совет «попробуй ещё раз».
+ */
+function buildCheckFallback(reason: GuidedCheckFailureReason): GuidedCheckResult {
+  return {
+    verdict: "CHECK_FAILED",
+    confidence: 0,
+    feedback: checkFailedFeedback(reason),
+    error_type: "incomplete",
+    ai_score: null,
+    ai_score_comment: null,
+    failure_reason: reason,
+  };
+}
 
 const VALID_VERDICTS = new Set(["CORRECT", "INCORRECT", "ON_TRACK"]);
 const MIN_HINT_LENGTH = 40;
@@ -1472,16 +1529,6 @@ function classifyGuidedCheckFailure(error: unknown): GuidedCheckFailureReason {
 
 // ─── Check result sanitization ──────────────────────────────────────────────
 
-const CHECK_FALLBACK: GuidedCheckResult = {
-  verdict: "CHECK_FAILED",
-  confidence: 0,
-  feedback: CHECK_FAILED_FEEDBACK,
-  error_type: "incomplete",
-  ai_score: null,
-  ai_score_comment: null,
-  failure_reason: "unknown",
-};
-
 interface SanitizeCheckScoring {
   checkFormat?: EvaluateStudentAnswerParams["checkFormat"];
   maxScore: number;
@@ -1504,10 +1551,7 @@ function sanitizeCheckResult(
     ? parsed.verdict.trim().toUpperCase()
     : null;
   if (!rawVerdict || !VALID_VERDICTS.has(rawVerdict)) {
-    return {
-      ...CHECK_FALLBACK,
-      failure_reason: "invalid_json",
-    };
+    return buildCheckFallback("invalid_json");
   }
   const verdict = rawVerdict as Exclude<GuidedVerdict, "CHECK_FAILED">;
 
@@ -2282,7 +2326,7 @@ async function evaluatePhysicsPart2(
   solutionImageUrls: string[],
 ): Promise<GuidedCheckResult> {
   const kim = params.kimNumber ?? null;
-  if (kim == null) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+  if (kim == null) return buildCheckFallback("unknown");
 
   const rubric = resolveSubjectRubric({
     subject: "physics",
@@ -2301,7 +2345,7 @@ async function evaluatePhysicsPart2(
     reference,
     maxScore: params.maxScore,
   });
-  if (!systemContent) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+  if (!systemContent) return buildCheckFallback("unknown");
 
   const userParts: Array<LovableTextPart | LovableImagePart> = [];
   const condLabel = taskImageUrls.length > 0 ? "Условие задачи (текст + фото):" : "Условие задачи:";
@@ -2336,17 +2380,17 @@ async function evaluatePhysicsPart2(
       kim,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+    return buildCheckFallback("unknown");
   }
 
   const sane = sanitizePhysicsJudgments(parsed, kim);
   if (!sane) {
     console.warn("guided_check_physics_parse_failed", { kim });
-    return { ...CHECK_FALLBACK, failure_reason: "invalid_json" };
+    return buildCheckFallback("invalid_json");
   }
 
   const walk = walkPhysicsFlowchart(kim, sane.judgments);
-  if (!walk) return { ...CHECK_FALLBACK, failure_reason: "unknown" };
+  if (!walk) return buildCheckFallback("unknown");
 
   // Телеметрия misconfig (review fix P2): tutor max_score ≠ ФИПИ max → пропор-
   // циональный ремап даёт дробные баллы. Не блок (вердикт сохраняется), но surface.
@@ -2511,10 +2555,9 @@ export async function evaluateStudentAnswer(
         task_text_len: taskTextStr.length,
       }));
       return {
-        ...CHECK_FALLBACK,
+        ...buildCheckFallback("task_image_missing"),
         feedback:
-          "Не удалось загрузить картинку с условием задачи. Это техническая проблема — попробуй ещё раз через минуту. Баллы не списаны.",
-        failure_reason: "task_image_missing",
+          "Не удалось загрузить картинку с условием задачи. Это техническая проблема на нашей стороне — твой ответ сохранён, репетитор его увидит. Баллы не списаны.",
       };
     }
 
@@ -2743,10 +2786,7 @@ export async function evaluateStudentAnswer(
       error: error instanceof Error ? error.message : String(error),
       failure_reason,
     });
-    return {
-      ...CHECK_FALLBACK,
-      failure_reason,
-    };
+    return buildCheckFallback(failure_reason);
   }
 }
 

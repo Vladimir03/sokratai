@@ -88,6 +88,8 @@ export interface StudentLessonMaterial {
   url?: string | null;
   // homework_ref only:
   assignment_id?: string;
+  /** Т8 (2026-07-25): вид работы. Optional — старый edge поле не отдаёт. */
+  work_mode?: 'homework' | 'independent';
   status?: HomeworkRefStatus;
   score?: number | null;
   max?: number;

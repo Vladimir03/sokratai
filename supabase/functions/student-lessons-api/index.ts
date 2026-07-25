@@ -182,6 +182,8 @@ interface HwState {
 }
 interface HwInfo {
   title: string;
+  /** Т8 (2026-07-25): вид работы — чип «Самостоятельная» на карточке занятия. */
+  work_mode: "homework" | "independent";
   status: "assigned" | "submitted" | "reviewed";
   score: number | null;
   max: number;
@@ -202,10 +204,17 @@ async function loadHomeworkInfo(
 
   const { data: assignments } = await db
     .from("homework_tutor_assignments")
-    .select("id, title")
+    .select("id, title, work_mode")
     .in("id", hwIds);
   const titleById = new Map<string, string>();
-  for (const a of assignments ?? []) titleById.set(a.id as string, (a.title as string) ?? "");
+  const workModeById = new Map<string, "homework" | "independent">();
+  for (const a of assignments ?? []) {
+    titleById.set(a.id as string, (a.title as string) ?? "");
+    workModeById.set(
+      a.id as string,
+      a.work_mode === "independent" ? "independent" : "homework",
+    );
+  }
 
   // Student-assignments scoped to uid (anti cross-student leak).
   const { data: saRows } = await db
@@ -319,6 +328,7 @@ async function loadHomeworkInfo(
 
     result.set(hwId, {
       title: titleById.get(hwId) ?? "",
+      work_mode: workModeById.get(hwId) ?? "homework",
       status,
       score: submitted && anySignal ? Math.round(score * 100) / 100 : null,
       max,
@@ -472,6 +482,7 @@ async function assembleFeedItems(
           kind: "homework_ref",
           assignment_id: m.homework_assignment_id,
           title: info.title,
+          work_mode: info.work_mode,
           status: info.status,
           score: info.score,
           max: info.max,

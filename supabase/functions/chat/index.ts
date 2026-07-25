@@ -100,6 +100,7 @@ import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-ru
 import { SUBJECT_LABELS } from "../_shared/subjects.generated.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 import { buildPedagogyContextBlock, loadLearningContext } from "../_shared/learning-context.ts";
+import { logAiGatewayError } from "../_shared/ai-gateway-errors.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -1966,6 +1967,15 @@ async function processAIRequest(
   if (!response.ok) {
     const errorText = await response.text();
     console.error("AI gateway error:", response.status, errorText);
+
+    // T0 (2026-07-25): обсуждение с Сократом — САМЫЙ дорогой AI-путь (≈47%
+    // токенов), и его отказы раньше не попадали ни в одну таблицу: инцидент
+    // «кончились кредиты» был виден только по проверкам ДЗ. Fire-and-forget.
+    void logAiGatewayError({
+      source: guidedHomeworkAssignmentId ? "chat_discussion" : "chat_generic",
+      code: "http",
+      httpStatus: response.status,
+    });
 
     if (response.status === 429) {
       return new Response(JSON.stringify({ error: "Превышен лимит запросов. Попробуйте позже." }), {

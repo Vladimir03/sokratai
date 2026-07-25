@@ -52,6 +52,12 @@ export interface TutorHomeworkAssignmentListItem {
    * >0 → «N на проверку». Optional (backward-compat). Запрос Елены 2026-06-18.
    */
   review_pending_count?: number;
+  /**
+   * Вид работы (homework-work-modes, 2026-07-25). Драйвит чип «Самостоятельная»
+   * в списке ДЗ — репетиторы просили отличать её от «ДЗ с Сократом», не
+   * прописывая вид в названии. Optional: старый edge поле не отдаёт.
+   */
+  work_mode?: 'homework' | 'independent';
   avg_score: number | null;
   /** Sum of max_score for all tasks in this assignment. Used to display "X/Y" format. */
   max_score_total?: number | null;
@@ -1168,7 +1174,12 @@ export type RecentDialogKind =
   | 'wrote'
   | 'submitted'
   | 'completed'
-  | 'stuck';
+  | 'stuck'
+  /**
+   * T0 (2026-07-25): ученик сдал, но автопроверка упала (сбой AI-шлюза) —
+   * ответ ждёт РУЧНОЙ проверки репетитора. Приоритет выше 'submitted'.
+   */
+  | 'check_failed';
 
 export interface RecentDialogItem {
   /** Discriminator — см. `RecentDialogKind`. Optional for backward compat. */
