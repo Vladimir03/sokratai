@@ -570,6 +570,13 @@ export interface StudentHomeworkResultTask {
   final_score: number;
   /** Есть ли сдача ученика по задаче (false = «Без ответа», занулено finish'ем). */
   answered: boolean;
+  /**
+   * «% самостоятельности» по задаче (2026-07-25). `null` = данных нет (работа
+   * до релиза / задача закрыта массово) → в UI не показываем.
+   */
+  independence_pct?: number | null;
+  /** Сырое число обращений к помощи AI по задаче. */
+  ai_help_events?: number | null;
 }
 
 export type StudentHomeworkResult =
@@ -593,6 +600,14 @@ export type StudentHomeworkResult =
       tasks: StudentHomeworkResultTask[];
       total_score: number;
       total_max: number;
+      /**
+       * Агрегат «% самостоятельности» по работе — средневзвешенный по max_score
+       * задач. `null` в самостоятельной работе (AI выключен → метрика
+       * бессмысленна) и когда ни по одной задаче нет данных.
+       */
+      independence_pct?: number | null;
+      /** Σ обращений к помощи AI по работе. */
+      ai_help_total?: number;
     };
 
 /** Экран «Результат работы» (Т6) — один round-trip, state-aware reveal. */

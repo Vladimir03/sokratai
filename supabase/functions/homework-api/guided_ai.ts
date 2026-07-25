@@ -472,20 +472,17 @@ export interface GenerateHintParams {
 }
 
 // ─── Score computation ──────────────────────────────────────────────────────
-
-/**
- * Compute available score after degradation.
- * Formula: maxScore * max(0.5, 1 - 0.1 * (wrongCount + hintCount))
- */
-export function computeAvailableScore(
-  maxScore: number,
-  wrongCount: number,
-  hintCount: number,
-): number {
-  const factor = Math.max(0.5, 1 - 0.1 * (wrongCount + hintCount));
-  const raw = maxScore * factor;
-  return Math.round(raw * 100) / 100; // round to 2 decimals
-}
+//
+// НАДГРОБИЕ: `computeAvailableScore(max, wrong, hint) = max * max(0.5, 1 − 0.1×(wrong+hint))`
+// удалён 2026-07-25. Деградация балла за подсказки/неверные попытки ОТМЕНЕНА
+// решением владельца: балл задачи должен показывать то, что ученик реально
+// решил по критериям ФИПИ («так будет чётко видна шкала, к которой мы приучаем
+// ребёнка»), а цену помощи показывает отдельная метрика — «% самостоятельности»
+// = 100% − 10 п.п. × обращений к AI (`_shared/score-compute.ts`).
+//
+// Не возрождать: два штрафа за одно и то же (и балл, и метрика) снова сделали бы
+// оценку непрозрачной. `available_score` продолжает писаться, но равен max_score
+// (его читает ученик как «максимальный балл за задачу»).
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

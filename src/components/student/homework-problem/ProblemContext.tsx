@@ -50,6 +50,14 @@ export interface ProblemContextTask {
   /** Max score for this task. */
   task_score_max: number;
   /**
+   * «% самостоятельности» по задаче (2026-07-25): 100% − 10% за каждое
+   * обращение к помощи AI. Ученик видит метрику открыто — она мотивирует
+   * думать самому, не пряча при этом балл. `null` = данных нет (работа до
+   * релиза) ИЛИ самостоятельная работа (там AI выключен → всегда 100%,
+   * показывать бессмысленно) → чип не рендерится.
+   */
+  independence_pct?: number | null;
+  /**
    * Active vs completed task — drives chip styling. `'completed'` makes
    * the score green to telegraph «зафиксировано». Default `'active'`.
    */
@@ -196,6 +204,19 @@ export function ProblemContext({
             {task.score_state === 'completed' ? 'баллов' : 'баллов'}
           </span>
           )}
+          {/* Самостоятельность (2026-07-25) — ученику ОТКРЫТО, решение
+              владельца: «мы именно его мотивируем через эту систему думать
+              головой». Чип появляется, только когда данные есть; в
+              самостоятельной работе бэкенд присылает null (там всегда 100%). */}
+          {task.independence_pct != null ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-socrat-border bg-socrat-surface px-2 py-0.5 text-[11px] font-semibold tabular-nums text-foreground/80"
+              title={`Самостоятельность ${task.independence_pct}% — 100% минус 10% за каждое обращение к помощи Сократа (разбор ошибки, подсказка, ответ в обсуждении). На балл за задачу это не влияет.`}
+              aria-label={`Самостоятельность ${task.independence_pct} процентов`}
+            >
+              Сам-но {task.independence_pct}%
+            </span>
+          ) : null}
           {/* Hint counter (B3) — visible only when > 0 to keep clean state. */}
           {(task.hint_count ?? 0) > 0 ? (
             <span

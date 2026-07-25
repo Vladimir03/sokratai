@@ -69,6 +69,21 @@ export interface StudentProblemResponse {
    * (state-aware reveal — балл не раскрывается).
    */
   task_score: number | null;
+  /**
+   * «% самостоятельности» по задаче (2026-07-25): 100% − 10% за каждое
+   * обращение к помощи AI (разбор ошибки / подсказка / ответ в обсуждении).
+   * `null` = данных нет (работа до релиза) ИЛИ самостоятельная работа, где AI
+   * выключен и метрика по определению 100%. Формулу на клиенте НЕ считаем.
+   */
+  task_independence_pct?: number | null;
+  /** Сырое число обращений к помощи AI (для тултипа). */
+  task_ai_help_events?: number | null;
+  /**
+   * Максимальный балл, доступный за задачу (`available_score`). С 2026-07-25
+   * равен `max_score` — деградация за подсказки отменена; поле оставлено, чтобы
+   * ученик видел «до чего можно дотянуть», и на случай будущих потолков.
+   */
+  task_score_ceiling?: number | null;
   /** Hydrated thread for the assignment (with task_states + messages). */
   thread: HomeworkThread | null;
   student: StudentProblemStudent;

@@ -126,7 +126,7 @@ export async function loadHomeworkForStudents(
   for (const list of tasksByAssignment.values()) list.sort((a, b) => a.order_num - b.order_num);
 
   const threadById = new Map<string, { saId: string; status: string }>();
-  const statesByThread = new Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>();
+  const statesByThread = new Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>();
   if (saIds.length > 0) {
     const { data: threadRows } = await db
       .from("homework_tutor_threads")
@@ -142,7 +142,11 @@ export async function loadHomeworkForStudents(
     if (threadIds.length > 0) {
       const { data: stateRows } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, status, ai_score, earned_score, tutor_score_override, tutor_reviewed_at")
+        // `best_earned_score` — часть цепочки computeFinalScore (2026-07-25):
+        // без неё балл здесь разошёлся бы с экраном результатов. `ai_help_events`
+        // НЕ селектим: этот билдер шарится с ПУБЛИЧНЫМ отчётом родителю, а
+        // видимость метрики самостоятельности там — отдельное решение.
+        .select("thread_id, task_id, status, ai_score, earned_score, best_earned_score, tutor_score_override, tutor_reviewed_at")
         .in("thread_id", threadIds);
       for (const s of stateRows ?? []) {
         const tid = s.thread_id as string;
@@ -152,6 +156,7 @@ export async function loadHomeworkForStudents(
           status: (s.status as string | null) ?? null,
           ai_score: s.ai_score != null ? Number(s.ai_score) : null,
           earned_score: s.earned_score != null ? Number(s.earned_score) : null,
+          best_earned_score: s.best_earned_score != null ? Number(s.best_earned_score) : null,
           tutor_score_override: s.tutor_score_override != null ? Number(s.tutor_score_override) : null,
           tutor_reviewed_at: (s.tutor_reviewed_at as string | null) ?? null,
         });
@@ -277,7 +282,7 @@ export async function buildStudentProgress(
 
   // ── Homework works ──
   const hw = await loadHomeworkForStudents(db, tutorUserId, [studentId]);
-  type HwState = { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null };
+  type HwState = { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null };
   // saId list for this student (all, since loadHomeworkForStudents narrowed to [studentId])
   const saThread = new Map<string, { threadStatus: string; states: HwState[] }>();
   for (const [tid, th] of hw.threadById) {
