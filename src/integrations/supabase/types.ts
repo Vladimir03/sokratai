@@ -74,6 +74,33 @@ export type Database = {
         }
         Relationships: []
       }
+      ai_gateway_errors: {
+        Row: {
+          alert_sent: boolean
+          error_code: string | null
+          http_status: number | null
+          id: number
+          occurred_at: string
+          source: string
+        }
+        Insert: {
+          alert_sent?: boolean
+          error_code?: string | null
+          http_status?: number | null
+          id?: number
+          occurred_at?: string
+          source: string
+        }
+        Update: {
+          alert_sent?: boolean
+          error_code?: string | null
+          http_status?: number | null
+          id?: number
+          occurred_at?: string
+          source?: string
+        }
+        Relationships: []
+      }
       analytics_events: {
         Row: {
           actor_user_id: string | null
@@ -4750,6 +4777,18 @@ export type Database = {
       admin_revoke_tutor_plan: {
         Args: { p_email: string; p_note?: string }
         Returns: Json
+      }
+      ai_credit_usage_summary: {
+        Args: { _day_start: string; _month_start: string }
+        Returns: Json
+      }
+      ai_gateway_error_log: {
+        Args: {
+          p_error_code?: string
+          p_http_status?: number
+          p_source: string
+        }
+        Returns: boolean
       }
       book_lesson_slot: {
         Args: {
