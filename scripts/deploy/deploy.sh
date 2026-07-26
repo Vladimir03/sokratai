@@ -83,17 +83,34 @@ log "4/10 валидация dist (ПРОД ЕЩЁ НЕ ТРОНУТ)"
 [ -s dist/invite-og.html ] || die "нет dist/invite-og.html — упал postbuild (generate-og-variants)"
 js_count=$(find dist/assets -name '*.js' -type f | wc -l)
 [ "$js_count" -ge "$MIN_JS_CHUNKS" ] || die "только $js_count JS-чанков (ожидалось ≥$MIN_JS_CHUNKS) — билд неполный"
-if grep -q 'data:application/octet-stream;base64' dist/index.html; then
-  die "в index.html вернулся modulepreload сырого исходника (data:application/octet-stream) — см. rule 95"
-fi
-# Каждый /assets/... из обоих HTML обязан существовать в dist/assets.
-missing=0
-for html in dist/index.html dist/invite-og.html; do
-  while IFS= read -r ref; do
-    [ -f "dist$ref" ] || { printf '   %s → отсутствует %s\n' "$html" "$ref"; missing=1; }
-  done < <(grep -o '/assets/[A-Za-z0-9._-]*' "$html" | sort -u)
-done
-[ "$missing" -eq 0 ] || die "HTML ссылается на отсутствующие ассеты"
+# HTML-комментарии снимаются ДО проверки содержимого — иначе гард читает
+# СОБСТВЕННУЮ документацию. Ровно это и случилось на первом боевом запуске:
+# в index.html живёт комментарий, дословно цитирующий
+# `data:application/octet-stream;base64` (объяснение, почему нельзя ставить
+# modulepreload на /src/*.tsx), и валидация упала на нём, а не на коде.
+# Vite оставляет HTML-комментарии в выводе, так что цитата доезжает до dist.
+# Тот же класс ложных срабатываний уже ловился в smoke-check — там комментарии
+# тоже снимаются первыми. Заодно это закрывает симметричный случай: упоминание
+# `/assets/...` в комментарии больше не читается как ссылка на ассет.
+#
+# Обе проверки живут внутри одного node-прохода: он гарантированно есть (билд
+# только что отработал), и сбой самого node отличим от найденной проблемы.
+validation=$(node -e '
+  const fs = require("fs");
+  const strip = (f) => fs.readFileSync(f, "utf8").replace(/<!--[\s\S]*?-->/g, "");
+  const problems = [];
+  if (/data:application\/octet-stream;base64/.test(strip("dist/index.html"))) {
+    problems.push("в index.html вернулся modulepreload сырого исходника (data:application/octet-stream) — см. rule 95");
+  }
+  for (const f of ["index.html", "invite-og.html"]) {
+    for (const ref of new Set(strip("dist/" + f).match(/\/assets\/[A-Za-z0-9._-]+/g) || [])) {
+      if (!fs.existsSync("dist" + ref)) problems.push(f + " ссылается на отсутствующий " + ref);
+    }
+  }
+  process.stdout.write(problems.join("\n"));
+') || die "не смог проверить dist (node упал) — прод не тронут"
+[ -z "$validation" ] || die "валидация dist не прошла:
+$validation"
 printf '   ok: %s JS-чанков, все ссылки HTML резолвятся\n' "$js_count"
 
 log "5/10 запоминаем ЖИВОЙ entry (проверка retention на шаге 9)"
