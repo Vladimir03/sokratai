@@ -28,6 +28,12 @@ REPO=/opt/sokratai
 DOCROOT=/var/www/sokratai
 ASSETS="$DOCROOT/assets"
 SNAPSHOTS=/var/www/sokratai-releases
+# Маркер «пул ассетов ведёт ЭТОТ скрипт». Живёт вне докрута (не отдаётся
+# nginx) и вне $ASSETS (иначе GC по mtime удалил бы его как обычный файл).
+# Смысл — в шаге 9: проверять retention можно только если ПРОШЛЫЙ деплой тоже
+# был нашим. На переходном запуске прошлый entry снёс легаси-`rm -rf`, и его
+# 404 — ожидаемое прошлое, а не наша регрессия.
+POOL_STATE="$SNAPSHOTS/.pool-managed"
 RETENTION_DAYS=30
 KEEP_SNAPSHOTS=10
 BASE_URL=https://sokratai.ru
@@ -96,6 +102,9 @@ if [ -f "$DOCROOT/index.html" ]; then
   OLD_ENTRY=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$DOCROOT/index.html" | head -1 || true)
 fi
 printf '   текущий прод-entry: %s\n' "${OLD_ENTRY:-<нет, первый деплой>}"
+POOL_MANAGED=0
+[ -f "$POOL_STATE" ] && POOL_MANAGED=1
+[ "$POOL_MANAGED" = 1 ] || printf '   ⚠️  переходный деплой: пул ассетов ещё не наш, retention проверим со следующего раза\n'
 
 log "6/10 assets — append-only merge"
 mkdir -p "$ASSETS"
@@ -106,6 +115,8 @@ rsync -a --size-only --chmod=D755,F644 dist/assets/ "$ASSETS/"
 # GC-keepalive (инвариант 2): rsync пропустил идентичные файлы, не обновив
 # mtime → без этого прохода GC удалит живой react-vendor.
 (cd dist/assets && find . -type f -print0) | (cd "$ASSETS" && xargs -0 -r touch -c -m --)
+# С этого момента пул наш: следующий деплой обязан доказать retention.
+mkdir -p "$SNAPSHOTS" && touch "$POOL_STATE"
 
 log "7/10 корень — атомарно (rsync = temp-file + rename per file)"
 rsync -a --delete --chmod=D755,F644 \
@@ -127,10 +138,17 @@ NEW_ENTRY=$(grep -o '/assets/index-[A-Za-z0-9_-]*\.js' "$DOCROOT/index.html" | h
 [ "$(code "$BASE_URL$NEW_ENTRY")" = 200 ] || die "новый entry $NEW_ENTRY отдаёт не 200"
 if [ -n "$OLD_ENTRY" ]; then
   old_code=$(code "$BASE_URL$OLD_ENTRY")
-  if [ "$old_code" != 200 ]; then
+  if [ "$old_code" = 200 ]; then
+    printf '   ✅ retention: прошлый entry %s всё ещё 200\n' "$OLD_ENTRY"
+  elif [ "$POOL_MANAGED" = 1 ]; then
     die "RETENTION СЛОМАН: прошлый entry $OLD_ENTRY отдаёт $old_code — стейл-вкладки словят белый экран"
+  else
+    # Переходный деплой: тот entry снёс ЛЕГАСИ-`rm -rf` ещё до нас. Падать
+    # здесь значило бы обвинять новый скрипт в наследстве старого — и, хуже,
+    # блокировать ровно тот запуск, который чинит проблему.
+    printf '   ⚠️  прошлый entry %s отдаёт %s — ожидаемо, его снёс легаси-деплой.\n' "$OLD_ENTRY" "$old_code"
+    printf '      Retention копится С ЭТОГО запуска; следующий деплой проверит его жёстко.\n'
   fi
-  printf '   ✅ retention: прошлый entry %s всё ещё 200\n' "$OLD_ENTRY"
 fi
 curl -sI "$BASE_URL/" | grep -qi 'cache-control:.*no-store' \
   || printf '   ⚠️  index.html отдаётся без no-store — проверь nginx\n'
