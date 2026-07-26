@@ -1,6 +1,6 @@
 ---
 name: production-deploy
-description: Прод SokratAI (Selectel VPS): подробности деплоя и откатa, OG-варианты приглашений в nginx, инцидент Service Worker с octet-stream и его диагностика, авто-reload chunk-load, tiered-статус ошибок tutor-кабинета, топология деплоя edge-функций через Lovable, массовая потеря функций и probe-скрипт, pg_cron и SCHEDULER_SECRET. Загружай при работе с деплоем, service worker, nginx или диагностикой прода.
+description: "Прод SokratAI (Selectel VPS): подробности деплоя и откатa, OG-варианты приглашений в nginx, инцидент Service Worker с octet-stream и его диагностика, авто-reload chunk-load, tiered-статус ошибок tutor-кабинета, топология деплоя edge-функций через Lovable, массовая потеря функций и probe-скрипт, pg_cron и SCHEDULER_SECRET. Загружай при работе с деплоем, service worker, nginx или диагностикой прода."
 ---
 
 <!-- Извлечено из .claude/rules/95-production-deploy.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее

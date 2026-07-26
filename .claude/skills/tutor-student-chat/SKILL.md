@@ -1,6 +1,6 @@
 ---
 name: tutor-student-chat
-description: Чат репетитор↔ученик и групповые чаты: realtime и merge-хелперы, atomic tsc_post_message, RLS SELECT-only, @СократAI в переписке, уведомления и троттлинг, аватары и ссылки, bucket tutor-chat-uploads, PWA-наджи установки и push. Загружай при работе с чатами, группами чатов, push-уведомлениями или наджами установки.
+description: "Чат репетитор↔ученик и групповые чаты: realtime и merge-хелперы, atomic tsc_post_message, RLS SELECT-only, @СократAI в переписке, уведомления и троттлинг, аватары и ссылки, bucket tutor-chat-uploads, PWA-наджи установки и push. Загружай при работе с чатами, группами чатов, push-уведомлениями или наджами установки."
 ---
 
 <!-- Извлечено из .claude/rules/100-tutor-student-chat.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее

@@ -162,17 +162,28 @@ Discovery (WHAT/WHY) vs Delivery (HOW). New specs → `docs/delivery/features/<f
 | `101-ceo-analytics.md` | CEO-аналитика `/admin`: «Пульс» (воронка активации поимённо, NSM, каналы, MRR run-rate), инварианты расчётов, аудит «Аналитики», МСК-бакеты |
 | `performance.md` | React.memo lists, lazy load, React Query keys, getSession vs getUser, почему `exhaustive-deps` не чинят пачкой |
 
-**Каждый rule-файл ≤200 строк.** Перерос — вынеси глубину в skill (см. «Бюджет контекста» выше). Текущие нарушители, ждущие выноса: `50-kb-module` (400), `96-auth-ru-bypass` (454), `60-telegram-bot` (331), `95-production-deploy` (274).
+**Каждый rule-файл ≤200 строк — соблюдается (2026-07-26).** Перерос — вынеси глубину в skill (см. «Бюджет контекста» выше). Итог реструктуризации: always-loaded rules **163 414 → 28 345 токенов (−83%)** при нулевой потере текста (перенесено дословно в skills, сверено по md5).
 
 ## Skills index — `.claude/skills/` (глубина, грузится по надобности)
 
-Домены, вынесенные из always-loaded rules. Инварианты остались в rules; здесь — специфика, история фич и пошаговые разборы.
+Домены, вынесенные из always-loaded rules. **Инварианты, нарушаемые ПЕРВОЙ же правкой, остались в rules**; здесь — специфика, история фич и пошаговые разборы ревью.
 
 | Skill | Домен | Инварианты в |
 |---|---|---|
 | `homework-system` | ДЗ: грейдинг по предметам/критериям, CEFR/языки, физика Ч2 flowchart, голос, экран задачи ученика, шаблоны и Банк ДЗ, папки, share/preview, «требует проверки», полный QA-чеклист конструктора | `40-homework-system.md` |
+| `mock-exams` | Пробники: AI-грейдер Ч2, OCR бланков, режимы проверки по предметам, репетиторские варианты и CRUD, пауза, ExamProfile, шкалы | `45-mock-exams.md` |
+| `kb-module` | База знаний: модерация Source→Copy, fingerprint-дедуп, Банк ДЗ, темы/источники, AI-загрузчик из PDF, ФИПИ-импорт, олимпиады | `50-kb-module.md` |
+| `telegram-schedule-payments` | Бот, расписание, **деньги**: `/pay`, подтверждение занятий, серии, личные дела, ledger баланса, архив, группы и метки | `60-telegram-schedule-money.md` |
+| `production-deploy` | Деплой и откат, OG в nginx, инцидент SW octet-stream, авто-reload чанков, tiered-статус, топология edge-деплоя, pg_cron | `95-production-deploy.md` |
+| `auth-ru-bypass` | Авторизация в РФ: гарды, email-verify, Yandex/VK OAuth, claim-код и онбординг v2, сброс пароля, ops-чеклисты | `96-auth-ru-bypass.md` |
+| `schedule-materials` | «Занятия»: крепление материалов, edge-роуты, notify-дайджест, несколько ДЗ на урок, attach=assign | `98-schedule-materials.md` |
+| `ai-quota-subscriptions` | Квоты AI, подписки, админ-выдача тарифа, YooKassa «AI-старт», возвраты, промо | `99-ai-quota-subscriptions.md` |
+| `tutor-student-chat` | Чат репетитор↔ученик и группы, realtime, @СократAI, уведомления, bucket, PWA-наджи | `100-tutor-student-chat.md` |
+| `ceo-analytics` | `/admin`: «Пульс», воронка, MRR, каналы, ретеншн, пре-воронка Метрики, дайджест, рефералка | `101-ceo-analytics.md` |
 
-Прочие skills (`sokratai-formula-loader`, `fipi-task-loader`, дизайн-скиллы, AJTBD/NMT-скиллы) — рабочие процессы, не выжимки из rules.
+Прочие skills (`sokratai-formula-loader`, `fipi-task-loader`, дизайн-скиллы, AJTBD/NMT-скиллы) — рабочие процессы, не выжимки из rules; их не трогать при правках канона.
+
+⚠️ **`description` в SKILL.md — ОБЯЗАТЕЛЬНО в кавычках, если содержит `: `.** Незакавыченный YAML-скаляр с двоеточием-пробелом парсится неверно: skill теряет описание и перестаёт находиться по релевантности, то есть механизм on-demand ломается МОЛЧА (так и случилось у 9 файлов при первом выносе). Многострочные блочные скаляры (`>-`, `|`) кавычить НЕЛЬЗЯ — это их сломает.
 
 ---
 

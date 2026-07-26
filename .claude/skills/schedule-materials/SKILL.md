@@ -1,6 +1,6 @@
 ---
 name: schedule-materials
-description: Материалы занятий («Занятия»): крепление записи/конспекта/ссылки на ДЗ, edge lesson-materials-api и student-lessons-api, групповая модель через participants, one-hop переход в ДЗ, notify-дайджест, несколько ДЗ на урок, attach=assign. Загружай при работе с материалами занятий или вкладкой «Занятия» ученика.
+description: "Материалы занятий («Занятия»): крепление записи/конспекта/ссылки на ДЗ, edge lesson-materials-api и student-lessons-api, групповая модель через participants, one-hop переход в ДЗ, notify-дайджест, несколько ДЗ на урок, attach=assign. Загружай при работе с материалами занятий или вкладкой «Занятия» ученика."
 ---
 
 <!-- Извлечено из .claude/rules/98-schedule-materials.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее

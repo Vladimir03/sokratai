@@ -1,6 +1,6 @@
 ---
 name: telegram-schedule-payments
-description: Telegram-бот SokratAI + расписание занятий + деньги: /pay и отметка оплат, web-invite flow, добавление учеников, надёжность бота (fetchChatWithTimeout, safeSendError), подтверждение прошедших занятий, серии и удаление занятий, личные дела, БАЛАНС УЧЕНИКА (append-only ledger, cost-driven списание, Phase 2b cutover), архив ученика, группы и метки. Загружай при работе с ботом, расписанием, оплатами, балансом или карточкой ученика.
+description: "Telegram-бот SokratAI + расписание занятий + деньги: /pay и отметка оплат, web-invite flow, добавление учеников, надёжность бота (fetchChatWithTimeout, safeSendError), подтверждение прошедших занятий, серии и удаление занятий, личные дела, БАЛАНС УЧЕНИКА (append-only ledger, cost-driven списание, Phase 2b cutover), архив ученика, группы и метки. Загружай при работе с ботом, расписанием, оплатами, балансом или карточкой ученика."
 ---
 
 <!-- Извлечено из .claude/rules/60-telegram-bot.md 2026-07-25. Текст ниже — ДОСЛОВНО прежнее
