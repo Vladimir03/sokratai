@@ -22,7 +22,16 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     mode === "development" && componentTagger(),
-    mcpPlugin(),
+    // mcpPlugin — ТОЛЬКО в dev (2026-07-26). Он ПЕРЕЗАПИСЫВАЕТ отслеживаемый
+    // исходник `supabase/functions/mcp/index.ts` во время сборки: проверено —
+    // чистый файл после `npm run build` меняет md5. Последствия в проде:
+    //   • сборка неповторяема (билд мутирует свой же вход);
+    //   • деплой-чекаут /opt/sokratai пачкается ПОСЛЕ каждого билда, из-за чего
+    //     гард «чистого main» в стабе блокировал каждый второй деплой;
+    //   • rule 50 уже фиксировала это как рутинную помеху («перед коммитом
+    //     git checkout -- его») — теперь причина устранена, а не обходится.
+    // Гейт зеркалит componentTagger строкой выше: оба — dev-тулинг.
+    mode === "development" && mcpPlugin(),
     ANALYZE && visualizer({
       filename: "dist/stats.html",
       template: "treemap",   // sunburst | treemap | network

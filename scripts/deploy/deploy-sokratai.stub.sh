@@ -44,10 +44,44 @@ cd "$REPO"
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 [ "$current_branch" = "$BRANCH" ] || die "HEAD на «$current_branch», а не «$BRANCH» — деплой остановлен (проверь, что оставили на VPS)"
 
-dirty=$(git status --porcelain --untracked-files=no)
-if [ -n "$dirty" ]; then
-  printf '\nЛокальные изменения в %s:\n%s\n' "$REPO" "$dirty" >&2
-  die "рабочее дерево не чистое — деплой остановлен"
+# Блокируем только грязь, которая РЕАЛЬНО попадает в сборку. Список зеркалит
+# триггеры «🚀 Deploy needed» из rule 95 — это один и тот же набор путей.
+#
+# Почему не «любая грязь»: `npm run build` исторически перезаписывал
+# `supabase/functions/mcp/index.ts` (mcpPlugin работал и в prod-режиме), из-за
+# чего гард блокировал КАЖДЫЙ ВТОРОЙ деплой. Корень устранён гейтом в
+# vite.config, но правило остаётся верным и само по себе: edge-функции и доки
+# в `dist/` не попадают — они деплоятся отдельно (Lovable), и блокировать из-за
+# них выкладку фронта бессмысленно.
+#
+# Ветка при этом проверяется СТРОГО (HEAD == main), так что случай «уехала
+# целая feature-ветка» ловится полностью — это и была суть гарда.
+dirty_all=$(git status --porcelain --untracked-files=no || true)
+dirty_build=""
+if [ -n "$dirty_all" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    p=${line#???}                 # снять XY + пробел
+    p=${p##* -> }                 # для renames взять целевой путь
+    case "$p" in
+      src/*|public/*|scripts/*|index.html|package.json|package-lock.json| \
+      vite.config.ts|tailwind.config.ts|postcss.config.*|tsconfig*)
+        dirty_build="$dirty_build  $line"$'\n' ;;
+    esac
+  done <<EOF
+$dirty_all
+EOF
+fi
+
+if [ -n "$dirty_build" ]; then
+  printf '\nИзменения, влияющие на сборку, в %s:\n%s\n' "$REPO" "$dirty_build" >&2
+  die "рабочее дерево не чистое по build-путям — деплой остановлен"
+fi
+
+if [ -n "$dirty_all" ]; then
+  # Видимо, но не блокирующе: пусть в логе деплоя останется след.
+  printf '\n⚠️  Есть локальные изменения вне build-путей (на сборку не влияют):\n%s\n' \
+    "$(printf '%s\n' "$dirty_all" | sed 's/^/  /')"
 fi
 
 git pull --ff-only origin "$BRANCH"
