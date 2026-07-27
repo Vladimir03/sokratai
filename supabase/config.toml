@@ -75,10 +75,6 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.push-subscribe]
     verify_jwt = true
-  [functions.rag-bot-setup-webhook]
-    verify_jwt = false
-  [functions.rag-competitor-bot]
-    verify_jwt = false
   [functions.setup-telegram-webhook]
     verify_jwt = false
   [functions.student-account]

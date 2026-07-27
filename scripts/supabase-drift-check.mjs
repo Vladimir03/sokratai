@@ -35,8 +35,6 @@ const DEPLOYED_OUTSIDE_WORKFLOW = new Set([
   "payment-reminder",
   "process-email-queue",
   "public-homework-share",
-  "rag-bot-setup-webhook",
-  "rag-competitor-bot",
   "telegram-scheduled-broadcast",
   "telegram-webapp-recent-solutions",
   "tutor-referral-announce",

@@ -14,7 +14,7 @@ docs/
 │   ├── features/        — Спеки по фичам (spec + tasks + prompts)
 │   └── engineering/     — Архитектура, auth, БД, Telegram, codebase overview
 │
-└── misc/                — Разное (rag-bot-setup)
+└── misc/                — Разное
 ```
 
 ## Discovery — ключевые документы
