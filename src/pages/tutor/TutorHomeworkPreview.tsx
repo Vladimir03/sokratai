@@ -165,6 +165,8 @@ function TutorHomeworkPreviewContent() {
         task_image_urls: parseAttachmentUrls(t.task_image_url)
           .map((ref) => taskUrlMap[ref])
           .filter((url): url is string => Boolean(url)),
+        // options_json (2026-07-28): варианты структурного теста в превью.
+        options_json: t.options_json ?? null,
         correct_answer: t.correct_answer ?? null,
         solution_text: t.solution_text ?? null,
         solution_image_urls: parseAttachmentUrls(t.solution_image_urls ?? null)

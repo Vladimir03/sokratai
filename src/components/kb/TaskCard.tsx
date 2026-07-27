@@ -5,12 +5,9 @@ import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
+import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
 import { parseAttachmentUrls } from '@/lib/kbApi';
-import {
-  compactChoiceAnswer,
-  describeTaskOptions,
-  normalizeOptionsJson,
-} from '@/lib/taskOptions';
+import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
 import { cn } from '@/lib/utils';
 import type { KBTask } from '@/types/kb';
 
@@ -158,10 +155,6 @@ export const TaskCard = memo(function TaskCard({
   // РЕПЕТИТОРА, поэтому верные варианты помечаем: это тот же вид, что у автора
   // в исходном конструкторе. Ученику options_json уходит без ключа (rule 40).
   const taskOptions = useMemo(() => normalizeOptionsJson(task.options_json), [task.options_json]);
-  const correctKeys = useMemo(() => {
-    if (!taskOptions || !task.answer) return new Set<string>();
-    return new Set(compactChoiceAnswer(task.answer).split('').filter(Boolean));
-  }, [taskOptions, task.answer]);
 
   // Phase 3: Click on content toggles only if no text selection
   const handleContentClick = useCallback(() => {
@@ -375,49 +368,7 @@ export const TaskCard = memo(function TaskCard({
             <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">
               {taskOptions.kind === 'matching' ? 'Соответствие' : 'Варианты ответа'}
             </div>
-            {taskOptions.kind === 'matching' ? (
-              <div className="grid gap-3 md:grid-cols-2">
-                {(['left', 'right'] as const).map((side) => (
-                  <ul key={side} className="space-y-1.5">
-                    {taskOptions[side].map((opt) => (
-                      <li key={opt.key} className="flex gap-2 text-sm text-slate-700">
-                        <span className="font-mono text-slate-500">{opt.key})</span>
-                        <MathText text={opt.text} />
-                      </li>
-                    ))}
-                  </ul>
-                ))}
-              </div>
-            ) : (
-              <ul className="space-y-1.5">
-                {taskOptions.options.map((opt) => {
-                  const isCorrect = correctKeys.has(opt.key);
-                  return (
-                    <li
-                      key={opt.key}
-                      className={cn(
-                        'flex items-start gap-2 rounded-lg px-2 py-1 text-sm',
-                        isCorrect ? 'bg-socrat-primary-light text-slate-900' : 'text-slate-700',
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                          isCorrect
-                            ? 'border-socrat-primary bg-socrat-primary text-white'
-                            : 'border-slate-300 bg-white',
-                        )}
-                        aria-hidden
-                      >
-                        {isCorrect ? <Check className="h-3 w-3" /> : null}
-                      </span>
-                      <span className="font-mono text-slate-500">{opt.key})</span>
-                      <MathText text={opt.text} />
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <TaskOptionsList options={taskOptions} correctAnswer={task.answer} />
           </div>
         ) : null}
 

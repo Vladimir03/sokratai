@@ -19,7 +19,9 @@
 
 import { memo } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
+import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
+import { normalizeOptionsJson } from '@/lib/taskOptions';
 
 export interface HomeworkPreviewTask {
   id: string;
@@ -31,6 +33,11 @@ export interface HomeworkPreviewTask {
   check_format: 'short_answer' | 'detailed_solution' | null;
   /** Already resolved direct/signed URLs ready for `<img loading="lazy">`. */
   task_image_urls: string[];
+  /**
+   * options_json (2026-07-28): структурные варианты ответа. Пометки верных
+   * рисуются только при showAnswers — сам список безопасен всегда.
+   */
+  options_json?: unknown;
   correct_answer?: string | null;
   solution_text?: string | null;
   /** Already resolved direct/signed URLs ready for `<img loading="lazy">`. */
@@ -66,6 +73,7 @@ const PreviewTaskCard = memo(function PreviewTaskCard({
     showSolutions &&
     ((task.solution_text && task.solution_text.trim().length > 0) ||
       (task.solution_image_urls?.length ?? 0) > 0);
+  const structuredOptions = normalizeOptionsJson(task.options_json ?? null);
 
   return (
     <article
@@ -102,6 +110,14 @@ const PreviewTaskCard = memo(function PreviewTaskCard({
             multiThumbnailClassName="h-[200px] w-auto max-w-[260px] rounded-md border border-slate-200 bg-white object-contain"
           />
         </div>
+      ) : null}
+
+      {structuredOptions ? (
+        <TaskOptionsList
+          options={structuredOptions}
+          correctAnswer={showAnswers ? task.correct_answer : null}
+          className="mt-3"
+        />
       ) : null}
 
       {showAnswers && task.correct_answer ? (

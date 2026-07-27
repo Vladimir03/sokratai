@@ -12326,7 +12326,10 @@ async function handleGetTutorStudentThread(
 
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, max_score, check_format, options_json")
+    // correct_answer здесь легален: handleGetTutorStudentThread — tutor-only
+    // эндпоинт (ownership-гард выше); нужен для пометки верных вариантов
+    // структурного теста в GuidedThreadViewer (2026-07-28).
+    .select("id, order_num, task_text, task_image_url, max_score, check_format, options_json, correct_answer")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 

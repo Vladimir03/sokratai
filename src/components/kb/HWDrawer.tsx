@@ -34,6 +34,8 @@ import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { HWDraftTask } from '@/types/kb';
 import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
 import { normalizeOptionsJson } from '@/lib/taskOptions';
+import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { validateStructuredAnswer } from '@/lib/taskAnswerValidation';
 
 interface DraftTaskRowProps {
   task: HWDraftTask;
@@ -113,6 +115,19 @@ const DraftTaskRow = memo(function DraftTaskRow({
                 text={task.textSnapshot}
                 className="line-clamp-3 text-xs leading-relaxed text-slate-700"
               />
+              {/* options_json (2026-07-28): репетитор проверяет глазами, ЧТО
+                  отправляет — полный список вариантов с пометкой верных. */}
+              {(() => {
+                const structured = normalizeOptionsJson(task.optionsSnapshot ?? null);
+                return structured ? (
+                  <TaskOptionsList
+                    options={structured}
+                    correctAnswer={task.answerSnapshot}
+                    dense
+                    className="mt-2"
+                  />
+                ) : null;
+              })()}
               {firstRef ? (
                 <div className="relative mt-2">
                   {firstUrl ? (
@@ -258,6 +273,18 @@ export function HWDrawer({
   };
 
   const saveEdit = (taskId: string) => {
+    // Структурный тест: ответ обязан состоять из ключей вариантов — чекер
+    // посимвольный, «6» при пяти вариантах = молчаливый ноль ученику при
+    // верном выборе (решение владельца 2026-07-28: мусор не сохраняем).
+    const editedTask = tasks.find((t) => t.taskId === taskId);
+    const structured = normalizeOptionsJson(editedTask?.optionsSnapshot ?? null);
+    if (structured) {
+      const answerError = validateStructuredAnswer(structured, editAnswer);
+      if (answerError) {
+        toast.error(answerError);
+        return;
+      }
+    }
     // Always update both fields — updateSnapshot only marks edited if value changed
     updateSnapshot(taskId, 'textSnapshot', editText);
     updateSnapshot(taskId, 'answerSnapshot', editAnswer || '');

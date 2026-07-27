@@ -1105,6 +1105,13 @@ export interface TutorStudentGuidedThreadResponse {
     task_image_url: string | null;
     max_score: number;
     check_format: 'short_answer' | 'detailed_solution';
+    /**
+     * options_json (2026-07-28): структурные варианты — тьюторский просмотр
+     * условия в треде. Optional: deploy-skew-защита от старого edge.
+     */
+    options_json?: unknown;
+    /** Ключ верных вариантов для пометок (tutor-only эндпоинт). Optional — как выше. */
+    correct_answer?: string | null;
   }[];
   student: {
     id: string;

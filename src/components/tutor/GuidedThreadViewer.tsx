@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BadgeCheck, ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
+import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { normalizeOptionsJson } from '@/lib/taskOptions';
 import { toast } from 'sonner';
 import {
   getTutorStudentGuidedThread,
@@ -826,6 +828,20 @@ export function GuidedThreadViewer({
                         text={selectedTask.task_text}
                         className="whitespace-pre-wrap leading-relaxed break-words"
                       />
+                      {/* options_json (2026-07-28): варианты структурного теста
+                          с пометкой верных (tutor-only эндпоинт отдаёт
+                          correct_answer; старый edge — без пометок, деградация
+                          мягкая). Выбор ученика виден в сообщениях треда. */}
+                      {(() => {
+                        const structured = normalizeOptionsJson(selectedTask.options_json ?? null);
+                        return structured ? (
+                          <TaskOptionsList
+                            options={structured}
+                            correctAnswer={selectedTask.correct_answer ?? null}
+                            dense
+                          />
+                        ) : null;
+                      })()}
                       <TaskContextGallery
                         key={selectedTask.id}
                         assignmentId={assignmentId}

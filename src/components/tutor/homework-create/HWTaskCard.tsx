@@ -27,6 +27,8 @@ import {
 } from '@/lib/attachmentRefs';
 import { compressForUpload } from '@/lib/imageCompression';
 import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
+import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { validateStructuredAnswer } from '@/lib/taskAnswerValidation';
 import { usePasteImages } from '@/hooks/usePasteImages';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { cn } from '@/lib/utils';
@@ -210,6 +212,17 @@ export function HWTaskCard({
   // Секция default-open всегда — № КИМ должен быть на виду (запрос Егора:
   // «как система поймёт, что это за КИМ?»); сворачивание — опция экономии места.
   const [classificationOpen, setClassificationOpen] = useState<boolean>(true);
+  // options_json (2026-07-28): раскрытие списка вариантов по клику на бейдж
+  // (решение владельца). Сам список read-only — редактора вариантов в v1 нет.
+  const [optionsOpen, setOptionsOpen] = useState<boolean>(false);
+  const structuredOptions = useMemo(
+    () => normalizeOptionsJson(task.options_json ?? null),
+    [task.options_json],
+  );
+  const structuredAnswerError = useMemo(
+    () => (structuredOptions ? validateStructuredAnswer(structuredOptions, task.correct_answer) : null),
+    [structuredOptions, task.correct_answer],
+  );
 
   /**
    * Применить авто-балл только если тутор его не переопределял (scoreTouchedRef).
@@ -732,19 +745,19 @@ export function HWTaskCard({
             {task.kb_source && (
               <SourceBadge source={task.kb_source} />
             )}
-            {/* options_json (2026-07-27): read-only бейдж структурного теста
-                (редактора вариантов в конструкторе v1 нет — импорт/Банк). */}
-            {(() => {
-              const structured = normalizeOptionsJson(task.options_json ?? null);
-              return structured ? (
-                <span
-                  className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
-                  title="Задача с выбором вариантов — проверяется автоматически, без AI-квоты"
-                >
-                  {describeTaskOptions(structured)}
-                </span>
-              ) : null;
-            })()}
+            {/* options_json: бейдж структурного теста, по клику раскрывает
+                read-only список вариантов (редактора в конструкторе v1 нет). */}
+            {structuredOptions ? (
+              <button
+                type="button"
+                onClick={() => setOptionsOpen((prev) => !prev)}
+                className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
+                title="Задача с выбором вариантов — проверяется автоматически, без AI-квоты. Нажми, чтобы посмотреть варианты."
+                style={{ touchAction: 'manipulation' }}
+              >
+                {describeTaskOptions(structuredOptions)} {optionsOpen ? '▴' : '▾'}
+              </button>
+            ) : null}
             {task.kb_source_label && (
               <span
                 className="max-w-[240px] truncate text-xs text-muted-foreground"
@@ -816,6 +829,12 @@ export function HWTaskCard({
           </div>
         </div>
 
+        {structuredOptions && optionsOpen ? (
+          <div className="rounded-md border border-socrat-border bg-socrat-surface px-3 py-2.5">
+            <TaskOptionsList options={structuredOptions} correctAnswer={task.correct_answer} />
+          </div>
+        ) : null}
+
         {/* TASK SECTION — paste routed via lastFocusedSection (whole-card),
             drag-drop landing routed по этой секции (per-wrapper). */}
         <div
@@ -857,13 +876,18 @@ export function HWTaskCard({
             <div className="space-y-2">
               <Label>Правильный ответ</Label>
               <Input
-                placeholder="x=2, x=3"
+                placeholder={structuredOptions ? 'Ключи верных вариантов, напр. 135' : 'x=2, x=3'}
                 value={task.correct_answer}
                 onChange={(e) =>
                   onUpdate({ ...task, correct_answer: e.target.value })
                 }
-                className="text-base"
+                className={cn('text-base', structuredAnswerError && 'border-red-500 focus-visible:ring-red-500/30')}
               />
+              {/* Структурный тест: ключ вне списка вариантов = молчаливый ноль
+                  ученику при верном выборе (чекеры посимвольные). */}
+              {structuredAnswerError ? (
+                <p className="text-xs text-red-600">{structuredAnswerError}</p>
+              ) : null}
             </div>
             <div className="space-y-2">
               <Label>
