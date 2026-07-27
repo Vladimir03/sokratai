@@ -1406,6 +1406,7 @@ export type Database = {
           kim_number: number | null
           max_score: number
           ocr_text: string | null
+          options_json: Json | null
           order_num: number
           rubric_image_urls: string | null
           rubric_text: string | null
@@ -1432,6 +1433,7 @@ export type Database = {
           kim_number?: number | null
           max_score?: number
           ocr_text?: string | null
+          options_json?: Json | null
           order_num: number
           rubric_image_urls?: string | null
           rubric_text?: string | null
@@ -1458,6 +1460,7 @@ export type Database = {
           kim_number?: number | null
           max_score?: number
           ocr_text?: string | null
+          options_json?: Json | null
           order_num?: number
           rubric_image_urls?: string | null
           rubric_text?: string | null
@@ -2025,6 +2028,7 @@ export type Database = {
           id: string
           kim_number: number | null
           moderation_status: string
+          options_json: Json | null
           owner_id: string | null
           primary_score: number | null
           published_at: string | null
@@ -2058,6 +2062,7 @@ export type Database = {
           id?: string
           kim_number?: number | null
           moderation_status?: string
+          options_json?: Json | null
           owner_id?: string | null
           primary_score?: number | null
           published_at?: string | null
@@ -2091,6 +2096,7 @@ export type Database = {
           id?: string
           kim_number?: number | null
           moderation_status?: string
+          options_json?: Json | null
           owner_id?: string | null
           primary_score?: number | null
           published_at?: string | null
@@ -4958,6 +4964,7 @@ export type Database = {
           id: string
           kim_number: number | null
           moderation_status: string
+          options_json: Json | null
           owner_id: string | null
           primary_score: number | null
           published_at: string | null
@@ -5000,6 +5007,7 @@ export type Database = {
           id: string
           kim_number: number | null
           moderation_status: string
+          options_json: Json | null
           owner_id: string | null
           primary_score: number | null
           published_at: string | null
