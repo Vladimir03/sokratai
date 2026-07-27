@@ -114,6 +114,7 @@ function buildTaskSignature(tasks: Array<{
   cefr_level?: string | null;
   kim_number?: number | null;
   grading_criteria_json?: unknown;
+  options_json?: unknown;
 }>): string {
   return JSON.stringify(
     tasks.map((task, index) => ({
@@ -142,6 +143,8 @@ function buildTaskSignature(tasks: Array<{
       // Criteria-grading feature (2026-06): структурные критерии в подписи → правка
       // ТОЛЬКО критериев (без других полей) помечает tasksDirty (иначе не сохранится).
       grading_criteria_json: task.grading_criteria_json ?? null,
+      // options_json (2026-07-27): варианты в подписи → их изменение = tasksDirty.
+      options_json: task.options_json ?? null,
       // Ревью-фикс P2 (2026-07-06): каскад-поля (exam/difficulty/topic/subtopic/
       // source_label) НЕ входят в подпись — они не персистятся в
       // homework_tutor_tasks (только KB-зеркало при создании + push-body),
@@ -450,6 +453,8 @@ function resolveTemplateLoad(tpl: HomeworkTemplate): {
       kim_number: t.kim_number ?? null,
       // Criteria-grading feature (2026-06): структурные критерии из шаблона → ДЗ.
       grading_criteria_json: t.grading_criteria_json ?? null,
+      // options_json (2026-07-27): варианты из шаблона → ДЗ.
+      options_json: t.options_json ?? null,
       // unified-task-model (2026-07-05): ссылочный шаблон несёт source_kb_task_id
       // (синтез бэкенда) → выдача из шаблона = снимок ТЕХ ЖЕ задач Базы
       // (провенанс + usage-цепочка Банка). Legacy-шаблон без него → null =
@@ -874,6 +879,8 @@ function TutorHomeworkCreateContent() {
         kim_number: t.kim_number ?? null,
         // Criteria-grading feature (2026-06): preserve structured criteria on edit.
         grading_criteria_json: t.grading_criteria_json ?? null,
+        // options_json (2026-07-27): preserve варианты on edit (иначе clobber).
+        options_json: t.options_json ?? null,
         kb_task_id: t.kb_task_id ?? undefined,
         kb_snapshot_text: t.kb_snapshot_text ?? undefined,
         kb_snapshot_answer: t.kb_snapshot_answer ?? undefined,
@@ -1340,6 +1347,8 @@ function TutorHomeworkCreateContent() {
           // Gated на eligible-задачи (review fix P2) — критерии, заданные на
           // развёрнутой задаче и затем переключённой в «Краткий ответ», НЕ пишутся.
           grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
+          // options_json (2026-07-27): структурные варианты (тест).
+          options_json: t.options_json ?? null,
           // unified-task-model F2 (2026-07-05): tri-state провенанс — новый
           // клиент ВСЕГДА шлёт uuid (снимок задачи Базы) или null (ЯВНО новая
           // → бэкенд авто-зеркалит в «Из ДЗ»). undefined = только старые клиенты.
@@ -1735,6 +1744,8 @@ function TutorHomeworkCreateContent() {
             // Criteria-grading feature (2026-06): структурные критерии (any subject).
             // Gated на eligible-задачи (review fix P2) — см. create body.
             grading_criteria_json: isCriteriaEligibleTask(t) ? (t.grading_criteria_json ?? null) : null,
+            // options_json (2026-07-27): mirror create body (round-trip, не clobber).
+            options_json: t.options_json ?? null,
             // unified-task-model F2: tri-state провенанс (mirror create body).
             kb_task_id: t.kb_task_id ?? null,
             exam: t.exam === 'ege' || t.exam === 'oge' ? t.exam : null,

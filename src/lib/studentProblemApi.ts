@@ -45,6 +45,12 @@ export interface StudentProblemTask {
   max_score: number;
   check_format: 'short_answer' | 'detailed_solution';
   task_kind: 'numeric' | 'extended' | 'proof' | 'speaking';
+  /**
+   * options_json (2026-07-27): структурные варианты ответа (student-safe,
+   * GRANT миграции 20260727130000). Парсится normalizeOptionsJson; невалидное →
+   * обычный текстовый ввод (deploy-skew-safe).
+   */
+  options_json?: unknown;
 }
 
 export interface StudentProblemStudent {

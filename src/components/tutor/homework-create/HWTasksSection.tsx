@@ -119,6 +119,8 @@ function kbTaskToDraftTask(
         : null,
       // Phase 2 (2026-06-21): переносим № КИМ в ДЗ → AI грейдит по критериям ФИПИ.
       kim_number: task.kim_number ?? null,
+      // options_json (2026-07-27): структурные варианты Базы → ДЗ (path A).
+      options_json: task.options_json ?? null,
       kb_task_id: task.id,
       kb_source: task.owner_id ? 'my' : 'socrat',
       kb_snapshot_text: task.text,

@@ -26,6 +26,7 @@ import {
   MAX_SOLUTION_IMAGES,
 } from '@/lib/attachmentRefs';
 import { compressForUpload } from '@/lib/imageCompression';
+import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
 import { usePasteImages } from '@/hooks/usePasteImages';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { cn } from '@/lib/utils';
@@ -731,6 +732,19 @@ export function HWTaskCard({
             {task.kb_source && (
               <SourceBadge source={task.kb_source} />
             )}
+            {/* options_json (2026-07-27): read-only бейдж структурного теста
+                (редактора вариантов в конструкторе v1 нет — импорт/Банк). */}
+            {(() => {
+              const structured = normalizeOptionsJson(task.options_json ?? null);
+              return structured ? (
+                <span
+                  className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+                  title="Задача с выбором вариантов — проверяется автоматически, без AI-квоты"
+                >
+                  {describeTaskOptions(structured)}
+                </span>
+              ) : null;
+            })()}
             {task.kb_source_label && (
               <span
                 className="max-w-[240px] truncate text-xs text-muted-foreground"

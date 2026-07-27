@@ -33,6 +33,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { HWDraftTask } from '@/types/kb';
 import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
+import { normalizeOptionsJson } from '@/lib/taskOptions';
 
 interface DraftTaskRowProps {
   task: HWDraftTask;
@@ -346,6 +347,9 @@ export function HWDrawer({
           // unified-task-model F1: критерии + CEFR больше не теряются (rule 40).
           grading_criteria_json: task.gradingCriteriaSnapshot ?? null,
           cefr_level: task.cefrLevelSnapshot ?? null,
+          // options_json (2026-07-27): структурные варианты; whitelist-нормализация
+          // обязательна и на клиентском write-site (anti-leak спеки).
+          options_json: normalizeOptionsJson(task.optionsSnapshot ?? null),
           // Phase 2 (2026-06-21): № КИМ → grading по критериям ФИПИ (path B).
           kim_number: task.kim_number ?? null,
           // Review fix P1 (2026-06-21): балл задачи из KB (иначе DB DEFAULT 1).

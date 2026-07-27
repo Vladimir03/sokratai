@@ -189,6 +189,12 @@ export interface KBTask {
   task_kind: 'numeric' | 'extended' | 'proof' | 'speaking' | null;
   cefr_level: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   grading_criteria_json: GradingCriterion[] | null;
+  /**
+   * options_json (2026-07-27): структурные варианты ответа (single/multi
+   * choice, matching). Канон формы — src/lib/taskOptions.ts. Правильный ответ
+   * НЕ здесь (в `answer`). Optional: колонка добавлена миграцией 20260727130000.
+   */
+  options_json?: unknown;
   /** Source task → its canonical public copy (set on source tasks in сократ) */
   published_task_id: string | null;
   /** Canonical public copy → its source task (set on catalog copies) */
@@ -357,6 +363,8 @@ export interface HWDraftTask {
   gradingCriteriaSnapshot?: GradingCriterion[] | null;
   cefrLevelSnapshot?: 'A1' | 'A2' | 'B1' | 'B2' | 'C1' | null;
   taskKindSnapshot?: 'speaking' | null;
+  /** options_json (2026-07-27): снимок структурных вариантов (path B carrier). */
+  optionsSnapshot?: unknown;
 }
 
 /** Row from homework_kb_tasks table */

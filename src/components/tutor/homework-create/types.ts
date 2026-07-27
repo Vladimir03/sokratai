@@ -151,6 +151,12 @@ export interface DraftTask {
    * грейдинг). Редактор показывается только для развёрнутых задач (non-numeric).
    */
   grading_criteria_json?: GradingCriterion[] | null;
+  /**
+   * options_json (2026-07-27): структурные варианты ответа (тест). Приезжают
+   * из Базы/шаблона/edit-GET, редактора в конструкторе нет (v1 — read-only
+   * бейдж). Round-trip обязателен: без поля правка ДЗ молча теряет варианты.
+   */
+  options_json?: unknown;
 }
 
 // ─── Draft material type ──────────────────────────────────────────────────────
@@ -281,6 +287,7 @@ export function computeTaskContentFingerprint(t: {
   kim_number?: number | null;
   max_score?: number | null;
   grading_criteria_json?: GradingCriterion[] | null;
+  options_json?: unknown;
   exam?: string | null;
   difficulty?: number | null;
   topic_id?: string | null;
@@ -299,6 +306,8 @@ export function computeTaskContentFingerprint(t: {
     t.kim_number ?? null,
     t.max_score ?? null,
     t.grading_criteria_json ?? null,
+    // options_json (2026-07-27): расхождение вариантов видно divergence-детекту.
+    t.options_json ?? null,
     // Ревью-фикс P1 (2026-07-06): каскад-поля участвуют в divergence — правка
     // ТОЛЬКО классификации показывает «изменено» и уезжает с «Обновить в Базе».
     // Пустые нормализуются к null: edit-prefill каскад не грузит, но и снимок

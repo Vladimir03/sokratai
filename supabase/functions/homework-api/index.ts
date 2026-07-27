@@ -46,6 +46,9 @@ import {
   SUBJECT_IDS,
   SUBJECTS_REQUIRING_CEFR,
 } from "../_shared/subjects.generated.ts";
+// options_json (2026-07-27): whitelist-нормализация структурных вариантов на
+// ВСЕХ write-site (спека homework-choice-tasks).
+import { normalizeOptionsJson } from "../_shared/task-options.ts";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -1332,6 +1335,9 @@ async function handleCreateAssignment(
       // Criteria-grading feature (2026-06): структурные критерии репетитора (любой
       // предмет) → покритериальная AI-оценка. Normalize защищает от битого payload.
       grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
+      // options_json (2026-07-27): структурные варианты ответа. Whitelist-
+      // проекция — лишние поля (в т.ч. случайный `correct`) не доезжают до БД.
+      options_json: normalizeOptionsJson(t.options_json),
       // unified-task-model: провенанс снимка (per-row, вместо позиционного
       // homework_kb_tasks). NULL = legacy-клиент или сбой авто-зеркала.
       source_kb_task_id: sourceKbIds[i] ?? null,
@@ -1369,6 +1375,7 @@ async function handleCreateAssignment(
       cefr_level: isLanguageTemplate ? t.cefr_level : null,
       kim_number: t.kim_number,
       grading_criteria_json: t.grading_criteria_json,
+      options_json: t.options_json,
     }));
     const { error: templateErr } = await db
       .from("homework_tutor_templates")
@@ -1741,7 +1748,7 @@ async function handleGetAssignment(
   // во всех ДЗ. Схема-дрейф должен падать громко, не тихо пустеть.
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at, source_kb_task_id, source_kb_synced_at")
+    .select("id, order_num, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, solution_text, solution_image_urls, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, options_json, ai_reference_solution, ai_reference_confidence, ai_reference_status, ai_reference_generated_at, source_kb_task_id, source_kb_synced_at")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
   if (tasksError) {
@@ -2402,6 +2409,10 @@ async function handleUpdateAssignment(
           // Criteria-grading feature (2026-06): структурные критерии round-trip on edit.
           updateFields.grading_criteria_json = normalizeGradingCriteria(t.grading_criteria_json);
         }
+        if (t.options_json !== undefined) {
+          // options_json (2026-07-27): варианты round-trip on edit (иначе clobber).
+          updateFields.options_json = normalizeOptionsJson(t.options_json);
+        }
 
         // Phase C: сброс кэша AI-эталона при изменении условия/эталона (regen ниже).
         Object.assign(
@@ -2499,6 +2510,8 @@ async function handleUpdateAssignment(
               cefr_level: normalizeCefrLevel(t.cefr_level),
               kim_number: normalizeKimNumber(t.kim_number),
               grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
+              // options_json (2026-07-27): mirror create-path.
+              options_json: normalizeOptionsJson(t.options_json),
               // unified-task-model: провенанс снимка (tri-state, mirror create).
               source_kb_task_id: sourceKbId,
               source_kb_synced_at: sourceKbId ? new Date().toISOString() : null,
@@ -2594,6 +2607,8 @@ async function handleUpdateAssignment(
           cefr_level: normalizeCefrLevel(t.cefr_level),
           kim_number: normalizeKimNumber(t.kim_number),
           grading_criteria_json: normalizeGradingCriteria(t.grading_criteria_json),
+          // options_json (2026-07-27): full-overwrite ветка (mirror create).
+          options_json: normalizeOptionsJson(t.options_json),
         };
         // Phase C: сброс кэша AI-эталона при изменении условия/эталона (regen ниже).
         Object.assign(
@@ -6001,7 +6016,7 @@ async function handleCreateTemplateFromAssignment(
       "id, order_num, task_text, task_image_url, correct_answer, max_score, " +
         "rubric_text, rubric_image_urls, solution_text, solution_image_urls, " +
         "check_format, task_kind, kim_number, cefr_level, grading_criteria_json, " +
-        "source_kb_task_id",
+        "options_json, source_kb_task_id",
     )
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
@@ -6041,6 +6056,7 @@ async function handleCreateTemplateFromAssignment(
     cefr_level: string | null;
     kim_number: number | null;
     grading_criteria_json: unknown;
+    options_json: unknown;
     source_kb_task_id: string | null;
   }>).map((t) => {
     const base: Record<string, unknown> = {
@@ -6053,6 +6069,9 @@ async function handleCreateTemplateFromAssignment(
       // include_rubric=false → rubric поля зануляются в snapshot
       rubric_text: includeRubric ? (t.rubric_text ?? null) : null,
       rubric_image_urls: includeRubric ? (t.rubric_image_urls ?? null) : null,
+      // options_json (2026-07-27): варианты = контент задачи (не AI-настройка) —
+      // едут в шаблон безусловно.
+      options_json: normalizeOptionsJson(t.options_json),
     };
     // include_ai_settings=false → опускаем check_format / task_kind / cefr_level,
     // чтобы при использовании шаблона применился runtime default. Field-parity
@@ -6645,7 +6664,7 @@ async function handleSaveTasksToKB(
       "id, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, rubric_text, rubric_image_urls, " +
         // unified-task-model (2026-07-05): грейдинг-мета теперь едет в Базу
         // (закрывает потерю check_format/КИМ/критериев на save-back — Q3 снят).
-        "max_score, check_format, task_kind, cefr_level, kim_number, grading_criteria_json",
+        "max_score, check_format, task_kind, cefr_level, kim_number, grading_criteria_json, options_json",
     )
     .eq("assignment_id", assignmentId)
     .in("id", taskIds);
@@ -8615,7 +8634,7 @@ async function handleGetThread(
 
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, max_score, check_format")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format, options_json")
     .eq("assignment_id", sa.assignment_id)
     .order("order_num", { ascending: true });
 
@@ -8756,7 +8775,7 @@ async function handleGetStudentAssignment(
     // task_kind added 2026-05-28 for parity with the (now-removed) direct
     // PostgREST select in studentHomeworkApi::getStudentAssignment, which
     // routes through this endpoint. Anti-leak: solution_*/rubric_* excluded.
-    .select("id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind")
+    .select("id, assignment_id, order_num, task_text, task_image_url, max_score, check_format, task_kind, options_json")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 
@@ -8915,7 +8934,7 @@ async function handleGetStudentResult(
 
   const { data: tasksRaw, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, max_score, task_kind, check_format")
+    .select("id, order_num, task_text, max_score, task_kind, check_format, options_json")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
   if (tasksError) {
@@ -9300,7 +9319,7 @@ async function handleGetStudentProblem(
   //    Sorting by order_num so task_total ordering matches the step indicator.
   const { data: tasksRaw, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, max_score, check_format, task_kind")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format, task_kind, options_json")
     .eq("assignment_id", hwId)
     .order("order_num", { ascending: true });
   if (tasksError) {
@@ -10478,6 +10497,8 @@ async function runStudentAnswerGrading(args: {
     cefr_level?: string | null;
     /** Criteria-grading feature (2026-06): tutor structured criteria (any subject). */
     grading_criteria_json?: unknown;
+    /** options_json (2026-07-27): структурные варианты → детерминированный грейдинг. */
+    options_json?: unknown;
     /** Phase 3/A: AI-эталон решения (tutor-only) + статус генерации. Реф для физ-Часть-2 узел-грейдинга. */
     ai_reference_solution?: string | null;
     ai_reference_status?: string | null;
@@ -10503,6 +10524,12 @@ async function runStudentAnswerGrading(args: {
    * деградации (computeAvailableScore) не применяются: балл = результат проверки.
    */
   independentMode?: boolean;
+  /**
+   * options_json: false = квота на AI-объяснение структурного теста исчерпана —
+   * детерминированный балл с canned-фидбэком, БЕЗ вызова модели (не 429).
+   * На нестуктурные задачи не влияет.
+   */
+  aiExplanationAllowed?: boolean;
 }): Promise<Record<string, unknown>> {
   const {
     db,
@@ -10516,6 +10543,7 @@ async function runStudentAnswerGrading(args: {
     recentMessages,
     feedbackKind,
     independentMode = false,
+    aiExplanationAllowed = true,
   } = args;
   // Шаг-1 инструментирование (2026-07-12): сквозная латентность грейдинга
   // (резолв фото + OCR + вызов модели + вердикт) → hw_ai_check_events.latency_ms.
@@ -10603,6 +10631,9 @@ async function runStudentAnswerGrading(args: {
     // Criteria-grading feature (2026-06): tutor structured criteria drive the
     // per-criterion breakdown for ANY subject (overrides built-in presets).
     gradingCriteria: normalizeGradingCriteria(task.grading_criteria_json),
+    // options_json (2026-07-27): структурный тест → балл считает КОД, AI объясняет.
+    taskOptions: task.options_json ?? null,
+    aiExplanationAllowed,
     conversationHistory: (recentMessages ?? []).map((m) => ({
       role: typeof m.role === "string" ? m.role : "",
       content: typeof m.content === "string" ? m.content : "",
@@ -11103,24 +11134,8 @@ async function handleCheckAnswer(
     return independentAiDisabledError(cors);
   }
 
-  // AI-quota gate. Free-students with a paying tutor get 50/day (vs 10) in homework context.
-  // Mirrors chat/index.ts — single source of truth is checkAiQuota / get_subscription_status RPC.
-  const quotaResult = await checkAiQuota(userId, db, {
-    incrementUsage: true,
-    context: "homework",
-  });
-  if (!quotaResult.allowed) {
-    console.warn(JSON.stringify({
-      event: "homework_ai_quota_reached",
-      handler: "handleCheckAnswer",
-      userId,
-      limit: quotaResult.limit,
-      messagesUsed: quotaResult.messagesUsed,
-      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
-    }));
-    return buildLimitReachedResponse(quotaResult, cors);
-  }
-
+  // AI-quota gate ПЕРЕНЕСЁН ниже, после чтения задачи (options_json 2026-07-27,
+  // прецедент speaking-ветки submission): нужно знать, структурный ли это тест.
   const b = (body && typeof body === "object") ? body as Record<string, unknown> : {};
   const answer = typeof b.answer === "string" ? b.answer.trim() : "";
   if (!answer) {
@@ -11143,7 +11158,7 @@ async function handleCheckAnswer(
   // Load the full task (with correct_answer, rubric, reference solution)
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_status")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, options_json, ai_reference_solution, ai_reference_status")
     .eq("id", currentState.task_id)
     .single();
 
@@ -11160,6 +11175,36 @@ async function handleCheckAnswer(
 
   if (!assignment) {
     return jsonError(cors, 500, "DB_ERROR", "Assignment not found");
+  }
+
+  // AI-quota gate (перенесён после чтения задачи — options_json 2026-07-27).
+  // Структурный тест: балл считает КОД, отказ квоты = canned-объяснение вместо
+  // AI, НЕ 429 (детерминированный балл не должен блокироваться лимитом).
+  // Нестуктурные задачи: семантика прежняя — 429 до любых записей. Побочное
+  // улучшение: пустой ответ/битый контекст больше не списывают квоту.
+  const structuredCheckTask =
+    normalizeOptionsJson(task.options_json) !== null &&
+    typeof task.correct_answer === "string" && task.correct_answer.trim().length > 0 &&
+    task.check_format !== "detailed_solution";
+  let aiExplanationAllowed = true;
+  const quotaResult = await checkAiQuota(userId, db, {
+    incrementUsage: true,
+    context: "homework",
+  });
+  if (!quotaResult.allowed) {
+    console.warn(JSON.stringify({
+      event: "homework_ai_quota_reached",
+      handler: "handleCheckAnswer",
+      structured: structuredCheckTask,
+      userId,
+      limit: quotaResult.limit,
+      messagesUsed: quotaResult.messagesUsed,
+      tutorCanUpgrade: quotaResult.tutorCanUpgrade,
+    }));
+    if (!structuredCheckTask) {
+      return buildLimitReachedResponse(quotaResult, cors);
+    }
+    aiExplanationAllowed = false;
   }
 
   // Load conversation history (last 15 messages for current task)
@@ -11238,6 +11283,8 @@ async function handleCheckAnswer(
       message_kind?: string | null;
     }>,
     feedbackKind: "ai_reply",
+    // options_json: квота исчерпана на структурном тесте → canned-объяснение.
+    aiExplanationAllowed,
     });
   } catch (gradingError) {
     console.error("homework_api_check_answer_grading_failed", {
@@ -11431,7 +11478,7 @@ async function handleStudentSubmission(
   // 5. Load target task (full SELECT — grading needs solution/rubric).
   const { data: task, error: taskError } = await db
     .from("homework_tutor_tasks")
-    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, ai_reference_solution, ai_reference_status")
+    .select("id, assignment_id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, grading_criteria_json, options_json, ai_reference_solution, ai_reference_status")
     .eq("id", taskId)
     .maybeSingle();
   if (taskError) {
@@ -11667,6 +11714,13 @@ async function handleStudentSubmission(
   // (анти-требование PRD — free-ученик не должен упереться в 429 посреди среза;
   // объём ограничен одной попыткой на задачу). AI-грейдинг при этом вызывается,
   // токены логируются в token_usage_logs как обычно.
+  // options_json (2026-07-27): структурный тест — балл считает КОД; отказ квоты
+  // означает canned-объяснение вместо AI, НЕ 429 (mirror handleCheckAnswer).
+  const structuredSubmissionTask =
+    normalizeOptionsJson(task.options_json) !== null &&
+    typeof task.correct_answer === "string" && task.correct_answer.trim().length > 0 &&
+    task.check_format !== "detailed_solution";
+  let aiExplanationAllowed = true;
   if (!isIndependent) {
     const quotaResult = await checkAiQuota(userId, db, {
       incrementUsage: true,
@@ -11676,12 +11730,16 @@ async function handleStudentSubmission(
       console.warn(JSON.stringify({
         event: "homework_ai_quota_reached",
         handler: "handleStudentSubmission",
+        structured: structuredSubmissionTask,
         userId,
         limit: quotaResult.limit,
         messagesUsed: quotaResult.messagesUsed,
         tutorCanUpgrade: quotaResult.tutorCanUpgrade,
       }));
-      return buildLimitReachedResponse(quotaResult, cors);
+      if (!structuredSubmissionTask) {
+        return buildLimitReachedResponse(quotaResult, cors);
+      }
+      aiExplanationAllowed = false;
     }
   }
 
@@ -11884,6 +11942,8 @@ async function handleStudentSubmission(
       }>,
       feedbackKind: "check_result",
       independentMode: isIndependent,
+      // options_json: квота исчерпана на структурном тесте → canned-объяснение.
+      aiExplanationAllowed,
     });
   } catch (gradingError) {
     // homework-work-modes (ревью-фикс P0 р.1): сбой ПЕРСИСТА балла в
@@ -12053,7 +12113,7 @@ async function handleRequestHint(
   // generic hints that ignored tutor logic. See plan: wild-swinging-nova.md.
   const { data: task } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level")
+    .select("id, order_num, task_text, task_image_url, ocr_text, correct_answer, rubric_text, rubric_image_urls, solution_text, solution_image_urls, max_score, check_format, task_kind, kim_number, cefr_level, options_json")
     .eq("id", activeState.task_id)
     .single();
 
@@ -12130,6 +12190,8 @@ async function handleRequestHint(
     rubricImageUrls,
     solutionText: task.solution_text,
     solutionImageUrls,
+    // options_json (2026-07-27): варианты в hint-контекст.
+    taskOptions: (task as { options_json?: unknown }).options_json ?? null,
     subject: assignment?.subject ?? "math",
     // Phase 2 (2026-05-15) subject-rubric resolver inputs.
     examType: (assignment?.exam_type === "oge" || assignment?.exam_type === "ege")
@@ -12260,7 +12322,7 @@ async function handleGetTutorStudentThread(
 
   const { data: tasks, error: tasksError } = await db
     .from("homework_tutor_tasks")
-    .select("id, order_num, task_text, task_image_url, max_score, check_format")
+    .select("id, order_num, task_text, task_image_url, max_score, check_format, options_json")
     .eq("assignment_id", assignmentId)
     .order("order_num", { ascending: true });
 

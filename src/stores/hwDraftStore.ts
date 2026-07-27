@@ -73,6 +73,8 @@ export const useHWDraftStore = create<HWDraftStore>()(
               : null,
           cefrLevelSnapshot: task.cefr_level ?? null,
           taskKindSnapshot: task.task_kind === 'speaking' ? 'speaking' : null,
+          // options_json (2026-07-27): freeze структурные варианты (path B carrier).
+          optionsSnapshot: task.options_json ?? null,
           // Review P1 (2026-07-07): предмет темы источника → HWDrawer префиллит
           // «Предмет ДЗ» из единого snapshot'а всех задач корзины.
           subjectSnapshot: subjectHint ?? null,

@@ -31,6 +31,16 @@ import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 import { SUBJECTS_REQUIRING_CEFR } from "../_shared/subjects.generated.ts";
 // #61 (2026-07-11): несколько допустимых верных ответов + числовой диапазон.
 import { describeAnswerSpecForPrompt, parseAnswerSpec } from "../_shared/answer-alternatives.ts";
+// options_json (2026-07-27, спека homework-choice-tasks): структурные тестовые
+// задачи. Балл считает КОД (чекеры Части 1 пробников — consume-only), AI только
+// объясняет результат (precomputedVerdict).
+import {
+  compactChoiceAnswer,
+  normalizeOptionsJson,
+  renderOptionsForPrompt,
+  type TaskOptions,
+} from "../_shared/task-options.ts";
+import { checkStrict, gradeMultiChoice, gradeOrdered } from "../_shared/mock-exam-part1-checker.ts";
 import { type FlowchartTraceStep, physicsFlowchartKind, walkPhysicsFlowchart } from "../_shared/physics-flowcharts.ts";
 import { buildPhysicsNodeSystemContent, sanitizePhysicsJudgments } from "../_shared/physics-node-prompt.ts";
 // ai-usage-logging (2026-07-06): per-call token-usage attribution. Observability
@@ -378,6 +388,25 @@ export interface EvaluateStudentAnswerParams {
    * task row in `runStudentAnswerGrading`.
    */
   gradingCriteria?: SubjectCriterionTemplate[] | null;
+  /**
+   * options_json (2026-07-27): сырое значение `homework_tutor_tasks.options_json`.
+   * Непустое валидное значение + непустой correct_answer + не detailed_solution
+   * → детерминированный грейдинг чекерами пробников; AI зовётся только для
+   * объяснения (precomputedVerdict). Невалидное → обычный путь.
+   */
+  taskOptions?: unknown;
+  /**
+   * options_json: false = квота на AI-объяснение исчерпана — вернуть
+   * детерминированный балл с canned-фидбэком БЕЗ вызова модели (не 429).
+   * Применяется только к структурным задачам; default true.
+   */
+  aiExplanationAllowed?: boolean;
+  /**
+   * options_json (internal): балл уже вычислен кодом — промпт запрещает модели
+   * переоценивать и называть правильные варианты; verdict/ai_score из ответа
+   * модели ИГНОРИРУЮТСЯ (перезаписываются кодом).
+   */
+  precomputedVerdict?: { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number; max: number } | null;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -461,6 +490,8 @@ export interface GenerateHintParams {
   cefrLevel?: "A1" | "A2" | "B1" | "B2" | "C1" | null;
   /** See EvaluateStudentAnswerParams.feedbackLanguage (Phase 11). */
   feedbackLanguage?: "auto" | "russian" | "target" | null;
+  /** options_json (2026-07-27): варианты видимы модели в hint-контексте. */
+  taskOptions?: unknown;
   conversationHistory: GuidedConversationHistoryMessage[];
   wrongAnswerCount: number;
   hintCount: number;
@@ -1928,6 +1959,12 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
       includeGoal: false,
     }),
     `Условие задачи: ${clampPromptText(params.taskText)}`,
+    // options_json: варианты обязаны быть видимы модели — иначе она обсуждает
+    // тест вслепую. Рендер единый (Deno-зеркало task-options).
+    (() => {
+      const opts = normalizeOptionsJson(params.taskOptions ?? null);
+      return opts ? renderOptionsForPrompt(opts) : "";
+    })(),
     ...graphGroundingGuidance,
     hasTaskImage ? "К задаче прикреплено изображение с условием — внимательно изучи его." : "",
     hasStudentImage
@@ -1970,6 +2007,21 @@ function buildCheckPrompt(params: EvaluateStudentAnswerParams): LovableMessage[]
     // Strict-criteria-grading (2026-06-29): клауза строгости перед правилами
     // выставления балла. null для не-откалиброванных предметов → .filter(Boolean) drop.
     rubric.grading_discipline ?? "",
+    // options_json precomputedVerdict: балл уже посчитан кодом — модель ТОЛЬКО
+    // объясняет. Запрет называть верные варианты обязателен: пересдача не
+    // ограничена, а leak-детектор слаб на голых цифрах.
+    ...(params.precomputedVerdict
+      ? [
+          "",
+          "ВЕРДИКТ УЖЕ ВЫЧИСЛЕН КОДОМ (детерминированная проверка теста) — НЕ переоценивай ответ:",
+          `- verdict: ${params.precomputedVerdict.verdict}, балл: ${params.precomputedVerdict.earned} из ${params.precomputedVerdict.max}.`,
+          "- Твоя задача — ТОЛЬКО поле feedback: объясни результат ученику.",
+          params.precomputedVerdict.verdict === "CORRECT"
+            ? "- Ответ ВЕРНЫЙ: коротко похвали и перескажи СМЫСЛ пояснения репетитора (почему именно эти варианты), не цитируя его дословно."
+            : "- Ответ НЕВЕРНЫЙ или частично верный: сократически направь к правилу/теме. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО называть или намекать, какие варианты правильные (номера, буквы, количество верных) — ученик будет пересдавать.",
+          "- Поля verdict/ai_score в твоём JSON будут перезаписаны кодом — заполни их формально значениями выше.",
+        ]
+      : []),
     "",
     "ПРАВИЛА ОЦЕНКИ:",
     "",
@@ -2110,8 +2162,13 @@ function buildHintPrompt(params: GenerateHintParams): LovableMessage[] {
   const hasSolutionText = Boolean(params.solutionText && params.solutionText.trim().length > 0);
   const hasTutorReference = hasSolutionText || hasSolutionImages;
   const graphGroundingGuidance = buildGraphGroundingGuidance(params.taskOcrText, hasTaskImage);
+  // options_json: варианты видимы модели и в hint-контексте (иначе подсказка
+  // обсуждает тест вслепую). Называть правильные варианты hint'у и так
+  // запрещено anti-spoiler контрактом.
+  const hintOptions = normalizeOptionsJson(params.taskOptions ?? null);
   const taskContext = [
     clampPromptText(params.taskText) || "[текст задачи отсутствует, опирайся на изображение задачи]",
+    hintOptions ? renderOptionsForPrompt(hintOptions) : "",
     ...graphGroundingGuidance,
     hasTaskImage ? "[к задаче приложено изображение]" : "",
   ].filter(Boolean).join("\n");
@@ -2454,6 +2511,80 @@ async function evaluatePhysicsPart2(
   };
 }
 
+// ─── options_json: детерминированный грейдинг структурных тестов ─────────────
+// Балл считает КОД теми же чекерами, что Часть 1 пробников (consume-only импорт,
+// файл чекеров НЕ менять). Формат correct_answer: single "3", multi "1267",
+// matching "35142". Ответ ученика приходит строкой из UI («1, 2, 6, 7») —
+// compactChoiceAnswer приводит обе стороны к форме чекера.
+function gradeStructuredChoice(
+  options: TaskOptions,
+  correctAnswer: string,
+  studentAnswer: string,
+  maxScore: number,
+): { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number } {
+  const correct = compactChoiceAnswer(correctAnswer);
+  const student = compactChoiceAnswer(studentAnswer ?? "");
+  let earned = 0;
+  if (options.kind === "single_choice") {
+    earned = checkStrict(correct, student) ? maxScore : 0;
+  } else if (options.kind === "multi_choice") {
+    earned = gradeMultiChoice(correct, student, maxScore);
+  } else {
+    earned = gradeOrdered(correct, student, maxScore);
+  }
+  const verdict = earned >= maxScore ? "CORRECT" : earned > 0 ? "ON_TRACK" : "INCORRECT";
+  return { verdict, earned };
+}
+
+// Canned-фидбэк, когда AI-объяснение недоступно (квота исчерпана / сбой модели).
+// Детерминированный балл НИКОГДА не теряется из-за 429/502 (инвариант спеки).
+function buildStructuredResult(
+  score: { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number },
+  maxScore: number,
+): GuidedCheckResult {
+  const feedback = score.verdict === "CORRECT"
+    ? "Верно! Отличная работа."
+    : score.verdict === "ON_TRACK"
+      ? `Частично верно: ${score.earned} из ${maxScore}. Пересмотри выбранные варианты и попробуй ещё раз.`
+      : "Пока неверно. Подумай ещё раз над вариантами и попробуй снова.";
+  return {
+    verdict: score.verdict,
+    feedback,
+    confidence: 1,
+    error_type: score.verdict === "CORRECT"
+      ? "correct"
+      : score.verdict === "ON_TRACK"
+        ? "partial"
+        : "wrong_answer",
+    ai_score: score.earned,
+    ai_score_comment: null,
+    deterministic_score: true,
+  };
+}
+
+// Слить AI-объяснение с детерминированным баллом: verdict/ai_score ВСЕГДА от
+// кода (модели не доверяется), от модели берётся только текст. CHECK_FAILED
+// модели → canned (балл сохраняется).
+function mergeStructuredResult(
+  aiResult: GuidedCheckResult,
+  score: { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number },
+  maxScore: number,
+): GuidedCheckResult {
+  if (aiResult.verdict === "CHECK_FAILED" || !aiResult.feedback?.trim()) {
+    return buildStructuredResult(score, maxScore);
+  }
+  return {
+    ...aiResult,
+    verdict: score.verdict,
+    ai_score: score.earned,
+    confidence: 1,
+    deterministic_score: true,
+    // criteria/flowchart неприменимы к тестовому формату.
+    criteria_breakdown: undefined,
+    flowchart_trace: undefined,
+  };
+}
+
 export async function evaluateStudentAnswer(
   params: EvaluateStudentAnswerParams,
 ): Promise<GuidedCheckResult> {
@@ -2498,7 +2629,46 @@ export async function evaluateStudentAnswer(
   // (tutor criteria OR built-in preset), always run the AI so the breakdown is
   // produced — never short-circuit a criteria task on a deterministic match.
   const hasCriteriaTemplate = Array.isArray(criteriaTemplate) && criteriaTemplate.length > 0;
-  if (params.checkFormat !== "detailed_solution" && !isLanguageSubject && !hasCriteriaTemplate) {
+
+  // ── options_json: структурный тест → балл считает КОД, AI только объясняет.
+  // Гейт: валидные варианты + непустой эталон + не detailed_solution. Языки и
+  // критерии гейт НЕ блокируют: детерминизм теста важнее (объяснение всё равно AI).
+  const structuredOptions = normalizeOptionsJson(params.taskOptions ?? null);
+  const structuredCorrect = params.correctAnswer?.trim() ?? "";
+  let structuredScore:
+    | { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number }
+    | null = null;
+  if (structuredOptions && structuredCorrect && params.checkFormat !== "detailed_solution") {
+    structuredScore = gradeStructuredChoice(
+      structuredOptions,
+      structuredCorrect,
+      params.studentAnswer,
+      params.maxScore,
+    );
+    console.log("guided_check_structured_choice", {
+      subject: params.subject,
+      kind: structuredOptions.kind,
+      verdict: structuredScore.verdict,
+      earned: structuredScore.earned,
+      ai_explanation: params.aiExplanationAllowed !== false,
+    });
+    if (params.aiExplanationAllowed === false) {
+      return buildStructuredResult(structuredScore, params.maxScore);
+    }
+    params = {
+      ...params,
+      precomputedVerdict: {
+        verdict: structuredScore.verdict,
+        earned: structuredScore.earned,
+        max: params.maxScore,
+      },
+    };
+  }
+
+  if (
+    !structuredScore &&
+    params.checkFormat !== "detailed_solution" && !isLanguageSubject && !hasCriteriaTemplate
+  ) {
     const deterministicMatch = tryDeterministicShortAnswerMatch(
       params.studentAnswer,
       params.correctAnswer,
@@ -2778,6 +2948,12 @@ export async function evaluateStudentAnswer(
       }
     }
 
+    // options_json: вердикт/балл ВСЕГДА от кода; от модели — только текст
+    // объяснения. CHECK_FAILED модели → canned, балл не теряется.
+    if (structuredScore) {
+      result = mergeStructuredResult(result, structuredScore, params.maxScore);
+    }
+
     console.log("guided_check_success", {
       verdict: result.verdict,
       confidence: result.confidence,
@@ -2792,6 +2968,10 @@ export async function evaluateStudentAnswer(
       error: error instanceof Error ? error.message : String(error),
       failure_reason,
     });
+    // options_json: сбой AI-объяснения не съедает детерминированный балл.
+    if (structuredScore) {
+      return buildStructuredResult(structuredScore, params.maxScore);
+    }
     return buildCheckFallback(failure_reason);
   }
 }

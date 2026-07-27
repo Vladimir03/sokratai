@@ -131,6 +131,8 @@ export interface CreateAssignmentTask {
    * покритериальная AI-оценка. null/undefined → нет покритериального разбора.
    */
   grading_criteria_json?: GradingCriterion[] | null;
+  /** options_json (2026-07-27): структурные варианты ответа (тест). */
+  options_json?: unknown;
   /**
    * unified-task-model F2 (2026-07-05) — TRI-STATE провенанс (deploy-skew-защита):
    *   uuid      → снимок задачи Базы (source_kb_task_id);
@@ -205,6 +207,8 @@ export interface HomeworkTemplateTask {
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии round-trip через шаблон. */
   grading_criteria_json?: GradingCriterion[] | null;
+  /** options_json (2026-07-27): структурные варианты round-trip через шаблон. */
+  options_json?: unknown;
   /**
    * unified-task-model (2026-07-05): провенанс задачи Базы. Для ссылочных
    * шаблонов tasks_json СИНТЕЗИРУЕТСЯ бэкендом из живых kb-задач и всегда
@@ -760,6 +764,8 @@ export interface TutorHomeworkAssignmentDetails {
     kim_number?: number | null;
     /** Criteria-grading feature (2026-06): структурные критерии — round-trip on edit. */
     grading_criteria_json?: GradingCriterion[] | null;
+    /** options_json (2026-07-27): структурные варианты — round-trip on edit. */
+    options_json?: unknown;
     kb_task_id?: string | null;
     kb_snapshot_text?: string | null;
     kb_snapshot_answer?: string | null;
@@ -1594,6 +1600,8 @@ export interface UpdateAssignmentTask {
   kim_number?: number | null;
   /** Criteria-grading feature (2026-06): структурные критерии (любой предмет). */
   grading_criteria_json?: GradingCriterion[] | null;
+  /** options_json (2026-07-27): структурные варианты — round-trip на edit. */
+  options_json?: unknown;
   /** unified-task-model F2 — tri-state провенанс (см. CreateAssignmentTask.kb_task_id). */
   kb_task_id?: string | null;
   /** Классификация зеркала для новых задач ДЗ (mirror CreateAssignmentTask). */

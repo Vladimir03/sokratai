@@ -14,7 +14,7 @@
 export const KB_TASK_SNAPSHOT_SELECT =
   "id, owner_id, folder_id, topic_id, subtopic_id, exam, kim_number, primary_score, difficulty, " +
   "text, answer, solution, answer_format, check_format, task_kind, cefr_level, grading_criteria_json, " +
-  "rubric_text, rubric_image_urls, attachment_url, solution_attachment_url, " +
+  "options_json, rubric_text, rubric_image_urls, attachment_url, solution_attachment_url, " +
   "source_label, moderation_status, published_task_id, fingerprint, updated_at";
 
 export interface KbTaskLike {
@@ -31,6 +31,8 @@ export interface KbTaskLike {
   task_kind: string | null;
   cefr_level: string | null;
   grading_criteria_json: unknown;
+  /** options_json (2026-07-27): структурные варианты ответа (jsonb). */
+  options_json?: unknown;
   kim_number: number | null;
   exam: string | null;
   primary_score: number | null;
@@ -55,6 +57,12 @@ function asCefr(v: unknown): string | null {
 }
 function asCriteria(v: unknown): unknown[] | null {
   return Array.isArray(v) && v.length > 0 ? v : null;
+}
+// options_json: структурная валидация живёт в _shared/task-options.ts
+// (normalizeOptionsJson на write-site); здесь достаточно object-гейта —
+// конвертер должен оставаться zero-dependency.
+function asOptionsJson(v: unknown): unknown {
+  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
 }
 function nonEmpty(v: unknown): string | null {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
@@ -140,6 +148,8 @@ export function kbTaskToTemplateTaskJson(kb: KbTaskLike): Record<string, unknown
   if (typeof kb.kim_number === "number") base.kim_number = kb.kim_number;
   const gc = asCriteria(kb.grading_criteria_json);
   if (gc) base.grading_criteria_json = gc;
+  const oj = asOptionsJson(kb.options_json);
+  if (oj) base.options_json = oj;
   return base;
 }
 
@@ -158,6 +168,7 @@ export interface HomeworkTaskFieldsForKb {
   cefr_level?: unknown;
   kim_number?: unknown;
   grading_criteria_json?: unknown;
+  options_json?: unknown;
   // Ревью-фикс P1 (2026-07-06): каскад-классификация в push-body (конструктор
   // теперь её редактирует — F2). Присутствие ключа = «обнови», отсутствие =
   // «не трогай» (клиент шлёт только непустые — edit-prefill Базу не грузит).
@@ -214,6 +225,7 @@ export function homeworkTaskFieldsToKbRow(
     task_kind: asTaskKind(t.task_kind),
     cefr_level: asCefr(t.cefr_level),
     grading_criteria_json: asCriteria(t.grading_criteria_json),
+    options_json: asOptionsJson(t.options_json),
     rubric_text: nonEmpty(t.rubric_text),
     rubric_image_urls: nonEmpty(t.rubric_image_urls),
     attachment_url: nonEmpty(t.task_image_url),
@@ -253,6 +265,7 @@ export function homeworkTaskFieldsToKbUpdate(
       ? Math.min(Math.max(Math.round(t.kim_number), 1), 40)
       : null,
     grading_criteria_json: asCriteria(t.grading_criteria_json),
+    options_json: asOptionsJson(t.options_json),
     primary_score: maxScore != null ? Math.min(Math.round(maxScore), 32767) : null,
     fingerprint,
     updated_at: new Date().toISOString(),

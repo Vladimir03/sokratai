@@ -24,6 +24,8 @@ import {
   getSubmitSheetDraftKey,
 } from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
+import { StructuredAnswerPanel } from '@/components/student/homework-problem/StructuredAnswerPanel';
+import { normalizeOptionsJson } from '@/lib/taskOptions';
 import { SubmitNudgeBanner } from '@/components/student/homework-problem/SubmitNudgeBanner';
 import { PostSubmissionNudge } from '@/components/pwa/PostSubmissionNudge';
 import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
@@ -171,6 +173,12 @@ export default function HomeworkProblem() {
   // (старый бэкенд) → обычная домашка.
   const isIndependent = data?.assignment.work_mode === 'independent';
   const isWorkCompleted = data?.thread?.status === 'completed';
+  // options_json (2026-07-27): структурный тест — вместо текстового ввода
+  // рендерится панель вариантов; не парсится → обычный ввод (deploy-skew-safe).
+  const structuredOptions = useMemo(
+    () => normalizeOptionsJson(data?.task.options_json ?? null),
+    [data?.task.options_json],
+  );
 
   // Lock html/body overflow while the problem screen is mounted —
   // prevents an outer page-level scrollbar on mobile when
@@ -1940,7 +1948,17 @@ export default function HomeworkProblem() {
         </div>
       ) : null}
 
-      {data.task.task_kind === 'numeric' ? (
+      {data.task.task_kind === 'numeric' && structuredOptions && !isCurrentCompleted ? (
+        // options_json: панель вариантов вместо текстового ввода. key = task.id —
+        // сброс выбора при переходе между задачами.
+        <StructuredAnswerPanel
+          key={data.task.id}
+          options={structuredOptions}
+          disabled={isStreaming}
+          isSubmitting={isInlineAnswerSubmitting}
+          onSubmit={(serialized) => void handleInlineAnswerSubmit(serialized)}
+        />
+      ) : data.task.task_kind === 'numeric' ? (
         <NumericAnswerComposer
           answerDraft={answerDraft}
           onAnswerDraftChange={setAnswerDraft}
@@ -1983,7 +2001,9 @@ export default function HomeworkProblem() {
           uses SubmitCtaBar in the left aside). */}
       {/* homework-work-modes: numeric+tablet рендерил этот блок только ради
           discussion-композера — в самостоятельной он не нужен вовсе. */}
-      {(!isSpeaking && (data.task.task_kind !== 'numeric' || (isTabletPlus && !isIndependent))) ? (
+      {/* options_json: у структурного теста NumericAnswerComposer заменён панелью
+          вариантов (без discussion-строки) → chat-композер нужен и на мобиле. */}
+      {(!isSpeaking && (data.task.task_kind !== 'numeric' || ((isTabletPlus || Boolean(structuredOptions)) && !isIndependent))) ? (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
         {/* Primary CTA — mobile-only AND extended/proof-only.
             - Tablet/desktop: SubmitCtaBar in the left aside owns it

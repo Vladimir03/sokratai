@@ -100,6 +100,9 @@ import { isHumanitiesSubject, resolveSubjectRubric } from "../_shared/subject-ru
 import { SUBJECT_LABELS } from "../_shared/subjects.generated.ts";
 import { containsVerbatimSpan } from "../_shared/leak-detector.ts";
 import { buildPedagogyContextBlock, loadLearningContext } from "../_shared/learning-context.ts";
+// options_json (2026-07-27): варианты структурного теста видимы модели в
+// обсуждении/bootstrap — иначе AI обсуждает тест, не видя вариантов.
+import { normalizeOptionsJson, renderOptionsForPrompt } from "../_shared/task-options.ts";
 import { logAiGatewayError } from "../_shared/ai-gateway-errors.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -1361,6 +1364,8 @@ async function processAIRequest(
   // we verify here that `userId` is assigned to this homework before loading.
   // See plan wild-swinging-nova.md (2026-04-18).
   let tutorSolutionText: string | null = null;
+  // options_json (2026-07-27): готовый текст-блок вариантов структурного теста.
+  let guidedTaskOptionsBlock: string | null = null;
   let tutorSolutionImageDataUrls: string[] = [];
   // Resolved subject for guided homework context. Defaults to client-supplied value
   // (safe for non-guided / generic chat). When guidedHomeworkAssignmentId is present,
@@ -1424,7 +1429,7 @@ async function processAIRequest(
         const [taskRowResp, assignmentMetaResp] = await Promise.all([
           adminSupabase
             .from("homework_tutor_tasks")
-            .select("id, solution_text, solution_image_urls, kim_number, task_kind, check_format, rubric_text, cefr_level")
+            .select("id, solution_text, solution_image_urls, kim_number, task_kind, check_format, rubric_text, cefr_level, options_json")
             .eq("id", guidedHomeworkTaskId)
             .eq("assignment_id", guidedHomeworkAssignmentId)
             .maybeSingle(),
@@ -1585,6 +1590,13 @@ async function processAIRequest(
           const cl = (taskRow as { cefr_level?: unknown }).cefr_level;
           if (cl === "A1" || cl === "A2" || cl === "B1" || cl === "B2" || cl === "C1") {
             resolvedCefr = cl;
+          }
+          // options_json: варианты структурного теста → в контекст задачи ниже.
+          const structuredOpts = normalizeOptionsJson(
+            (taskRow as { options_json?: unknown }).options_json ?? null,
+          );
+          if (structuredOpts) {
+            guidedTaskOptionsBlock = renderOptionsForPrompt(structuredOpts);
           }
         }
         if (taskErr) {
@@ -1821,7 +1833,10 @@ async function processAIRequest(
   }
 
   if (taskContext) {
-    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+    const optionsSuffix = guidedTaskOptionsBlock ? `\n${guidedTaskOptionsBlock}` : "";
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 КОНТЕКСТ ЗАДАЧИ:\n${taskContext}${optionsSuffix}\n\nИспользуй ИМЕННО эту задачу в своих ответах. НЕ придумывай другие задачи!`;
+  } else if (guidedTaskOptionsBlock) {
+    effectiveSystemPrompt = `${effectiveSystemPrompt}\n\n📋 ВАРИАНТЫ ОТВЕТА ЗАДАЧИ:\n${guidedTaskOptionsBlock}`;
   }
 
   // Inject tutor's reference solution with anti-spoiler contract (guided homework only).
