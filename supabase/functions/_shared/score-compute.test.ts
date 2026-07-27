@@ -3,7 +3,9 @@ import {
   aggregateIndependencePct,
   computeFinalScore,
   computeIndependencePct,
+  estimateIndependencePctLegacy,
   INDEPENDENCE_PENALTY_PP,
+  resolveIndependencePct,
 } from "./score-compute";
 
 /**
@@ -140,5 +142,56 @@ describe("aggregateIndependencePct — средневзвешенное по с�
   it("нет ни одной задачи с данными — null, а не 0%", () => {
     expect(aggregateIndependencePct([])).toBeNull();
     expect(aggregateIndependencePct([{ pct: null, weight: 5 }])).toBeNull();
+  });
+});
+
+describe("estimateIndependencePctLegacy — оценка для работ до 2026-07-26", () => {
+  it("считает по подсказкам и неверным попыткам", () => {
+    // Одна подсказка + одна неверная попытка = два обращения → 80%.
+    expect(estimateIndependencePctLegacy(1, 1)).toBe(80);
+    expect(estimateIndependencePctLegacy(0, 3)).toBe(70);
+  });
+
+  it("нулевая активность — null, а не 100%", () => {
+    // Ключевое решение: задачу, к которой ученик не приступал (или которую
+    // закрыли массово), оценивать нечем. «100% самостоятельно» за нетронутую
+    // работу — ложь, которая ещё и завысит агрегат.
+    expect(estimateIndependencePctLegacy(0, 0, 0)).toBeNull();
+    expect(estimateIndependencePctLegacy(null, null, null)).toBeNull();
+  });
+
+  it("одна попытка без ошибок и подсказок — 100%", () => {
+    // Активность есть (attempts=1), обращений нет → решил сам.
+    expect(estimateIndependencePctLegacy(0, 0, 1)).toBe(100);
+  });
+
+  it("floor 0 — метрика не уходит в минус", () => {
+    expect(estimateIndependencePctLegacy(7, 6)).toBe(0);
+  });
+});
+
+describe("resolveIndependencePct — развилка точный расчёт / оценка", () => {
+  it("есть счётчик обращений — точный расчёт, без пометки оценки", () => {
+    expect(resolveIndependencePct({ ai_help_events: 2, hint_count: 9, wrong_answer_count: 9 }))
+      .toEqual({ pct: 80, isEstimate: false });
+  });
+
+  it("счётчик 0 — это ДАННЫЕ, а не их отсутствие", () => {
+    // `ai_help_events = 0` материализуется при закрытии задачи и означает
+    // «решил полностью сам». Уйти в legacy-ветку здесь нельзя: там по
+    // hint/wrong могло бы получиться меньше 100%.
+    expect(resolveIndependencePct({ ai_help_events: 0, hint_count: 3, wrong_answer_count: 2 }))
+      .toEqual({ pct: 100, isEstimate: false });
+  });
+
+  it("счётчика нет, но активность была — оценка с пометкой", () => {
+    expect(resolveIndependencePct({ ai_help_events: null, hint_count: 1, wrong_answer_count: 0 }))
+      .toEqual({ pct: 90, isEstimate: true });
+  });
+
+  it("ни счётчика, ни активности — null и НЕ оценка", () => {
+    // Именно этот случай остаётся «—» в интерфейсе.
+    expect(resolveIndependencePct({ ai_help_events: null, hint_count: 0, wrong_answer_count: 0, attempts: 0 }))
+      .toEqual({ pct: null, isEstimate: false });
   });
 });
