@@ -751,6 +751,39 @@ export type Database = {
           },
         ]
       }
+      health_check_state: {
+        Row: {
+          check_key: string
+          consecutive_failures: number
+          last_alert_at: string | null
+          last_detail: string | null
+          last_failure_at: string | null
+          last_ok_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          check_key: string
+          consecutive_failures?: number
+          last_alert_at?: string | null
+          last_detail?: string | null
+          last_failure_at?: string | null
+          last_ok_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          check_key?: string
+          consecutive_failures?: number
+          last_alert_at?: string | null
+          last_detail?: string | null
+          last_failure_at?: string | null
+          last_ok_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       homework_chat_messages: {
         Row: {
           content: string
