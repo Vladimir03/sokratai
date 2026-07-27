@@ -751,6 +751,39 @@ export type Database = {
           },
         ]
       }
+      health_check_state: {
+        Row: {
+          check_key: string
+          consecutive_failures: number
+          last_alert_at: string | null
+          last_detail: string | null
+          last_failure_at: string | null
+          last_ok_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          check_key: string
+          consecutive_failures?: number
+          last_alert_at?: string | null
+          last_detail?: string | null
+          last_failure_at?: string | null
+          last_ok_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          check_key?: string
+          consecutive_failures?: number
+          last_alert_at?: string | null
+          last_detail?: string | null
+          last_failure_at?: string | null
+          last_ok_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       homework_chat_messages: {
         Row: {
           content: string
@@ -4647,6 +4680,45 @@ export type Database = {
         }
         Relationships: []
       }
+      web_vitals_samples: {
+        Row: {
+          app_version: string | null
+          device: string
+          id: string
+          metric: string
+          nav_type: string | null
+          occurred_at: string
+          rating: string | null
+          role: string
+          route: string
+          value: number
+        }
+        Insert: {
+          app_version?: string | null
+          device: string
+          id?: string
+          metric: string
+          nav_type?: string | null
+          occurred_at?: string
+          rating?: string | null
+          role: string
+          route: string
+          value: number
+        }
+        Update: {
+          app_version?: string | null
+          device?: string
+          id?: string
+          metric?: string
+          nav_type?: string | null
+          occurred_at?: string
+          rating?: string | null
+          role?: string
+          route?: string
+          value?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       kb_topics_with_counts: {
@@ -4783,6 +4855,39 @@ export type Database = {
       admin_revoke_tutor_plan: {
         Args: { p_email: string; p_note?: string }
         Returns: Json
+      }
+      admin_web_vitals_p75: {
+        Args: { p_days?: number; p_route?: string }
+        Returns: {
+          device: string
+          good_share: number
+          metric: string
+          p50: number
+          p75: number
+          role: string
+          route: string
+          samples: number
+        }[]
+      }
+      admin_web_vitals_summary: {
+        Args: { p_days?: number }
+        Returns: {
+          device: string
+          good_share: number
+          metric: string
+          p50: number
+          p75: number
+          samples: number
+        }[]
+      }
+      admin_web_vitals_trend: {
+        Args: { p_days?: number; p_metric: string }
+        Returns: {
+          day: string
+          device: string
+          p75: number
+          samples: number
+        }[]
       }
       ai_credit_usage_summary: {
         Args: { _day_start: string; _month_start: string }
