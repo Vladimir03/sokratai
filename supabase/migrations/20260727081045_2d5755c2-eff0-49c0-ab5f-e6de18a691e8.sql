@@ -1,0 +1,1 @@
+DELETE FROM public.web_vitals_samples WHERE route = '/__probe';
