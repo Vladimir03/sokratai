@@ -1,13 +1,30 @@
 name: Deploy Supabase Edge Functions
 
+# ⚠️ PUSH-ТРИГГЕР СНЯТ 2026-07-27 — этот workflow не работал НИКОГДА.
+#
+# 30 прогонов из 30 последних — красные, успешных нет вообще. Причина одна и та
+# же: секрет `SUPABASE_ACCESS_TOKEN` — токен developer-уровня, а `functions
+# deploy` дёргает privileged list-эндпоинт и получает
+#   `unexpected list functions status 403: Your account does not have the
+#    necessary privileges to access this endpoint`
+# (тот же класс, что и описанный ниже отказ `supabase link`).
+#
+# Почему сняли триггер, а не оставили «пусть висит красным»: вечно красный
+# workflow на КАЖДОМ пуше обучает игнорировать статус CI — и настоящая поломка
+# в этом шуме утонет. Реальный путь выкладки edge-функций — явный деплой через
+# агента Lovable (синк подтягивает только код), см. rule 96 #11.
+#
+# ЧТОБЫ ВЕРНУТЬ АВТОДЕПЛОЙ: выпустить в Supabase (Account → Access Tokens)
+# токен с доступом к functions этого проекта, положить его в GitHub-секрет
+# `SUPABASE_ACCESS_TOKEN`, запустить вручную (`workflow_dispatch`) и убедиться,
+# что прогон зелёный. После этого вернуть блок `push:` ниже и обновить rule 96 #11.
+#
+# on:
+#   push:
+#     branches: [main]
+#     paths: ['supabase/functions/**', 'supabase/config.toml']
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'supabase/functions/**'
-      - 'supabase/config.toml'
-  workflow_dispatch:  # Позволяет запускать вручную
+  workflow_dispatch:  # только вручную, пока токену не выданы права
 
 jobs:
   deploy:

@@ -78,7 +78,7 @@ Hard rules for any Supabase HTTP call:
 - **Edge functions:** signed URLs returned to a browser → wrap in `rewriteToProxy()`; server-side `fetch()` of a signed URL → `rewriteToDirect()`; validators reading signed URLs from DB → accept **both** hosts (dual-host, rule 40). Import `SUPABASE_PROXY_URL`/`SUPABASE_PROXY_HOST` from `_shared/proxy-url.ts` — never hardcode the proxy host.
 - **Pre-merge:** `git diff --staged | grep -E "supabase\.co"` — any non-comment hit that isn't `api.sokratai.ru` is a merge blocker.
 
-**Deploy:** a frontend change does **not** reach prod automatically. After touching `src/**`, `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.ts`, or `public/**`, end your final message with a **"🚀 Deploy needed"** block (rule 95): `ssh … 185.161.65.182 && deploy-sokratai`. Migrations + edge functions auto-deploy via Lovable on push.
+**Deploy:** a frontend change does **not** reach prod automatically. After touching `src/**`, `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.ts`, or `public/**`, end your final message with a **"🚀 Deploy needed"** block (rule 95): `ssh … 185.161.65.182 && deploy-sokratai`. **Migrations and edge functions do NOT auto-deploy** (corrected 2026-07-27 — the previous claim here was false). Lovable's sync pulls *code*; applying migrations and deploying functions is a separate, explicit step through the Lovable agent. The GitHub workflow never worked (30/30 failures on a developer-scope token). After pushing an edge function, **verify**: `curl -X OPTIONS https://api.sokratai.ru/functions/v1/<name>` → 404 = not deployed, 503 = boot-fail, 401/200 = live. (rule 96 #11)
 
 ---
 
