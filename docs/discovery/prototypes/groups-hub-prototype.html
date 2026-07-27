@@ -220,6 +220,7 @@
 <div class="ptb">
   <b>Прототип · Группы</b>
   <div class="seg" id="scr-seg">
+    <button data-scr="empty">0 Старт</button>
     <button data-scr="list" class="on">1 Список</button>
     <button data-scr="hub">2 Хаб (мини)</button>
     <button data-scr="hub-stress">3 Поток Дианы</button>
@@ -231,8 +232,8 @@
     <button data-vp="mobile">375px</button>
   </div>
   <div class="seg" id="nav-seg" title="Вариант навигации">
-    <button data-nav="A" class="on">Нав A: пункт меню</button>
-    <button data-nav="B">Нав B: вкладка</button>
+    <button data-nav="A" class="on">Нав A ✓ выбран</button>
+    <button data-nav="B">Нав B (отклонён)</button>
   </div>
   <label class="sw"><input type="checkbox" id="anno-sw" checked> Аннотации</label>
 </div>
@@ -258,6 +259,73 @@
   </nav>
 
   <main id="main">
+
+  <!-- ══════════ Экран 0: СТАРТ (репетитор без учеников и групп) ══════════ -->
+  <section class="screen" id="scr-empty">
+    <div id="emp-list">
+      <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div>
+          <div class="h1">Группы</div>
+          <div class="sub">Рабочие места ваших групп: занятия, работы и результаты.</div>
+        </div>
+      </div>
+      <div class="anno"><b>Job (первый запуск):</b> пункт «Группы» виден всегда — фича не прячется от нового
+        платящего-группового; группы — приглашение, не барьер (антипаттерн онбординга дока 16 соблюдён).
+        <span class="m">Метрика: median время регистрация → первая группа с ≥2 учениками</span></div>
+      <div class="card empty" style="margin-top:18px;padding:56px 24px">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="1.5" style="margin:0 auto 14px"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <h3>Групп пока нет</h3>
+        <p style="max-width:420px;margin:0 auto 18px">Создайте группу и пришлите ученикам ссылку —
+          они добавятся сами, без ручного заведения каждого.</p>
+        <button class="btn btn-p" onclick="empHub()">+ Создать группу</button>
+        <div style="margin-top:14px"><button class="btn btn-g">У меня индивидуальные ученики → Все ученики</button></div>
+      </div>
+    </div>
+
+    <div id="emp-hub" style="display:none">
+      <div class="crumbs"><a onclick="empList()">Группы</a> <span>/</span> <span>Ср 18:00 · ЕГЭ база</span></div>
+      <div class="hub-head">
+        <div class="info">
+          <div class="hub-title"><span class="clr" style="background:#1B6B4A"></span><div class="h1">Ср 18:00 · ЕГЭ база</div></div>
+          <div class="hub-meta"><span class="chip chip-mut">учеников пока нет</span></div>
+        </div>
+        <div class="hub-act"><button class="btn btn-g" title="Переименовать · Архив">⋯</button></div>
+      </div>
+      <div class="anno"><b>Пустой хаб = онбординг группы, порядок блоков = порядок КПР:</b> сначала состав (Z2,
+        самое левое несделанное звено), работа задизейблена честно до первого ученика.
+        <span class="m">Критерий Z2: 0 ручных действий — ученики входят по ссылке сами</span></div>
+
+      <div class="sec" style="margin-top:18px">
+        <div class="sec-h"><h2>Соберите состав</h2></div>
+        <hr class="divider">
+        <div class="card" style="padding:18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+          <div style="width:86px;height:86px;border:1px solid var(--border);border-radius:8px;display:grid;place-items:center;color:var(--t3);font-size:11px">QR</div>
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:500;margin-bottom:6px">Пришлите ссылку ученикам — они появятся здесь сами</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <code style="background:#F8FAFC;border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:#334155">sokratai.ru/invite/ZWPVKDXZ?g=a81f…</code>
+              <button class="btn btn-p" style="min-height:36px">Скопировать ссылку</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h2>Сейчас в работе</h2></div>
+        <hr class="divider">
+        <div class="card empty" style="padding:22px">
+          <p>Когда появятся ученики — выдайте первую работу.</p>
+          <button class="btn btn-s" disabled style="opacity:.55;margin-top:10px">Выдать работу группе</button>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h"><h2>Занятия</h2><span class="act">+ Серия</span></div>
+        <hr class="divider">
+        <div class="card empty" style="padding:22px"><p>Поставьте еженедельную серию — участники подтянутся из состава.</p></div>
+      </div>
+    </div>
+  </section>
 
   <!-- ══════════ Экран 1: СПИСОК ГРУПП ══════════ -->
   <section class="screen on" id="scr-list">
@@ -495,7 +563,7 @@
     <div class="hubgrid">
       <div>
         <div class="sec" style="margin-top:18px">
-          <div class="sec-h"><h2>Сейчас в работе</h2><span class="act" onclick="go('monitor')">Смотреть в моменте →</span></div>
+          <div class="sec-h"><h2>Сейчас в работе</h2><span class="meta">последние 3 · ещё 2 →</span><span class="act" onclick="go('monitor')">Смотреть в моменте →</span></div>
           <hr class="divider">
           <div class="workrow card">
             <div>
@@ -567,7 +635,7 @@
     </div>
 
     <div class="anno"><b>Job (#44, Aha):</b> «ученик на 5-м вопросе — я уже вижу результаты по первым четырём» — без открытия каждого.
-      <b>Критерий:</b> «кто где» одним экраном ≤5 сек; данные не старше 1 мин; «застрял» = ≥3 ошибки/подсказки.
+      <b>Критерий:</b> «кто где» одним экраном ≤5 сек; поллинг 30 сек (решение v1); «застрял» = ≥3 ошибки/подсказки.
       <span class="m">Метрика: ≥40% репетиторов открывают монитор в 30 мин после дедлайна</span></div>
 
     <div class="monwrap">
@@ -741,6 +809,7 @@
     q('#scr-'+scr).classList.add('on');
     qa('#scr-seg button').forEach(b=>b.classList.toggle('on', b.dataset.scr===scr));
     if(scr==='assign') asStep(1);
+    if(scr==='empty') empList();
     q('#main').scrollTop=0; window.scrollTo(0,0);
   }
   qa('#scr-seg button').forEach(b=>b.onclick=()=>go(b.dataset.scr));
@@ -761,6 +830,10 @@
   q('#anno-sw').onchange=e=>document.body.classList.toggle('show-anno', e.target.checked);
 
   function tgl(id){const el=q('#'+id); el.style.display = el.style.display==='none'?'block':'none';}
+
+  // Экран 0: старт → пустой хаб
+  function empHub(){ q('#emp-list').style.display='none'; q('#emp-hub').style.display='block'; }
+  function empList(){ q('#emp-list').style.display='block'; q('#emp-hub').style.display='none'; }
 
   // Флоу выдачи
   function asStep(n){
