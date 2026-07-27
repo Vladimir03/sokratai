@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сократ · Прототип: группы как рабочее место</title>
+<style>
+  /* ── Sokrat tokens (rule 90) ─────────────────────────────────────────── */
+  :root{
+    --accent:#1B6B4A; --accent-lt:#DCFCE7; --primary:#1E293B;
+    --bg:#F8FAFC; --surface:#FFFFFF; --border:#E2E8F0;
+    --t1:#0F172A; --t2:#64748B; --t3:#94A3B8;
+    --warn:#F59E0B; --warn-bg:#FEF3C7; --danger:#EF4444; --danger-bg:#FEE2E2;
+    --ok:#059669; --ok-bg:#D1FAE5;
+    --r-md:6px; --r-lg:8px; --r-xl:12px;
+    --anno:#7C3AED; --anno-bg:#F3EEFF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:'Golos Text',-apple-system,'Segoe UI',system-ui,sans-serif;
+    background:#EEF1F6; color:var(--t1); font-size:16px; line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;cursor:pointer;border:none;background:none;color:inherit;touch-action:manipulation}
+  svg{display:block;flex:none}
+
+  /* ── Прототип-тулбар ─────────────────────────────────────────────────── */
+  .ptb{position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px 16px;background:var(--primary);color:#E2E8F0;font-size:13px}
+  .ptb b{color:#fff;font-weight:600;margin-right:6px}
+  .ptb .seg{display:flex;background:#0f172a55;border-radius:999px;padding:3px}
+  .ptb .seg button{padding:5px 12px;border-radius:999px;color:#CBD5E1;font-size:13px}
+  .ptb .seg button.on{background:var(--accent);color:#fff}
+  .ptb .sw{display:flex;align-items:center;gap:6px;margin-left:auto;color:#CBD5E1}
+  .ptb .sw input{accent-color:var(--accent);width:15px;height:15px}
+
+  /* ── Сцена ───────────────────────────────────────────────────────────── */
+  .stage{display:flex;justify-content:center;padding:22px 16px 60px}
+  .device{background:var(--bg);border:1px solid #d7dde7;border-radius:14px;overflow:hidden;
+    box-shadow:0 12px 40px rgba(15,23,42,.10);width:min(1180px,100%);min-height:720px;transition:width .3s ease}
+  body.vp-mobile .device{width:375px;min-height:740px}
+
+  /* ── App chrome ──────────────────────────────────────────────────────── */
+  .app{display:grid;grid-template-columns:216px 1fr;min-height:720px}
+  body.vp-mobile .app{grid-template-columns:1fr}
+  .nav{background:var(--surface);border-right:1px solid var(--border);padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+  body.vp-mobile .nav{display:none}
+  .nav .logo{display:flex;align-items:center;gap:8px;font-weight:600;padding:6px 10px 14px;color:var(--t1)}
+  .nav .logo .dot{width:26px;height:26px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
+  .nav h6{font-size:10.5px;letter-spacing:.08em;color:var(--t3);padding:12px 10px 4px;font-weight:600}
+  .nav a{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:var(--r-lg);color:#334155;font-size:14px;text-decoration:none;cursor:pointer}
+  .nav a svg{color:var(--t3)}
+  .nav a.on{background:var(--accent);color:#fff}
+  .nav a.on svg{color:#fff}
+  .nav a .cnt{margin-left:auto;font-size:11.5px;background:var(--warn-bg);color:#92400E;border-radius:999px;padding:1px 7px;font-weight:600}
+  .nav a.on .cnt{background:#ffffff33;color:#fff}
+
+  main{padding:22px 26px 40px;min-width:0}
+  body.vp-mobile main{padding:14px 14px 84px}
+
+  /* мобильная нижняя навигация */
+  .mnav{display:none}
+  body.vp-mobile .mnav{position:sticky;bottom:0;display:flex;justify-content:space-around;background:var(--surface);
+    border-top:1px solid var(--border);padding:8px 4px 10px;margin:0 -14px -84px;z-index:5}
+  .mnav button{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;color:var(--t2);min-width:56px;padding:4px}
+  .mnav button.on{color:var(--accent)}
+
+  /* ── Общие примитивы ─────────────────────────────────────────────────── */
+  .h1{font-size:24px;font-weight:600;letter-spacing:-.01em}
+  .sub{color:var(--t2);font-size:14px;margin-top:3px}
+  .btn{display:inline-flex;align-items:center;gap:7px;border-radius:var(--r-lg);padding:9px 15px;font-size:14px;font-weight:500;min-height:40px}
+  .btn-p{background:var(--accent);color:#fff}
+  .btn-p:hover{background:#15573C}
+  .btn-s{background:var(--surface);border:1px solid var(--border);color:#334155}
+  .btn-g{color:var(--t2)}
+  .btn-g:hover{color:#334155}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg)}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;border-radius:999px;padding:2.5px 9px}
+  .chip-warn{background:var(--warn-bg);color:#92400E}
+  .chip-ok{background:var(--ok-bg);color:#065F46}
+  .chip-mut{background:#F1F5F9;color:var(--t2)}
+  .chip-red{background:var(--danger-bg);color:#991B1B}
+  .dotc{width:9px;height:9px;border-radius:50%;flex:none}
+  .sec{margin-top:26px}
+  .sec-h{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+  .sec-h h2{font-size:17px;font-weight:600}
+  .sec-h .meta{color:var(--t3);font-size:13px}
+  .sec-h .act{margin-left:auto;font-size:13.5px;color:var(--accent);font-weight:500;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+  .divider{border:none;border-top:1px solid var(--border);margin:8px 0 14px}
+  .ava{width:30px;height:30px;border-radius:50%;background:#E2E8F0;color:#475569;display:grid;place-items:center;font-size:12.5px;font-weight:600;flex:none}
+  .ava.g{background:var(--accent-lt);color:#065F46}
+
+  /* ── Аннотации Job↔критерий↔метрика ─────────────────────────────────── */
+  .anno{display:none;border:1.5px dashed var(--anno);background:var(--anno-bg);border-radius:var(--r-lg);
+    padding:9px 13px;font-size:12.5px;color:#4C1D95;margin:14px 0 4px}
+  body.show-anno .anno{display:block}
+  .anno b{color:var(--anno)}
+  .anno .m{display:inline-block;margin-top:3px;background:#fff;border-radius:6px;padding:1px 7px;border:1px solid #DDD6FE;font-size:11.5px}
+
+  .screen{display:none}
+  .screen.on{display:block}
+
+  /* ── Экран 1: список групп ───────────────────────────────────────────── */
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin:18px 0 0}
+  .tabs button{padding:9px 14px;font-size:14px;color:var(--t2);border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs button.on{color:var(--accent);border-color:var(--accent);font-weight:500}
+  .glist{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+  .grow{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:13px 16px;
+    cursor:pointer;transition:box-shadow .15s}
+  .grow:hover{box-shadow:0 3px 12px rgba(15,23,42,.07)}
+  .grow .nm{font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:9px}
+  .grow .ln2{display:flex;gap:14px;color:var(--t2);font-size:13px;margin-top:3px;flex-wrap:wrap}
+  .grow .ln2 span{display:inline-flex;align-items:center;gap:5px}
+  .grow .right{display:flex;align-items:center;gap:10px}
+  .pb{height:5px;border-radius:999px;background:#EDF1F6;min-width:90px;overflow:hidden}
+  .pb i{display:block;height:100%;background:var(--accent);border-radius:999px}
+  body.vp-mobile .grow{grid-template-columns:1fr auto}
+  body.vp-mobile .grow .right .pbwrap{display:none}
+
+  /* ── Экран 2/3: хаб группы ───────────────────────────────────────────── */
+  .crumbs{font-size:13px;color:var(--t3);display:flex;gap:6px;align-items:center;margin-bottom:10px}
+  .crumbs a{color:var(--t2);cursor:pointer}
+  .hub-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
+  .hub-head .info{min-width:0}
+  .hub-title{display:flex;align-items:center;gap:10px}
+  .hub-title .clr{width:14px;height:14px;border-radius:4px;flex:none}
+  .hub-meta{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+  .hub-act{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  body.vp-mobile .hub-act{margin-left:0;width:100%}
+  .avastack{display:flex;margin-top:10px;align-items:center}
+  .avastack .ava{margin-right:-7px;border:2px solid var(--bg)}
+  .avastack .more{margin-left:14px;font-size:13px;color:var(--t2)}
+  .hubgrid{display:grid;grid-template-columns:1.55fr 1fr;gap:0 34px}
+  body.vp-mobile .hubgrid{grid-template-columns:1fr}
+
+  .workrow{display:grid;grid-template-columns:1fr auto;gap:6px 14px;padding:12px 14px;align-items:center}
+  .workrow+.workrow{margin-top:8px}
+  .workrow .t{font-weight:500;font-size:14.5px}
+  .workrow .d{font-size:12.5px;color:var(--t2);display:flex;gap:10px;align-items:center;margin-top:3px;flex-wrap:wrap}
+  .workrow .mon{white-space:nowrap}
+  .lesson{display:flex;gap:12px;align-items:center;padding:10px 13px}
+  .lesson+.lesson{margin-top:8px}
+  .lesson .dt{width:46px;text-align:center;flex:none}
+  .lesson .dt b{display:block;font-size:16px}
+  .lesson .dt span{font-size:11px;color:var(--t3);text-transform:uppercase}
+  .memrow{display:flex;align-items:center;gap:10px;padding:8px 6px;border-bottom:1px solid #F1F5F9;font-size:14px}
+  .memrow:last-child{border-bottom:none}
+  .memrow .st{margin-left:auto;display:flex;gap:6px}
+  .kv{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
+  .kv .cell b{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+  .kv .cell span{display:block;font-size:12px;color:var(--t2)}
+  .weak{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+
+  /* ── Экран 4: монитор ────────────────────────────────────────────────── */
+  .mon-sum{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .mon-upd{margin-left:auto;font-size:12.5px;color:var(--t3);display:flex;gap:6px;align-items:center}
+  .mon-upd .pulse{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .monwrap{overflow-x:auto;touch-action:pan-x;margin-top:14px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface)}
+  table.mon{border-collapse:separate;border-spacing:0;table-layout:fixed;width:max-content;font-size:13px}
+  .mon th,.mon td{border-bottom:1px solid #F1F5F9;height:44px;text-align:center;font-variant-numeric:tabular-nums}
+  .mon thead th{font-size:12px;color:var(--t2);font-weight:500;background:#F8FAFC;position:sticky;top:0}
+  .mon .name{position:sticky;left:0;background:var(--surface);text-align:left;padding:0 14px;min-width:170px;font-weight:500;z-index:2;border-right:1px solid var(--border)}
+  .mon thead .name{background:#F8FAFC;z-index:3}
+  .mon td.c{width:52px;cursor:pointer}
+  .mon td.c:hover{outline:2px solid var(--accent);outline-offset:-2px;border-radius:4px}
+  .cell-ok{background:var(--ok-bg);color:#065F46;font-weight:600}
+  .cell-run{background:var(--warn-bg);color:#92400E}
+  .cell-stuck{background:var(--warn-bg);color:#92400E;font-weight:700}
+  .cell-no{background:#F8FAFC;color:var(--t3)}
+  .mon .rowsum{padding:0 12px;color:var(--t2);font-size:12px;white-space:nowrap}
+  .monlist{display:none}
+  body.vp-mobile .monwrap{display:none}
+  body.vp-mobile .monlist{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+  .mlrow{display:flex;align-items:center;gap:10px;padding:11px 13px}
+  .mlrow .prog{margin-left:auto;text-align:right;font-size:12.5px;color:var(--t2)}
+  .mpanel{margin-top:14px;padding:14px 16px;border-left:3px solid var(--warn)}
+  .mpanel .q{background:#F8FAFC;border-radius:var(--r-md);padding:9px 12px;font-size:13.5px;margin:9px 0;color:#334155}
+
+  /* ── Экран 5: флоу выдачи ────────────────────────────────────────────── */
+  .steps{display:flex;gap:8px;align-items:center;margin:16px 0 20px;font-size:13px;color:var(--t3)}
+  .steps .s{display:flex;align-items:center;gap:7px}
+  .steps .n{width:22px;height:22px;border-radius:50%;background:#E2E8F0;color:var(--t2);display:grid;place-items:center;font-size:12px;font-weight:600}
+  .steps .s.on .n{background:var(--accent);color:#fff}
+  .steps .s.on{color:var(--t1);font-weight:500}
+  .steps .ln{width:26px;border-top:1px solid var(--border)}
+  .srcgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+  body.vp-mobile .srcgrid{grid-template-columns:1fr}
+  .srccard{padding:16px;cursor:pointer;transition:box-shadow .15s}
+  .srccard:hover{box-shadow:0 3px 12px rgba(15,23,42,.08)}
+  .srccard h3{font-size:15px;font-weight:600;margin:10px 0 4px}
+  .srccard p{font-size:13px;color:var(--t2)}
+  .tpl{display:flex;align-items:center;gap:10px;padding:10px 13px;cursor:pointer}
+  .tpl+.tpl{margin-top:8px}
+  .tpl:hover{box-shadow:0 3px 12px rgba(15,23,42,.07)}
+  .recip{max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--surface);padding:4px 12px;margin-top:10px}
+  .recip label{display:flex;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid #F1F5F9;font-size:14px;cursor:pointer}
+  .recip label:last-child{border-bottom:none}
+  .recip input{width:16px;height:16px;accent-color:var(--accent)}
+  .sendbar{display:flex;align-items:center;gap:14px;margin-top:18px;flex-wrap:wrap}
+  .sendbar .cnt{font-size:13.5px;color:var(--t2)}
+  .resrow{display:flex;align-items:center;gap:10px;padding:8px 4px;font-size:14px;border-bottom:1px solid #F1F5F9}
+  .resrow:last-child{border-bottom:none}
+  .field{margin-top:14px}
+  .field label{font-size:13px;font-weight:500;color:#334155;display:block;margin-bottom:6px}
+  .pill2{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-lg);overflow:hidden}
+  .pill2 button{padding:8px 14px;font-size:13.5px;color:var(--t2);background:var(--surface)}
+  .pill2 button.on{background:var(--accent-lt);color:#065F46;font-weight:500}
+  input[type=date]{font:inherit;font-size:16px;border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;background:var(--surface);color:var(--t1)}
+
+  .empty{padding:40px 20px;text-align:center;color:var(--t2)}
+  .empty h3{color:var(--t1);font-size:16px;margin-bottom:6px}
+  .backlnk{display:inline-flex;align-items:center;gap:6px;color:var(--t2);font-size:13.5px;cursor:pointer;margin-bottom:8px}
+</style>
+</head>
+<body class="show-anno">
+
+<!-- ══ Прототип-тулбар ══ -->
+<div class="ptb">
+  <b>Прототип · Группы</b>
+  <div class="seg" id="scr-seg">
+    <button data-scr="list" class="on">1 Список</button>
+    <button data-scr="hub">2 Хаб (мини)</button>
+    <button data-scr="hub-stress">3 Поток Дианы</button>
+    <button data-scr="monitor">4 Монитор</button>
+    <button data-scr="assign">5 Выдача</button>
+  </div>
+  <div class="seg" id="vp-seg">
+    <button data-vp="desktop" class="on">Desktop</button>
+    <button data-vp="mobile">375px</button>
+  </div>
+  <div class="seg" id="nav-seg" title="Вариант навигации">
+    <button data-nav="A" class="on">Нав A: пункт меню</button>
+    <button data-nav="B">Нав B: вкладка</button>
+  </div>
+  <label class="sw"><input type="checkbox" id="anno-sw" checked> Аннотации</label>
+</div>
+
+<div class="stage"><div class="device"><div class="app">
+
+  <!-- ══ SideNav ══ -->
+  <nav class="nav">
+    <div class="logo"><span class="dot">С</span> Сократ AI</div>
+    <h6>РАБОТА</h6>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Главная</a>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Расписание</a>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> Домашние задания</a>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> Пробники</a>
+    <h6>УЧЕНИКИ</h6>
+    <a id="navA-groups" class="on"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Группы <span class="cnt">3</span></a>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Все ученики</a>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Чаты</a>
+    <h6>МАТЕРИАЛЫ</h6>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> База задач</a>
+    <h6>ФИНАНСЫ</h6>
+    <a><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg> Оплаты</a>
+  </nav>
+
+  <main id="main">
+
+  <!-- ══════════ Экран 1: СПИСОК ГРУПП ══════════ -->
+  <section class="screen on" id="scr-list">
+    <div id="listB-head" style="display:none">
+      <div class="h1">👥&#8288;</div>
+      <div class="h1" style="margin-top:-32px">Мои ученики</div>
+      <div class="sub">Все ваши ученики, мини-группы и индивидуальные занятия в одном месте.</div>
+      <div class="tabs">
+        <button>Ученики</button><button class="on">Группы</button><button>Успеваемость</button>
+      </div>
+    </div>
+    <div id="listA-head">
+      <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+        <div>
+          <div class="h1">Группы</div>
+          <div class="sub">Рабочие места ваших групп: занятия, работы и результаты.</div>
+        </div>
+        <button class="btn btn-p" style="margin-left:auto">+ Создать группу</button>
+      </div>
+    </div>
+
+    <div class="anno"><b>Job:</b> выбрать группу для работы + увидеть, где нужно внимание, не заходя в каждую.
+      <b>Критерий:</b> «где внимание» видно со списка, 0 переходов; 12 групп Дианы — один экран.
+      <span class="m">Метрика: WAU хаба ≥60% · активация ≥70% платящих с ≥1 группой</span></div>
+
+    <div class="glist">
+      <div class="grow card" onclick="go('hub')">
+        <span class="dotc" style="background:#1B6B4A"></span>
+        <div>
+          <div class="nm">Ср 18:00 · ЕГЭ база</div>
+          <div class="ln2">
+            <span>4 ученика</span><span>·</span><span>занятие завтра, 18:00</span><span>·</span>
+            <span>«Электростатика №1–8» — сдали 2 из 4</span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="chip chip-warn">1 застрял</span>
+          <span class="pbwrap"><span class="pb" style="width:90px"><i style="width:50%"></i></span></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+      </div>
+      <div class="grow card" onclick="go('hub-stress')">
+        <span class="dotc" style="background:#B45309"></span>
+        <div>
+          <div class="nm">11Д · поток декабря</div>
+          <div class="ln2">
+            <span>22 ученика</span><span>·</span><span>занятие в чт, 17:00</span><span>·</span>
+            <span>«Задание 15: Н и НН» — сдали 15 из 22</span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="chip chip-warn">3 застряли</span>
+          <span class="pbwrap"><span class="pb" style="width:90px"><i style="width:68%"></i></span></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+      </div>
+      <div class="grow card" onclick="go('hub')">
+        <span class="dotc" style="background:#3B82F6"></span>
+        <div>
+          <div class="nm">Пн 16:00 · ОГЭ</div>
+          <div class="ln2">
+            <span>3 ученика</span><span>·</span><span>занятие в пн, 16:00</span><span>·</span>
+            <span>активной работы нет</span>
+          </div>
+        </div>
+        <div class="right">
+          <span class="chip chip-red">2 долга</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-h"><h2>Метки</h2><span class="meta">для фильтров и массовой выдачи</span>
+        <span class="act">+ Метка</span></div>
+      <hr class="divider">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span class="chip chip-mut">#интенсив · 6</span>
+        <span class="chip chip-mut">#сочинения · 9</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ Экран 2: ХАБ МИНИ-ГРУППЫ ══════════ -->
+  <section class="screen" id="scr-hub">
+    <div class="crumbs"><a onclick="go('list')">Группы</a> <span>/</span> <span>Ср 18:00 · ЕГЭ база</span></div>
+
+    <div class="hub-head">
+      <div class="info">
+        <div class="hub-title">
+          <span class="clr" style="background:#1B6B4A"></span>
+          <div class="h1">Ср 18:00 · ЕГЭ база</div>
+        </div>
+        <div class="hub-meta">
+          <span class="chip chip-mut">занятие завтра, 18:00</span>
+          <span class="chip chip-red">долги: 1</span>
+        </div>
+        <div class="avastack">
+          <span class="ava g">АК</span><span class="ava g">МП</span><span class="ava">ДС</span><span class="ava">ИВ</span>
+          <span class="more">4 ученика</span>
+        </div>
+      </div>
+      <div class="hub-act">
+        <button class="btn btn-p" onclick="go('assign')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+          Выдать работу группе</button>
+        <button class="btn btn-s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Ссылка в группу</button>
+        <button class="btn btn-s"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> Чат</button>
+        <button class="btn btn-g" title="Переименовать · Архив">⋯</button>
+      </div>
+    </div>
+
+    <div class="anno"><b>Job:</b> рабочее место группы — выдать, увидеть состояние, вернуться к материалам (чинит Z4-контекст).
+      <b>Критерий:</b> от «задам работу» до отправки ≤60 сек, группа уже выбрана; один primary CTA.
+      <span class="m">Метрика: ≥60% групповых выдач из хаба · median ≤60 сек</span></div>
+
+    <div class="hubgrid">
+      <div><!-- левая колонка -->
+        <div class="sec" style="margin-top:18px">
+          <div class="sec-h"><h2>Сейчас в работе</h2><span class="act" onclick="go('monitor')">Смотреть в моменте →</span></div>
+          <hr class="divider">
+          <div class="workrow card">
+            <div>
+              <div class="t">Электростатика №1–8 · домашка</div>
+              <div class="d"><span>дедлайн завтра 09:00</span>
+                <span class="pb" style="width:120px"><i style="width:50%"></i></span><span>сдали 2 из 4</span>
+                <span class="chip chip-warn">Даша застряла на №3</span></div>
+            </div>
+            <button class="btn btn-s mon" onclick="go('monitor')">В моменте</button>
+          </div>
+          <div class="workrow card">
+            <div>
+              <div class="t">Самостоятельная: конденсаторы · 6 задач</div>
+              <div class="d"><span>до пятницы</span>
+                <span class="pb" style="width:120px"><i style="width:25%"></i></span><span>сдал 1 из 4</span></div>
+            </div>
+            <button class="btn btn-s mon" onclick="go('monitor')">В моменте</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><h2>Работы группы</h2><span class="meta">12 за всё время</span><span class="act">Все →</span></div>
+          <hr class="divider">
+          <div class="workrow card">
+            <div><div class="t">Кинематика: повторение</div>
+              <div class="d"><span>завершена 21.07</span><span class="chip chip-ok">средний 78% · сдали 4/4</span></div></div>
+            <button class="btn btn-g">Разбор →</button>
+          </div>
+          <div class="workrow card">
+            <div><div class="t">Пробник ЕГЭ · вариант 6</div>
+              <div class="d"><span>завершён 14.07</span><span class="chip chip-ok">средний 61 балл</span></div></div>
+            <button class="btn btn-g">Разбор →</button>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><h2>Результаты группы</h2><span class="meta">за 4 недели</span></div>
+          <hr class="divider">
+          <div class="card" style="padding:14px 16px">
+            <div class="kv">
+              <div class="cell"><b>74%</b><span>средний результат</span></div>
+              <div class="cell"><b>92%</b><span>сдаваемость</span></div>
+              <div class="cell"><b>3</b><span>работы за месяц</span></div>
+            </div>
+            <div class="weak">
+              <span style="font-size:13px;color:var(--t2);align-self:center">Слабые места:</span>
+              <span class="chip chip-warn">Закон Кулона · 48%</span>
+              <span class="chip chip-warn">Векторы поля · 55%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div><!-- правая колонка -->
+        <div class="sec" style="margin-top:18px">
+          <div class="sec-h"><h2>Занятия</h2><span class="act">+ Серия</span></div>
+          <hr class="divider">
+          <div class="lesson card">
+            <div class="dt"><b>28</b><span>июл</span></div>
+            <div><div style="font-weight:500;font-size:14px">Ср · 18:00–19:30</div>
+              <div style="font-size:12.5px;color:var(--t2)">4 участника · серия еженедельно</div></div>
+          </div>
+          <div class="lesson card">
+            <div class="dt"><b>4</b><span>авг</span></div>
+            <div><div style="font-weight:500;font-size:14px">Ср · 18:00–19:30</div>
+              <div style="font-size:12.5px;color:var(--t2)">4 участника</div></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h"><h2>Состав</h2><span class="act">+ Ученик</span></div>
+          <hr class="divider">
+          <div class="card" style="padding:4px 12px">
+            <div class="memrow"><span class="ava g">АК</span> Аня Ковалёва <span class="st"><span class="chip chip-ok">активна</span></span></div>
+            <div class="memrow"><span class="ava g">МП</span> Миша Петров <span class="st"><span class="chip chip-red">долг 3 000 ₽</span></span></div>
+            <div class="memrow"><span class="ava">ДС</span> Даша Соколова <span class="st"><span class="chip chip-warn">застряла</span></span></div>
+            <div class="memrow"><span class="ava">ИВ</span> Илья Волков
+              <span class="st"><span class="chip chip-mut">новичок</span><button class="btn btn-s" style="min-height:30px;padding:4px 10px;font-size:12.5px">Догнать: выдать работы</button></span></div>
+          </div>
+        </div>
+
+        <div class="anno"><b>Job (Z2-стык):</b> новичок по ссылке получает активные работы группы одним подтверждением.
+          <span class="m">Метрика: ≥90% новичков догнаны ≤24ч</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ Экран 3: STRESS — ПОТОК ДИАНЫ ══════════ -->
+  <section class="screen" id="scr-hub-stress">
+    <div class="crumbs"><a onclick="go('list')">Группы</a> <span>/</span> <span>11Д · поток декабря</span></div>
+    <div class="hub-head">
+      <div class="info">
+        <div class="hub-title"><span class="clr" style="background:#B45309"></span><div class="h1">11Д · поток декабря</div></div>
+        <div class="hub-meta">
+          <span class="chip chip-mut">занятие в чт, 17:00</span>
+          <span class="chip chip-mut">русский · ЕГЭ</span>
+        </div>
+        <div class="avastack">
+          <span class="ava g">ЛП</span><span class="ava g">ОК</span><span class="ava">ВС</span><span class="ava g">ТМ</span><span class="ava">ЕА</span>
+          <span class="more"><b style="color:var(--t1)">22 ученика</b> · развернуть →</span>
+        </div>
+      </div>
+      <div class="hub-act">
+        <button class="btn btn-p" onclick="go('assign')">Выдать работу группе</button>
+        <button class="btn btn-s">Ссылка в группу</button>
+        <button class="btn btn-s">Чат</button>
+        <button class="btn btn-g">⋯</button>
+      </div>
+    </div>
+
+    <div class="anno"><b>Stress-тест:</b> те же блоки при 22 учениках — состав свёрнут в стек аватаров,
+      работы пагинируются по 10, монитор со sticky-именами. <b>Критерий:</b> пороги Z4/Z5 не деградируют.
+      <span class="m">Метрика: те же ≤60 сек / ≤5 сек при N=25</span></div>
+
+    <div class="hubgrid">
+      <div>
+        <div class="sec" style="margin-top:18px">
+          <div class="sec-h"><h2>Сейчас в работе</h2><span class="act" onclick="go('monitor')">Смотреть в моменте →</span></div>
+          <hr class="divider">
+          <div class="workrow card">
+            <div>
+              <div class="t">Задание 15: Н и НН · тест, 10 вопросов</div>
+              <div class="d"><span>дедлайн сегодня 20:00</span>
+                <span class="pb" style="width:140px"><i style="width:68%"></i></span><span>сдали 15 из 22</span>
+                <span class="chip chip-warn">3 застряли</span><span class="chip chip-mut">4 не открывали</span></div>
+            </div>
+            <button class="btn btn-s mon" onclick="go('monitor')">В моменте</button>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Работы группы</h2><span class="meta">38 за всё время</span><span class="act">Все →</span></div>
+          <hr class="divider">
+          <div class="workrow card">
+            <div><div class="t">Задание 14: слитно/раздельно</div>
+              <div class="d"><span>завершена 24.07</span><span class="chip chip-ok">средний 81% · сдали 20/22</span></div></div>
+            <button class="btn btn-g">Разбор →</button>
+          </div>
+          <div class="workrow card">
+            <div><div class="t">Задание 11: суффиксы</div>
+              <div class="d"><span>завершена 21.07</span><span class="chip chip-warn">средний 64% · сдали 19/22</span></div></div>
+            <button class="btn btn-g">Разбор →</button>
+          </div>
+          <div style="text-align:center;margin-top:10px"><button class="btn btn-g">Показать ещё 8 ↓</button></div>
+        </div>
+      </div>
+      <div>
+        <div class="sec" style="margin-top:18px">
+          <div class="sec-h"><h2>Результаты группы</h2><span class="meta">за 4 недели</span></div>
+          <hr class="divider">
+          <div class="card" style="padding:14px 16px">
+            <div class="kv">
+              <div class="cell"><b>71%</b><span>средний результат</span></div>
+              <div class="cell"><b>86%</b><span>сдаваемость</span></div>
+              <div class="cell"><b>6</b><span>работ за месяц</span></div>
+            </div>
+            <div class="weak">
+              <span style="font-size:13px;color:var(--t2);align-self:center">Слабые места:</span>
+              <span class="chip chip-warn">№15 Н/НН · 58%</span>
+              <span class="chip chip-warn">№11 суффиксы · 64%</span>
+            </div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-h"><h2>Занятия</h2><span class="act">+ Серия</span></div>
+          <hr class="divider">
+          <div class="lesson card">
+            <div class="dt"><b>29</b><span>июл</span></div>
+            <div><div style="font-weight:500;font-size:14px">Чт · 17:00–18:30</div>
+              <div style="font-size:12.5px;color:var(--t2)">22 участника · серия еженедельно</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ Экран 4: МОНИТОР ══════════ -->
+  <section class="screen" id="scr-monitor">
+    <span class="backlnk" onclick="go('hub')">← Ср 18:00 · ЕГЭ база</span>
+    <div class="h1">Электростатика №1–8 — в моменте</div>
+    <div class="sub">Домашка · дедлайн завтра 09:00</div>
+
+    <div class="mon-sum">
+      <span class="chip chip-ok">Сдали 2</span>
+      <span class="chip chip-warn">В работе 1</span>
+      <span class="chip chip-mut">Не открывал 1</span>
+      <span class="mon-upd"><span class="pulse"></span> обновлено <span id="upd-sec">8</span> сек назад</span>
+    </div>
+
+    <div class="anno"><b>Job (#44, Aha):</b> «ученик на 5-м вопросе — я уже вижу результаты по первым четырём» — без открытия каждого.
+      <b>Критерий:</b> «кто где» одним экраном ≤5 сек; данные не старше 1 мин; «застрял» = ≥3 ошибки/подсказки.
+      <span class="m">Метрика: ≥40% репетиторов открывают монитор в 30 мин после дедлайна</span></div>
+
+    <div class="monwrap">
+      <table class="mon">
+        <thead><tr>
+          <th class="name">Ученик</th>
+          <th style="width:52px">№1</th><th style="width:52px">№2</th><th style="width:52px">№3</th><th style="width:52px">№4</th>
+          <th style="width:52px">№5</th><th style="width:52px">№6</th><th style="width:52px">№7</th><th style="width:52px">№8</th>
+          <th class="rowsum">Итог</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="name">Аня Ковалёва</td>
+            <td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td>
+            <td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td>
+            <td class="rowsum">сдала · 8/8 · 21 мин</td></tr>
+          <tr><td class="name">Миша Петров</td>
+            <td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-run">2п</td>
+            <td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td><td class="c cell-ok">✓</td>
+            <td class="rowsum">сдал · 7,5/8</td></tr>
+          <tr><td class="name">Даша Соколова</td>
+            <td class="c cell-ok">✓</td><td class="c cell-ok">✓</td>
+            <td class="c cell-stuck" onclick="tgl('mpanel')">!3</td>
+            <td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td>
+            <td class="rowsum">решает · застряла на №3</td></tr>
+          <tr><td class="name">Илья Волков</td>
+            <td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td>
+            <td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td><td class="c cell-no">—</td>
+            <td class="rowsum">не открывал</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- мобильная версия монитора: список -->
+    <div class="monlist">
+      <div class="mlrow card"><span class="ava g">АК</span><div><b style="font-size:14px">Аня Ковалёва</b>
+        <div style="font-size:12.5px;color:var(--t2)">сдала · 8/8</div></div><span class="prog chip chip-ok">✓ 8/8</span></div>
+      <div class="mlrow card"><span class="ava g">МП</span><div><b style="font-size:14px">Миша Петров</b>
+        <div style="font-size:12.5px;color:var(--t2)">сдал · 7,5/8</div></div><span class="prog chip chip-ok">✓ 7,5/8</span></div>
+      <div class="mlrow card" onclick="tgl('mpanel')"><span class="ava">ДС</span><div><b style="font-size:14px">Даша Соколова</b>
+        <div style="font-size:12.5px;color:var(--t2)">решает · застряла на №3</div></div><span class="prog chip chip-warn">№3 · 3 ошибки</span></div>
+      <div class="mlrow card"><span class="ava">ИВ</span><div><b style="font-size:14px">Илья Волков</b>
+        <div style="font-size:12.5px;color:var(--t2)">не открывал</div></div><span class="prog chip chip-mut">—</span></div>
+    </div>
+
+    <div class="mpanel card" id="mpanel" style="display:none">
+      <div style="display:flex;align-items:center;gap:8px">
+        <b>Даша · задача №3</b> <span class="chip chip-warn">3 неверные попытки · 1 подсказка</span>
+      </div>
+      <div class="q">Последний ответ: «E = kq/r» — перепутана формула напряжённости и потенциала.</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s">Открыть диалог</button>
+        <button class="btn btn-s">Написать Даше</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════ Экран 5: ФЛОУ ВЫДАЧИ ══════════ -->
+  <section class="screen" id="scr-assign">
+    <span class="backlnk" onclick="go('hub')">← Ср 18:00 · ЕГЭ база</span>
+    <div class="h1">Выдать работу группе</div>
+
+    <div class="steps">
+      <span class="s" id="st1"><span class="n">1</span> Источник</span><span class="ln"></span>
+      <span class="s" id="st2"><span class="n">2</span> Проверка и отправка</span><span class="ln"></span>
+      <span class="s" id="st3"><span class="n">3</span> Готово</span>
+    </div>
+
+    <!-- Шаг 1 -->
+    <div id="as-step1">
+      <div class="anno"><b>Job (Z4):</b> от решения «задам работу» до отправки ≤60 сек — группа уже выбрана контекстом.
+        <span class="m">Метрика: median group_hub_assign_started → sent ≤60 сек</span></div>
+      <div class="srcgrid">
+        <div class="srccard card" onclick="asStep(2)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+          <h3>Из шаблона</h3><p>Ваши готовые наборы — выдача в два клика.</p>
+        </div>
+        <div class="srccard card" onclick="asStep(2)">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <h3>Из Банка ДЗ</h3><p>Готовые подборки по темам ЕГЭ/ОГЭ.</p>
+        </div>
+        <div class="srccard card">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1B6B4A" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          <h3>Собрать новую</h3><p>Конструктор откроется с уже выбранной группой.</p>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-h"><h2>Недавние шаблоны</h2></div>
+        <hr class="divider">
+        <div class="tpl card" onclick="asStep(2)"><span class="ava g">⚡&#8288;</span>
+          <div><b style="font-size:14px">Электростатика №1–8</b>
+            <div style="font-size:12.5px;color:var(--t2)">8 задач · использован для этой группы 21.07</div></div></div>
+        <div class="tpl card" onclick="asStep(2)"><span class="ava g">📐&#8288;</span>
+          <div><b style="font-size:14px">Кинематика: повторение</b>
+            <div style="font-size:12.5px;color:var(--t2)">6 задач · средний 78% в прошлый раз</div></div></div>
+      </div>
+    </div>
+
+    <!-- Шаг 2 -->
+    <div id="as-step2" style="display:none">
+      <div class="card" style="padding:16px 18px">
+        <b style="font-size:15.5px">Электростатика №1–8</b>
+        <span style="color:var(--t2);font-size:13.5px"> · 8 задач · до 12,5 баллов</span>
+        <div class="field">
+          <label>Вид работы</label>
+          <span class="pill2"><button class="on">Домашка с Сократом</button><button>Самостоятельная</button></span>
+        </div>
+        <div class="field">
+          <label>Дедлайн</label>
+          <input type="date" value="2026-07-29">
+        </div>
+        <div class="field">
+          <label>Получатели · <a style="color:var(--accent);cursor:pointer" onclick="selAll(true)">выбрать всех</a> ·
+            <a style="color:var(--t2);cursor:pointer" onclick="selAll(false)">снять</a></label>
+          <div class="recip">
+            <label><input type="checkbox" class="rc" checked onchange="cnt()"> Аня Ковалёва</label>
+            <label><input type="checkbox" class="rc" checked onchange="cnt()"> Миша Петров</label>
+            <label><input type="checkbox" class="rc" checked onchange="cnt()"> Даша Соколова</label>
+            <label><input type="checkbox" class="rc" checked onchange="cnt()"> Илья Волков <span class="chip chip-mut">новичок</span></label>
+          </div>
+        </div>
+        <div class="sendbar">
+          <button class="btn btn-p" id="send-btn" onclick="asSend()">Отправить работу</button>
+          <span class="cnt">Отправится: <b id="rc-n">4</b> ученикам</span>
+        </div>
+      </div>
+      <div class="anno"><b>Критерий (Z4-batch):</b> счётчик получателей до отправки; частичный сбой — поимённо,
+        успешные не откатываются, «Повторить» для остальных.
+        <span class="m">Метрика: 0 сбоев без поимённого отчёта</span></div>
+    </div>
+
+    <!-- Шаг 3 -->
+    <div id="as-step3" style="display:none">
+      <div class="card" style="padding:18px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span class="chip chip-ok" style="font-size:13px">Отправлено 3 из 4</span>
+          <span class="chip chip-warn" style="font-size:13px">1 не доставлено</span>
+        </div>
+        <div class="resrow"><span class="ava g">АК</span> Аня Ковалёва <span style="margin-left:auto" class="chip chip-ok">✓ push</span></div>
+        <div class="resrow"><span class="ava g">МП</span> Миша Петров <span style="margin-left:auto" class="chip chip-ok">✓ telegram</span></div>
+        <div class="resrow"><span class="ava">ДС</span> Даша Соколова <span style="margin-left:auto" class="chip chip-ok">✓ push</span></div>
+        <div class="resrow"><span class="ava">ИВ</span> Илья Волков <span style="margin-left:auto" class="chip chip-warn">нет канала — покажите код входа</span></div>
+        <div class="sendbar">
+          <button class="btn btn-p" onclick="go('monitor')">Смотреть в моменте</button>
+          <button class="btn btn-s">Повторить для неотправленных</button>
+          <button class="btn btn-g" onclick="go('hub')">В группу</button>
+        </div>
+      </div>
+      <div class="anno"><b>Aha влево:</b> сразу после выдачи — мост в монитор (Z4→Z5): «выдал и вижу, как решают».
+        <span class="m">Метрика: % переходов в монитор из итога выдачи</span></div>
+    </div>
+  </section>
+
+  <!-- мобильная нижняя навигация -->
+  <div class="mnav">
+    <button><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Главная</button>
+    <button class="on"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Группы</button>
+    <button><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>ДЗ</button>
+    <button><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Чаты</button>
+  </div>
+
+  </main>
+</div></div></div>
+
+<script>
+  // Прототип-стейт: экран / вьюпорт / вариант навигации / аннотации.
+  function q(s){return document.querySelector(s)}
+  function qa(s){return [...document.querySelectorAll(s)]}
+
+  function go(scr){
+    qa('.screen').forEach(el=>el.classList.remove('on'));
+    q('#scr-'+scr).classList.add('on');
+    qa('#scr-seg button').forEach(b=>b.classList.toggle('on', b.dataset.scr===scr));
+    if(scr==='assign') asStep(1);
+    q('#main').scrollTop=0; window.scrollTo(0,0);
+  }
+  qa('#scr-seg button').forEach(b=>b.onclick=()=>go(b.dataset.scr));
+
+  qa('#vp-seg button').forEach(b=>b.onclick=()=>{
+    qa('#vp-seg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    document.body.classList.toggle('vp-mobile', b.dataset.vp==='mobile');
+  });
+
+  qa('#nav-seg button').forEach(b=>b.onclick=()=>{
+    qa('#nav-seg button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    const A=b.dataset.nav==='A';
+    q('#navA-groups').style.display=A?'flex':'none';
+    q('#listA-head').style.display=A?'block':'none';
+    q('#listB-head').style.display=A?'none':'block';
+  });
+
+  q('#anno-sw').onchange=e=>document.body.classList.toggle('show-anno', e.target.checked);
+
+  function tgl(id){const el=q('#'+id); el.style.display = el.style.display==='none'?'block':'none';}
+
+  // Флоу выдачи
+  function asStep(n){
+    [1,2,3].forEach(i=>{
+      q('#as-step'+i).style.display = i===n?'block':'none';
+      q('#st'+i).classList.toggle('on', i<=n);
+    });
+  }
+  function asSend(){
+    const btn=q('#send-btn'); btn.textContent='Отправляем… 2 из 4'; btn.disabled=true;
+    setTimeout(()=>{ btn.textContent='Отправить работу'; btn.disabled=false; asStep(3); }, 900);
+  }
+  function cnt(){ q('#rc-n').textContent = qa('.rc:checked').length; }
+  function selAll(v){ qa('.rc').forEach(c=>c.checked=v); cnt(); }
+
+  // Монитор: «обновлено N сек назад»
+  let sec=8; setInterval(()=>{ sec=(sec+5)%60||5; const el=q('#upd-sec'); if(el) el.textContent=sec; }, 5000);
+</script>
+</body>
+</html>
