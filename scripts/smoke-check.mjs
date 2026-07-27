@@ -1268,5 +1268,27 @@ if (process.env.SMOKE_SKIP_NPM_CI === "1") {
   }
 }
 
+// ─── 24. Task options (options_json) mirror parity (2026-07-27) ──────────────
+// Структурные тестовые задачи (спека homework-choice-tasks): зеркала
+// src/lib/taskOptions.ts ↔ _shared/task-options.ts идентичны; anti-leak
+// (whitelist-проекция выбрасывает `correct`); капы ≤9/≤500; сериализация
+// выбора совместима с посимвольными чекерами пробников.
+console.log("");
+console.log("24. Task options (options_json) mirror parity...");
+const taskOptionsTestPath = path.join(rootDir, "scripts", "test-task-options.mjs");
+if (!fs.existsSync(taskOptionsTestPath)) {
+  fail("scripts/test-task-options.mjs missing — options_json mirrors unguarded");
+}
+const taskOptionsResult = spawnSync(process.execPath, [taskOptionsTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (taskOptionsResult.status !== 0) {
+  console.error(taskOptionsResult.stdout ?? "");
+  console.error(taskOptionsResult.stderr ?? "");
+  fail("task options mirror parity FAILED — see node:test output above");
+}
+ok("task options mirror parity pass (зеркала + anti-leak + капы + сериализация)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

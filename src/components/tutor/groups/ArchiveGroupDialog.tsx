@@ -89,7 +89,10 @@ export function ArchiveGroupDialog({ group, memberCount, onClose }: ArchiveGroup
                   <>
                     <li>
                       {memberCount > 0 ? (
-                        <>{membersPhrase} станут «Без группы»</>
+                        <>
+                          {membersPhrase} {pluralizeRu(memberCount, ['станет', 'станут', 'станут'])}{' '}
+                          «Без группы»
+                        </>
                       ) : (
                         <>участников нет — никто не потеряет группу</>
                       )}

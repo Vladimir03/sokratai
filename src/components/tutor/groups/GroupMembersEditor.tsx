@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useTutorStudents, useTutorGroupMemberships } from '@/hooks/useTutor';
 import { addStudentTag, removeStudentTag, setStudentPrimaryGroup } from '@/lib/tutors';
 import {
@@ -229,19 +230,25 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
                 const fromGroup = !checked ? otherPrimaryByStudent.get(s.id) : undefined;
                 return (
                   <li key={s.id}>
-                    <label
+                    {/* Кнопка-строка + Radix Checkbox: нативный input невидим под
+                        глобальным CSS-reset (QA прода 2026-07-27 — «пустые» строки). */}
+                    <button
+                      type="button"
+                      onClick={() => void handleToggle(s.id, studentLabel(s))}
+                      disabled={busy}
+                      aria-pressed={checked}
+                      aria-label={`${checked ? 'Убрать из состава' : 'Добавить в состав'}: ${studentLabel(s)}`}
                       className={cn(
-                        'flex min-h-[44px] cursor-pointer items-center gap-3 rounded-lg px-3 py-2 hover:bg-slate-50',
+                        'flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50',
                         busy && 'opacity-60',
                       )}
                       style={{ touchAction: 'manipulation' }}
                     >
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={checked}
-                        disabled={busy}
-                        onChange={() => void handleToggle(s.id, studentLabel(s))}
-                        className="h-4 w-4 shrink-0 accent-[#1B6B4A]"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                        className="pointer-events-none shrink-0"
                       />
                       <span className="min-w-0 flex-1 truncate text-sm text-slate-800">
                         {studentLabel(s)}
@@ -251,7 +258,7 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
                       ) : fromGroup ? (
                         <span className="shrink-0 text-xs text-slate-400">из «{fromGroup}»</span>
                       ) : null}
-                    </label>
+                    </button>
                   </li>
                 );
               })}
