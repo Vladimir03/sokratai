@@ -36,6 +36,7 @@ import { describeAnswerSpecForPrompt, parseAnswerSpec } from "../_shared/answer-
 // объясняет результат (precomputedVerdict).
 import {
   compactChoiceAnswer,
+  feedbackLeaksCorrectChoice,
   normalizeOptionsJson,
   renderOptionsForPrompt,
   type TaskOptions,
@@ -2569,9 +2570,32 @@ function mergeStructuredResult(
   aiResult: GuidedCheckResult,
   score: { verdict: "CORRECT" | "ON_TRACK" | "INCORRECT"; earned: number },
   maxScore: number,
+  leakGuard: { options: TaskOptions; correctAnswer: string; subject: string },
 ): GuidedCheckResult {
   if (aiResult.verdict === "CHECK_FAILED" || !aiResult.feedback?.trim()) {
     return buildStructuredResult(score, maxScore);
+  }
+  // Ученик, уже набравший максимум, знает верный вариант — фильтр не нужен.
+  // Иначе (ревью 5.6 P1 #2) детерминированно проверяем, что модель не назвала
+  // верные варианты: попадание → canned-текст, балл сохраняется. Ложное
+  // срабатывание стоит дешевле утечки ответа.
+  if (score.verdict !== "CORRECT") {
+    const leaked =
+      feedbackLeaksCorrectChoice(aiResult.feedback, leakGuard.options, leakGuard.correctAnswer) ||
+      feedbackLeaksCorrectChoice(
+        aiResult.ai_score_comment,
+        leakGuard.options,
+        leakGuard.correctAnswer,
+      );
+    if (leaked) {
+      console.warn(JSON.stringify({
+        event: "guided_check_structured_answer_leak_scrubbed",
+        subject: leakGuard.subject,
+        kind: leakGuard.options.kind,
+        verdict: score.verdict,
+      }));
+      return buildStructuredResult(score, maxScore);
+    }
   }
   return {
     ...aiResult,
@@ -2730,6 +2754,13 @@ export async function evaluateStudentAnswer(
         expected_images: expectedTaskImageRefs,
         task_text_len: taskTextStr.length,
       }));
+      // options_json (ревью 5.6 P1 #1): балл структурного теста посчитан кодом
+      // ДО обращения к модели и от картинки не зависит — сбой её загрузки не
+      // должен превращать верный ответ в CHECK_FAILED. AI-объяснения не будет,
+      // балл выставляется с canned-текстом.
+      if (structuredScore) {
+        return buildStructuredResult(structuredScore, params.maxScore);
+      }
       return {
         ...buildCheckFallback("task_image_missing"),
         feedback:
@@ -2740,7 +2771,11 @@ export async function evaluateStudentAnswer(
     // strict-criteria-grading Phase 3 / Phase B: физика Часть 2 (№21-26 развёрнутая)
     // → узел-грейдинг по блок-схеме ФИПИ (балл считает КОД). Прочие предметы/
     // numeric/generic-физика (physicsFlowchartKind=null) идут холистическим путём.
+    // !structuredScore: у структурного теста балл уже посчитан чекером — путь
+    // блок-схемы вернул бы СВОЙ балл в обход merge (ревью 5.6: «все ли выходы
+    // накрыты»). Комбинация редкая (тест + физика Ч2), но выход-дыра реальна.
     if (
+      !structuredScore &&
       params.subject === "physics" &&
       (params.taskKind === "extended" || params.taskKind === "proof") &&
       physicsFlowchartKind(params.kimNumber) !== null
@@ -2950,8 +2985,12 @@ export async function evaluateStudentAnswer(
 
     // options_json: вердикт/балл ВСЕГДА от кода; от модели — только текст
     // объяснения. CHECK_FAILED модели → canned, балл не теряется.
-    if (structuredScore) {
-      result = mergeStructuredResult(result, structuredScore, params.maxScore);
+    if (structuredScore && structuredOptions) {
+      result = mergeStructuredResult(result, structuredScore, params.maxScore, {
+        options: structuredOptions,
+        correctAnswer: structuredCorrect,
+        subject: params.subject,
+      });
     }
 
     console.log("guided_check_success", {

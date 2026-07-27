@@ -41,7 +41,12 @@ export function ManageGroupsSheet({
   onInviteLink,
 }: ManageGroupsSheetProps) {
   const queryClient = useQueryClient();
-  const { groups, loading } = useTutorGroups(open);
+  const { groups, loading, error: groupsError, refetch: refetchGroups, isRecovering } =
+    useTutorGroups(open);
+
+  // Ревью 5.6 P1 #6 (тот же класс, что в редакторе состава): сорванный запрос
+  // выглядел как «групп пока нет» — репетитор создал бы дубль уже существующей.
+  const groupsUnavailable = Boolean(groupsError) && groups.length === 0 && !loading;
 
   // Архив: все группы (включая неактивные) — отдельный подключ под общим
   // префиксом ['tutor','groups'] (prefix-инвалидации накрывают оба).
@@ -102,7 +107,7 @@ export function ManageGroupsSheet({
               type="button"
               onClick={() => onInviteLink(g)}
               aria-label={`Ссылка в группу ${g.name}`}
-              className="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-accent"
+              className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-accent"
               style={{ touchAction: 'manipulation' }}
             >
               <Link2 className="h-4 w-4" />
@@ -112,7 +117,7 @@ export function ManageGroupsSheet({
             type="button"
             onClick={() => onRename(g)}
             aria-label={`Переименовать ${g.name}`}
-            className="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
             style={{ touchAction: 'manipulation' }}
           >
             <Pencil className="h-4 w-4" />
@@ -121,7 +126,7 @@ export function ManageGroupsSheet({
             type="button"
             onClick={() => onMembers(g)}
             aria-label={`Состав ${g.name}`}
-            className="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
             style={{ touchAction: 'manipulation' }}
           >
             <Users className="h-4 w-4" />
@@ -130,7 +135,7 @@ export function ManageGroupsSheet({
             type="button"
             onClick={() => onArchive(g, count)}
             aria-label={`Архивировать ${g.name}`}
-            className="rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-red-600"
             style={{ touchAction: 'manipulation' }}
           >
             <Archive className="h-4 w-4" />
@@ -151,6 +156,21 @@ export function ManageGroupsSheet({
           </SheetDescription>
         </SheetHeader>
 
+        {groupsUnavailable ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-[13px] text-amber-900">
+            <p>Список групп не загрузился — он может быть непустым. Не создавайте новую, пока не увидели текущие.</p>
+            <button
+              type="button"
+              onClick={() => void refetchGroups()}
+              disabled={isRecovering}
+              className="mt-2 inline-flex min-h-[36px] items-center rounded-lg border border-amber-300 bg-white px-3 text-[13px] font-semibold text-amber-900 disabled:opacity-60"
+              style={{ touchAction: 'manipulation' }}
+            >
+              {isRecovering ? 'Загружаем…' : 'Повторить'}
+            </button>
+          </div>
+        ) : null}
+
         <div className="space-y-6">
           <section>
             <div className="mb-2 flex items-center justify-between">
@@ -164,7 +184,7 @@ export function ManageGroupsSheet({
             </div>
             {loading ? (
               <p className="py-3 text-sm text-muted-foreground">Загрузка…</p>
-            ) : primaryGroups.length === 0 ? (
+            ) : groupsUnavailable ? null : primaryGroups.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-muted-foreground">
                 Учебных групп пока нет
               </p>
@@ -185,7 +205,7 @@ export function ManageGroupsSheet({
             </div>
             {loading ? (
               <p className="py-3 text-sm text-muted-foreground">Загрузка…</p>
-            ) : tagGroups.length === 0 ? (
+            ) : groupsUnavailable ? null : tagGroups.length === 0 ? (
               <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center text-sm text-muted-foreground">
                 Меток пока нет
               </p>

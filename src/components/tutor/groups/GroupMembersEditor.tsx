@@ -4,7 +4,7 @@
 // save). Учебная группа: DB-триггер single_primary_guard сам переносит ученика
 // из прежней основной группы. После добавления в учебную группу с будущими
 // занятиями — существующий roster-prompt (AddToGroupLessonsPrompt).
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -27,8 +27,14 @@ interface GroupMembersEditorProps {
 
 export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) {
   const queryClient = useQueryClient();
-  const { students, loading: studentsLoading } = useTutorStudents();
-  const { memberships, loading: membershipsLoading } = useTutorGroupMemberships(true);
+  const { students, loading: studentsLoading, error: studentsError } = useTutorStudents();
+  const {
+    memberships,
+    loading: membershipsLoading,
+    error: membershipsError,
+    isRecovering: membershipsRecovering,
+    refetch: refetchMemberships,
+  } = useTutorGroupMemberships(true);
 
   const [search, setSearch] = useState('');
   const [busyStudentId, setBusyStudentId] = useState<string | null>(null);
@@ -36,6 +42,17 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
   // после успешного сейва, не дожидаясь медленного под DPI рефетча.
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const busyRef = useRef(false);
+  // Инвалидация — ОДИН раз на закрытие, а не после каждого переключателя
+  // (ревью 5.6 P2): состав из 25 человек давал 25 мутаций × 4 активных
+  // рефетча. Пока редактор открыт, правду показывают overrides.
+  const dirtyRef = useRef(false);
+
+  // Ревью 5.6 P1 #6: сорванный под РФ-DPI запрос состава раньше выглядел как
+  // «в группе никого» — репетитор видел ложный состав с рабочими чекбоксами.
+  // Нет валидного снимка → редактор в режиме «данные не загрузились».
+  const rosterUnavailable =
+    (Boolean(membershipsError) && memberships.length === 0) ||
+    (Boolean(studentsError) && students.length === 0);
 
   // Roster-prompt после добавления в учебную группу с будущими занятиями.
   const [futureCount, setFutureCount] = useState(0);
@@ -45,9 +62,24 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
   } | null>(null);
   const [isAddingToLessons, setIsAddingToLessons] = useState(false);
 
+  const flushGroupCaches = useCallback(() => {
+    if (!dirtyRef.current) return;
+    dirtyRef.current = false;
+    void invalidateGroupEditorCaches(queryClient);
+  }, [queryClient]);
+
+  const handleClose = useCallback(() => {
+    flushGroupCaches();
+    onClose();
+  }, [flushGroupCaches, onClose]);
+
+  // Размонтирование мимо handleClose (родитель закрыл сам) — состав всё равно
+  // обязан доехать до остальных поверхностей.
+  useEffect(() => () => flushGroupCaches(), [flushGroupCaches]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     document.addEventListener('keydown', handleKeyDown);
     document.body.style.overflow = 'hidden';
@@ -55,7 +87,7 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [handleClose]);
 
   useEffect(() => {
     if (!group.is_primary) return;
@@ -118,7 +150,7 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
   );
 
   const handleToggle = async (tutorStudentId: string, studentName: string) => {
-    if (busyRef.current) return;
+    if (busyRef.current || rosterUnavailable) return;
     busyRef.current = true;
     setBusyStudentId(tutorStudentId);
     const next = !isChecked(tutorStudentId);
@@ -136,7 +168,7 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
         return;
       }
       setOverrides((prev) => ({ ...prev, [tutorStudentId]: next }));
-      void invalidateGroupEditorCaches(queryClient);
+      dirtyRef.current = true;
       if (next && group.is_primary && futureCount > 0) {
         setLessonsPrompt({ tutorStudentId, studentName });
       }
@@ -175,23 +207,53 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
 
   return (
     <>
-      <div className="fixed inset-0 z-[300] bg-black/40 animate-in fade-in-0" onClick={onClose} />
+      <div className="fixed inset-0 z-[300] bg-black/40 animate-in fade-in-0" onClick={handleClose} />
 
       {/* max-h в vh, не dvh: Safari 15.0–15.3 не знает dvh (rule 80). */}
-      <div className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="group-members-title"
+        className="fixed left-1/2 top-1/2 z-[301] flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[440px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95"
+      >
         <div className="flex items-center justify-between border-b border-socrat-border px-5 py-4">
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold">
+            <h3 id="group-members-title" className="truncate text-base font-semibold">
               Состав: {groupLabel}
             </h3>
             <p className="text-xs text-slate-500">
-              {group.is_primary ? 'Учебная группа' : 'Метка'} · выбрано {memberCount}
+              {group.is_primary ? 'Учебная группа' : 'Метка'} ·{' '}
+              {rosterUnavailable ? 'состав не загрузился' : `выбрано ${memberCount}`}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="shrink-0 p-1" aria-label="Закрыть">
+          <button
+            type="button"
+            onClick={handleClose}
+            className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-slate-50"
+            style={{ touchAction: 'manipulation' }}
+            aria-label="Закрыть"
+          >
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
+
+        {rosterUnavailable ? (
+          <div className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-[13px] text-amber-900">
+            <p>
+              Не удалось загрузить состав группы, поэтому отметки ниже могут не отражать
+              реальность — менять состав сейчас нельзя.
+            </p>
+            <button
+              type="button"
+              onClick={() => void refetchMemberships()}
+              disabled={membershipsRecovering}
+              className="mt-2 inline-flex min-h-[36px] items-center rounded-lg border border-amber-300 bg-white px-3 text-[13px] font-semibold text-amber-900 disabled:opacity-60"
+              style={{ touchAction: 'manipulation' }}
+            >
+              {membershipsRecovering ? 'Загружаем…' : 'Повторить'}
+            </button>
+          </div>
+        ) : null}
 
         <div className="border-b border-socrat-border px-5 py-3">
           <div className="relative">
@@ -235,12 +297,12 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
                     <button
                       type="button"
                       onClick={() => void handleToggle(s.id, studentLabel(s))}
-                      disabled={busy}
+                      disabled={busy || rosterUnavailable}
                       aria-pressed={checked}
                       aria-label={`${checked ? 'Убрать из состава' : 'Добавить в состав'}: ${studentLabel(s)}`}
                       className={cn(
                         'flex min-h-[44px] w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-slate-50',
-                        busy && 'opacity-60',
+                        (busy || rosterUnavailable) && 'opacity-60',
                       )}
                       style={{ touchAction: 'manipulation' }}
                     >
@@ -269,8 +331,9 @@ export function GroupMembersEditor({ group, onClose }: GroupMembersEditorProps) 
         <div className="flex justify-end border-t border-socrat-border px-5 py-3.5">
           <button
             type="button"
-            onClick={onClose}
-            className="rounded-lg bg-socrat-primary px-4 py-2 text-[13px] font-semibold text-white"
+            onClick={handleClose}
+            className="min-h-[44px] rounded-lg bg-socrat-primary px-4 text-[13px] font-semibold text-white"
+            style={{ touchAction: 'manipulation' }}
           >
             Готово
           </button>

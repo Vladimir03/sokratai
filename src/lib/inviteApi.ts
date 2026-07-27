@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
+import { extractEdgeFunctionError } from '@/lib/edgeFunctionError';
 
 const PENDING_INVITE_CODE_STORAGE_KEY = 'pending_invite_code';
 // Групповая ссылка (?g={join_code}, 2026-07-27): парный ключ читается ТОЛЬКО
@@ -58,11 +59,25 @@ export async function claimInvite(
   });
 
   if (error) {
-    throw error;
+    // rule 97: supabase-js прячет тело в error.context — без разбора пользователь
+    // видел бы «Edge Function returned a non-2xx status code». `context`
+    // сохраняем: ветвление по HTTP-статусу ниже и в InvitePage опирается на него.
+    const { message, code } = await extractEdgeFunctionError(
+      error,
+      data,
+      'Не удалось принять приглашение. Попробуйте ещё раз.',
+    );
+    const wrapped = new Error(message) as Error & {
+      code?: string;
+      context?: { status?: number };
+    };
+    if (code) wrapped.code = code;
+    wrapped.context = (error as { context?: { status?: number } }).context;
+    throw wrapped;
   }
 
   if (!data) {
-    throw new Error('Empty response from claim-invite');
+    throw new Error('Не удалось принять приглашение: пустой ответ сервера.');
   }
 
   return data;

@@ -22,12 +22,14 @@ type TaskOptions =
   | { kind: 'single_choice'; options: { key: string; text: string }[] }   // key '1'..'9'
   | { kind: 'multi_choice';  options: { key: string; text: string }[] }
   | { kind: 'matching';
-      left:  { key: string; text: string }[];   // 'А'..'Д' (≤5)
+      left:  { key: string; text: string }[];   // метка 'А'..'Д' (≤9; у ФИПИ обычно 4–5)
       right: { key: string; text: string }[] }  // '1'..'9' (≤9, неравной длины)
 ```
 
 - **Правильный ответ НЕ в options_json** (колонка student-safe!). Он остаётся в `correct_answer` (tutor-only) в формате чекеров пробников: single `"3"`, multi `"1267"`, matching `"35142"` (по левому столбцу).
-- Канон типов + `normalizeOptionsJson` (whitelist-проекция: только `kind/options/left/right/key/text`, капы ≤9 ключей multi/matching-right, text ≤500) — `src/lib/taskOptions.ts` + Deno-зеркало `_shared/task-options.ts` + parity-тест в smoke-check. Normalizer применяется на ВСЕХ write-site (edge и клиентском) — случайный `correct: true` из импорт-скрипта не доедет.
+- Канон типов + `normalizeOptionsJson` (whitelist-проекция: только `kind/options/left/right/key/text`, капы ≤9 ключей multi/matching-right, text ≤500) — `src/lib/taskOptions.ts` + Deno-зеркало `_shared/task-options.ts` + parity-тест в smoke-check. Normalizer применяется на ВСЕХ write-site (edge и клиентском) — случайный `correct: true` из импорт-скрипта не доедет. **Он же вшит в `kb_snapshot.ts`** (авто-зеркало ДЗ→База и push-to-kb получают сырой payload клиента).
+- **Оцениваемый ключ — РОВНО один буквенно-цифровой символ** (варианты choice и правый столбец matching): чекеры сравнивают посимвольно, «10» или «A)» не совпадут с `correct_answer` никогда — задача молча оценивалась бы в ноль при верном выборе. Левая метка matching в сериализацию не входит → до 3 символов.
+- **Нормализация fail-closed:** битый вариант, дубль ключа или список сверх капа отвергают ВЕСЬ `options_json` (→ обычный текстовый ввод), а не режут список: «3 варианта вместо 4» ученик не заметил бы.
 - `check_format`/`task_kind` НЕ расширяются: `options_json` — ортогональный presence-флаг при `short_answer`/`numeric` (существующий деterministic fast-path гейтится `!== 'detailed_solution'` — совместимо).
 
 ## 2. Anti-leak (rule 40, 3 слоя)
@@ -85,3 +87,16 @@ type TaskOptions =
 4. Утечка ответа в объяснении на INCORRECT → промпт-запрет + canned-fallback.
 5. Перенос квота-гейта — чувствительное место, нестуктурный путь оставить байт-в-байт.
 6. >9 вариантов ломает посимвольные чекеры → кап в normalizer.
+
+## 10. Ревью ChatGPT-5.6 (2026-07-27) — что изменилось после первого раунда
+
+Внешний ревьюер нашёл 8 P1 (P0 нет). Принято и исправлено:
+
+1. **Риск №4 закрыт кодом, а не промптом.** `feedbackLeaksCorrectChoice` (в обоих зеркалах, без lookbehind — модуль исполняется и в браузере) ловит упоминание ключа верного варианта отдельным токеном и дословную цитату его формулировки; попадание → canned-фидбэк, балл сохраняется, событие `guided_check_structured_answer_leak_scrubbed`. Прежней защиты не было: `sanitizeFeedback` игнорирует эталоны короче 2 символов, т.е. любой single_choice.
+2. **Сбой картинки больше не отменяет детерминированный балл** — у задачи с условием только на фото ветка `task_image_missing` возвращала `CHECK_FAILED` поверх уже посчитанного балла. Туда же добавлен гард на путь физической блок-схемы (её балл шёл бы мимо merge).
+3. **Нормализация вариантов перенесена внутрь `kb_snapshot.ts`** — авто-зеркало ДЗ→База писало сырой payload клиента (с возможным `correct`) в `kb_tasks` мимо whitelist.
+4. **`options_json` добавлен в push-to-kb** (SELECT + `PUSH_TO_KB_DRAFT_FIELDS` + тело клиента): «Обновить в Базе» затирал варианты в источнике, форк каталожной задачи терял их в копии.
+5. **Ключи и fail-closed** — см. §1.
+6. **Ученику видно, когда это одна попытка** (самостоятельная работа: «Сдать ответ» + предупреждение), а правый столбец matching больше не спрятан в `<details>`.
+
+Отклонено: `bg-socrat-primary` названо «неканоническим токеном» — это и есть брендовый `#1B6B4A` из `tailwind.config.ts` (rule 90).

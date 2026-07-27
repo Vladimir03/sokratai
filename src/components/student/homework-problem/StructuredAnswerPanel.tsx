@@ -17,8 +17,22 @@ interface StructuredAnswerPanelProps {
   options: TaskOptions;
   disabled?: boolean;
   isSubmitting?: boolean;
+  /**
+   * Самостоятельная работа: ответ уходит одноразовым сабмитом. Меняет надпись
+   * CTA и добавляет предупреждение — иначе «Ответить» выглядело как обычная
+   * проверка с попытками (ревью 5.6).
+   */
+  isIndependent?: boolean;
   /** Сериализованный выбор («2» / «1, 2, 6, 7» / «35142») → существующий канал. */
   onSubmit: (serialized: string) => void;
+}
+
+/** Подпись варианта в списке правого столбца matching (native select). */
+const MAX_OPTION_LABEL_CHARS = 40;
+function optionLabel(key: string, text: string): string {
+  const clipped =
+    text.length > MAX_OPTION_LABEL_CHARS ? `${text.slice(0, MAX_OPTION_LABEL_CHARS - 1)}…` : text;
+  return `${key} — ${clipped}`;
 }
 
 function ChoiceIndicator({ checked, round }: { checked: boolean; round: boolean }) {
@@ -40,6 +54,7 @@ export const StructuredAnswerPanel = memo(function StructuredAnswerPanel({
   options,
   disabled = false,
   isSubmitting = false,
+  isIndependent = false,
   onSubmit,
 }: StructuredAnswerPanelProps) {
   // single/multi: выбранные ключи вариантов; matching: leftKey → rightKey.
@@ -85,6 +100,15 @@ export const StructuredAnswerPanel = memo(function StructuredAnswerPanel({
 
       {options.kind === 'matching' ? (
         <div className="flex flex-col gap-1.5">
+          {/* Правый столбец — ПОСТОЯННО на экране: спрятанный в <details> он
+              заставлял держать соответствия в памяти и прокручивать (ревью 5.6). */}
+          <ul className="rounded-lg border border-socrat-border-light bg-slate-50 px-2.5 py-1.5 text-[13px] text-slate-600">
+            {options.right.map((r) => (
+              <li key={r.key}>
+                <b>{r.key})</b> {r.text}
+              </li>
+            ))}
+          </ul>
           {options.left.map((l) => (
             <div key={l.key} className="flex min-h-[44px] items-center gap-2">
               <span className="min-w-0 flex-1 text-base text-slate-800">
@@ -96,24 +120,18 @@ export const StructuredAnswerPanel = memo(function StructuredAnswerPanel({
                 disabled={disabled || isSubmitting}
                 onChange={(e) => setMatches((prev) => ({ ...prev, [l.key]: e.target.value }))}
                 aria-label={`Соответствие для ${l.key}`}
-                className="h-11 shrink-0 rounded-md border border-socrat-border bg-white px-2 text-base text-slate-800 focus:border-accent focus:outline-none"
+                className="h-11 w-[132px] shrink-0 rounded-md border border-socrat-border bg-white px-2 text-base text-slate-800 focus:border-accent focus:outline-none"
                 style={{ fontSize: 16, touchAction: 'manipulation' }}
               >
                 <option value="">—</option>
                 {options.right.map((r) => (
-                  <option key={r.key} value={r.key}>{r.key}</option>
+                  // Подпись «1 — текст»: в закрытом виде обрезается, в нативном
+                  // пикере ученик видит формулировку и не листает экран.
+                  <option key={r.key} value={r.key}>{optionLabel(r.key, r.text)}</option>
                 ))}
               </select>
             </div>
           ))}
-          <details className="px-1 text-[13px] text-slate-500">
-            <summary style={{ touchAction: 'manipulation' }}>Варианты правого столбца</summary>
-            <ul className="mt-1 space-y-0.5">
-              {options.right.map((r) => (
-                <li key={r.key}><b>{r.key})</b> {r.text}</li>
-              ))}
-            </ul>
-          </details>
         </div>
       ) : (
         <div className="flex flex-col gap-1" role={isSingle ? 'radiogroup' : 'group'}>
@@ -156,8 +174,13 @@ export const StructuredAnswerPanel = memo(function StructuredAnswerPanel({
         style={{ touchAction: 'manipulation' }}
       >
         <Send className="h-4 w-4" aria-hidden="true" />
-        {isSubmitting ? 'Проверяем…' : 'Ответить'}
+        {isSubmitting ? (isIndependent ? 'Отправляем…' : 'Проверяем…') : isIndependent ? 'Сдать ответ' : 'Ответить'}
       </button>
+      {isIndependent ? (
+        <p className="mt-1 px-1 text-center text-[12px] text-slate-500">
+          Одна попытка — изменить ответ после отправки нельзя.
+        </p>
+      ) : null}
     </div>
   );
 });

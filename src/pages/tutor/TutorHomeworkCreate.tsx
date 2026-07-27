@@ -621,6 +621,9 @@ function TutorHomeworkCreateContent() {
           cefr_level: task.cefr_level ?? null,
           kim_number: task.kim_number ?? null,
           grading_criteria_json: isCriteriaEligibleTask(task) ? (task.grading_criteria_json ?? null) : null,
+          // options_json (ревью 5.6 P1 #4): без явной передачи вариантов push
+          // затирал их в источнике Базы, а форк каталожной задачи терял в копии.
+          options_json: task.options_json ?? null,
           // Ревью-фикс P1 (2026-07-06): каскад-поля едут в push, но ТОЛЬКО
           // непустые — edit-prefill классификацию из Базы не грузит, и слепой
           // `topic_id: null` затёр бы тему источника. Пустое поле = «не знаю»,

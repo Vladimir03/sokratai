@@ -63,13 +63,13 @@ Deno.serve(async (req) => {
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ error: "Method not allowed" }, 405);
+    return jsonResponse({ error: "Метод не поддерживается.", code: "METHOD_NOT_ALLOWED" }, 405);
   }
 
   try {
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return jsonResponse({ error: "No authorization header" }, 401);
+      return jsonResponse({ error: "Нужно войти в аккаунт, чтобы принять приглашение.", code: "AUTH_REQUIRED" }, 401);
     }
 
     const supabaseUser = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -80,7 +80,7 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabaseUser.auth.getUser();
     if (userError || !user) {
       console.error("claim-invite auth error:", userError);
-      return jsonResponse({ error: "Unauthorized" }, 401);
+      return jsonResponse({ error: "Сессия истекла — войдите заново и откройте ссылку ещё раз.", code: "SESSION_EXPIRED" }, 401);
     }
 
     const body = await req.json().catch(() => null) as {
@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
     const groupCode = typeof body?.group_code === "string" ? body.group_code.trim() : "";
 
     if (!inviteCode) {
-      return jsonResponse({ error: "invite_code is required" }, 400);
+      return jsonResponse({ error: "Ссылка приглашения неполная — попросите репетитора прислать её заново.", code: "INVITE_CODE_REQUIRED" }, 400);
     }
 
     const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -107,15 +107,15 @@ Deno.serve(async (req) => {
 
     if (tutorError) {
       console.error("claim-invite tutor lookup error:", tutorError);
-      return jsonResponse({ error: "Failed to find tutor" }, 500);
+      return jsonResponse({ error: "Не удалось проверить приглашение. Попробуйте ещё раз.", code: "TUTOR_LOOKUP_FAILED" }, 500);
     }
 
     if (!tutor) {
-      return jsonResponse({ error: "Invite code not found" }, 404);
+      return jsonResponse({ error: "Приглашение не найдено — возможно, репетитор обновил ссылку.", code: "INVITE_NOT_FOUND" }, 404);
     }
 
     if (tutor.user_id === user.id) {
-      return jsonResponse({ error: "Cannot link to yourself" }, 400);
+      return jsonResponse({ error: "Это ваша собственная ссылка приглашения — откройте её из аккаунта ученика.", code: "SELF_LINK" }, 400);
     }
 
     // Tutor accounts must not claim invites as students (would create a
@@ -157,7 +157,7 @@ Deno.serve(async (req) => {
 
     if (existingLinkError) {
       console.error("claim-invite existing link check error:", existingLinkError);
-      return jsonResponse({ error: "Failed to check tutor link" }, 500);
+      return jsonResponse({ error: "Не удалось проверить связь с репетитором. Попробуйте ещё раз.", code: "LINK_CHECK_FAILED" }, 500);
     }
 
     let status: ClaimInviteSuccessStatus = "linked";
@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
           tutorStudentId = racedLink?.id ?? null;
         } else {
           console.error("claim-invite insert error:", insertError);
-          return jsonResponse({ error: "Failed to create tutor link" }, 500);
+          return jsonResponse({ error: "Не удалось привязать вас к репетитору. Попробуйте ещё раз.", code: "LINK_CREATE_FAILED" }, 500);
         }
       } else {
         tutorStudentId = insertedLink?.id ?? null;
@@ -285,6 +285,13 @@ Deno.serve(async (req) => {
     return jsonResponse(response, 200);
   } catch (error) {
     console.error("claim-invite unexpected error:", error);
-    return jsonResponse({ error: "Internal server error" }, 500);
+    // rule 97: русская фраза + code + деталь из исключения (без PII).
+    return jsonResponse(
+      {
+        error: `Не удалось принять приглашение. Попробуйте ещё раз. (${error instanceof Error ? error.message : String(error)})`,
+        code: "CLAIM_FAILED",
+      },
+      500,
+    );
   }
 });

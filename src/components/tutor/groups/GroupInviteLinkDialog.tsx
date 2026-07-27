@@ -111,12 +111,22 @@ export function GroupInviteLinkDialog({ group, onClose }: GroupInviteLinkDialogP
     <>
       <div className="fixed inset-0 z-[300] bg-black/40 animate-in fade-in-0" onClick={onClose} />
 
-      <div className="fixed left-1/2 top-1/2 z-[301] flex w-[calc(100%-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="group-invite-title"
+        className="fixed left-1/2 top-1/2 z-[301] flex w-[calc(100%-2rem)] max-w-[420px] -translate-x-1/2 -translate-y-1/2 flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95">
         <div className="flex items-center justify-between border-b border-socrat-border px-5 py-4">
-          <h3 className="min-w-0 truncate text-base font-semibold">
+          <h3 id="group-invite-title" className="min-w-0 truncate text-base font-semibold">
             Ссылка в группу «{groupLabel}»
           </h3>
-          <button type="button" onClick={onClose} className="shrink-0 p-1" aria-label="Закрыть">
+          <button
+            type="button"
+            onClick={onClose}
+            className="-mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-slate-50"
+            style={{ touchAction: "manipulation" }}
+            aria-label="Закрыть"
+          >
             <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>

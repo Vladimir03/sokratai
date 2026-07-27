@@ -1956,6 +1956,7 @@ export default function HomeworkProblem() {
           options={structuredOptions}
           disabled={isStreaming}
           isSubmitting={isInlineAnswerSubmitting}
+          isIndependent={isIndependent}
           onSubmit={(serialized) => void handleInlineAnswerSubmit(serialized)}
         />
       ) : data.task.task_kind === 'numeric' ? (

@@ -26,25 +26,39 @@ export const MAX_CHOICE_OPTIONS = 9;
 export const MAX_MATCHING_LEFT = 9;
 export const MAX_MATCHING_RIGHT = 9;
 
-function normalizeItem(raw: unknown): TaskOptionItem | null {
+// Ключ, который чекер сравнивает ПОСИМВОЛЬНО (варианты choice, правый столбец
+// matching), обязан быть ровно одним буквенно-цифровым символом: «10» или «A)»
+// не совпадут с correct_answer никогда, и верный выбор ученика молча оценивался
+// бы в ноль (ревью 5.6 P1 #5). Левый столбец matching — только метка («А»,
+// «Б»), в сериализацию ответа не входит, поэтому до 3 символов.
+const GRADED_KEY_RE = /^[\p{L}\p{N}]$/u;
+const LABEL_KEY_RE = /^[\p{L}\p{N}]{1,3}$/u;
+
+function normalizeItem(raw: unknown, keyRe: RegExp): TaskOptionItem | null {
   if (!raw || typeof raw !== 'object') return null;
   const key = String((raw as { key?: unknown }).key ?? '').trim();
   const text = String((raw as { text?: unknown }).text ?? '').trim();
-  if (!key || key.length > 3) return null;
+  if (!keyRe.test(key)) return null;
   if (!text) return null;
   return { key, text: text.slice(0, MAX_OPTION_TEXT_CHARS) };
 }
 
-function normalizeItemList(raw: unknown, cap: number): TaskOptionItem[] {
-  if (!Array.isArray(raw)) return [];
+// Fail-closed: битый вариант раньше ПРОПУСКАЛСЯ, а список сверх капа резался —
+// ученик увидел бы 3 варианта из 4 и не узнал об этом. Любая аномалия → null,
+// задача откатывается к обычному текстовому вводу.
+function normalizeItemList(
+  raw: unknown,
+  cap: number,
+  keyRe: RegExp,
+): TaskOptionItem[] | null {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > cap) return null;
   const out: TaskOptionItem[] = [];
   const seen = new Set<string>();
   for (const entry of raw) {
-    const item = normalizeItem(entry);
-    if (!item || seen.has(item.key)) continue;
+    const item = normalizeItem(entry, keyRe);
+    if (!item || seen.has(item.key)) return null;
     seen.add(item.key);
     out.push(item);
-    if (out.length >= cap) break;
   }
   return out;
 }
@@ -62,14 +76,23 @@ export function normalizeOptionsJson(value: unknown): TaskOptions | null {
     const options = normalizeItemList(
       (value as { options?: unknown }).options,
       MAX_CHOICE_OPTIONS,
+      GRADED_KEY_RE,
     );
-    if (options.length < 2) return null;
+    if (!options || options.length < 2) return null;
     return { kind, options };
   }
   if (kind === 'matching') {
-    const left = normalizeItemList((value as { left?: unknown }).left, MAX_MATCHING_LEFT);
-    const right = normalizeItemList((value as { right?: unknown }).right, MAX_MATCHING_RIGHT);
-    if (left.length < 1 || right.length < 2) return null;
+    const left = normalizeItemList(
+      (value as { left?: unknown }).left,
+      MAX_MATCHING_LEFT,
+      LABEL_KEY_RE,
+    );
+    const right = normalizeItemList(
+      (value as { right?: unknown }).right,
+      MAX_MATCHING_RIGHT,
+      GRADED_KEY_RE,
+    );
+    if (!left || !right || right.length < 2) return null;
     return { kind: 'matching', left, right };
   }
   return null;
@@ -103,6 +126,63 @@ export function serializeChoiceSelection(
  */
 export function compactChoiceAnswer(raw: string): string {
   return raw.replace(/[\s,;.\-–—()]+/g, '');
+}
+
+/** Дословная цитата формулировки верного варианта — та же утечка, что и его номер. */
+const MIN_QUOTED_OPTION_CHARS = 12;
+
+/**
+ * Ключи и тексты ВЕРНЫХ вариантов по correct_answer.
+ * single/multi: символы ответа = ключи вариантов.
+ * matching: символы = ключи ПРАВОГО столбца (в порядке левого), поэтому
+ * раскрытие любого из них выдаёт часть соответствия.
+ */
+function correctChoiceParts(
+  options: TaskOptions,
+  correctAnswer: string,
+): { keys: string[]; texts: string[] } {
+  const chars = Array.from(new Set(compactChoiceAnswer(correctAnswer).split('')))
+    .filter((c) => c.trim().length > 0);
+  const pool = options.kind === 'matching' ? options.right : options.options;
+  const keys: string[] = [];
+  const texts: string[] = [];
+  for (const ch of chars) {
+    keys.push(ch);
+    const item = pool.find((o) => o.key.toLowerCase() === ch.toLowerCase());
+    if (item) texts.push(item.text);
+  }
+  return { keys, texts };
+}
+
+/**
+ * Детерминированный anti-leak для AI-объяснения структурного теста: текст
+ * называет ключ верного варианта отдельным токеном ИЛИ дословно цитирует его
+ * формулировку. Промпт-запрет «не называй варианты» — инструкция модели, а не
+ * гарантия; sanitizeFeedback тоже не спасает (сравнивает эталон целиком и
+ * игнорирует ответы короче 2 символов, т.е. любой single_choice).
+ *
+ * Границы слова — через группы `(^|[^\p{L}\p{N}])`, НЕ lookbehind: этот модуль
+ * исполняется в браузере, где lookbehind запрещён (Safari < 16.4, rule 80).
+ * Цифра внутри числа («1861») не считается.
+ */
+export function feedbackLeaksCorrectChoice(
+  text: string | null | undefined,
+  options: TaskOptions,
+  correctAnswer: string,
+): boolean {
+  const value = (text ?? '').trim();
+  if (!value) return false;
+  const { keys, texts } = correctChoiceParts(options, correctAnswer);
+  const boundary = '[^\\p{L}\\p{N}]';
+  for (const key of keys) {
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(?:^|${boundary})${escaped}(?:${boundary}|$)`, 'iu').test(value)) return true;
+  }
+  const lower = value.toLowerCase();
+  return texts.some((t) => {
+    const optionText = t.trim().toLowerCase();
+    return optionText.length >= MIN_QUOTED_OPTION_CHARS && lower.includes(optionText);
+  });
 }
 
 /** Текстовый блок вариантов для AI-промптов (check/hint/chat/bootstrap). */

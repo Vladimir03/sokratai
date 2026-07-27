@@ -7,8 +7,14 @@
 // обратно), обязано идти через этот модуль. Новое поле задачи → добавляется
 // ЗДЕСЬ один раз (плюс миграция паритета kb_tasks ↔ homework_tutor_tasks).
 //
-// Чистый модуль без зависимостей (тривиально тестируется/бандлится).
+// Чистый модуль без зависимостей (кроме такого же чистого task-options).
 // ═══════════════════════════════════════════════════════════════
+
+// options_json: whitelist-проекция ОБЯЗАНА жить в самом конвертере (ревью 5.6
+// P1 #3) — авто-зеркало ДЗ→База и push-to-kb передают сюда СЫРОЙ payload
+// клиента, и object-гейта мало: `correct: true` из импорт-скрипта доехал бы до
+// kb_tasks в обход нормализации основной строки.
+import { normalizeOptionsJson } from "../_shared/task-options.ts";
 
 /** Поля kb_tasks, участвующие в снимке/шаблоне (SELECT-подмножество). */
 export const KB_TASK_SNAPSHOT_SELECT =
@@ -58,11 +64,11 @@ function asCefr(v: unknown): string | null {
 function asCriteria(v: unknown): unknown[] | null {
   return Array.isArray(v) && v.length > 0 ? v : null;
 }
-// options_json: структурная валидация живёт в _shared/task-options.ts
-// (normalizeOptionsJson на write-site); здесь достаточно object-гейта —
-// конвертер должен оставаться zero-dependency.
+// options_json → whitelist-проекция (kind/options/left/right/key/text). Всё
+// лишнее (в т.ч. `correct`) отсекается ЗДЕСЬ, т.к. это последняя общая точка
+// перед записью в kb_tasks. Невалидная структура → null.
 function asOptionsJson(v: unknown): unknown {
-  return v && typeof v === "object" && !Array.isArray(v) ? v : null;
+  return normalizeOptionsJson(v);
 }
 function nonEmpty(v: unknown): string | null {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;

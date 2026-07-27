@@ -6898,10 +6898,14 @@ async function handleSaveTasksToKB(
 // null затёр бы тему источника); отсутствие ключа = «не трогай». Строка
 // homework_tutor_tasks этих колонок не имеет → в merged `task` они появляются
 // только из draft-body, что и даёт `key in t` в homeworkTaskFieldsToKbUpdate.
+// options_json (ревью 5.6 P1 #4): без него «Обновить в Базе» затирал варианты
+// в задаче-источнике (kbUpdate пишет колонку безусловно), а copy-on-write форк
+// каталожной задачи терял их в копии.
 const PUSH_TO_KB_DRAFT_FIELDS = [
   "task_text", "task_image_url", "correct_answer", "max_score",
   "rubric_text", "rubric_image_urls", "solution_text", "solution_image_urls",
   "check_format", "task_kind", "cefr_level", "kim_number", "grading_criteria_json",
+  "options_json",
   "exam", "difficulty", "topic_id", "subtopic_id", "source_label",
 ] as const;
 
@@ -6925,7 +6929,7 @@ async function handleTaskPushToKb(
     .select(
       "id, task_text, task_image_url, correct_answer, max_score, rubric_text, rubric_image_urls, " +
         "solution_text, solution_image_urls, check_format, task_kind, cefr_level, kim_number, " +
-        "grading_criteria_json, source_kb_task_id",
+        "grading_criteria_json, options_json, source_kb_task_id",
     )
     .eq("id", taskId)
     .eq("assignment_id", assignmentId)

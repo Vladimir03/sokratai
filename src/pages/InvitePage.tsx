@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { claimInvite, clearPendingInvite, persistPendingInvite } from '@/lib/inviteApi';
+import type { ClaimInviteResult } from '@/lib/inviteApi';
 import YandexAuthButton from '@/components/YandexAuthButton';
 import VkAuthButton from '@/components/VkAuthButton';
 import { z } from 'zod';
@@ -48,6 +49,10 @@ export default function InvitePage() {
   const [groupName, setGroupName] = useState<string | null>(null);
   // Итог по группе после клейма (для success-экрана).
   const [claimedGroupName, setClaimedGroupName] = useState<string | null>(null);
+  // Ревью 5.6 P1 #7: привязка к репетитору прошла, а в группу не добавили.
+  // Раньше это выглядело как полный успех — ученик считал, что он в группе,
+  // репетитор видел его «Без группы», и повторить было нечем.
+  const [groupIssue, setGroupIssue] = useState<'failed' | 'not_found' | null>(null);
 
   // Form state
   const [isLogin, setIsLogin] = useState(false);
@@ -266,12 +271,7 @@ export default function InvitePage() {
       // Auth succeeded — claim invite immediately
       if (inviteCode) {
         try {
-          const result = await claimInvite(inviteCode, groupCode);
-          setClaimedTutorName(result.tutor_name);
-          if (result.group_name && (result.group_status === 'joined' || result.group_status === 'moved' || result.group_status === 'already_member')) {
-            setClaimedGroupName(result.group_name);
-          }
-          clearPendingInvite();
+          await finalizeClaim(await claimInvite(inviteCode, groupCode));
         } catch {
           // Claim failed — save to localStorage as fallback for next login
           persistPendingInvite(inviteCode, groupCode);
@@ -290,18 +290,60 @@ export default function InvitePage() {
     navigate('/homework');
   };
 
+  /**
+   * Единый разбор итога клейма (оба входа: регистрация и клик под сессией).
+   * Транзиентный сбой привязки к группе → ОДИН повтор: сам claim идемпотентен
+   * (вернёт already_linked), а членство в группе пере-применится. Не помогло —
+   * говорим прямо и оставляем pending-инвайт, чтобы следующий вход добрал
+   * группу сам. `group_not_found` (группу заархивировали/удалили) терминален.
+   */
+  const finalizeClaim = async (result: ClaimInviteResult): Promise<void> => {
+    setClaimedTutorName(result.tutor_name);
+
+    let outcome = result;
+    if (outcome.group_status === 'group_attach_failed' && inviteCode) {
+      try {
+        outcome = await claimInvite(inviteCode, groupCode);
+        setClaimedTutorName(outcome.tutor_name);
+      } catch {
+        // Повтор не удался — остаёмся с прежним результатом.
+      }
+    }
+
+    const joined =
+      outcome.group_status === 'joined' ||
+      outcome.group_status === 'moved' ||
+      outcome.group_status === 'already_member';
+
+    if (joined && outcome.group_name) {
+      setClaimedGroupName(outcome.group_name);
+      setGroupIssue(null);
+      clearPendingInvite();
+      return;
+    }
+
+    if (!groupCode || outcome.group_status === undefined) {
+      clearPendingInvite();
+      return;
+    }
+
+    if (outcome.group_status === 'group_not_found') {
+      setGroupIssue('not_found');
+      clearPendingInvite();
+      return;
+    }
+
+    setGroupIssue('failed');
+  };
+
   // One-click claim for an already-logged-in (non-tutor) account.
   const handleClaimWithSession = async () => {
     if (!inviteCode) return;
     setClaimError(null);
     setClaiming(true);
     try {
-      const result = await claimInvite(inviteCode, groupCode); // 'linked' | 'already_linked' — both success
-      clearPendingInvite();
-      setClaimedTutorName(result.tutor_name);
-      if (result.group_name && (result.group_status === 'joined' || result.group_status === 'moved' || result.group_status === 'already_member')) {
-        setClaimedGroupName(result.group_name);
-      }
+      // 'linked' | 'already_linked' — оба успех; группа разбирается отдельно.
+      await finalizeClaim(await claimInvite(inviteCode, groupCode));
       setAuthSuccess(true);
     } catch (err: unknown) {
       const status = (err as { context?: { status?: number } })?.context?.status;
@@ -419,6 +461,13 @@ export default function InvitePage() {
             </CardTitle>
             {claimedTutorName && claimedGroupName && (
               <CardDescription>Вы в группе «{claimedGroupName}»</CardDescription>
+            )}
+            {claimedTutorName && groupIssue && (
+              <CardDescription className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900">
+                {groupIssue === 'not_found'
+                  ? `Группа${groupName ? ` «${groupName}»` : ''} больше недоступна — репетитор добавит вас в актуальную.`
+                  : `В группу${groupName ? ` «${groupName}»` : ''} добавить не получилось. Занятия и ДЗ уже доступны; напишите репетитору — он добавит вас вручную.`}
+              </CardDescription>
             )}
             {!claimedTutorName && (
               <CardDescription>
