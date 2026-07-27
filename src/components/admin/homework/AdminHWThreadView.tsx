@@ -2,8 +2,7 @@ import { useEffect, useState, useMemo, lazy, Suspense, Component, type ReactNode
 import { format, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
 import remarkGfmSafe from "@/lib/markdown/remarkGfmSafe";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { useMathPlugins } from "@/lib/markdown/mathPlugins";
 import {
   fetchThreadDetails,
   type AdminThreadMessage,
@@ -80,9 +79,9 @@ function RichMarkdown({
   text: string;
   onError?: (err: Error) => void;
 }) {
-  useEffect(() => {
-    void import("katex/dist/katex.min.css");
-  }, []);
+  // Плагины математики — лениво и только при наличии `$` (раньше лениво
+  // грузился лишь CSS, а rehype-katex тянул 76 КБ gzip в чанк админки всегда).
+  const mathPlugins = useMathPlugins(text.includes("$"));
 
   const processed = useMemo(() => {
     try {
@@ -97,8 +96,10 @@ function RichMarkdown({
     <Suspense fallback={<div className="whitespace-pre-wrap break-words">{text}</div>}>
       <div className="prose prose-sm max-w-none break-words [&_p]:my-1 [&_p]:leading-relaxed [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:text-[0.85em] [&_strong]:font-semibold [&_em]:italic">
         <ReactMarkdown
-          remarkPlugins={[remarkGfmSafe, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          remarkPlugins={
+            mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+          }
+          rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
         >
           {processed}
         </ReactMarkdown>

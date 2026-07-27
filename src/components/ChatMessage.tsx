@@ -1,7 +1,6 @@
-import { memo, lazy, Suspense, useEffect, useState, useMemo, useCallback } from "react";
+import { memo, lazy, Suspense, useState, useMemo, useCallback } from "react";
 import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { useMathPlugins } from '@/lib/markdown/mathPlugins';
 import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { X, Copy, ThumbsUp, ThumbsDown, Check, Clock, CheckCheck, AlertCircle, Brain, RotateCw } from "lucide-react";
@@ -54,7 +53,6 @@ interface ChatMessageProps {
 }
 
 const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedback, onInteraction }: ChatMessageProps) => {
-  const [katexLoaded, setKatexLoaded] = useState(false);
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [currentFeedback, setCurrentFeedback] = useState<'like' | 'dislike' | null>(
     message.feedback || null
@@ -172,14 +170,11 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
     ? preprocessLatex(message.content)
     : message.content;
 
-  // Загружаем KaTeX CSS только если есть математика
-  useEffect(() => {
-    if (hasMath && !katexLoaded) {
-      import('katex/dist/katex.min.css').then(() => {
-        setKatexLoaded(true);
-      });
-    }
-  }, [hasMath, katexLoaded]);
+  // Математика (remark-math + rehype-katex + CSS) — одной ленивой связкой и
+  // только при наличии `$`. Раньше лениво грузился ТОЛЬКО CSS, а плагины были
+  // статическими импортами — и тянули katex (76 КБ gzip) в чанк чата всегда,
+  // даже в диалоге без единой формулы.
+  const mathPlugins = useMathPlugins(hasMath);
 
   // Компонент для отображения статуса сообщения
   const MessageStatusIcon = ({ status }: { status?: MessageStatus }) => {
@@ -278,8 +273,10 @@ const ChatMessage = memo(({ message, isLoading, onQuickMessage, onRetry, onFeedb
               <Suspense fallback={<div className="animate-pulse">{displayContent}</div>}>
                 <MarkdownErrorBoundary fallbackText={displayContent}>
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfmSafe, remarkMath]}
-                    rehypePlugins={[rehypeKatex]}
+                    remarkPlugins={
+                      mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+                    }
+                    rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
                     components={markdownComponents}
                   >
                     {displayContent}

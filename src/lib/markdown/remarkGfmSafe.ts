@@ -23,6 +23,7 @@ import { gfmFootnoteFromMarkdown } from 'mdast-util-gfm-footnote';
 import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough';
 import { gfmTableFromMarkdown } from 'mdast-util-gfm-table';
 import { gfmTaskListItemFromMarkdown } from 'mdast-util-gfm-task-list-item';
+import type { Plugin, Processor } from 'unified';
 
 interface UnifiedDataLike {
   micromarkExtensions?: unknown[];
@@ -31,8 +32,18 @@ interface UnifiedDataLike {
 
 // toMarkdown-сторона намеренно опущена: react-markdown только парсит,
 // remark-stringify в наших пайплайнах не используется.
-export default function remarkGfmSafe(this: { data: () => UnifiedDataLike }) {
-  const data = this.data();
+//
+// ТИП (2026-07-27, правка только типа — рантайм байт-в-байт прежний).
+// Раньше сигнатура объявляла узкий `this: { data: () => UnifiedDataLike }`, и
+// плагин НЕ был присваиваем в `PluggableList`: каждый
+// `remarkPlugins={[remarkGfmSafe, …]}` давал ошибку TS2322. Их было две и они
+// жили незамеченными, потому что корневой `tsconfig.json` содержит `files: []`
+// и не проверяет ничего — реальный прогон только через `tsconfig.app.json`.
+// unified типизирует `this` как `Processor`; мы обращаемся к нему ровно в
+// одном месте и знаем о нём больше компилятора, поэтому сужение делается
+// точечно внутри, а не размазывается кастами по пяти местам вызова.
+const remarkGfmSafe: Plugin<[]> = function remarkGfmSafe(this: Processor) {
+  const data = (this as unknown as { data: () => UnifiedDataLike }).data();
   const micromarkExtensions =
     data.micromarkExtensions || (data.micromarkExtensions = []);
   const fromMarkdownExtensions =
@@ -50,4 +61,6 @@ export default function remarkGfmSafe(this: { data: () => UnifiedDataLike }) {
     gfmTableFromMarkdown(),
     gfmTaskListItemFromMarkdown(),
   ]);
-}
+};
+
+export default remarkGfmSafe;

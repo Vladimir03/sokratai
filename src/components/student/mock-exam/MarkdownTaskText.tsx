@@ -1,7 +1,6 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense } from 'react';
 import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { useMathPlugins } from '@/lib/markdown/mathPlugins';
 import { cn } from '@/lib/utils';
 import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 
@@ -69,18 +68,20 @@ const tableComponents = {
 };
 
 export function MarkdownTaskText({ text, className }: MarkdownTaskTextProps) {
-  useEffect(() => {
-    // KaTeX CSS — same lazy import path as MathText uses.
-    void import('katex/dist/katex.min.css');
-  }, []);
+  // Математика — лениво и только если она в тексте есть: rehype-katex статически
+  // тянет 76 КБ gzip, а условия КИМ сплошь и рядом без формул. Плагины и CSS
+  // приезжают одной связкой (src/lib/markdown/mathPlugins).
+  const mathPlugins = useMathPlugins(text.includes('$'));
 
   return (
     <div className={cn('text-base leading-7 text-slate-800', className)}>
       <Suspense fallback={<div className="whitespace-pre-wrap">{text}</div>}>
         <MarkdownErrorBoundary fallbackText={text}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfmSafe, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            remarkPlugins={
+              mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+            }
+            rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
             components={tableComponents}
           >
             {text}

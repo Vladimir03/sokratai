@@ -5,8 +5,7 @@
 
 import { memo, lazy, Suspense, useEffect, useState, useMemo } from 'react';
 import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { useMathPlugins } from '@/lib/markdown/mathPlugins';
 import { AlertTriangle, EyeOff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
@@ -163,16 +162,12 @@ const GuidedChatMessage = memo(({
   subject,
 }: GuidedChatMessageProps) => {
   const resolveImageRef = imageResolver ?? getStudentTaskImageSignedUrl;
-  const [katexLoaded, setKatexLoaded] = useState(false);
   const hasMath = message.content.includes('$') || message.content.includes('\\(') || message.content.includes('\\[');
 
-  useEffect(() => {
-    if (hasMath && !katexLoaded) {
-      import('katex/dist/katex.min.css').then(() => {
-        setKatexLoaded(true);
-      });
-    }
-  }, [hasMath, katexLoaded]);
+  // Гейт по загрузке здесь БЫЛ и работал верно — но грузился только CSS, а
+  // сами плагины оставались статическими импортами и тянули katex (76 КБ gzip)
+  // в чанк ДЗ-чата всегда. Тот же гейт, только теперь он ждёт всю связку.
+  const mathPlugins = useMathPlugins(hasMath);
 
   const displayContent =
     message.role === 'assistant' || message.role === 'tutor'
@@ -320,8 +315,10 @@ const GuidedChatMessage = memo(({
         <Suspense fallback={<p className="whitespace-pre-wrap break-words">{displayContent}</p>}>
           <MarkdownErrorBoundary fallbackText={displayContent}>
             <ReactMarkdown
-              remarkPlugins={[remarkGfmSafe, remarkMath]}
-              rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+              remarkPlugins={
+                mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+              }
+              rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
               components={markdownComponents}
             >
               {displayContent}
@@ -422,8 +419,10 @@ const GuidedChatMessage = memo(({
         >
           <MarkdownErrorBoundary fallbackText={displayContent}>
             <ReactMarkdown
-              remarkPlugins={[remarkGfmSafe, remarkMath]}
-              rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+              remarkPlugins={
+                mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+              }
+              rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
               components={markdownComponents}
             >
               {displayContent}
@@ -504,8 +503,10 @@ const GuidedChatMessage = memo(({
               >
                 <MarkdownErrorBoundary fallbackText={displayContent}>
                   <ReactMarkdown
-                    remarkPlugins={[remarkGfmSafe, remarkMath]}
-                    rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                    remarkPlugins={
+                      mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+                    }
+                    rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
                     components={markdownComponents}
                   >
                     {displayContent}
@@ -588,8 +589,10 @@ const GuidedChatMessage = memo(({
           >
             <MarkdownErrorBoundary fallbackText={displayContent}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfmSafe, remarkMath]}
-                rehypePlugins={hasMath && katexLoaded ? [rehypeKatex] : []}
+                remarkPlugins={
+                  mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+                }
+                rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
                 components={markdownComponents}
               >
                 {displayContent}

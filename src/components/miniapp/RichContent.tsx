@@ -1,7 +1,6 @@
-import { Suspense, lazy, useMemo, useEffect, useState } from 'react';
+import { Suspense, lazy, useMemo } from 'react';
 import remarkGfmSafe from '@/lib/markdown/remarkGfmSafe';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
+import { useMathPlugins } from '@/lib/markdown/mathPlugins';
 import { Math } from './Math';
 import MarkdownErrorBoundary from '@/components/MarkdownErrorBoundary';
 
@@ -19,7 +18,6 @@ interface RichContentProps {
  * Similar to ChatMessage but optimized for Mini App
  */
 export function RichContent({ children, className = '', inline = false, style }: RichContentProps) {
-  const [katexLoaded, setKatexLoaded] = useState(false);
 
   // Preprocess LaTeX to handle different formats
   const preprocessLatex = (text: string) => {
@@ -93,18 +91,14 @@ export function RichContent({ children, className = '', inline = false, style }:
     []
   );
 
-  // Load KaTeX CSS if there's math content
-  useEffect(() => {
-    if (processedContent.includes('$') && !katexLoaded) {
-      const link = document.createElement('link');
-      link.rel = 'stylesheet';
-      link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.23/dist/katex.min.css';
-      link.integrity = 'sha384-p2VkVBxIW6poXRz+CjEfTGYy0GnN0Bh7+uCh0xN6TG/qPfqBTUJjU4bQhWX3dh2T';
-      link.crossOrigin = 'anonymous';
-      document.head.appendChild(link);
-      setKatexLoaded(true);
-    }
-  }, [processedContent, katexLoaded]);
+  // Плагины математики + CSS — лениво, одной связкой, только при наличии `$`.
+  //
+  // Заменяет ДВА недостатка разом: плагины были статическими импортами (тянули
+  // katex 76 КБ gzip в чанк мини-аппа всегда), а CSS подтягивался тегом <link>
+  // с ВНЕШНЕГО CDN (jsdelivr). Второе особенно неуместно в продукте, который
+  // существует из-за блокировок в РФ: недоступный CDN оставил бы формулы без
+  // стилей молча. Теперь CSS приезжает из нашего же бандла.
+  const mathPlugins = useMathPlugins(processedContent.includes('$'));
 
   // For inline rendering (like in titles)
   if (inline) {
@@ -113,8 +107,10 @@ export function RichContent({ children, className = '', inline = false, style }:
         <Suspense fallback={<span>{children}</span>}>
           <MarkdownErrorBoundary fallbackText={processedContent}>
             <ReactMarkdown
-              remarkPlugins={[remarkGfmSafe, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
+              remarkPlugins={
+                mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+              }
+              rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
               components={{
                 ...markdownComponents,
                 p: ({ children }: any) => <>{children}</>, // No <p> wrapper for inline
@@ -140,8 +136,10 @@ export function RichContent({ children, className = '', inline = false, style }:
       >
         <MarkdownErrorBoundary fallbackText={processedContent}>
           <ReactMarkdown
-            remarkPlugins={[remarkGfmSafe, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            remarkPlugins={
+              mathPlugins ? [remarkGfmSafe, mathPlugins.remarkMath] : [remarkGfmSafe]
+            }
+            rehypePlugins={mathPlugins ? [mathPlugins.rehypeKatex] : []}
             components={markdownComponents}
           >
             {processedContent}
