@@ -4,10 +4,48 @@
  * Job: A2 — верифицировать задачу (doc 16, принцип 16: "Физика — не plain text")
  */
 
-import { Fragment, memo, useEffect, useMemo, type ElementType } from 'react';
-import katex from 'katex';
+import { Fragment, memo, useEffect, useMemo, useState, type ElementType } from 'react';
 import { containsChatUrl, linkifyEscapedHtml } from '@/lib/chatLinkify';
 import { preprocessLatex } from '@/components/kb/ui/preprocessLatex';
+
+/**
+ * KaTeX грузится ЛЕНИВО — статический `import katex from 'katex'` здесь был
+ * главным перевесом бандла (замер 2026-07-27: чанк katex 259 КБ raw / 76 КБ
+ * gzip, и на него СТАТИЧЕСКИ ссылались 34 чанка).
+ *
+ * Ловушка, из-за которой это долго не замечали: fast-path ниже («нет `$` →
+ * plain text, zero KaTeX overhead») экономил РЕНДЕР, но не БАЙТЫ. Библиотека
+ * всё равно уезжала пользователю — ученик платил 76 КБ за формулы в задаче,
+ * где формул нет. CSS уже грузился динамически, а сам движок — нет.
+ *
+ * Модульный кэш, а не хук: цена платится один раз на вкладку, дальше рендер
+ * синхронный. Промис хранится отдельно от модуля, чтобы N одновременных
+ * MathText дали ОДИН сетевой запрос, а не N.
+ */
+type KatexModule = typeof import('katex').default;
+let katexModule: KatexModule | null = null;
+let katexPromise: Promise<void> | null = null;
+
+function loadKatex(): Promise<void> {
+  if (katexModule) return Promise.resolve();
+  if (!katexPromise) {
+    katexPromise = Promise.all([
+      import('katex'),
+      // CSS в той же связке: рендерить формулы без стилей — хуже, чем подождать.
+      import('katex/dist/katex.min.css'),
+    ])
+      .then(([mod]) => {
+        katexModule = mod.default;
+      })
+      .catch(() => {
+        // Сбой загрузки (DPI-обрыв, стейл-чанк) НЕ должен ронять экран: ниже
+        // есть текстовый фолбэк. Промис сбрасываем — следующий MathText
+        // попробует снова, а не залипнет на отказе навсегда.
+        katexPromise = null;
+      });
+  }
+  return katexPromise;
+}
 
 interface MathTextProps {
   text: string;
@@ -33,13 +71,19 @@ function escapeHtml(text: string): string {
 }
 
 function renderMathSegment(segment: string): string {
+  // Движок ещё не приехал (или не приедет) → показываем исходный `$…$` как
+  // текст. Это НЕ пустое место: высота строки сопоставима с формулой, поэтому
+  // подмена после загрузки почти не двигает вёрстку (CLS, rule 80). Пустой
+  // плейсхолдер был бы хуже — он гарантировал бы прыжок.
+  if (!katexModule) return escapeHtml(segment);
+
   const isDisplay = segment.startsWith('$$') && segment.endsWith('$$');
   const rawLatex = isDisplay
     ? segment.slice(2, -2)
     : segment.slice(1, -1);
 
   try {
-    return katex.renderToString(rawLatex, {
+    return katexModule.renderToString(rawLatex, {
       displayMode: isDisplay,
       throwOnError: false,
       output: 'html',
@@ -148,13 +192,31 @@ function MathRenderer({
   Tag: ElementType;
   markdownLite?: boolean;
 }) {
+  // Загрузку стартуем В РЕНДЕРЕ, а не в эффекте: эффект выполняется ПОСЛЕ
+  // отрисовки, и лишний кадр — это лишний кадр с сырым `$…$` на экране.
+  // Вызов идемпотентен (модульный промис), поэтому побочный эффект в теле
+  // безопасен и переживает двойной рендер StrictMode.
+  const [katexReady, setKatexReady] = useState(() => katexModule !== null);
+  if (!katexReady) void loadKatex();
+
   useEffect(() => {
-    void import('katex/dist/katex.min.css');
-  }, []);
+    if (katexReady) return;
+    let cancelled = false;
+    void loadKatex().then(() => {
+      // Проверяем именно модуль, а не факт резолва: при сбое загрузки промис
+      // резолвится (мы его catch'нули), но рендерить всё ещё нечем.
+      if (!cancelled && katexModule) setKatexReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [katexReady]);
 
   const renderedHtml = useMemo(
     () => renderMixedLatexToHtml(text, markdownLite),
-    [text, markdownLite],
+    // katexReady в зависимостях ОБЯЗАТЕЛЕН: без него мемо не пересчитается
+    // после загрузки движка, и формулы навсегда останутся сырым текстом.
+    [text, markdownLite, katexReady],
   );
 
   return (
