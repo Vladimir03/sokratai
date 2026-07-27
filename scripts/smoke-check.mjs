@@ -1132,5 +1132,62 @@ if (scoreSelectViolations === 0) {
   ok("score chain pass (все скоринговые SELECT'ы тянут best_earned_score)");
 }
 
+// ── 23. package-lock синхронизирован с package.json (2026-07-27) ────────────
+//
+// ПРИЧИНА: деплой на VPS упал на `npm ci` — лок разошёлся с package.json после
+// добавления vitest (не хватало транзитивных `@emnapi/*`, а зафиксированная
+// `@emnapi/wasi-threads@1.2.2` не удовлетворяла требуемую 1.2.3). До этого
+// момента рассинхрон не ловился НИГДЕ: ни lint, ни build, ни тесты не читают
+// лок построчно — `npm ci` единственный, кто сверяет его с package.json, и он
+// запускается только на VPS внутри `deploy-sokratai`. То есть узнать о поломке
+// можно было лишь оборванным деплоем.
+//
+// `--dry-run` ничего не пишет в node_modules: он ресолвит дерево и падает с
+// EUSAGE при расхождении. Это ровно та же проверка, что делает деплой, только
+// на 5 секунд и без последствий.
+console.log("");
+console.log("23. package-lock ↔ package.json (та же проверка, что npm ci на деплое)...");
+
+if (process.env.SMOKE_SKIP_NPM_CI === "1") {
+  warn("SMOKE_SKIP_NPM_CI=1 — пропускаю проверку лока (быстрый локальный прогон)");
+} else {
+  // Windows: с Node 20 прямой spawn `npm.cmd` отдаёт EINVAL (защита от
+  // CVE-2024-27980), поэтому идём через shell — и ОДНОЙ строкой, иначе Node
+  // ругается DEP0190 (args при shell:true не экранируются). Команда фиксированная,
+  // пользовательского ввода в ней нет. На Linux (CI и VPS) — обычный spawn.
+  const npmArgs = ["ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund"];
+  const probeOptions = { cwd: rootDir, encoding: "utf8", timeout: 180_000 };
+  const lockProbe = process.platform === "win32"
+    ? spawnSync(`npm ${npmArgs.join(" ")}`, { ...probeOptions, shell: true })
+    : spawnSync("npm", npmArgs, probeOptions);
+  const probeOutput = `${lockProbe.stdout ?? ""}${lockProbe.stderr ?? ""}`;
+  if (lockProbe.error) {
+    // npm не найден / таймаут — это про окружение, а не про репозиторий.
+    warn(`npm недоступен (${lockProbe.error.message}) — пропускаю проверку лока`);
+  } else if (lockProbe.status === 0) {
+    ok("package-lock синхронизирован (npm ci пройдёт на деплое)");
+  } else if (/EUSAGE|can only install packages when your package\.json/.test(probeOutput)) {
+    // ЕДИНСТВЕННЫЙ случай, где валим сборку: лок реально разошёлся.
+    const details = probeOutput
+      .split("\n")
+      .filter((line) => /Missing:|Invalid:|Extraneous:/.test(line))
+      .slice(0, 8)
+      .map((line) => line.replace(/^npm\s+error\s+/, "  "))
+      .join("\n");
+    fail(
+      "package-lock.json разошёлся с package.json — `npm ci` на деплое упадёт, " +
+        "и деплой оборвётся до касания прода.\n" +
+        (details ? `${details}\n` : "") +
+        "  Починить: npm install --package-lock-only && git add package-lock.json",
+    );
+  } else {
+    // Сеть, реестр, права — не наша проверка, не блокируем прогон.
+    warn(
+      `npm ci --dry-run завершился с кодом ${lockProbe.status} без EUSAGE ` +
+        "(похоже на сетевую/реестровую ошибку) — рассинхрон лока не подтверждён",
+    );
+  }
+}
+
 console.log("");
 console.log("=== Smoke Check Complete ===");
