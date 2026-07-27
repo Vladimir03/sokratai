@@ -3566,6 +3566,7 @@ export type Database = {
           id: string
           is_active: boolean
           is_primary: boolean
+          join_code: string | null
           name: string
           short_name: string | null
           tutor_id: string
@@ -3577,6 +3578,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_primary?: boolean
+          join_code?: string | null
           name: string
           short_name?: string | null
           tutor_id: string
@@ -3588,6 +3590,7 @@ export type Database = {
           id?: string
           is_active?: boolean
           is_primary?: boolean
+          join_code?: string | null
           name?: string
           short_name?: string | null
           tutor_id?: string
@@ -5047,6 +5050,7 @@ export type Database = {
           topic: string
         }[]
       }
+      get_group_join_info: { Args: { _join_code: string }; Returns: Json }
       get_lessons_needing_payment_reminder: {
         Args: never
         Returns: {
@@ -5545,6 +5549,10 @@ export type Database = {
         }
         Returns: string
       }
+      tutor_ensure_group_join_code: {
+        Args: { _regenerate?: boolean; _tutor_group_id: string }
+        Returns: string
+      }
       tutor_ensure_student_claim_token: {
         Args: { p_tutor_student_id: string }
         Returns: string
@@ -5574,6 +5582,10 @@ export type Database = {
         Returns: string
       }
       tutor_revert_lesson: { Args: { p_lesson_id: string }; Returns: Json }
+      tutor_set_group_archived: {
+        Args: { _archived: boolean; _tutor_group_id: string }
+        Returns: Json
+      }
       tutor_set_lesson_cost: {
         Args: { _amount: number; _lesson_id: string }
         Returns: Json
