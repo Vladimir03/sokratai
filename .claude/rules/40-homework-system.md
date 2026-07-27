@@ -28,6 +28,16 @@
 
 **`task_kind` ↔ `check_format`:** любой write, трогающий `check_format`, ОБЯЗАН писать и `task_kind` (`deriveTaskKind` / `deriveTaskKindFromCheckFormat`). Иначе DB DEFAULT `'extended'` делает все «краткие ответы» развёрнутыми. `task_kind='speaking'` НЕ выводится из `check_format` — только явный выбор через `resolveWriteTaskKind` (грепни: speaking-сайтов 4).
 
+## Структурные тесты (`options_json`) — инварианты
+
+Варианты живут в `options_json` (**student-safe**, GRANT `20260727130000`); верный ответ — ТОЛЬКО в `correct_answer` (tutor-only) в формате чекеров пробников: single `"3"`, multi `"1267"`, matching `"35142"`. **Глубина — skill `homework-system`**, спека — `docs/delivery/features/homework-choice-tasks/spec.md`.
+
+- **Любой write проходит `normalizeOptionsJson`** (`_shared/task-options.ts` + браузерное зеркало `src/lib/taskOptions.ts`, parity — smoke §24). Он же вшит в `kb_snapshot.ts`: авто-зеркало ДЗ→База и push-to-kb получают СЫРОЙ payload клиента, и без него `correct: true` из импорт-скрипта уезжает в `kb_tasks`.
+- **`options_json` — часть dual write-path И push-to-kb.** `homeworkTaskFieldsToKbUpdate` пишет колонку **безусловно** ⇒ поле, отсутствующее в SELECT или в `PUSH_TO_KB_DRAFT_FIELDS`, **ЗАТИРАЕТ** варианты у задачи-источника Базы, а форк каталожной задачи теряет их в копии (ревью 5.6).
+- **Балл считает КОД** (`gradeStructuredChoice` → чекеры Части 1 пробников), `deterministic_score=true`; AI только объясняет через `precomputedVerdict`. **Любой новый выход из `evaluateStudentAnswer` обязан либо пройти `mergeStructuredResult`, либо вернуть `buildStructuredResult`** — иначе балл теряется (так теряли его ветка «картинка условия не загрузилась» и путь физ-блок-схемы). Сбой AI / исчерпанная квота → canned-фидбэк, НЕ 429 и не CHECK_FAILED.
+- **Anti-leak объяснения — детерминированный, а не промптом:** `feedbackLeaksCorrectChoice` на не-CORRECT вердиктах (ключ отдельным токеном + дословная цитата варианта) → canned + событие `guided_check_structured_answer_leak_scrubbed`. `sanitizeFeedback` тут НЕ работает: он игнорирует эталоны короче 2 символов, т.е. любой single_choice.
+- **Оцениваемый ключ — РОВНО один буквенно-цифровой символ** (чекеры посимвольные: «10» не совпадёт никогда → молчаливый ноль при верном выборе). Нормализация **fail-closed**: битый вариант / дубль / перебор капа отвергают весь `options_json` (→ текстовый ввод), а не режут список.
+
 ## Anti-leak — три слоя, не один
 
 1. **Edge column-whitelist.** Никакого `select("*")` на `homework_tutor_tasks`/`_assignments`. `solution_text`, `solution_image_urls`, `rubric_*`, `ai_reference_solution`, `grading_criteria_json`, `ai_score_comment`, `correct_answer`, `ocr_text`, `student_opened_at`, `tutor_*_by` — tutor-only.

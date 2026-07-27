@@ -1562,3 +1562,19 @@ Build-лог: memory `project_elena_requests_2026_06_17.md`. План: `~/.claud
 - **При расширении:** новый источник «проверено» → `isStudentWorkFullyReviewed` (не дублировать определение); новая мутация, меняющая review/completion → `invalidateAfterReview`; фильтровать reviewed дёшево ДО display-лимита, тяжёлые results — только для финальных.
 
 Build-лог: memory `project_elena_requests_2026_06_17.md` (секция 2026-06-18). План: `~/.claude/plans/1-linked-treehouse.md`.
+
+## Структурные тестовые задачи (`options_json`) — 2026-07-27
+
+Кейс Дианы Шевцовой (школа русского языка, 2471 тест на Online Test Pad): задачи с готовыми вариантами ответа. Инварианты — rule 40, спека — `docs/delivery/features/homework-choice-tasks/spec.md` (там же §10 — разбор внешнего ревью ChatGPT-5.6).
+
+**Экономика решения, а не только UX.** Балл считает КОД, поэтому тест не тратит AI-квоту на проверку — при 400 учениках Дианы это и есть условие сходимости юнит-экономики. AI подключается ТОЛЬКО как объяснение поверх уже готового вердикта.
+
+**Три вида + сериализация ответа.** `single_choice` («3»), `multi_choice` («1, 2, 6, 7» → `1267`), `matching` (правые ключи в порядке левого столбца → `35142`). Ученический выбор уходит **существующим каналом** `checkAnswer`/submission — ни нового endpoint'а, ни нового `message_kind`. Чекеры переиспользованы из Части 1 пробников (`_shared/mock-exam-part1-checker.ts`, consume-only): `checkStrict` / `gradeMultiChoice` / `gradeOrdered`, поэтому частичный балл у multi/matching работает ровно как на пробнике.
+
+**Квота-гейт перенесён ПОСЛЕ чтения задачи** (`handleCheckAnswer`, `handleStudentSubmission`): исчерпанная дневная квота у структурного теста НЕ даёт 429 — ученик получает балл с canned-фидбэком (`aiExplanationAllowed=false`). Для нестуктурных задач семантика прежняя, байт-в-байт. Любая правка этого места требует проверки обеих веток.
+
+**Клиент.** `StructuredAnswerPanel` (`src/components/student/homework-problem/`) заменяет `NumericAnswerComposer` при `task_kind='numeric'` + валидных вариантах; `key={task.id}` сбрасывает выбор между задачами. Radix-чекбоксов нет — свой индикатор (нативный input невидим под глобальным CSS-reset, прецедент `GroupMembersEditor`), matching — нативные `<select>` (drag-drop запрещён, Safari 15), правый столбец **постоянно на экране** (в `<details>` он заставлял держать соответствия в памяти). В самостоятельной работе CTA — «Сдать ответ» + подпись про одну попытку. В конструкторе — read-only бейдж `describeTaskOptions` («проверяется автоматически, без AI-квоты»).
+
+**Чего осознанно НЕТ в v1:** редактора вариантов в конструкторе (наполнение — импорт-скриптом под логином репетитора, превью-гейт владельцу), `options_json` в `kb_publish_task`/`kb_resync_task` (публикация тестов в общий Каталог отложена — сначала закрыть column-list каталога), drag-drop matching, отдельного `check_mode`-override под строгие профили ФИПИ.
+
+**Чем ловится регресс:** `node scripts/test-task-options.mjs` (parity зеркал + anti-leak whitelist + fail-closed + векторы утечки фидбэка) — он же smoke-check §24.
