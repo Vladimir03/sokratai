@@ -14,6 +14,8 @@ import { claimPendingInvite } from "@/lib/inviteApi";
 import { applyPendingConsent } from "@/lib/consent";
 import { requestStudentOtp } from "@/lib/studentClaimApi";
 import { InAppBrowserNudge } from "@/components/InAppBrowserNudge";
+import { ConnectionTroubleNotice } from "@/components/common/ConnectionTroubleNotice";
+import { resetConnectionVerdict, useConnectionTrouble } from "@/hooks/useConnectionTrouble";
 
 const loginSchema = z.object({
   email: z.string().trim().email({ message: "Неверный формат email" }).max(255),
@@ -29,6 +31,14 @@ const Login = () => {
   // Под РФ-DPI первый запрос логина может «упасть» → авто-ретрай (authRetry),
   // флаг показывает «сеть медленная, ещё раз» на кнопке (зеркало TutorLogin).
   const [retrying, setRetrying] = useState(false);
+  // Подсказка про VPN на входе показывается ТОЛЬКО после неудачной попытки
+  // (решение владельца 2026-07-27) — иначе она пугала бы того, кто просто
+  // медленно набирает пароль.
+  const [networkTrouble, setNetworkTrouble] = useState(false);
+  const { tripped: loginTroubleVisible, verdict: loginVerdict } = useConnectionTrouble(
+    networkTrouble,
+    0,
+  );
   const [showTelegramHint, setShowTelegramHint] = useState(false);
   const telegramTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const redirectErrorShown = useRef(false);
@@ -109,6 +119,7 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
     setRetrying(false);
+    setNetworkTrouble(false);
 
     try {
       const validation = loginSchema.safeParse({ email, password });
@@ -175,10 +186,11 @@ const Login = () => {
       // Сетевой сбой/таймаут под DPI — честное сообщение + подсказка про VPN,
       // а не вечный спиннер и не generic «Ошибка входа».
       if (isAuthNetworkFailure(error)) {
-        toast.error(
-          "Сеть не отвечает — запрос не дошёл. Попробуйте ещё раз; в РФ часто помогает вход с VPN.",
-          { duration: 8000 },
-        );
+        // Тост тут не годится: он исчезает через несколько секунд, а совет
+        // «выключи VPN» нужен ученику ровно в момент повторной попытки.
+        // Блок над формой висит, пока попытка не удастся.
+        resetConnectionVerdict();
+        setNetworkTrouble(true);
       } else {
         toast.error(getAuthErrorMessage(error, "Ошибка входа"));
       }
@@ -239,6 +251,9 @@ const Login = () => {
         </CardHeader>
         <CardContent className="space-y-6">
           <InAppBrowserNudge />
+          {loginTroubleVisible ? (
+            <ConnectionTroubleNotice verdict={loginVerdict} context="login" />
+          ) : null}
           {/* Email/Password Login - Primary */}
           <form onSubmit={handleLogin} className="space-y-4">
             <div className="space-y-2">

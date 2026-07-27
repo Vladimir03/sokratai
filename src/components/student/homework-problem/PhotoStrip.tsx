@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, Loader2, X } from 'lucide-react';
+import { Camera, ImageOff, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   getStudentTaskImageSignedUrl,
   uploadStudentThreadImage,
   StudentHomeworkApiError,
 } from '@/lib/studentHomeworkApi';
+import { ConnectionTroubleNotice } from '@/components/common/ConnectionTroubleNotice';
+import {
+  CONNECTION_TROUBLE_DELAY_MS,
+  resetConnectionVerdict,
+  useConnectionTrouble,
+} from '@/hooks/useConnectionTrouble';
 
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/heic', 'image/heif', 'image/webp'];
 const HEIC_NAME_RX = /\.(heic|heif)$/i;
@@ -156,6 +162,29 @@ export function PhotoStrip({
 
   const canAddMore = photos.length + uploadingCount < max && !disabled;
 
+  // Миниатюры решения: `undefined` — ещё резолвим, `null` — резолв провалился.
+  // Провал показываем сразу, зависание — через общий таймаут (инцидент с VPN
+  // 2026-07-27: вечный спиннер вместо честного «не загрузилось»).
+  const hasUnresolvedThumbs = photos.some((ref) => thumbUrls[ref] === undefined);
+  const hasFailedThumbs = photos.some((ref) => thumbUrls[ref] === null);
+  const { tripped: thumbsTripped, verdict: thumbsVerdict } = useConnectionTrouble(
+    hasUnresolvedThumbs || hasFailedThumbs,
+    hasFailedThumbs ? 0 : CONNECTION_TROUBLE_DELAY_MS,
+  );
+
+  const handleThumbsRetry = useCallback(() => {
+    resetConnectionVerdict();
+    // Снимаем только неудачные ключи — эффект резолва подхватит их заново,
+    // уже загруженные миниатюры не мигают.
+    setThumbUrls((prev) => {
+      const next: Record<string, string | null> = {};
+      for (const [ref, value] of Object.entries(prev)) {
+        if (value !== null) next[ref] = value;
+      }
+      return next;
+    });
+  }, []);
+
   return (
     <div className="flex flex-col gap-2">
       {/* Single hidden input — no `capture` attribute. iOS Safari shows
@@ -194,6 +223,14 @@ export function PhotoStrip({
                     alt={`Страница ${pageNo}`}
                     loading="lazy"
                     className="w-full h-full object-cover"
+                  />
+                ) : url === null ? (
+                  // Резолв ссылки не удался. Раньше здесь крутился ТОТ ЖЕ
+                  // спиннер, что и при загрузке, — ученик под VPN не понимал,
+                  // что процесс уже кончился неудачей (инцидент 2026-07-27).
+                  <ImageOff
+                    className="h-5 w-5 text-amber-600"
+                    aria-label={`Страница ${pageNo} не загрузилась`}
                   />
                 ) : (
                   <Loader2
@@ -248,6 +285,14 @@ export function PhotoStrip({
           </button>
         )}
       </div>
+
+      {thumbsTripped ? (
+        <ConnectionTroubleNotice
+          verdict={thumbsVerdict}
+          context="photo"
+          onRetry={handleThumbsRetry}
+        />
+      ) : null}
     </div>
   );
 }

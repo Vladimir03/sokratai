@@ -10,7 +10,19 @@ import {
   PaginationNext, 
   PaginationPrevious 
 } from '@/components/ui/pagination';
-import { UserPlus, Archive, ArrowLeft, Users } from 'lucide-react';
+import { UserPlus, Archive, ArrowLeft, Users, Settings2, MoreVertical, Pencil, Link2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ManageGroupsSheet } from '@/components/tutor/groups/ManageGroupsSheet';
+import { CreateGroupModal } from '@/components/tutor/groups/CreateGroupModal';
+import { RenameGroupModal } from '@/components/tutor/groups/RenameGroupModal';
+import { ArchiveGroupDialog } from '@/components/tutor/groups/ArchiveGroupDialog';
+import { GroupMembersEditor } from '@/components/tutor/groups/GroupMembersEditor';
+import { GroupInviteLinkDialog } from '@/components/tutor/groups/GroupInviteLinkDialog';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import { StudentCard } from '@/components/tutor/StudentCard';
 import { ConnectStudentSheet, type ConnectStudentTarget } from '@/components/tutor/ConnectStudentSheet';
@@ -133,6 +145,18 @@ function TutorStudentsContent() {
     setConnectOpen(true);
   };
   const [resettingStudentId, setResettingStudentId] = useState<string | null>(null);
+
+  // Управление группами/метками (запрос Егора #39): шит-список + модалки действий.
+  // Модалки хостятся здесь — их делят ManageGroupsSheet и kebab на заголовках секций.
+  const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+  const [createGroupType, setCreateGroupType] = useState<'group' | 'tag' | null>(null);
+  const [renameGroupTarget, setRenameGroupTarget] = useState<TutorGroup | null>(null);
+  const [membersGroupTarget, setMembersGroupTarget] = useState<TutorGroup | null>(null);
+  const [archiveGroupTarget, setArchiveGroupTarget] = useState<{
+    group: TutorGroup;
+    memberCount: number;
+  } | null>(null);
+  const [inviteLinkGroupTarget, setInviteLinkGroupTarget] = useState<TutorGroup | null>(null);
 
   // Архив учеников (запрос Елены 2026-06-17). Фетчим архив только когда открыт режим.
   const queryClient = useQueryClient();
@@ -568,8 +592,18 @@ function TutorStudentsContent() {
           </Suspense>
         ) : (
         <>
-        {/* Архив-тоггл (запрос Елены 2026-06-17) */}
-        <div className="flex justify-end">
+        {/* Архив-тоггл (запрос Елены 2026-06-17) + «Группы и метки» (запрос Егора #39) */}
+        <div className="flex justify-end gap-1">
+          {miniGroupsEnabled && !showArchived && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setManageGroupsOpen(true)}
+              className="text-muted-foreground"
+            >
+              <Settings2 className="h-4 w-4 mr-1.5" /> Группы и метки
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -650,12 +684,53 @@ function TutorStudentsContent() {
             {filteredStudents.length > 0 &&
               (groupSections ? (
                 <div className="space-y-5">
-                  {groupSections.map((section) => (
+                  {groupSections.map((section) => {
+                    // Действия секции: группа-объект из кэша (key = group.id).
+                    const sectionGroup =
+                      section.key !== UNASSIGNED_GROUP_KEY
+                        ? groups.find((g) => g.id === section.key) ?? null
+                        : null;
+                    return (
                     <div key={section.key} className="space-y-2.5">
                       <div className="flex items-center gap-2 px-1">
                         <Users className="h-4 w-4 text-slate-400" aria-hidden="true" />
                         <h3 className="text-sm font-semibold text-slate-700">{section.label}</h3>
                         <span className="text-xs text-slate-400">{section.students.length}</span>
+                        {sectionGroup && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                aria-label={`Действия с группой ${section.label}`}
+                                className="ml-auto rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                                style={{ touchAction: 'manipulation' }}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setInviteLinkGroupTarget(sectionGroup)}>
+                                <Link2 className="mr-2 h-4 w-4" /> Ссылка в группу
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setRenameGroupTarget(sectionGroup)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Переименовать
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => setMembersGroupTarget(sectionGroup)}>
+                                <Users className="mr-2 h-4 w-4" /> Состав
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() =>
+                                  setArchiveGroupTarget({
+                                    group: sectionGroup,
+                                    memberCount: section.students.length,
+                                  })
+                                }
+                              >
+                                <Archive className="mr-2 h-4 w-4" /> Архивировать
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
                       <div className="space-y-3">
                         {section.students.map((student) => (
@@ -677,7 +752,8 @@ function TutorStudentsContent() {
                         ))}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <>
@@ -731,6 +807,64 @@ function TutorStudentsContent() {
         onOpenChange={setConnectOpen}
         students={connectTargets}
       />
+
+      {/* Управление группами/метками (#39): шит + модалки действий (общие с kebab секций) */}
+      <ManageGroupsSheet
+        open={manageGroupsOpen}
+        onOpenChange={setManageGroupsOpen}
+        onCreate={(type) => setCreateGroupType(type)}
+        onRename={(g) => setRenameGroupTarget(g)}
+        onMembers={(g) => setMembersGroupTarget(g)}
+        onArchive={(g, memberCount) => setArchiveGroupTarget({ group: g, memberCount })}
+        onInviteLink={(g) => setInviteLinkGroupTarget(g)}
+      />
+      {createGroupType && (
+        <CreateGroupModal
+          initialType={createGroupType}
+          onClose={() => setCreateGroupType(null)}
+          onCreated={(created) => {
+            // Сразу открыть состав — собрать учеников, не покидая флоу.
+            if (created.is_primary) {
+              setMembersGroupTarget({
+                id: created.id,
+                name: created.name,
+                short_name: null,
+                color: null,
+                is_active: true,
+                is_primary: created.is_primary,
+                tutor_id: '',
+                created_at: '',
+                updated_at: '',
+              });
+            }
+          }}
+        />
+      )}
+      {renameGroupTarget && (
+        <RenameGroupModal
+          group={renameGroupTarget}
+          onClose={() => setRenameGroupTarget(null)}
+        />
+      )}
+      {membersGroupTarget && (
+        <GroupMembersEditor
+          group={membersGroupTarget}
+          onClose={() => setMembersGroupTarget(null)}
+        />
+      )}
+      {archiveGroupTarget && (
+        <ArchiveGroupDialog
+          group={archiveGroupTarget.group}
+          memberCount={archiveGroupTarget.memberCount}
+          onClose={() => setArchiveGroupTarget(null)}
+        />
+      )}
+      {inviteLinkGroupTarget && (
+        <GroupInviteLinkDialog
+          group={inviteLinkGroupTarget}
+          onClose={() => setInviteLinkGroupTarget(null)}
+        />
+      )}
     </>
   );
 }

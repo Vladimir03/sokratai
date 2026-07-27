@@ -164,6 +164,18 @@ export async function invalidateTutorStudentDependentQueries(
       queryKey: ['tutor', 'homework'],
       refetchType: 'active',
     }),
+    // Счётчики участников групп (HWAssignSection показывает group.members из
+    // ['tutor','groups']) — без этой пары свежая привязка ученика к группе давала
+    // «0 учеников» в конструкторе ДЗ до конца TUTOR_STALE_TIME (баг со звонка
+    // Дианы 2026-07-27).
+    queryClient.invalidateQueries({
+      queryKey: ['tutor', 'groups'],
+      refetchType: 'active',
+    }),
+    queryClient.invalidateQueries({
+      queryKey: ['tutor', 'group-memberships'],
+      refetchType: 'active',
+    }),
   ]);
 }
 
@@ -184,6 +196,9 @@ export async function invalidateGroupRosterCaches(queryClient: QueryClient): Pro
       ['tutor', 'received-payments'],
       ['tutor', 'students'],
       ['tutor', 'student'],
+      // Счётчики участников групп в конструкторе ДЗ (group.members).
+      ['tutor', 'groups'],
+      ['tutor', 'group-memberships'],
       // Групповые чаты: состав/наличие учебной группы = строка списка «Чаты»
       // (синтезируется из memberships; realtime событий по membership нет).
       ['chat', 'conversations'],

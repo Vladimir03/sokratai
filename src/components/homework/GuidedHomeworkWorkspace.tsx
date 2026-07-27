@@ -30,6 +30,12 @@ import {
 } from '@/components/ui/dialog';
 import GuidedChatMessage from './GuidedChatMessage';
 import GuidedChatInput from './GuidedChatInput';
+import { ConnectionTroubleNotice } from '@/components/common/ConnectionTroubleNotice';
+import {
+  CONNECTION_TROUBLE_DELAY_MS,
+  resetConnectionVerdict,
+  useConnectionTrouble,
+} from '@/hooks/useConnectionTrouble';
 import TaskStepper from './TaskStepper';
 
 const MathText = lazy(() => import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })));
@@ -368,14 +374,30 @@ const TaskConditionGallery = memo(function TaskConditionGallery({
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const touchStartXRef = useRef<number | null>(null);
   const touchStartAtRef = useRef<number | null>(null);
-  const { data: signedUrls = [], isLoading } = useStudentTaskImagesSignedUrls(assignmentId, taskId, {
-    enabled: refs.length > 0,
-  });
+  const galleryQueryClient = useQueryClient();
+  const { data: signedUrls = [], isLoading, isFetching } = useStudentTaskImagesSignedUrls(
+    assignmentId,
+    taskId,
+    { enabled: refs.length > 0 },
+  );
 
   const resolvedUrls = useMemo(() => {
     if (signedUrls.length > 0) return signedUrls;
     return refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
   }, [refs, signedUrls]);
+
+  const hasNoUrls = refs.length > 0 && resolvedUrls.length === 0;
+  const { tripped: noUrlsTripped, verdict: noUrlsVerdict } = useConnectionTrouble(
+    hasNoUrls,
+    isLoading ? CONNECTION_TROUBLE_DELAY_MS : 0,
+  );
+
+  const handleGalleryRetry = useCallback(() => {
+    resetConnectionVerdict();
+    void galleryQueryClient.invalidateQueries({
+      queryKey: ['student', 'homework', 'guided-task-images', assignmentId, taskId],
+    });
+  }, [galleryQueryClient, assignmentId, taskId]);
 
   const canGoPrev = openIndex !== null && openIndex > 0;
   const canGoNext = openIndex !== null && openIndex < resolvedUrls.length - 1;
@@ -449,12 +471,21 @@ const TaskConditionGallery = memo(function TaskConditionGallery({
 
   if (refs.length === 0) return null;
 
-  if (isLoading && resolvedUrls.length === 0) {
+  if (hasNoUrls && !noUrlsTripped) {
     return <p className="text-xs text-muted-foreground">Загрузка фото условия...</p>;
   }
 
-  if (resolvedUrls.length === 0) {
-    return <p className="text-xs text-muted-foreground">Фото условия недоступны</p>;
+  // Зеркало TaskImagesGallery: вечный спиннер вместо условия оставлял ученика
+  // под VPN без задания (инцидент 2026-07-27). Правишь тут — правь и там.
+  if (hasNoUrls) {
+    return (
+      <ConnectionTroubleNotice
+        verdict={noUrlsVerdict}
+        context="photo"
+        onRetry={handleGalleryRetry}
+        isRetrying={isFetching}
+      />
+    );
   }
 
   return (

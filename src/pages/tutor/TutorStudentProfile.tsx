@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Save, Trash2, MessageSquare, ChevronRight, Edit, AlertCircle, Archive, ArchiveRestore } from 'lucide-react';
@@ -189,6 +189,10 @@ function TutorStudentProfileContent() {
   } | null>(null);
   const [isAddingToGroupLessons, setIsAddingToGroupLessons] = useState(false);
   const [isCreatingEditGroup, setIsCreatingEditGroup] = useState(false);
+  // Синхронный guard против двойного сабмита создания группы: `isCreatingEditGroup`
+  // (state) дизейблит кнопку асинхронно, ref отсекает гонку сразу (паттерн
+  // StudentTagsEditor; инцидент Дианы 2026-07-27 — два «11 класс»).
+  const createEditGroupBusyRef = useRef(false);
   // Несколько групп на ученика (2026-06-18): основная группа (is_primary) — для
   // селектора «мини-группа»; метки (is_primary=false) — отдельный редактор.
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
@@ -360,20 +364,32 @@ function TutorStudentProfileContent() {
   }, [tutorStudentId, student?.archived_at, queryClient]);
 
   const handleCreateEditGroup = useCallback(async () => {
+    if (createEditGroupBusyRef.current) return;
     const groupName = editNewGroupName.trim();
     if (!groupName) {
       toast.error('Введите название мини-группы');
       return;
     }
 
+    createEditGroupBusyRef.current = true;
     setIsCreatingEditGroup(true);
     try {
       // Из профиля создаётся учебная (основная) группа → is_primary: true.
+      // createTutorGroup сам реюзает одноимённую активную группу (create-or-reuse).
       const createdGroup = await createTutorGroup({ name: groupName, is_primary: true });
       if (!createdGroup) {
         toast.error('Не удалось создать мини-группу');
         return;
       }
+      // Seed кэша ДО рефетча: Select показывает созданную группу мгновенно, а не
+      // после медленного под DPI запроса (пустой Select провоцировал второй клик).
+      queryClient.setQueryData<Array<TutorGroup & { members: unknown[] }>>(
+        ['tutor', 'groups'],
+        (old) =>
+          old && !old.some((g) => g.id === createdGroup.id)
+            ? [...old, { ...createdGroup, members: [] }]
+            : old,
+      );
       setEditSelectedGroupId(createdGroup.id);
       setEditNewGroupName('');
       refetchGroups();
@@ -382,9 +398,10 @@ function TutorStudentProfileContent() {
       console.error('Error creating tutor group from student profile:', groupError);
       toast.error('Не удалось создать мини-группу');
     } finally {
+      createEditGroupBusyRef.current = false;
       setIsCreatingEditGroup(false);
     }
-  }, [editNewGroupName, refetchGroups]);
+  }, [editNewGroupName, refetchGroups, queryClient]);
 
   const handleUpdateStudent = useCallback(async () => {
     if (!tutorStudentId) return;
@@ -486,6 +503,10 @@ function TutorStudentProfileContent() {
             }
           }
           refetchMemberships();
+          // ['tutor','groups'] несёт счётчики участников (group.members) — без
+          // рефетча конструктор ДЗ показывал «0 учеников» в свежей группе
+          // (баг со звонка Дианы 2026-07-27).
+          refetchGroups();
           // Групповые чаты синтезируются из memberships — обновить список «Чаты».
           void queryClient.invalidateQueries({ queryKey: ['chat', 'conversations'] });
         } catch (membershipError) {
@@ -555,6 +576,7 @@ function TutorStudentProfileContent() {
     miniGroupsEnabled,
     queryClient,
     refetchMemberships,
+    refetchGroups,
     refetchStudent,
     student?.student_id,
     student?.display_name,

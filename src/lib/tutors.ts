@@ -339,6 +339,27 @@ export async function createTutorGroup(
     return null;
   }
 
+  const isPrimary = input.is_primary ?? false;
+
+  // Create-or-reuse: повторный сабмит того же имени (double-click; «не создалось»,
+  // пока Select ждёт медленный рефетч под RU-DPI) не должен плодить одноимённые
+  // группы — инцидент Дианы 2026-07-27, два «11 класс». Мутации не ретраятся
+  // (rule 60 №10), поэтому дедуп живёт на самом write-site, а не в UI.
+  // Сбой lookup'а не блокирует создание (fail-open — дедуп best-effort).
+  const { data: existingRows, error: lookupError } = await (supabase
+    .from('tutor_groups') as any)
+    .select('*')
+    .eq('tutor_id', tutor.id)
+    .eq('is_active', true)
+    .eq('is_primary', isPrimary);
+  if (!lookupError) {
+    const nameLower = name.toLowerCase();
+    const existing = ((existingRows ?? []) as TutorGroup[]).find(
+      (g) => (g.name ?? '').trim().toLowerCase() === nameLower,
+    );
+    if (existing) return existing;
+  }
+
   const { data, error } = await (supabase
     .from('tutor_groups') as any)
     .insert({
@@ -348,7 +369,7 @@ export async function createTutorGroup(
       color: input.color ?? null,
       is_active: true,
       // false (default) = метка; true = учебная (основная) группа.
-      is_primary: input.is_primary ?? false,
+      is_primary: isPrimary,
     })
     .select('*')
     .single();
@@ -359,6 +380,103 @@ export async function createTutorGroup(
   }
 
   return data as TutorGroup;
+}
+
+/**
+ * Переименовать группу/метку (глобально: новое имя видят все поверхности —
+ * секции списка учеников, фильтры, чипы, селекторы). Прямой UPDATE под RLS
+ * ("Tutors can update own groups"). Конфликт c unique-индексом
+ * tutor_groups_unique_active_name → человеческая ошибка (rule 97).
+ */
+export async function updateTutorGroup(
+  groupId: string,
+  patch: { name?: string; short_name?: string | null; color?: string | null }
+): Promise<TutorGroup | null> {
+  const tutor = await getCurrentTutor();
+  if (!tutor) {
+    console.error('No tutor profile found');
+    return null;
+  }
+
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) {
+    const name = patch.name.trim();
+    if (!name) {
+      throw new Error('Название не может быть пустым');
+    }
+    update.name = name;
+  }
+  if (patch.short_name !== undefined) update.short_name = patch.short_name?.trim() || null;
+  if (patch.color !== undefined) update.color = patch.color;
+  if (Object.keys(update).length === 0) return null;
+
+  const { data, error } = await (supabase
+    .from('tutor_groups') as any)
+    .update(update)
+    .eq('id', groupId)
+    .eq('tutor_id', tutor.id)
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error('Error updating tutor group:', error);
+    throw new Error(
+      error.code === '23505'
+        ? 'У вас уже есть активная группа или метка с таким названием'
+        : error.message || 'Не удалось сохранить группу',
+    );
+  }
+  return data as TutorGroup;
+}
+
+/**
+ * Архив/восстановление группы или метки — атомарная RPC tutor_set_group_archived
+ * (архив снимает группу И все её membership'ы одной транзакцией; удаления групп
+ * нет вообще — FK-ссылки занятий/ДЗ должны жить). Восстановление membership'ы
+ * НЕ возвращает.
+ */
+export async function setTutorGroupArchived(
+  groupId: string,
+  archived: boolean
+): Promise<{ ok: boolean; deactivatedMembers?: number; error?: string }> {
+  // RPC не в сгенерированном types.ts до регенерации Lovable → as never (rule 99).
+  const { data, error } = await supabase.rpc(
+    'tutor_set_group_archived' as never,
+    { _tutor_group_id: groupId, _archived: archived } as never,
+  );
+  if (error) {
+    console.error('Error archiving tutor group:', error);
+    const message = error.message?.includes('NAME_TAKEN')
+      ? 'Уже есть активная группа с таким названием — сначала переименуйте её'
+      : error.message || 'Не удалось изменить статус группы';
+    return { ok: false, error: message };
+  }
+  const res = (data ?? {}) as { ok?: boolean; deactivated_members?: number };
+  return { ok: Boolean(res.ok), deactivatedMembers: res.deactivated_members };
+}
+
+/**
+ * Выдать (или пересоздать) join-код групповой ссылки саморегистрации.
+ * regenerate=true = отзыв: старая ссылка перестаёт работать мгновенно.
+ * Только активные УЧЕБНЫЕ группы (RPC-гард). Код = bearer — не логировать.
+ */
+export async function ensureGroupJoinCode(
+  groupId: string,
+  regenerate = false
+): Promise<string> {
+  // RPC не в сгенерированном types.ts до регенерации Lovable → as never (rule 99).
+  const { data, error } = await supabase.rpc(
+    'tutor_ensure_group_join_code' as never,
+    { _tutor_group_id: groupId, _regenerate: regenerate } as never,
+  );
+  if (error) {
+    console.error('Error ensuring group join code:', error);
+    throw new Error(error.message || 'Не удалось получить ссылку группы');
+  }
+  if (typeof data !== 'string' || !data) {
+    throw new Error('Пустой код ссылки группы');
+  }
+  return data;
 }
 
 /**
@@ -387,6 +505,7 @@ export async function getTutorGroupMemberships(
         short_name,
         color,
         is_active,
+        is_primary,
         created_at,
         updated_at
       )

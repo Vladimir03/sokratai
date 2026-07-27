@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import { claimInvite } from '@/lib/inviteApi';
+import { claimInvite, clearPendingInvite, persistPendingInvite } from '@/lib/inviteApi';
 import YandexAuthButton from '@/components/YandexAuthButton';
 import VkAuthButton from '@/components/VkAuthButton';
 import { z } from 'zod';
@@ -34,11 +34,20 @@ const loginSchema = z.object({
 
 export default function InvitePage() {
   const { inviteCode } = useParams<{ inviteCode: string }>();
+  // Групповая ссылка (2026-07-27): ?g={join_code} — тот же invite-флоу,
+  // плюс автоматическое зачисление в учебную группу репетитора.
+  const [searchParams] = useSearchParams();
+  const groupCode = searchParams.get('g')?.trim() || null;
   const navigate = useNavigate();
 
   const [tutor, setTutor] = useState<TutorInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Имя группы из ?g= (для заголовка); резолв через anon-RPC get_group_join_info.
+  // Не нашли — молча ведём себя как обычный инвайт (claim вернёт group_not_found).
+  const [groupName, setGroupName] = useState<string | null>(null);
+  // Итог по группе после клейма (для success-экрана).
+  const [claimedGroupName, setClaimedGroupName] = useState<string | null>(null);
 
   // Form state
   const [isLogin, setIsLogin] = useState(false);
@@ -137,13 +146,32 @@ export default function InvitePage() {
     return () => { cancelled = true; };
   }, [inviteCode]);
 
+  useEffect(() => {
+    if (!groupCode) {
+      setGroupName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      // RPC ещё не в сгенерированном types.ts до регенерации Lovable → as never.
+      const { data, error: rpcError } = await supabase.rpc(
+        'get_group_join_info' as never,
+        { _join_code: groupCode } as never,
+      );
+      if (cancelled || rpcError) return;
+      const info = data as { group_name?: string } | null;
+      if (info?.group_name) setGroupName(info.group_name);
+    })();
+    return () => { cancelled = true; };
+  }, [groupCode]);
+
   // №79 (2026-07-20): персист инвайта ТОЛЬКО по клику на OAuth-кнопку
   // (onBeforeRedirect) — НЕ на рендере (ревью 5.6 P1 #4: просмотр ссылки не
   // должен превращаться в отложенное принятие приглашения на общем браузере).
   // После возврата (#access_token → /student/schedule) AuthGuard зовёт
   // claimPendingInvite() из localStorage; терминальные ошибки чистят ключ.
   const persistInviteForOAuth = () => {
-    if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+    if (inviteCode) persistPendingInvite(inviteCode, groupCode);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -203,7 +231,7 @@ export default function InvitePage() {
           if (authError.message.includes('already registered')) {
             // Keep the invite for the deferred claim (AuthGuard/Login run
             // claimPendingInvite after auth) and steer to the login form.
-            if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+            if (inviteCode) persistPendingInvite(inviteCode, groupCode);
             setIsLogin(true);
             setFormError('Этот email уже зарегистрирован. Войдите — репетитор подключится автоматически.');
           } else {
@@ -217,7 +245,7 @@ export default function InvitePage() {
         // or if the email is already taken (masked as success for security).
         // Detect fake signup: identities array is empty → email already exists.
         if (signUpData.user && (!signUpData.user.identities || signUpData.user.identities.length === 0)) {
-          if (inviteCode) localStorage.setItem('pending_invite_code', inviteCode);
+          if (inviteCode) persistPendingInvite(inviteCode, groupCode);
           setIsLogin(true);
           setFormError('Этот email уже зарегистрирован. Войдите — репетитор подключится автоматически.');
           setSubmitting(false);
@@ -227,7 +255,7 @@ export default function InvitePage() {
         if (!signUpData.session) {
           // Email confirmation required — save invite code and show confirmation message
           if (inviteCode) {
-            localStorage.setItem('pending_invite_code', inviteCode);
+            persistPendingInvite(inviteCode, groupCode);
           }
           setNeedsEmailConfirm(true);
           setSubmitting(false);
@@ -238,12 +266,15 @@ export default function InvitePage() {
       // Auth succeeded — claim invite immediately
       if (inviteCode) {
         try {
-          const result = await claimInvite(inviteCode);
+          const result = await claimInvite(inviteCode, groupCode);
           setClaimedTutorName(result.tutor_name);
-          localStorage.removeItem('pending_invite_code');
+          if (result.group_name && (result.group_status === 'joined' || result.group_status === 'moved' || result.group_status === 'already_member')) {
+            setClaimedGroupName(result.group_name);
+          }
+          clearPendingInvite();
         } catch {
           // Claim failed — save to localStorage as fallback for next login
-          localStorage.setItem('pending_invite_code', inviteCode);
+          persistPendingInvite(inviteCode, groupCode);
         }
       }
 
@@ -265,9 +296,12 @@ export default function InvitePage() {
     setClaimError(null);
     setClaiming(true);
     try {
-      const result = await claimInvite(inviteCode); // 'linked' | 'already_linked' — both success
-      localStorage.removeItem('pending_invite_code');
+      const result = await claimInvite(inviteCode, groupCode); // 'linked' | 'already_linked' — both success
+      clearPendingInvite();
       setClaimedTutorName(result.tutor_name);
+      if (result.group_name && (result.group_status === 'joined' || result.group_status === 'moved' || result.group_status === 'already_member')) {
+        setClaimedGroupName(result.group_name);
+      }
       setAuthSuccess(true);
     } catch (err: unknown) {
       const status = (err as { context?: { status?: number } })?.context?.status;
@@ -383,6 +417,9 @@ export default function InvitePage() {
                 : isLogin ? 'Вы вошли в систему' : 'Регистрация прошла успешно'
               }
             </CardTitle>
+            {claimedTutorName && claimedGroupName && (
+              <CardDescription>Вы в группе «{claimedGroupName}»</CardDescription>
+            )}
             {!claimedTutorName && (
               <CardDescription>
                 Подключение к репетитору {tutor.name} произойдёт автоматически
@@ -411,7 +448,9 @@ export default function InvitePage() {
         <Card className="w-full max-w-md text-center" animate={false}>
           <CardHeader>
             <CardTitle className="text-xl">
-              Вас пригласил репетитор {tutor.name}
+              {groupName
+                ? `${tutor.name} приглашает вас в группу «${groupName}»`
+                : `Вас пригласил репетитор ${tutor.name}`}
             </CardTitle>
             <CardDescription>
               Вы вошли как <strong>{session.user.email ?? 'ваш аккаунт'}</strong>
@@ -468,7 +507,9 @@ export default function InvitePage() {
       <Card className="w-full max-w-md" animate={false}>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">
-            Вас пригласил репетитор {tutor.name}
+            {groupName
+              ? `${tutor.name} приглашает вас в группу «${groupName}»`
+              : `Вас пригласил репетитор ${tutor.name}`}
           </CardTitle>
           <CardDescription>
             {isLogin

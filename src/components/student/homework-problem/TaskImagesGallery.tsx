@@ -4,6 +4,12 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStudentTaskImagesSignedUrls } from '@/hooks/useStudentHomework';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { ConnectionTroubleNotice } from '@/components/common/ConnectionTroubleNotice';
+import {
+  CONNECTION_TROUBLE_DELAY_MS,
+  resetConnectionVerdict,
+  useConnectionTrouble,
+} from '@/hooks/useConnectionTrouble';
 
 interface TaskImagesGalleryProps {
   /** Assignment UUID — for batched signed-URL endpoint cache key. */
@@ -101,10 +107,33 @@ export function TaskImagesGallery({
 
   const handleRetry = useCallback(() => {
     setErroredUrls(new Set());
+    // Вердикт кэшируется на 15 с — без сброса ручной повтор показал бы старую
+    // формулировку даже после того, как ученик выключил VPN.
+    resetConnectionVerdict();
     void queryClient.invalidateQueries({
       queryKey: ['student', 'homework', 'guided-task-images', assignmentId, taskId],
     });
   }, [queryClient, assignmentId, taskId]);
+
+  // Ссылок нет: либо ещё грузим (ждём 8 с и признаём зависшим), либо запрос уже
+  // отработал вхолостую — тогда это сбой и подсказка нужна немедленно.
+  // Инцидент 2026-07-27: ученик под VPN смотрел на «Загрузка фото условия...»
+  // без конца, а условия задач были ТОЛЬКО картинками — работать он не мог.
+  const hasNoUrls = refs.length > 0 && resolvedUrls.length === 0;
+  const { tripped: noUrlsTripped, verdict: noUrlsVerdict } = useConnectionTrouble(
+    hasNoUrls,
+    isLoading ? CONNECTION_TROUBLE_DELAY_MS : 0,
+  );
+
+  // Ссылки пришли, но НИ ОДНА картинка не отрисовалась — та же болезнь, только
+  // ловится на этапе загрузки файла. Отдельные битые плитки (часть загрузилась)
+  // остаются со своей точечной кнопкой повтора и общей подсказки не поднимают.
+  const allImagesErrored =
+    resolvedUrls.length > 0 && resolvedUrls.every((url) => erroredUrls.has(url));
+  const { tripped: allErroredTripped, verdict: allErroredVerdict } = useConnectionTrouble(
+    allImagesErrored,
+    0,
+  );
 
   // Keyboard nav inside the fullscreen viewer.
   useEffect(() => {
@@ -129,15 +158,20 @@ export function TaskImagesGallery({
 
   if (refs.length === 0) return null;
 
-  if (isLoading && resolvedUrls.length === 0) {
+  if (hasNoUrls && !noUrlsTripped) {
     return (
       <p className="text-xs text-socrat-muted">Загрузка фото условия...</p>
     );
   }
 
-  if (resolvedUrls.length === 0) {
+  if (hasNoUrls) {
     return (
-      <p className="text-xs text-socrat-muted">Фото условия недоступны</p>
+      <ConnectionTroubleNotice
+        verdict={noUrlsVerdict}
+        context="photo"
+        onRetry={handleRetry}
+        isRetrying={isFetching}
+      />
     );
   }
 
@@ -210,6 +244,16 @@ export function TaskImagesGallery({
           );
         })}
       </div>
+
+      {allErroredTripped ? (
+        <ConnectionTroubleNotice
+          verdict={allErroredVerdict}
+          context="photo"
+          onRetry={handleRetry}
+          isRetrying={isFetching}
+          className="mt-2"
+        />
+      ) : null}
 
       <DialogPrimitive.Root
         open={openIndex !== null}

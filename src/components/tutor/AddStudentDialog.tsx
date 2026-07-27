@@ -159,6 +159,8 @@ export function AddStudentDialog({
   const [selectedGroupId, setSelectedGroupId] = useState('');
   const [newGroupName, setNewGroupName] = useState('');
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
+  // Синхронный guard создания группы (state-дизейбл кнопки срабатывает позже ref).
+  const createGroupBusyRef = useRef(false);
 
   // Онбординг v2 — массовое добавление по списку имён (контакт NULL).
   const [bulkMode, setBulkMode] = useState(false);
@@ -363,19 +365,33 @@ export function AddStudentDialog({
   };
 
   const handleCreateMiniGroup = async () => {
+    // Синхронный guard против двойного сабмита (state-дизейбл асинхронен; паттерн
+    // StudentTagsEditor). Инцидент Дианы 2026-07-27 — два «11 класс».
+    if (createGroupBusyRef.current) return;
     const name = newGroupName.trim();
     if (!name) {
       toast({ title: 'Введите название мини-группы', variant: 'destructive' });
       return;
     }
 
+    createGroupBusyRef.current = true;
     setIsCreatingGroup(true);
     try {
       // Из AddStudentDialog создаётся учебная (основная) группа → is_primary: true.
+      // createTutorGroup сам реюзает одноимённую активную группу (create-or-reuse).
       const createdGroup = await createTutorGroup({ name, is_primary: true });
       if (!createdGroup) {
         throw new Error('Не удалось создать мини-группу');
       }
+      // Seed кэша ДО инвалидации: Select показывает группу сразу, не дожидаясь
+      // медленного под DPI рефетча (пустой Select провоцировал повторный клик).
+      queryClient.setQueryData<Array<typeof createdGroup & { members: unknown[] }>>(
+        ['tutor', 'groups'],
+        (old) =>
+          old && !old.some((g) => g.id === createdGroup.id)
+            ? [...old, { ...createdGroup, members: [] }]
+            : old,
+      );
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'groups'] });
 
       setSelectedGroupId(createdGroup.id);
@@ -391,6 +407,7 @@ export function AddStudentDialog({
         variant: 'destructive',
       });
     } finally {
+      createGroupBusyRef.current = false;
       setIsCreatingGroup(false);
     }
   };
