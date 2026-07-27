@@ -28,3 +28,10 @@ public/sitemap.xml
 *.njsproj
 *.sln
 *.sw?
+
+# Рабочие деревья Claude Code — локальные, у каждой сессии свои.
+# Попали в индекс как gitlink-записи (mode 160000) БЕЗ .gitmodules: checkout
+# в CI из-за них ругался «git failed with exit code 128», а git status вечно
+# показывал их изменёнными. Содержимое в репозиторий и не попадало — только
+# висячие ссылки на коммиты чужих деревьев.
+.claude/worktrees/
