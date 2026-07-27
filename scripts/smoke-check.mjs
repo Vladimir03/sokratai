@@ -167,6 +167,64 @@ console.log("");
 console.log("2. Cross-browser compatibility checks...");
 let compatWarnings = 0;
 
+// ── Голая ссылка на НЕОБЯЗАТЕЛЬНЫЙ глобал = ReferenceError, а не undefined ──
+//
+// Инцидент 2026-07-27: в index.html стояло `requestIdleCallback ? … : …`,
+// написанное КАК проверка поддержки. Safari этот API не поддерживает, поэтому
+// строка падала «Can't find variable: requestIdleCallback» на КАЖДОЙ загрузке
+// у всех пользователей Safari и iOS. Цена была не в консольной строке: throw
+// происходил до вызова loadMetrika, и Яндекс.Метрика на iOS не грузилась
+// вообще — пре-воронка (rule 101) не видела учеников с iPhone.
+//
+// Правильные формы: `window.X`, `typeof X === 'function'`, `'X' in globalThis`.
+// Проверяем ТОЛЬКО index.html: там инлайн-скрипты без бандлера и без типов, а в
+// `src/` такие обращения ловит TypeScript.
+const OPTIONAL_GLOBALS = [
+  "requestIdleCallback",
+  "IntersectionObserver",
+  "ResizeObserver",
+  "PerformanceObserver",
+  "structuredClone",
+  "reportError",
+  "scheduler",
+];
+{
+  // Комментарии снимаем ВСЕ — и HTML, и JS внутри <script>. Иначе гард читает
+  // собственную документацию: объяснение «почему нельзя писать голое имя»
+  // содержит это самое имя. За 2026-07-27 этот класс ложных срабатываний
+  // всплыл четырежды (deploy.sh, §21, здесь), поэтому:
+  //   • сначала HTML-комментарии;
+  //   • затем JS-строчные — но `//` внутри URL (`https://…`) комментарием НЕ
+  //     считается, иначе стриппер съест половину скрипта вместе с кодом;
+  //   • затем JS-блочные.
+  const raw = readText(path.join(rootDir, "index.html"));
+  const html = raw
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  // Санитарная проверка стриппера: если он съел код, проверка ниже станет
+  // бессмысленной и «пройдёт» на пустоте.
+  if (!html.includes("loadMetrika") || !html.includes("addEventListener")) {
+    fail("smoke-check §2: стриппер комментариев съел код index.html — проверка недостоверна");
+  }
+  const bare = [];
+  for (const name of OPTIONAL_GLOBALS) {
+    // Ищем имя, перед которым НЕТ `.`, `"`, `'` (свойство/строка) и НЕТ
+    // `typeof `. Такое обращение исполнится как чтение переменной и бросит.
+    const re = new RegExp(`(^|[^.\\w"'])(?<!typeof )${name}\\b`, "g");
+    if (re.test(html)) bare.push(name);
+  }
+  if (bare.length > 0) {
+    fail(
+      `index.html: голая ссылка на необязательный глобал (${bare.join(", ")}) — ` +
+        "в браузере без этого API это ReferenceError, а не undefined. " +
+        "Используй window.X или typeof X === 'function' (инцидент 2026-07-27, rule 80)",
+    );
+  } else {
+    ok("index.html: необязательные глобалы читаются безопасно (window./typeof)");
+  }
+}
+
 const sourceFiles = listFilesRecursive(srcDir, (filePath) =>
   [".ts", ".tsx", ".css"].includes(path.extname(filePath)),
 );

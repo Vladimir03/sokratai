@@ -16,6 +16,7 @@
 ## Запрещённые паттерны (ломают Safari/iOS)
 
 ### JavaScript / TypeScript
+- **Голая ссылка на необязательный глобал = `ReferenceError`, а не `undefined`.** Проверка поддержки вида `requestIdleCallback ? … : …` в браузере БЕЗ этого API падает сама. Только `window.X`, `typeof X === 'function'` или `'X' in globalThis`. Инцидент 2026-07-27: такая строка в `index.html` роняла загрузку у ВСЕХ пользователей Safari/iOS, и Яндекс.Метрика там не грузилась вовсе — пре-воронка (rule 101) не видела учеников с iPhone. Гард — smoke-check §2 (список необязательных API, только `index.html`: в `src/` это ловит TypeScript).
 - **`RegExp` lookbehind** (`(?<=...)`) — Safari < 16.4 НЕ поддерживает. Используй capturing groups. Vite-таргет `safari15` НЕ спасает: esbuild конвертирует литерал в `new RegExp(...)` → SyntaxError «Invalid regular expression» в рантайме при первом исполнении. **Ловится и в зависимостях**: smoke-check §1 фейлит lookbehind в любом чанке `dist/assets`, §2 — в `src/` (инцидент Глеба 2026-07-15: `remark-gfm` ронял экран задачи у всех учеников на iOS ≤ 16.3).
 - **`remark-gfm` напрямую ЗАПРЕЩЁН** — только `@/lib/markdown/remarkGfmSafe` (тот же GFM без autolink-literal, чей email-регэксп несёт lookbehind и исполняется при каждом рендере ReactMarkdown). Тело ReactMarkdown в чатах оборачивать в `MarkdownErrorBoundary` (plain-text fallback: падает пузырь, не страница).
 - **`structuredClone()`** — Safari < 15.4. Используй `JSON.parse(JSON.stringify(obj))` или lodash `cloneDeep`

@@ -204,7 +204,23 @@
       // Defer Yandex Metrika loading until after page becomes interactive (1.5s after load)
       // This ensures React hydration completes before analytics contends for main thread
       window.addEventListener('load', function() {
-        requestIdleCallback ? requestIdleCallback(function() {
+        // ⚠️ ТОЛЬКО `window.requestIdleCallback`, НИКОГДА голое имя.
+        //
+        // Голая ссылка на НЕОБЪЯВЛЕННЫЙ глобал — это ReferenceError, а не
+        // undefined. Safari `requestIdleCallback` не поддерживает, поэтому
+        // строка `requestIdleCallback ? … : …`, написанная КАК проверка
+        // поддержки, сама и падала: «Can't find variable: requestIdleCallback»
+        // на каждой загрузке у всех пользователей Safari и iOS.
+        //
+        // Цена была не в консольной строке: throw происходил ДО вызова
+        // loadMetrika, поэтому Яндекс.Метрика на Safari/iOS не загружалась
+        // ВООБЩЕ. Вся пре-воронка (rule 101) не видела учеников с iPhone —
+        // то есть ровно тот сегмент, ради которого она заведена.
+        //
+        // Обращение через `window.` (или `typeof x === 'function'`) безопасно:
+        // отсутствующее свойство объекта — это undefined, а не бросок.
+        var ric = window.requestIdleCallback;
+        ric ? ric(function() {
           setTimeout(loadMetrika, 500);
         }, { timeout: 2000 }) : setTimeout(loadMetrika, 1500);
         
