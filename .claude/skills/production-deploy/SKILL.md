@@ -281,3 +281,34 @@ Edge-функции (`supabase/functions/**`) деплоит **Lovable на си
 **Симптом:** запушил фикс edge-функции, а прод отдаёт старое поведение / boot-crash. Это **Lovable lag / не синканулся**, а НЕ код. Проверка: `curl` функцию — `503` = boot-crash (не задеплоилось/упало при старте), `401` = задеплоено и живо (JWT-гейт), `404` = функции нет.
 
 **Чтобы edge-изменение доехало в прод/preview:** открой/синкни Lovable-проект (он подтянет main и передеплоит функции). Чинить CI «по-настоящему»: задать секрет `SUPABASE_ACCESS_TOKEN` (GitHub → repo Settings → Secrets → Actions) ИЛИ выключить workflow, чтобы убрать ложный red. **Frontend — отдельно**, по-прежнему `deploy-sokratai` (VPS); Lovable edge-deploy его НЕ обновляет.
+
+### Кого редеплоить после правки `_shared/*` — считать, а не вспоминать
+
+**Правка одного файла в `supabase/functions/_shared/` = молчаливое расхождение поверхностей.** Функция, которую не передеплоили, продолжает жить на СТАРОЙ копии shared-модуля: балл на одном экране считается по новой цепочке, на другом — по старой, и никакой ошибки при этом нет. Прецедент 2026-07-27: правка `score-compute.ts` затронула 4 функции, а вспомнили сначала одну.
+
+Список потребителей получать командой, а не по памяти:
+
+```bash
+for m in score-compute student-progress-build ai-lovable ai-gateway-errors ai-credits; do
+  printf "%-24s " "$m"
+  grep -rl "_shared/$m" supabase/functions/ --include=*.ts \
+    | grep -v "_shared/" | sed 's|supabase/functions/||;s|/.*||' | sort -u | tr '\n' ' '
+  echo
+done
+```
+
+Карта на 2026-07-27 (пересчитывать при добавлении потребителей):
+
+| `_shared`-модуль | Кого редеплоить |
+|---|---|
+| `score-compute.ts` | `homework-api`, `student-lessons-api` (+ косвенно все потребители `student-progress-build`) |
+| `student-progress-build.ts` | `tutor-progress-api`, `public-student-report`, `tutor-student-chat-api` |
+| `ai-lovable.ts` | `kb-ai-extract`, `homework-generate-reference`, `tutor-student-chat-api` |
+| `ai-gateway-errors.ts` | `homework-api`, `chat`, `mock-exam-grade` |
+| `ai-credits.ts` | `ceo-telegram-digest` |
+
+**Шаблон промпта агенту Lovable** (`send_message`, project `5fbe4a32-1baf-47b0-8f47-83e3060cf929`, `wait: false` — иначе MCP-вызов упирается в таймаут ожидания):
+
+> В main запушен коммит `<sha>`. Покажи `git log -1 --oneline` своего воркспейса; если отстал — синкнись. Затем задеплой функции: `<список>`. Код и логику не меняй — всё уже в репозитории, нужен только деплой. После деплоя покажи фактический `verify_jwt` по каждой функции.
+
+Про `verify_jwt`: аудит 2026-07-27 (memory `project_verify_jwt_declared_vs_live`) показал, что **`verify_jwt=false` агентский деплой уважает в 100% случаев** (50/50), расхождения бывают только у `true`. То есть прежний страх «агент включит гейт и уронит учеников» не подтвердился — но curl-проба после деплоя всё равно дешевле, чем разбор инцидента: ответ функции с русской фразой + заголовок `x-deno-execution-id` = гейт не тронут, `{"code":401,...}` без этого заголовка = включён.
