@@ -1072,5 +1072,65 @@ if (bashProbe.error) {
 }
 ok("shell + deploy invariants pass (нет modulepreload /src/*, деплой сохраняет retention)");
 
+// ── 22. Цепочка балла: best_earned_score во всех скоринговых SELECT'ах ──────
+//
+// ПРИЧИНА (2026-07-27, репорты Елены и Егора): в `handleGetResults` — SELECT'е,
+// который кормит таблицу результатов репетитора — забыли `ai_help_events` и
+// `best_earned_score`. Метрика самостоятельности приходила null И по задачам,
+// И в агрегате, репетитор видел «—» там, где помощь фактически была; а балл в
+// той же таблице считался по `earned_score` и разошёлся бы с экраном ученика
+// при повторной, менее удачной сдаче. Правились 7 SELECT-листов, восьмой
+// пропустили — руками этот класс ошибки не отлавливается.
+//
+// Инвариант: любой `.select(...)` по `homework_tutor_task_states`, который
+// тянет `earned_score` (то есть участвует в скоринге), ОБЯЗАН тянуть и
+// `best_earned_score` — оно стоит выше в цепочке `computeFinalScore`.
+console.log("");
+console.log("22. Score chain: best_earned_score во всех скоринговых SELECT'ах...");
+
+// Явные исключения. Каждое — с причиной; расширять только вместе с обоснованием.
+const SCORE_SELECT_ALLOWLIST = [
+  // Pre-existing агрегат avg_score в handleListAssignments: суммирует сырой
+  // earned_score без override и без цепочки computeFinalScore вообще. Его
+  // неточность старше метрики и правится отдельной задачей.
+  "thread_id, task_id, earned_score",
+];
+
+const scoreSelectFiles = [
+  "supabase/functions/homework-api/index.ts",
+  "supabase/functions/_shared/student-progress-build.ts",
+  "supabase/functions/student-lessons-api/index.ts",
+  "supabase/functions/admin-homework/index.ts",
+];
+
+let scoreSelectViolations = 0;
+for (const relPath of scoreSelectFiles) {
+  const fullPath = path.join(rootDir, relPath);
+  if (!fs.existsSync(fullPath)) {
+    warn(`${relPath} отсутствует — пропускаю проверку цепочки балла`);
+    continue;
+  }
+  const source = fs.readFileSync(fullPath, "utf8");
+  // Ищем строковые литералы column-list'ов: они всегда содержат earned_score и
+  // перечисление через запятую. UPDATE-вызовы сюда не попадают (там объект, не строка).
+  const literals = source.match(/"[^"\n]*\bearned_score\b[^"\n]*"/g) ?? [];
+  for (const literal of literals) {
+    const columns = literal.slice(1, -1);
+    // Только column-list'ы (перечисление), а не одиночные имена в других контекстах.
+    if (!columns.includes(",")) continue;
+    if (SCORE_SELECT_ALLOWLIST.includes(columns.trim())) continue;
+    if (columns.includes("best_earned_score")) continue;
+    scoreSelectViolations += 1;
+    fail(
+      `${relPath}: column-list с \`earned_score\` без \`best_earned_score\` → ` +
+        `балл на этой поверхности разойдётся с остальными (цепочка computeFinalScore: ` +
+        `override → best_earned_score → earned_score). Список: "${columns.slice(0, 120)}"`,
+    );
+  }
+}
+if (scoreSelectViolations === 0) {
+  ok("score chain pass (все скоринговые SELECT'ы тянут best_earned_score)");
+}
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

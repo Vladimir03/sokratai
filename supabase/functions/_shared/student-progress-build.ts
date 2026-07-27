@@ -8,7 +8,11 @@
 // (pre-approval breakdown не отдаётся).
 
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { computeFinalScore } from "./score-compute.ts";
+import {
+  aggregateIndependencePct,
+  computeFinalScore,
+  resolveIndependencePct,
+} from "./score-compute.ts";
 import { egePrimaryToScaled } from "./score-scales.ts";
 
 export const HW_CONFIRMED_MOCK = new Set(["approved", "manually_entered"]);
@@ -40,6 +44,31 @@ export interface HwWorkAgg {
 }
 
 /**
+ * Строка `homework_tutor_task_states` в том виде, в каком её читает этот билдер.
+ *
+ * ЕДИНЫЙ тип на все три места (возвращаемый тип загрузчика, внутренняя Map и
+ * локальный алиас в сборщике). Раньше это были три независимые копии инлайн-типа,
+ * и они уже разошлись: `best_earned_score` попал в две из трёх. Deno-код не
+ * проверяется локальным tsc (есбилд типы не смотрит), поэтому такой дрейф
+ * всплывает только на деплое — новое поле добавляйте ЗДЕСЬ.
+ */
+export interface HwTaskStateRow {
+  task_id: string;
+  status: string | null;
+  ai_score: number | null;
+  earned_score: number | null;
+  best_earned_score: number | null;
+  tutor_score_override: number | null;
+  tutor_reviewed_at: string | null;
+  /** Метрика самостоятельности: точный счётчик обращений к помощи AI. */
+  ai_help_events: number | null;
+  /** Legacy-счётчики — для «≈»-оценки работ до 2026-07-26. */
+  hint_count: number;
+  wrong_answer_count: number;
+  attempts: number;
+}
+
+/**
  * Load homework works per (studentId) for a tutor. Returns Map<studentId,
  * HwWorkAgg[]> + raw rows for the per-student detail builder. Batched.
  */
@@ -57,7 +86,7 @@ export async function loadHomeworkForStudents(
   // threadId → saId, threadId → status
   threadById: Map<string, { saId: string; status: string }>;
   // threadId → task_states[]
-  statesByThread: Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>;
+  statesByThread: Map<string, HwTaskStateRow[]>;
 }> {
   const empty = {
     saById: new Map(),
@@ -126,7 +155,7 @@ export async function loadHomeworkForStudents(
   for (const list of tasksByAssignment.values()) list.sort((a, b) => a.order_num - b.order_num);
 
   const threadById = new Map<string, { saId: string; status: string }>();
-  const statesByThread = new Map<string, { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null }[]>();
+  const statesByThread = new Map<string, HwTaskStateRow[]>();
   if (saIds.length > 0) {
     const { data: threadRows } = await db
       .from("homework_tutor_threads")
@@ -143,10 +172,14 @@ export async function loadHomeworkForStudents(
       const { data: stateRows } = await db
         .from("homework_tutor_task_states")
         // `best_earned_score` — часть цепочки computeFinalScore (2026-07-25):
-        // без неё балл здесь разошёлся бы с экраном результатов. `ai_help_events`
-        // НЕ селектим: этот билдер шарится с ПУБЛИЧНЫМ отчётом родителю, а
-        // видимость метрики самостоятельности там — отдельное решение.
-        .select("thread_id, task_id, status, ai_score, earned_score, best_earned_score, tutor_score_override, tutor_reviewed_at")
+        // без неё балл здесь разошёлся бы с экраном результатов.
+        //
+        // `ai_help_events` + legacy-счётчики (2026-07-27, решение владельца):
+        // агрегат «% самостоятельности» ПО РАБОТЕ показывается родителю —
+        // «родителям интереснее самостоятельный результат». Разбивку по задачам
+        // в отчёт НЕ отдаём (он задуман как «только итоги»), а текст подсказок и
+        // решений здесь по-прежнему не селектится (anti-leak, skill homework-system).
+        .select("thread_id, task_id, status, ai_score, earned_score, best_earned_score, tutor_score_override, tutor_reviewed_at, ai_help_events, hint_count, wrong_answer_count, attempts")
         .in("thread_id", threadIds);
       for (const s of stateRows ?? []) {
         const tid = s.thread_id as string;
@@ -159,6 +192,10 @@ export async function loadHomeworkForStudents(
           best_earned_score: s.best_earned_score != null ? Number(s.best_earned_score) : null,
           tutor_score_override: s.tutor_score_override != null ? Number(s.tutor_score_override) : null,
           tutor_reviewed_at: (s.tutor_reviewed_at as string | null) ?? null,
+          ai_help_events: s.ai_help_events != null ? Number(s.ai_help_events) : null,
+          hint_count: Number(s.hint_count ?? 0),
+          wrong_answer_count: Number(s.wrong_answer_count ?? 0),
+          attempts: Number(s.attempts ?? 0),
         });
       }
     }
@@ -282,7 +319,7 @@ export async function buildStudentProgress(
 
   // ── Homework works ──
   const hw = await loadHomeworkForStudents(db, tutorUserId, [studentId]);
-  type HwState = { task_id: string; status: string | null; ai_score: number | null; earned_score: number | null; best_earned_score: number | null; tutor_score_override: number | null; tutor_reviewed_at: string | null };
+  type HwState = HwTaskStateRow;
   // saId list for this student (all, since loadHomeworkForStudents narrowed to [studentId])
   const saThread = new Map<string, { threadStatus: string; states: HwState[] }>();
   for (const [tid, th] of hw.threadById) {
@@ -312,6 +349,23 @@ export async function buildStudentProgress(
       return { score, max: t.max_score };
     });
     const total = tasks.length;
+    // «% самостоятельности» по РАБОТЕ (2026-07-27, решение владельца: родителю
+    // интереснее самостоятельный результат). Только агрегат — разбивки по
+    // задачам в отчёте нет. Формула — общий хелпер, не дублируется.
+    const stateByTaskId = new Map(tinfo.states.map((s) => [s.task_id, s]));
+    let independenceIsEstimate = false;
+    const independencePctRaw = assignment.work_mode === "independent"
+      // В самостоятельной AI выключен → метрика всегда 100%, показывать нечего.
+      ? null
+      : aggregateIndependencePct(
+        tasks.map((t) => {
+          const st = stateByTaskId.get(t.id);
+          if (!st) return { pct: null, weight: t.max_score };
+          const resolved = resolveIndependencePct(st);
+          if (resolved.isEstimate) independenceIsEstimate = true;
+          return { pct: resolved.pct, weight: t.max_score };
+        }),
+      );
     const submitted = tinfo.threadStatus === "completed" ||
       tinfo.states.some((s) => s.status === "completed" || s.ai_score != null);
     const reviewed = total > 0 && reviewedCount === total;
@@ -333,6 +387,9 @@ export async function buildStudentProgress(
       // Т8: клиент (отчёт родителю / панель прогресса) делит список по этому
       // полю. Старый клиент поле игнорирует → прежний единый список.
       work_mode: assignment.work_mode,
+      // Агрегат самостоятельности по работе; «≈» — оценка по старым счётчикам.
+      independence_pct: independencePctRaw != null ? Math.round(independencePctRaw) : null,
+      independence_is_estimate: independencePctRaw != null && independenceIsEstimate,
       title: assignment.title,
       subject: assignment.subject,
       date: deadline ?? assignment.created_at,

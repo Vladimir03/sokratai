@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { BadgeCheck, Lightbulb, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getCellStyle, formatScore } from './heatmapStyles';
+import { getCellStyle, formatScore, formatIndependence } from './heatmapStyles';
 
 // ─── TaskMiniCard (TASK-6) ───────────────────────────────────────────────────
 // Horizontal row of these replaces the row of pill-buttons inside the viewer
@@ -22,6 +22,15 @@ interface TaskMiniCardProps {
   maxScore: number;
   /** Used to render a lightbulb indicator in the corner. */
   hintCount: number;
+  /**
+   * «% самостоятельности» по задаче (запрос Егора 2026-07-27). Рендерится
+   * ТРЕТЬЕЙ центральной строкой под баллом — четыре угла карточки заняты
+   * (подсказки / правка / «проверено» / карандаш), а по вертикали место есть.
+   * `null` = данных нет → строки нет вовсе.
+   */
+  independencePct?: number | null;
+  /** true → «≈»: процент оценён по legacy-счётчикам (работа до 26.07). */
+  independenceIsEstimate?: boolean;
   isSelected: boolean;
   /** "Все задачи" card renders differently (neutral bg, no score row). */
   isAllTasks?: boolean;
@@ -40,6 +49,8 @@ export const TaskMiniCard = memo(function TaskMiniCard({
   score,
   maxScore,
   hintCount,
+  independencePct = null,
+  independenceIsEstimate = false,
   isSelected,
   isAllTasks = false,
   hasOverride = false,
@@ -84,6 +95,12 @@ export const TaskMiniCard = memo(function TaskMiniCard({
         {scoreText !== null ? (
           <span className="mt-0.5 text-sm font-semibold leading-tight md:text-base">
             {scoreText}
+          </span>
+        ) : null}
+        {/* Третья строка — самостоятельность (углы заняты, вертикаль свободна). */}
+        {!isAllTasks && independencePct != null ? (
+          <span className="text-[10px] font-medium leading-tight opacity-70">
+            {formatIndependence(independencePct, independenceIsEstimate)}
           </span>
         ) : null}
         {!isAllTasks && hintCount >= 1 ? (

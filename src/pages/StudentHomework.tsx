@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import Navigation from '@/components/Navigation';
@@ -5,6 +7,10 @@ import AuthGuard from '@/components/AuthGuard';
 import { PageContent } from '@/components/PageContent';
 import { Button } from '@/components/ui/button';
 import { useStudentAssignments } from '@/hooks/useStudentHomework';
+import {
+  getStudentAssignmentScores,
+  type StudentAssignmentScore,
+} from '@/lib/studentHomeworkApi';
 import { getSubjectLabel } from '@/types/homework';
 import { parseISO } from 'date-fns';
 import { MessageSquare } from 'lucide-react';
@@ -34,8 +40,25 @@ const STATUS_COLORS: Record<string, string> = {
   deadline_missed: 'bg-red-100 text-red-700 border-red-200 hover:bg-red-200',
 };
 
+/** Компактная строка итогов: «7/7 · самостоятельность 96%». */
+const NUM = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 });
+
 const StudentHomework = () => {
   const { data, isLoading, error } = useStudentAssignments();
+  // Итоги по завершённым работам (2026-07-27). ОТДЕЛЬНЫЙ запрос: список должен
+  // нарисоваться сразу, а числа догрузиться — на телефоне это важнее
+  // атомарности. Балл считает сервер, формулу на клиенте не дублируем.
+  const { data: scores } = useQuery({
+    queryKey: ['student', 'homework', 'scores'],
+    queryFn: getStudentAssignmentScores,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const scoreByAssignment = useMemo(() => {
+    const map = new Map<string, StudentAssignmentScore>();
+    for (const s of scores ?? []) map.set(s.assignment_id, s);
+    return map;
+  }, [scores]);
 
   return (
     <AuthGuard>
@@ -68,6 +91,10 @@ const StudentHomework = () => {
                     assignment.latest_submission_status,
                     assignment.deadline,
                   );
+                  // Итоги — только у завершённых работ, одной строкой (решение
+                  // владельца: карточки не раздувать, особенно на телефоне).
+                  const score = scoreByAssignment.get(assignment.id);
+                  const showScoreLine = score?.completed && score.final_score != null;
 
                   return (
                     <Card key={assignment.id}>
@@ -90,6 +117,20 @@ const StudentHomework = () => {
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
+                        {/* Итоги сданной работы: балл + самостоятельность одной
+                            строкой. «≈» = процент оценён по старым данным. */}
+                        {showScoreLine && (
+                          <p className="text-sm font-semibold tabular-nums text-slate-700">
+                            {NUM.format(score!.final_score!)} / {NUM.format(score!.total_max)}
+                            {score!.independence_pct != null && (
+                              <span className="font-normal text-muted-foreground">
+                                {' · самостоятельность '}
+                                {score!.independence_is_estimate ? '≈' : ''}
+                                {score!.independence_pct}%
+                              </span>
+                            )}
+                          </p>
+                        )}
                         <p className="text-sm text-muted-foreground">Предмет: {getSubjectLabel(assignment.subject)}</p>
                         {assignment.deadline && (
                           <p className="text-sm text-muted-foreground">

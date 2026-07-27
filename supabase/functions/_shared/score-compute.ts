@@ -55,6 +55,55 @@ export function computeIndependencePct(events: number | null | undefined): numbe
 }
 
 /**
+ * ОЦЕНКА самостоятельности для работ, выполненных ДО релиза метрики (2026-07-26),
+ * где `ai_help_events` не писался. Считается из legacy-счётчиков:
+ * `100% − 10 п.п. × (подсказки + неверные попытки)`.
+ *
+ * Решение владельца 2026-07-27: показывать оценку со знаком «≈» вместо прочерка —
+ * иначе репетиторы видят «—» на всех работах, начатых раньше, и читают это как
+ * «метрика не работает» (репорт Елены).
+ *
+ * ⚠️ Оценка ЗАВЫШЕНА: ответы Сократа в обсуждении в legacy-полях не сохранялись,
+ * а они тоже считаются обращением. Поэтому результат обязан выводиться в UI с
+ * префиксом «≈» и пояснением — иначе цифру примут за точную.
+ *
+ * `null` — активности не было вовсе (не приступал / задача закрыта массово):
+ * оценивать нечего, в UI остаётся «—».
+ */
+export function estimateIndependencePctLegacy(
+  hintCount: number | null | undefined,
+  wrongCount: number | null | undefined,
+  attempts?: number | null | undefined,
+): number | null {
+  const hints = Math.max(0, Math.floor(Number(hintCount ?? 0)) || 0);
+  const wrong = Math.max(0, Math.floor(Number(wrongCount ?? 0)) || 0);
+  const tries = Math.max(0, Math.floor(Number(attempts ?? 0)) || 0);
+  if (hints === 0 && wrong === 0 && tries === 0) return null;
+  return Math.max(0, 100 - INDEPENDENCE_PENALTY_PP * (hints + wrong));
+}
+
+/**
+ * Разрешить метрику по задаче: точный расчёт, если счётчик есть; иначе оценка по
+ * legacy-счётчикам. ЕДИНСТВЕННАЯ точка этой развилки — вызывать её из всех
+ * эндпоинтов, иначе одна поверхность покажет «—», а другая «≈90%» по тем же данным.
+ */
+export function resolveIndependencePct(state: {
+  ai_help_events?: number | null;
+  hint_count?: number | null;
+  wrong_answer_count?: number | null;
+  attempts?: number | null;
+}): { pct: number | null; isEstimate: boolean } {
+  const exact = computeIndependencePct(state.ai_help_events);
+  if (exact != null) return { pct: exact, isEstimate: false };
+  const estimated = estimateIndependencePctLegacy(
+    state.hint_count,
+    state.wrong_answer_count,
+    state.attempts,
+  );
+  return { pct: estimated, isEstimate: estimated != null };
+}
+
+/**
  * Агрегат по работе — средневзвешенное по `max_score` задач (решение владельца:
  * «сложные задачи занимают больше времени и усилий, поэтому весят больше»).
  * Задачи без данных (pct === null) и с нулевым весом не входят ни в числитель,

@@ -17,9 +17,15 @@ export function formatScore(n: number): string {
  * массовый force-complete) → «—», а НЕ «100%»: «неизвестно» нельзя показывать
  * как «сделал сам».
  */
-export function formatIndependence(pct: number | null | undefined): string {
+export function formatIndependence(
+  pct: number | null | undefined,
+  isEstimate = false,
+): string {
   if (pct == null || !Number.isFinite(Number(pct))) return '—';
-  return `${Math.round(Number(pct))}%`;
+  // «≈» — процент выведен из legacy-счётчиков (работа до 2026-07-26). Показывать
+  // такую цифру без пометки нельзя: она завышена (ответы Сократа в обсуждении в
+  // старых полях не сохранялись) и репетитор примет её за точную.
+  return `${isEstimate ? '≈' : ''}${Math.round(Number(pct))}%`;
 }
 
 /**

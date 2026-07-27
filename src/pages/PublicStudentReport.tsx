@@ -46,6 +46,18 @@ function WorkRow({ work }: { work: ReportWork }) {
               : 'Домашнее задание'}
           {' · '}
           {format(parseISO(work.date), 'd MMMM', { locale: ru })}
+          {/* Самостоятельность по работе (2026-07-27): «сколько ребёнок сделал
+              сам». Только по домашкам — в самостоятельных AI выключен, там
+              метрика бессмысленна. «≈» = оценка по старым данным. */}
+          {work.independence_pct != null ? (
+            <>
+              {' · самостоятельность '}
+              <span className="font-medium tabular-nums text-slate-700">
+                {work.independence_is_estimate ? '≈' : ''}
+                {work.independence_pct}%
+              </span>
+            </>
+          ) : null}
         </p>
       </div>
       <div className="text-right">

@@ -24,7 +24,7 @@ import type { SubjectCriterionTemplate } from "../_shared/subject-rubrics/index.
 import {
   aggregateIndependencePct,
   computeFinalScore,
-  computeIndependencePct,
+  resolveIndependencePct,
 } from "../_shared/score-compute.ts";
 import { buildLearningContext, type LearningContext } from "../_shared/learning-context.ts";
 import { buildLimitReachedResponse, checkAiQuota } from "../_shared/subscription-limits.ts";
@@ -4504,8 +4504,13 @@ async function handleGetResults(
       final_score: number;
       hint_count: number;
       // Метрика «% самостоятельности» (2026-07-25). null = нет данных → «—».
+      // `independence_is_estimate` = процент выведен из legacy-счётчиков
+      // (работа до 2026-07-26): UI обязан показать «≈» — оценка завышена,
+      // ответы Сократа в обсуждении в старых полях не сохранялись.
       ai_help_events: number | null;
       independence_pct: number | null;
+      independence_is_estimate: boolean;
+      wrong_answer_count: number;
       has_override: boolean;
       ai_score: number | null;
       ai_score_comment: string | null;
@@ -4524,8 +4529,10 @@ async function handleGetResults(
     total_max: number;
     total_time_minutes: number | null;
     // Агрегат самостоятельности по работе — средневзвешенный по max_score задач.
-    // null = ни по одной задаче нет данных (не приступал / legacy).
+    // null = ни по одной задаче нет данных (не приступал).
     independence_pct: number | null;
+    // true = в агрегат вошла хотя бы одна оценочная задача (работа до 2026-07-26).
+    independence_is_estimate: boolean;
     ai_help_total: number;
     independence_task_count: number;
     // Phase 12 (2026-06-07): общий комментарий репетитора к ДЗ для этого ученика.
@@ -4613,7 +4620,14 @@ async function handleGetResults(
       const { data: allTaskStates } = await db
         .from("homework_tutor_task_states")
         .select(
-          "thread_id, task_id, earned_score, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts, tutor_force_completed_at, tutor_reviewed_at",
+          // ⚠️ P0 (2026-07-27, репорты Елены и Егора): без `ai_help_events`
+          // метрика самостоятельности приходила null И по задачам, И в агрегате —
+          // репетитор видел «—» там, где помощь фактически была. Без
+          // `best_earned_score` та же таблица считала балл по `earned_score` и
+          // расходилась бы с экраном ученика при повторной, менее удачной сдаче.
+          // `wrong_answer_count` нужен для «≈»-оценки работ до релиза метрики.
+          // Гард от повтора — smoke-check §22.
+          "thread_id, task_id, earned_score, best_earned_score, ai_help_events, wrong_answer_count, status, ai_score, ai_score_comment, tutor_score_override, tutor_score_override_comment, hint_count, attempts, tutor_force_completed_at, tutor_reviewed_at",
         )
         .in("thread_id", allThreadIdsForStates);
 
@@ -4689,17 +4703,28 @@ async function handleGetResults(
 
             const forceCompletedAtRaw = (ts as { tutor_force_completed_at?: string | null }).tutor_force_completed_at;
             const reviewedAtRaw = (ts as { tutor_reviewed_at?: string | null }).tutor_reviewed_at;
-            // Метрика «% самостоятельности» (2026-07-25). `null` — нет данных
-            // (работа до релиза / массовый force-complete): в UI «—», и в
-            // агрегат по работе такая задача НЕ входит (ни в числитель, ни в
-            // знаменатель) — иначе «неизвестно» читалось бы как «сделал сам».
+            // Метрика «% самостоятельности». Точный расчёт по `ai_help_events`,
+            // а для работ ДО релиза метрики — оценка по legacy-счётчикам с
+            // пометкой `independence_is_estimate` (решение владельца 2026-07-27:
+            // «—» на всех старых работах читалось как «метрика не работает»).
+            // `null` остаётся только там, где активности не было вовсе.
             const aiHelpEventsRaw = (ts as { ai_help_events?: number | null }).ai_help_events;
             const aiHelpEvents = aiHelpEventsRaw != null ? Number(aiHelpEventsRaw) : null;
+            const wrongCountRaw = (ts as { wrong_answer_count?: number | null }).wrong_answer_count;
+            const wrongCount = wrongCountRaw != null ? Number(wrongCountRaw) : 0;
+            const independence = resolveIndependencePct({
+              ai_help_events: aiHelpEvents,
+              hint_count: hintCount,
+              wrong_answer_count: wrongCount,
+              attempts: typeof ts.attempts === "number" ? ts.attempts : 0,
+            });
             taskScoresByStudent[studentId][ts.task_id] = {
               final_score: Math.round(finalScore * 100) / 100,
               hint_count: hintCount,
+              wrong_answer_count: wrongCount,
               ai_help_events: aiHelpEvents,
-              independence_pct: computeIndependencePct(aiHelpEvents),
+              independence_pct: independence.pct,
+              independence_is_estimate: independence.isEstimate,
               has_override: ts.tutor_score_override != null,
               ai_score: aiScoreRounded,
               ai_score_comment: typeof aiCommentRaw === "string" && aiCommentRaw.trim().length > 0
@@ -4830,6 +4855,8 @@ async function handleGetResults(
         hint_count: cell.hint_count,
         ai_help_events: cell.ai_help_events,
         independence_pct: cell.independence_pct,
+        independence_is_estimate: cell.independence_is_estimate,
+        wrong_answer_count: cell.wrong_answer_count,
         has_override: cell.has_override,
         ai_score: cell.ai_score,
         ai_score_comment: cell.ai_score_comment,
@@ -4855,8 +4882,14 @@ async function handleGetResults(
         0,
       );
       const independenceTaskCount = taskScores.filter((t) => t.independence_pct != null).length;
+      // Агрегат оценочный, если ХОТЬ ОДНА вошедшая в него задача оценочная:
+      // смешивать точные и приблизительные числа без пометки нельзя.
+      const independenceIsEstimate = taskScores.some(
+        (t) => t.independence_pct != null && t.independence_is_estimate,
+      );
       const independenceFields = {
         independence_pct: independencePct != null ? Math.round(independencePct) : null,
+        independence_is_estimate: independenceIsEstimate,
         ai_help_total: aiHelpTotal,
         independence_task_count: independenceTaskCount,
       };
@@ -4912,6 +4945,7 @@ async function handleGetResults(
           total_time_minutes: totalTimeMinutes,
           // Не приступал → метрики нет (не 100%): «—» в UI.
           independence_pct: null,
+          independence_is_estimate: false,
           ai_help_total: 0,
           independence_task_count: 0,
         });
@@ -8945,6 +8979,15 @@ async function handleGetStudentResult(
     totalMax += maxScore;
     const helpRaw = state ? (state as { ai_help_events?: unknown }).ai_help_events : null;
     const aiHelpEvents = typeof helpRaw === "number" ? helpRaw : null;
+    // Тот же резолвер, что у репетитора (точный расчёт → «≈»-оценка по legacy).
+    const independence = resolveIndependencePct({
+      ai_help_events: aiHelpEvents,
+      hint_count: state ? Number((state as { hint_count?: unknown }).hint_count ?? 0) : 0,
+      wrong_answer_count: state
+        ? Number((state as { wrong_answer_count?: unknown }).wrong_answer_count ?? 0)
+        : 0,
+      attempts: state ? Number((state as { attempts?: unknown }).attempts ?? 0) : 0,
+    });
     return {
       task_id: t.id,
       order_num: t.order_num,
@@ -8957,7 +9000,8 @@ async function handleGetStudentResult(
       // показывается (там AI выключен → всегда 100%), поэтому агрегат ниже
       // считается только для обычной домашки.
       ai_help_events: aiHelpEvents,
-      independence_pct: computeIndependencePct(aiHelpEvents),
+      independence_pct: independence.pct,
+      independence_is_estimate: independence.isEstimate,
     };
   });
 
@@ -8971,6 +9015,9 @@ async function handleGetStudentResult(
     completed: true,
     work_mode: workMode,
     independence_pct: independenceTotal != null ? Math.round(independenceTotal) : null,
+    // Агрегат оценочный, если хоть одна вошедшая задача оценочная (legacy).
+    independence_is_estimate: workMode !== "independent" &&
+      resultTasks.some((t) => t.independence_pct != null && t.independence_is_estimate),
     ai_help_total: resultTasks.reduce((sum, t) => sum + (t.ai_help_events ?? 0), 0),
     assignment: {
       id: assignment.id,
@@ -9026,6 +9073,159 @@ async function handleGetStudentIdentity(
     name: identity.name,
     gender: identity.gender,
   });
+}
+
+// ─── Endpoint: GET /student/assignments/scores (student) ─────────────────────
+//
+// Итоги по ВСЕМ работам ученика одним round-trip — для списка ДЗ (решение
+// владельца 2026-07-27: «показывать ученикам итоговый балл и самостоятельность
+// тоже, но не раздувать карточки»).
+//
+// Почему серверный роут, а не расчёт на клиенте: формула балла живёт ТОЛЬКО в
+// `_shared/score-compute.ts` (`computeFinalScore` → override → best_earned_score
+// → earned → ai → status). Дублировать её во фронте — прямой путь к тому же
+// расхождению поверхностей, из-за которого метрика уже показывала «—» вместо
+// числа. Образец батч-агрегации по ученику — `loadHomeworkInfo` в
+// `student-lessons-api` (там то же для карточек занятий).
+//
+// Anti-leak: отдаём ТОЛЬКО агрегаты (балл, максимум, процент, флаги). Ни
+// текстов, ни per-task разбивки, ни tutor-only полей. Для самостоятельной работы
+// до завершения баллы не раскрываются (`completed: false` + нули).
+async function handleGetStudentAssignmentScores(
+  db: SupabaseClient,
+  userId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const { data: saRows, error: saErr } = await db
+    .from("homework_tutor_student_assignments")
+    .select("id, assignment_id")
+    .eq("student_id", userId);
+  if (saErr) {
+    console.error("homework_api_student_scores_sa_failed", { error: saErr.message });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить результаты. Попробуй ещё раз.");
+  }
+  const saList = saRows ?? [];
+  if (saList.length === 0) return jsonOk(cors, { items: [] });
+
+  const assignmentIds = [...new Set(saList.map((r) => r.assignment_id as string))];
+  const saIds = saList.map((r) => r.id as string);
+
+  const [assignmentsRes, tasksRes, threadsRes] = await Promise.all([
+    db.from("homework_tutor_assignments")
+      .select("id, work_mode")
+      .in("id", assignmentIds),
+    db.from("homework_tutor_tasks")
+      .select("id, assignment_id, max_score")
+      .in("assignment_id", assignmentIds),
+    db.from("homework_tutor_threads")
+      .select("id, student_assignment_id, status")
+      .in("student_assignment_id", saIds),
+  ]);
+  if (assignmentsRes.error || tasksRes.error || threadsRes.error) {
+    console.error("homework_api_student_scores_batch_failed", {
+      assignments: assignmentsRes.error?.message ?? null,
+      tasks: tasksRes.error?.message ?? null,
+      threads: threadsRes.error?.message ?? null,
+    });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить результаты. Попробуй ещё раз.");
+  }
+
+  const workModeById = new Map<string, HomeworkWorkMode>();
+  for (const a of assignmentsRes.data ?? []) {
+    workModeById.set(a.id as string, normalizeWorkMode(a.work_mode) ?? "homework");
+  }
+  const tasksByAssignment = new Map<string, { id: string; max_score: number }[]>();
+  for (const t of tasksRes.data ?? []) {
+    const aid = t.assignment_id as string;
+    if (!tasksByAssignment.has(aid)) tasksByAssignment.set(aid, []);
+    tasksByAssignment.get(aid)!.push({ id: t.id as string, max_score: Number(t.max_score ?? 0) });
+  }
+  const threadBySa = new Map<string, { id: string; status: string }>();
+  for (const th of threadsRes.data ?? []) {
+    threadBySa.set(th.student_assignment_id as string, {
+      id: th.id as string,
+      status: (th.status as string) ?? "active",
+    });
+  }
+
+  // Состояния задач одним запросом по всем тредам ученика.
+  const threadIds = [...threadBySa.values()].map((t) => t.id);
+  const statesByThread = new Map<string, Record<string, unknown>[]>();
+  if (threadIds.length > 0) {
+    const { data: stateRows, error: statesErr } = await db
+      .from("homework_tutor_task_states")
+      .select(
+        "thread_id, task_id, status, earned_score, best_earned_score, ai_score, tutor_score_override, ai_help_events, hint_count, wrong_answer_count, attempts",
+      )
+      .in("thread_id", threadIds);
+    if (statesErr) {
+      console.error("homework_api_student_scores_states_failed", { error: statesErr.message });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось загрузить результаты. Попробуй ещё раз.");
+    }
+    for (const s of stateRows ?? []) {
+      const tid = s.thread_id as string;
+      if (!statesByThread.has(tid)) statesByThread.set(tid, []);
+      statesByThread.get(tid)!.push(s as Record<string, unknown>);
+    }
+  }
+
+  const items = saList.map((sa) => {
+    const assignmentId = sa.assignment_id as string;
+    const workMode = workModeById.get(assignmentId) ?? "homework";
+    const thread = threadBySa.get(sa.id as string);
+    const completed = thread?.status === "completed";
+    const tasks = tasksByAssignment.get(assignmentId) ?? [];
+    const totalMax = tasks.reduce((sum, t) => sum + t.max_score, 0);
+
+    // Незавершённую работу не раскрываем: список показывает итоги только по
+    // сданным (в самостоятельной это ещё и state-aware инвариант, rule 40).
+    if (!completed || !thread) {
+      return {
+        assignment_id: assignmentId,
+        completed: false,
+        final_score: null,
+        total_max: totalMax,
+        independence_pct: null,
+        independence_is_estimate: false,
+      };
+    }
+
+    const states = statesByThread.get(thread.id) ?? [];
+    const stateByTask = new Map(states.map((s) => [s.task_id as string, s]));
+    let finalScore = 0;
+    const independenceItems: Array<{ pct: number | null; weight: number }> = [];
+    let anyEstimate = false;
+    for (const task of tasks) {
+      const state = stateByTask.get(task.id);
+      finalScore += state
+        ? computeFinalScore(state as unknown as TaskStateScoreFields, task.max_score)
+        : 0;
+      if (!state) continue;
+      const independence = resolveIndependencePct({
+        ai_help_events: state.ai_help_events as number | null,
+        hint_count: Number(state.hint_count ?? 0),
+        wrong_answer_count: Number(state.wrong_answer_count ?? 0),
+        attempts: Number(state.attempts ?? 0),
+      });
+      if (independence.isEstimate) anyEstimate = true;
+      independenceItems.push({ pct: independence.pct, weight: task.max_score });
+    }
+    // В самостоятельной метрика не показывается (AI выключен → всегда 100%).
+    const independencePct = workMode === "independent"
+      ? null
+      : aggregateIndependencePct(independenceItems);
+
+    return {
+      assignment_id: assignmentId,
+      completed: true,
+      final_score: Math.round(finalScore * 100) / 100,
+      total_max: Math.round(totalMax * 100) / 100,
+      independence_pct: independencePct != null ? Math.round(independencePct) : null,
+      independence_is_estimate: independencePct != null && anyEstimate,
+    };
+  });
+
+  return jsonOk(cors, { items });
 }
 
 // ─── Endpoint: GET /student/problem/:hwId/:taskId (student) ─────────────────
@@ -9231,6 +9431,7 @@ async function handleGetStudentProblem(
   // владелец: «мы именно его мотивируем через эту систему думать головой».
   // Второе поле — максимальный балл за задачу (`available_score`, теперь = max).
   let taskIndependencePct: number | null = null;
+  let taskIndependenceIsEstimate = false;
   let taskAiHelpEvents: number | null = null;
   let taskScoreCeiling: number | null = Number(targetTask.max_score) || 0;
   if (thread) {
@@ -9249,7 +9450,18 @@ async function handleGetStudentProblem(
       hintsUsed = typeof hc === "number" ? hc : 0;
       const helpRaw = (targetState as { ai_help_events?: unknown }).ai_help_events;
       taskAiHelpEvents = typeof helpRaw === "number" ? helpRaw : null;
-      taskIndependencePct = computeIndependencePct(taskAiHelpEvents);
+      // Тот же резолвер, что у репетитора: точный расчёт → иначе «≈»-оценка по
+      // legacy-счётчикам. Иначе ученик увидит «—» там, где репетитор видит «≈90%».
+      const independence = resolveIndependencePct({
+        ai_help_events: taskAiHelpEvents,
+        hint_count: hintsUsed,
+        wrong_answer_count: typeof targetState.wrong_answer_count === "number"
+          ? targetState.wrong_answer_count
+          : 0,
+        attempts: typeof targetState.attempts === "number" ? targetState.attempts : 0,
+      });
+      taskIndependencePct = independence.pct;
+      taskIndependenceIsEstimate = independence.isEstimate;
       const ceilingRaw = (targetState as { available_score?: unknown }).available_score;
       if (typeof ceilingRaw === "number") taskScoreCeiling = ceilingRaw;
     }
@@ -9259,6 +9471,7 @@ async function handleGetStudentProblem(
     // В самостоятельной метрика не показывается вообще (AI выключен → всегда
     // 100%), а до сдачи не раскрываем и потолок балла — он часть результата.
     taskIndependencePct = null;
+    taskIndependenceIsEstimate = false;
     taskAiHelpEvents = null;
     taskScoreCeiling = null;
   }
@@ -9295,6 +9508,8 @@ async function handleGetStudentProblem(
     // Два открытых ученику поля (решение владельца): «Самостоятельность NN%» и
     // «Максимальный балл за задачу». `null` = нет данных / не раскрыто.
     task_independence_pct: taskIndependencePct,
+    // true → UI показывает «≈NN%»: процент выведен из legacy-счётчиков.
+    task_independence_is_estimate: taskIndependenceIsEstimate,
     task_ai_help_events: taskAiHelpEvents,
     task_score_ceiling: taskScoreCeiling,
     thread,
@@ -13105,6 +13320,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // GET /assignments/:id/identity (student endpoint) — Phase 8 regression fix
     if (seg.length === 3 && seg[0] === "assignments" && seg[2] === "identity" && route.method === "GET") {
       return await handleGetStudentIdentity(db, userId, seg[1], cors);
+    }
+
+    // GET /student/assignments/scores — итоги всех работ ученика для списка ДЗ
+    // (балл + % самостоятельности одним round-trip; формула балла остаётся на
+    // сервере, клиент её не дублирует).
+    if (
+      seg.length === 3 &&
+      seg[0] === "student" &&
+      seg[1] === "assignments" &&
+      seg[2] === "scores" &&
+      route.method === "GET"
+    ) {
+      return await handleGetStudentAssignmentScores(db, userId, cors);
     }
 
     // GET /student/problem/:hwId/:taskId

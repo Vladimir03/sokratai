@@ -850,8 +850,17 @@ export interface TutorHomeworkResultsPerStudent {
      * бэкенд считает через `_shared/score-compute.ts`.
      */
     independence_pct?: number | null;
+    /**
+     * true = процент выведен из legacy-счётчиков (работа до 2026-07-26, где
+     * `ai_help_events` не писался): `100 − 10 × (подсказки + неверные попытки)`.
+     * UI ОБЯЗАН показать «≈» — оценка завышена, ответы Сократа в обсуждении в
+     * старых полях не сохранялись.
+     */
+    independence_is_estimate?: boolean;
     /** Сырое число обращений к помощи AI (для тултипа «помощь AI: N»). */
     ai_help_events?: number | null;
+    /** Неверные попытки — нужны для «≈»-оценки и диагностики. */
+    wrong_answer_count?: number;
     /**
      * True if `tutor_score_override` is set on the underlying task_state.
      * Drives the small "правка репетитора" indicator on TaskMiniCard
@@ -944,6 +953,8 @@ export interface TutorHomeworkResultsPerStudent {
    * (не приступал / legacy) → в UI «—». Optional: старый edge поле не отдаёт.
    */
   independence_pct?: number | null;
+  /** true = в агрегат вошла хотя бы одна оценочная задача → показывать «≈». */
+  independence_is_estimate?: boolean;
   /** Σ обращений к помощи AI по всем задачам работы. */
   ai_help_total?: number;
   /** Сколько задач имеют данные для метрики (знаменатель прозрачности). */

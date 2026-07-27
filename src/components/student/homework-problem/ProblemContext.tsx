@@ -58,6 +58,11 @@ export interface ProblemContextTask {
    */
   independence_pct?: number | null;
   /**
+   * true → «≈»: процент оценён по старым счётчикам (подсказки + неверные
+   * попытки) для работ до 26.07, где обращения не записывались отдельно.
+   */
+  independence_is_estimate?: boolean;
+  /**
    * Active vs completed task — drives chip styling. `'completed'` makes
    * the score green to telegraph «зафиксировано». Default `'active'`.
    */
@@ -224,7 +229,7 @@ export function ProblemContext({
               style={{ touchAction: 'manipulation' }}
               aria-label={`Самостоятельность ${task.independence_pct} процентов — как считается`}
             >
-              Самост. {task.independence_pct}%
+              Самост. {task.independence_is_estimate ? '≈' : ''}{task.independence_pct}%
               <HelpCircle className="h-3 w-3 shrink-0 text-slate-400" aria-hidden="true" />
             </button>
           ) : null}

@@ -76,6 +76,8 @@ export interface StudentProblemResponse {
    * выключен и метрика по определению 100%. Формулу на клиенте НЕ считаем.
    */
   task_independence_pct?: number | null;
+  /** true → «≈»: процент оценён по legacy-счётчикам (работа до 26.07). */
+  task_independence_is_estimate?: boolean;
   /** Сырое число обращений к помощи AI (для тултипа). */
   task_ai_help_events?: number | null;
   /**

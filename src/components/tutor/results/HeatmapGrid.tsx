@@ -105,12 +105,35 @@ function DeliveryBadge({ status }: { status: DeliveryStatus | undefined }) {
 // ─── HeatmapCell ─────────────────────────────────────────────────────────────
 // Memoized cell. With 26×10 grids this cuts re-render cost on expand/collapse.
 
+/**
+ * Данные одной ячейки. Раньше map сужалась до `{final_score, hint_count}` и
+ * отбрасывала всё остальное — из-за этого метрика самостоятельности не доходила
+ * до ячейки, даже когда приходила из API. Новое поле показываете в ячейке →
+ * добавляйте его СЮДА, иначе оно молча потеряется при построении map.
+ */
+interface HeatmapCellData {
+  final_score: number;
+  hint_count: number;
+  independence_pct: number | null;
+  independence_is_estimate: boolean;
+  ai_help_events: number | null;
+}
+
 interface HeatmapCellProps {
   score: number | null;
   maxScore: number;
   studentId: string;
   taskId: string;
   isSelected: boolean;
+  /**
+   * «% самостоятельности» по этой задаче (запрос Егора 2026-07-27: «по каждой
+   * задаче должно быть 2 метрики — балл и % самостоятельности»). `null` = данных
+   * нет → вторая строка не рендерится вовсе (пустая ячейка лучше «—» под баллом).
+   */
+  independencePct: number | null;
+  independenceIsEstimate: boolean;
+  aiHelpEvents: number | null;
+  showIndependence: boolean;
   onCellClick?: (studentId: string, taskId: string) => void;
 }
 
@@ -120,6 +143,10 @@ const HeatmapCell = memo(function HeatmapCell({
   studentId,
   taskId,
   isSelected,
+  independencePct,
+  independenceIsEstimate,
+  aiHelpEvents,
+  showIndependence,
   onCellClick,
 }: HeatmapCellProps) {
   const { className, text } = getCellStyle(score, maxScore);
@@ -131,6 +158,7 @@ const HeatmapCell = memo(function HeatmapCell({
         onCellClick!(studentId, taskId);
       }
     : undefined;
+  const showPct = showIndependence && independencePct != null;
   return (
     <td
       className={cn(
@@ -140,8 +168,25 @@ const HeatmapCell = memo(function HeatmapCell({
         isSelected && 'ring-2 ring-slate-800 ring-inset',
       )}
       onClick={handleClick}
+      title={
+        showPct
+          ? `Балл ${text} · самостоятельность ${formatIndependence(independencePct, independenceIsEstimate)}` +
+            (aiHelpEvents != null ? ` · обращений к помощи AI: ${aiHelpEvents}` : '')
+          : undefined
+      }
     >
-      {text}
+      {/* Две строки в 44px ячейки: балл 14px + процент 10px ≈ 26px — высота
+          строки и ширина 56px НЕ меняются, плотность таблицы та же. Процент
+          наследует цвет текста ячейки с opacity-70: отдельной палитры для
+          метрики не вводим, цвет фона по-прежнему означает балл. */}
+      <div className="flex flex-col items-center justify-center leading-none">
+        <span>{text}</span>
+        {showPct ? (
+          <span className="mt-0.5 text-[10px] font-medium opacity-70">
+            {formatIndependence(independencePct, independenceIsEstimate)}
+          </span>
+        ) : null}
+      </div>
     </td>
   );
 });
@@ -151,7 +196,7 @@ const HeatmapCell = memo(function HeatmapCell({
 interface HeatmapRowProps {
   student: TutorHomeworkAssignmentDetails['assigned_students'][number];
   tasks: TutorHomeworkAssignmentDetails['tasks'];
-  taskScoresById: Map<string, { final_score: number; hint_count: number }>;
+  taskScoresById: Map<string, HeatmapCellData>;
   expanded: boolean;
   showHintOveruse: boolean;
   hintTotal: number;
@@ -168,6 +213,8 @@ interface HeatmapRowProps {
    * Колонка скрыта целиком в самостоятельной работе (`showIndependence=false`).
    */
   independencePct: number | null;
+  /** true = агрегат содержит оценочные задачи (legacy) → показывать «≈». */
+  independenceIsEstimate: boolean;
   aiHelpTotal: number;
   showIndependence: boolean;
   displayStatus: StudentDisplayStatus;
@@ -189,6 +236,7 @@ const HeatmapRow = memo(function HeatmapRow({
   totalMax,
   totalTimeMinutes,
   independencePct,
+  independenceIsEstimate,
   aiHelpTotal,
   showIndependence,
   displayStatus,
@@ -272,6 +320,10 @@ const HeatmapRow = memo(function HeatmapRow({
             studentId={student.student_id}
             taskId={task.id}
             isSelected={expanded && selectedTaskId === task.id}
+            independencePct={cell?.independence_pct ?? null}
+            independenceIsEstimate={cell?.independence_is_estimate ?? false}
+            aiHelpEvents={cell?.ai_help_events ?? null}
+            showIndependence={showIndependence}
             onCellClick={onCellClick}
           />
         );
@@ -317,20 +369,25 @@ const HeatmapRow = memo(function HeatmapRow({
           {(displayStatus === 'completed' || displayStatus === 'in_progress') &&
           independencePct != null ? (
             <span
-              title={`${INDEPENDENCE_TOOLTIP} Обращений к помощи AI: ${aiHelpTotal}.`}
+              title={
+                `${INDEPENDENCE_TOOLTIP} Обращений к помощи AI: ${aiHelpTotal}.` +
+                (independenceIsEstimate
+                  ? ' ≈ — оценка по старым данным (подсказки + неверные попытки): работа выполнялась до появления метрики.'
+                  : '')
+              }
               className={cn(
                 'tabular-nums',
                 displayStatus === 'completed' ? 'text-slate-700' : 'text-slate-400',
               )}
             >
-              {formatIndependence(independencePct)}
+              {formatIndependence(independencePct, independenceIsEstimate)}
             </span>
           ) : (
             <span
               title={
                 displayStatus === 'not_started'
                   ? 'Ученик не приступал'
-                  : 'Нет данных: работа выполнялась до появления метрики или задачи закрыты массово'
+                  : 'Нет данных: ученик не отправлял ответов по этой работе или задачи закрыты массово'
               }
               className="text-slate-400"
             >
@@ -426,13 +483,16 @@ export function HeatmapGrid({
   // Precompute lookups once per results/details update. These are shallow and
   // cheap but memoizing keeps HeatmapRow memo stable across re-renders.
   const taskScoresByStudent = useMemo(() => {
-    const map = new Map<string, Map<string, { final_score: number; hint_count: number }>>();
+    const map = new Map<string, Map<string, HeatmapCellData>>();
     for (const entry of per_student ?? []) {
-      const inner = new Map<string, { final_score: number; hint_count: number }>();
+      const inner = new Map<string, HeatmapCellData>();
       for (const ts of entry.task_scores ?? []) {
         inner.set(ts.task_id, {
           final_score: ts.final_score,
           hint_count: ts.hint_count,
+          independence_pct: ts.independence_pct ?? null,
+          independence_is_estimate: ts.independence_is_estimate ?? false,
+          ai_help_events: ts.ai_help_events ?? null,
         });
       }
       map.set(entry.student_id, inner);
@@ -500,9 +560,12 @@ export function HeatmapGrid({
           <p className="text-xs leading-relaxed text-slate-500">
             <b>Самост.</b> — самостоятельность: 100% минус 10% за каждое обращение
             ученика к помощи AI (разбор ошибки, подсказка, ответ в обсуждении).
-            Балл за задачу от этого не снижается, и ваша правка балла метрику не
-            меняет. <b>«—»</b> — данных нет: работа выполнялась до появления
-            метрики или задачи закрыты массово.
+            Показывается и по каждой задаче — второй строкой в ячейке. Балл за
+            задачу от этого не снижается, и ваша правка балла метрику не меняет.
+            {' '}<b>«≈»</b> — оценка по старым данным (подсказки и неверные попытки)
+            для работ до 26 июля: там обращения не записывались отдельно, поэтому
+            цифра может быть завышена. <b>«—»</b> — ученик не отправлял ответов или
+            задачи закрыты массово.
           </p>
         ) : null}
       </CardHeader>
@@ -592,7 +655,7 @@ export function HeatmapGrid({
               {assigned_students.map((student) => {
                 const taskScoresById =
                   taskScoresByStudent.get(student.student_id) ??
-                  (EMPTY_TASK_SCORES_MAP as Map<string, { final_score: number; hint_count: number }>);
+                  (EMPTY_TASK_SCORES_MAP as Map<string, HeatmapCellData>);
                 const hintTotal = hintTotalByStudent.get(student.student_id) ?? 0;
                 const showHintOveruse = hintTotal >= threshold;
 
@@ -632,6 +695,7 @@ export function HeatmapGrid({
                     totalMax={totalMax}
                     totalTimeMinutes={totalTimeMinutes}
                     independencePct={summary?.independence_pct ?? null}
+                    independenceIsEstimate={summary?.independence_is_estimate ?? false}
                     aiHelpTotal={summary?.ai_help_total ?? 0}
                     showIndependence={showIndependence}
                     displayStatus={displayStatus}
@@ -654,5 +718,5 @@ export function HeatmapGrid({
 
 // Shared empty map so students with no scores do not invalidate the
 // HeatmapRow memo on every parent re-render.
-const EMPTY_TASK_SCORES_MAP: ReadonlyMap<string, { final_score: number; hint_count: number }> =
+const EMPTY_TASK_SCORES_MAP: ReadonlyMap<string, HeatmapCellData> =
   new Map();

@@ -259,8 +259,10 @@ export function StudentDrillDown({
         tutor_reviewed_at: string | null;
         status: string;
         // Метрика самостоятельности (2026-07-25): null = данных нет → «—».
+        // `independence_is_estimate` = оценка по legacy-счётчикам → «≈».
         ai_help_events: number | null;
         independence_pct: number | null;
+        independence_is_estimate: boolean;
       }
     >();
     for (const ts of perStudent?.task_scores ?? []) {
@@ -277,6 +279,7 @@ export function StudentDrillDown({
         status: ts.status ?? 'active',
         ai_help_events: ts.ai_help_events ?? null,
         independence_pct: ts.independence_pct ?? null,
+        independence_is_estimate: ts.independence_is_estimate ?? false,
       });
     }
     return tasks.map((task) => {
@@ -296,6 +299,7 @@ export function StudentDrillDown({
         tutor_reviewed_at: cell?.tutor_reviewed_at ?? null,
         ai_help_events: cell?.ai_help_events ?? null,
         independence_pct: cell?.independence_pct ?? null,
+        independence_is_estimate: cell?.independence_is_estimate ?? false,
         // Если cell отсутствует — это provisionGuidedThread-stub: status='active'.
         // Если cell есть — берём его status (может быть 'completed' или 'active').
         status: cell?.status ?? 'active',
@@ -327,11 +331,20 @@ export function StudentDrillDown({
     if (selectedTaskId !== null) {
       const task = taskMeta.find((t) => t.id === selectedTaskId);
       if (!task || task.independence_pct == null) return null;
-      return `Задача №${task.order_num}: самостоятельность ${formatIndependence(task.independence_pct)} · помощь AI: ${task.ai_help_events ?? 0}`;
+      const pct = formatIndependence(task.independence_pct, task.independence_is_estimate);
+      return task.independence_is_estimate
+        // Для legacy-задач счётчика обращений нет — показывать «помощь AI: 0»
+        // было бы прямой ложью, поэтому источник оценки называем честно.
+        ? `Задача №${task.order_num}: самостоятельность ${pct} (оценка по подсказкам и неверным попыткам)`
+        : `Задача №${task.order_num}: самостоятельность ${pct} · помощь AI: ${task.ai_help_events ?? 0}`;
     }
     const aggregate = perStudent?.independence_pct;
     if (aggregate == null) return null;
-    return `Самостоятельность по работе: ${formatIndependence(aggregate)} · помощь AI: ${perStudent?.ai_help_total ?? 0}`;
+    const isEstimate = perStudent?.independence_is_estimate ?? false;
+    const aggregatePct = formatIndependence(aggregate, isEstimate);
+    return isEstimate
+      ? `Самостоятельность по работе: ${aggregatePct} (часть задач оценена по старым данным)`
+      : `Самостоятельность по работе: ${aggregatePct} · помощь AI: ${perStudent?.ai_help_total ?? 0}`;
   }, [selectedTaskId, taskMeta, perStudent]);
 
   // Selected task order_num for GuidedThreadViewer initial filter.
@@ -441,6 +454,8 @@ export function StudentDrillDown({
               score={task.score}
               maxScore={task.max_score}
               hintCount={task.hint_count}
+              independencePct={showIndependence ? task.independence_pct : null}
+              independenceIsEstimate={task.independence_is_estimate}
               hasOverride={task.has_override}
               isReviewed={isTaskScoreReviewed(task)}
               isSelected={selectedTaskId === task.id}

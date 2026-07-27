@@ -1432,6 +1432,7 @@ export default function HomeworkProblem() {
       // Второе открытое ученику поле (2026-07-25). Считает бэкенд —
       // формулу на клиенте не дублируем.
       independence_pct: data.task_independence_pct ?? null,
+      independence_is_estimate: data.task_independence_is_estimate ?? false,
       task_kind: data.task.task_kind,
       body: data.task.task_text,
       image_url: data.task.task_image_url,

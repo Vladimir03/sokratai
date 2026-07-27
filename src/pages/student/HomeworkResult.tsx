@@ -139,7 +139,8 @@ const HomeworkResult = () => {
                       {data.independence_pct != null ? (
                         <>
                           <span className="mt-1 text-sm font-semibold tabular-nums text-socrat-primary">
-                            Самостоятельность: {data.independence_pct}%
+                            Самостоятельность: {data.independence_is_estimate ? '≈' : ''}
+                            {data.independence_pct}%
                           </span>
                           {/* Ревью-фикс P1: формула видима, а не только в
                               `title` — на телефоне тултип недоступен. */}
@@ -192,7 +193,8 @@ const HomeworkResult = () => {
                                 // ниже WCAG AA и плохо читается на старом
                                 // iPhone. Плюс единая терминология «Самост.».
                                 <span className="text-xs tabular-nums text-slate-600">
-                                  Самост. {t.independence_pct}%
+                                  Самост. {t.independence_is_estimate ? '≈' : ''}
+                                  {t.independence_pct}%
                                 </span>
                               ) : null}
                             </span>

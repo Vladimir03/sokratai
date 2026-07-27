@@ -575,6 +575,8 @@ export interface StudentHomeworkResultTask {
    * до релиза / задача закрыта массово) → в UI не показываем.
    */
   independence_pct?: number | null;
+  /** true → «≈»: процент оценён по legacy-счётчикам (работа до 26.07). */
+  independence_is_estimate?: boolean;
   /** Сырое число обращений к помощи AI по задаче. */
   ai_help_events?: number | null;
 }
@@ -606,6 +608,8 @@ export type StudentHomeworkResult =
        * бессмысленна) и когда ни по одной задаче нет данных.
        */
       independence_pct?: number | null;
+      /** true → показывать «≈»: часть задач оценена по legacy-счётчикам. */
+      independence_is_estimate?: boolean;
       /** Σ обращений к помощи AI по работе. */
       ai_help_total?: number;
     };
@@ -618,6 +622,32 @@ export async function getStudentHomeworkResult(
     `/assignments/${encodeURIComponent(assignmentId)}/student/result`,
     { method: 'GET' },
   );
+}
+
+/**
+ * Итоги по каждой работе ученика для СПИСКА ДЗ (2026-07-27, решение владельца:
+ * «показывать ученикам итоговый балл и самостоятельность, но не раздувать
+ * карточки»). Отдельный запрос, а не часть `listStudentAssignments`: список
+ * должен нарисоваться сразу, а числа догрузиться — на телефоне это важнее.
+ *
+ * Балл считает СЕРВЕР (`computeFinalScore`) — на клиенте формулу не дублируем.
+ * Незавершённые работы приходят с `completed: false` и без баллов.
+ */
+export interface StudentAssignmentScore {
+  assignment_id: string;
+  completed: boolean;
+  final_score: number | null;
+  total_max: number;
+  independence_pct: number | null;
+  independence_is_estimate: boolean;
+}
+
+export async function getStudentAssignmentScores(): Promise<StudentAssignmentScore[]> {
+  const res = await requestStudentHomeworkApi<{ items?: StudentAssignmentScore[] }>(
+    '/student/assignments/scores',
+    { method: 'GET' },
+  );
+  return res.items ?? [];
 }
 
 /**

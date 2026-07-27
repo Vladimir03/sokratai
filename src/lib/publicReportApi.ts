@@ -19,6 +19,14 @@ export interface ReportWork {
    * для `kind='homework'` и только с новой версией edge (deploy-skew).
    */
   work_mode?: 'homework' | 'independent';
+  /**
+   * «% самостоятельности» по работе (2026-07-27): сколько ученик сделал сам.
+   * Только агрегат — разбивки по задачам в отчёте родителю нет. `null` для
+   * самостоятельных работ (там AI выключен) и когда данных нет.
+   */
+  independence_pct?: number | null;
+  /** true → «≈»: процент оценён по старым счётчикам (работа до 26.07). */
+  independence_is_estimate?: boolean;
   title: string;
   subject: string | null;
   date: string;

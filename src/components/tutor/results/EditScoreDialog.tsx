@@ -425,6 +425,17 @@ export function EditScoreDialog({
                     {formatIndependence(independencePct)}
                   </span>
                 </div>
+              ) : independencePct != null ? (
+                // Legacy-задача: счётчика обращений нет, процент оценён по
+                // подсказкам и неверным попыткам — источник называем прямо,
+                // иначе «помощь AI: 0» рядом с 90% выглядело бы ошибкой.
+                <div className="text-xs text-slate-600" title={INDEPENDENCE_TOOLTIP}>
+                  Самостоятельность{' '}
+                  <span className="font-medium tabular-nums">
+                    {formatIndependence(independencePct, true)}
+                  </span>
+                  {' — оценка по подсказкам и неверным попыткам (работа до 26.07)'}
+                </div>
               ) : null}
               {aiScoreComment ? (
                 <div className="text-xs text-slate-500">
