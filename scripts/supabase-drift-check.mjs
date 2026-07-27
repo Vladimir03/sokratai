@@ -8,6 +8,40 @@ const configPath = path.join(root, "supabase", "config.toml");
 const functionsDir = path.join(root, "supabase", "functions");
 const workflowPath = path.join(root, ".github", "workflows", "deploy-supabase-functions.yml");
 
+// Функции, которые деплоятся ВНЕ GitHub-workflow — Lovable-синком на push.
+// Список ОБЯЗАТЕЛЕН, а не «для удобства»: без него проверка «config not in
+// deploy» печатала бы 13 строк шума на чистом репозитории, а шумный отчёт
+// читается как «здесь всегда шумит» — и настоящий дрейф в нём утонет. Ровно
+// та же ловушка, что и у регэкспа `parseWorkflowDeploys` (фикс 2026-07-26).
+//
+// Проверено вживую 2026-07-27: каждое имя ниже ответило на OPTIONS
+// задеплоенным статусом, ни одного 404 (`node scripts/check-edge-deploy.mjs`).
+// Добавлять сюда — только осознанно: запись означает «GitHub Actions эту
+// функцию не деплоит, и это ожидаемо». Если не уверен — НЕ добавляй, а впиши
+// функцию в workflow (rule 96 #11); незадеплоенная функция даёт 404 на все
+// вызовы, а клиент показывает «Failed to send a request to the Edge Function».
+const DEPLOYED_OUTSIDE_WORKFLOW = new Set([
+  "admin-analytics",
+  "admin-ceo-dashboard",
+  "admin-crm",
+  "admin-homework",
+  "admin-mock-exams",
+  "assign-tutor-role",
+  "ceo-telegram-digest",
+  "claim-invite",
+  "lesson-auto-debit",
+  "mcp",
+  "notify-booking",
+  "payment-reminder",
+  "process-email-queue",
+  "public-homework-share",
+  "rag-bot-setup-webhook",
+  "rag-competitor-bot",
+  "telegram-scheduled-broadcast",
+  "telegram-webapp-recent-solutions",
+  "tutor-referral-announce",
+]);
+
 function readText(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
@@ -17,6 +51,11 @@ function listFunctionDirs(dirPath) {
     .readdirSync(dirPath, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
+    // `_shared` и прочие `_`-каталоги — общие модули, а не функции: деплоить и
+    // объявлять в config нечего. Та же конвенция, что в check-edge-deploy.mjs.
+    // Без фильтра `_shared` вечно висел бы в «only in functions dir», а
+    // отчёт должен быть ПУСТЫМ в норме — тогда любая строка означает дрейф.
+    .filter((name) => !name.startsWith("_"))
     .sort();
 }
 
@@ -80,6 +119,28 @@ function report() {
   const deployNotInConfig = deployNames.filter((name) => !config.has(name));
   const deployNotInDirs = deployNames.filter((name) => !dirs.includes(name));
 
+  // Обратное направление (rule 96 #11): функция объявлена в config и лежит в
+  // репо, но её никто не деплоит — ни workflow, ни Lovable. Симптом пропуска:
+  // 404 на КАЖДЫЙ вызов. Требуем наличие каталога, иначе сюда просочились бы
+  // «only in config»-призраки (check-solutions / get-solution), у которых
+  // деплоить попросту нечего.
+  const configNotInDeploy = configNames.filter(
+    (name) =>
+      dirs.includes(name) &&
+      !deploy.has(name) &&
+      !DEPLOYED_OUTSIDE_WORKFLOW.has(name),
+  );
+
+  // Гниение allow-list'а. Запись протухает двумя способами: имя доехало до
+  // workflow (исключение больше не нужно) либо функция исчезла из репо/конфига
+  // (исключение мёртвое). Без этой проверки список тихо разъедется с
+  // реальностью и начнёт ПРЯТАТЬ настоящий дрейф — ради чего он и заведён.
+  const staleAllowlist = [...DEPLOYED_OUTSIDE_WORKFLOW]
+    .filter(
+      (name) => deploy.has(name) || !dirs.includes(name) || !config.has(name),
+    )
+    .sort();
+
   const policyMismatches = [];
   for (const name of deployNames) {
     if (!config.has(name)) continue;
@@ -102,11 +163,19 @@ function report() {
   console.log(`config functions: ${configNames.length}`);
   console.log(`functions dirs:   ${dirs.length}`);
   console.log(`workflow deploys: ${deployNames.length}`);
+  // Печатаем размер исключения явно: сколько функций выведено из-под проверки
+  // «config not in deploy». Зелёный отчёт не должен достигаться вычитанием —
+  // читатель обязан видеть, что именно не покрыто (ср. check-edge-deploy.mjs).
+  console.log(
+    `outside workflow: ${DEPLOYED_OUTSIDE_WORKFLOW.size} (allow-listed: Lovable-синк)`,
+  );
   console.log("");
   console.log(`only in config:        ${fmtList(onlyInConfig)}`);
   console.log(`only in functions dir: ${fmtList(onlyInDirs)}`);
   console.log(`deploy not in config:  ${fmtList(deployNotInConfig)}`);
   console.log(`deploy not in dir:     ${fmtList(deployNotInDirs)}`);
+  console.log(`config not in deploy:  ${fmtList(configNotInDeploy)}`);
+  console.log(`stale allowlist:       ${fmtList(staleAllowlist)}`);
   console.log("");
   console.log("policy mismatches:");
   if (policyMismatches.length === 0) {
