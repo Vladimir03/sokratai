@@ -107,7 +107,22 @@ function fmtList(values) {
 function report() {
   const config = parseConfigFunctions(readText(configPath));
   const dirs = listFunctionDirs(functionsDir);
-  const deploy = parseWorkflowDeploys(readText(workflowPath));
+
+  // Workflow может отсутствовать — и с 2026-07-27 отсутствует НАМЕРЕННО.
+  // Прод-проект Supabase (vrsseotrfmsxpbciyqzc) принадлежит НЕ нам: его выделил
+  // и держит Lovable, в организации владельца его нет. Личный токен любого
+  // нашего аккаунта получает 403 на functions-эндпоинтах — автодеплой из
+  // GitHub Actions недостижим не по недосмотру, а по устройству прав.
+  //
+  // Логику сравнения с workflow НЕ выбрасываем: если проект однажды переедет в
+  // нашу организацию, файл вернётся и все проверки оживут сами. Пока его нет —
+  // тихо пропускаем ось «config ↔ workflow», а ось «config ↔ каталоги»
+  // работает как работала. Падать с ENOENT нельзя: проверку зовут в CI и
+  // вручную, и её смерть спрятала бы РЕАЛЬНЫЙ дрейф объявлений.
+  const hasWorkflow = fs.existsSync(workflowPath);
+  const deploy = hasWorkflow
+    ? parseWorkflowDeploys(readText(workflowPath))
+    : new Map();
 
   const configNames = [...config.keys()].sort();
   const deployNames = [...deploy.keys()].sort();
@@ -122,22 +137,32 @@ function report() {
   // 404 на КАЖДЫЙ вызов. Требуем наличие каталога, иначе сюда просочились бы
   // «only in config»-призраки (check-solutions / get-solution), у которых
   // деплоить попросту нечего.
-  const configNotInDeploy = configNames.filter(
-    (name) =>
-      dirs.includes(name) &&
-      !deploy.has(name) &&
-      !DEPLOYED_OUTSIDE_WORKFLOW.has(name),
-  );
+  // Без workflow эта проверка теряет смысл: «не деплоится workflow'ом» стало
+  // верно для ВСЕХ функций, и список превратился бы в перечень всего репо —
+  // ровно тот шум, против которого заведён allow-list. Факт выкладки в этом
+  // режиме проверяется живой пробой: `node scripts/check-edge-deploy.mjs`.
+  const configNotInDeploy = hasWorkflow
+    ? configNames.filter(
+        (name) =>
+          dirs.includes(name) &&
+          !deploy.has(name) &&
+          !DEPLOYED_OUTSIDE_WORKFLOW.has(name),
+      )
+    : [];
 
   // Гниение allow-list'а. Запись протухает двумя способами: имя доехало до
   // workflow (исключение больше не нужно) либо функция исчезла из репо/конфига
   // (исключение мёртвое). Без этой проверки список тихо разъедется с
   // реальностью и начнёт ПРЯТАТЬ настоящий дрейф — ради чего он и заведён.
-  const staleAllowlist = [...DEPLOYED_OUTSIDE_WORKFLOW]
-    .filter(
-      (name) => deploy.has(name) || !dirs.includes(name) || !config.has(name),
-    )
-    .sort();
+  // Тоже только при живом workflow: без него «имя доехало до workflow» ложно
+  // для всех, и проверка объявила бы протухшим весь список разом.
+  const staleAllowlist = hasWorkflow
+    ? [...DEPLOYED_OUTSIDE_WORKFLOW]
+        .filter(
+          (name) => deploy.has(name) || !dirs.includes(name) || !config.has(name),
+        )
+        .sort()
+    : [];
 
   const policyMismatches = [];
   for (const name of deployNames) {
@@ -160,7 +185,11 @@ function report() {
   console.log("");
   console.log(`config functions: ${configNames.length}`);
   console.log(`functions dirs:   ${dirs.length}`);
-  console.log(`workflow deploys: ${deployNames.length}`);
+  console.log(
+    hasWorkflow
+      ? `workflow deploys: ${deployNames.length}`
+      : "workflow deploys: — (workflow удалён: прод-проект Supabase принадлежит Lovable,\n                     автодеплой из GitHub Actions недостижим — rule 96 #11)",
+  );
   // Печатаем размер исключения явно: сколько функций выведено из-под проверки
   // «config not in deploy». Зелёный отчёт не должен достигаться вычитанием —
   // читатель обязан видеть, что именно не покрыто (ср. check-edge-deploy.mjs).
