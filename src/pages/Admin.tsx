@@ -248,6 +248,10 @@ const Admin = () => {
               <AlertTriangle className="w-4 h-4" />
               Ошибки
             </TabsTrigger>
+            <TabsTrigger value="web-vitals" className="flex items-center gap-2">
+              <Gauge className="w-4 h-4" />
+              Скорость
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="pulse">
@@ -345,6 +349,10 @@ const Admin = () => {
 
           <TabsContent value="client-errors">
             <AdminClientErrors />
+          </TabsContent>
+
+          <TabsContent value="web-vitals">
+            <AdminWebVitals />
           </TabsContent>
         </Tabs>
       </div>
