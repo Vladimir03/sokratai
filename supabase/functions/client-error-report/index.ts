@@ -25,6 +25,10 @@
  */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { logAnalyticsEvent } from "../_shared/analytics.ts";
+// Маски маршрутов — ОБЩИЕ с web-vitals-report (2026-07-26). Локальная копия
+// удалена: разъехавшиеся маски дают либо утёкший bearer-токен, либо два
+// написания одного маршрута в /admin. См. _shared/sanitize-route.ts.
+import { sanitizeRoute } from "../_shared/sanitize-route.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY =
@@ -39,7 +43,6 @@ const CORS_HEADERS = {
 
 const MESSAGE_MAX = 400;
 const UA_MAX = 300;
-const ROUTE_MAX = 200;
 const MAX_BODY_BYTES = 8 * 1024;
 // Неизвестный kind вырождается в "screen" (см. ниже) — поэтому фронт можно
 // катить раньше этой функции (edge деплоит Lovable-синк, rule 95).
@@ -81,35 +84,6 @@ function ipAllowed(ip: string): boolean {
   }
   w.count += 1;
   return w.count <= IP_WINDOW_MAX;
-}
-
-/**
- * Bearer-маршруты маскируются ЦЕЛИКОМ по префиксу (ревью P1: короткие
- * 8-символьные slug'и /invite и /p/* не ловятся эвристикой по длине).
- */
-const ROUTE_MASKS: Array<[RegExp, string]> = [
-  [/^\/c\/.+/i, "/c/:token"],
-  [/^\/invite\/.+/i, "/invite/:code"],
-  [/^\/p\/mock-result\/.+/i, "/p/mock-result/:slug"],
-  [/^\/p\/.+/i, "/p/:slug"],
-];
-
-/** pathname без query/hash + маскировка динамических сегментов. */
-function sanitizeRoute(raw: unknown): string {
-  if (typeof raw !== "string" || !raw.startsWith("/")) return "/";
-  const pathname = raw.split("?")[0].split("#")[0];
-  for (const [re, masked] of ROUTE_MASKS) {
-    if (re.test(pathname)) return masked;
-  }
-  const masked = pathname
-    .split("/")
-    .map((seg) =>
-      /^[0-9a-f-]{16,}$/i.test(seg) || /^[A-Za-z0-9_-]{16,}$/.test(seg) || /^\d+$/.test(seg)
-        ? ":id"
-        : seg,
-    )
-    .join("/");
-  return masked.slice(0, ROUTE_MAX);
 }
 
 /**

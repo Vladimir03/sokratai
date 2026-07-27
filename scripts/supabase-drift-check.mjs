@@ -44,13 +44,20 @@ function parseConfigFunctions(text) {
 
 function parseWorkflowDeploys(text) {
   const map = new Map();
-  const regex = /supabase functions deploy\s+([a-z0-9-]+)(?:\s+--no-verify-jwt)?/gi;
+  // ФЛАГ ИЩЕМ ДО КОНЦА СТРОКИ, а не сразу после имени (фикс 2026-07-26).
+  // Прежний `([a-z0-9-]+)(?:\s+--no-verify-jwt)?` требовал флаг ВПЛОТНУЮ к
+  // имени, тогда как реальная команда — `deploy <name> --project-ref "$REF"
+  // --no-verify-jwt`. Опциональная группа не матчилась никогда, и проверка
+  // объявляла ЛОЖНЫЙ дрейф для КАЖДОЙ публичной функции (client-error-report,
+  // email-verify, все oauth-*, telegram-*). Отчёт из 20 фантомных строк
+  // читается как «здесь всегда шумит» — и настоящий дрейф в нём утонул бы.
+  const regex = /supabase functions deploy\s+([a-z0-9-]+)([^\n]*)/gi;
   let match;
 
   while ((match = regex.exec(text)) !== null) {
-    const full = match[0];
     const name = match[1];
-    map.set(name, full.includes("--no-verify-jwt"));
+    const args = match[2] ?? "";
+    map.set(name, args.includes("--no-verify-jwt"));
   }
 
   return map;

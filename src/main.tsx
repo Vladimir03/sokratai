@@ -7,6 +7,7 @@ import { initPwaInstallCapture } from "./lib/pwaInstall";
 import { installChunkReloadGuards, markChunkReloadResolved } from "./lib/chunkReload";
 import { reportClientError } from "./lib/clientErrorReport";
 import { installGlobalErrorReporter } from "./lib/globalErrorReporter";
+import { installWebVitals } from "./lib/webVitals";
 
 // Авто-восстановление при «Failed to fetch dynamically imported module» — ДО
 // всего остального: стейл-чанк после деплоя / DPI-обрыв → тихая перезагрузка,
@@ -17,6 +18,11 @@ installChunkReloadGuards((message) => reportClientError(message, "chunk"));
 // Глобальная телеметрия uncaught-ошибок. Ставится ПОСЛЕ chunk-гарда: chunk-
 // ошибками владеет он, репортер их пропускает (иначе двойные записи).
 installGlobalErrorReporter();
+
+// Полевые Core Web Vitals. ДО рендера: TTFB и FCP наступают раньше маунта
+// React, и подписка после него их бы не увидела. Замеры копятся и уходят
+// одним батчем, когда страница скрывается.
+installWebVitals();
 
 // Регистрируем Service Worker для offline работы
 registerServiceWorker();

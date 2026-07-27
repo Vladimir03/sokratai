@@ -19,9 +19,10 @@ import { AdminHomeworkChats } from "@/components/admin/AdminHomeworkChats";
 import { AdminAiQuality } from "@/components/admin/AdminAiQuality";
 import { AdminTutorPlans } from "@/components/admin/AdminTutorPlans";
 import { AdminClientErrors } from "@/components/admin/AdminClientErrors";
+import { AdminWebVitals } from "@/components/admin/AdminWebVitals";
 import { AdminSegmentsChart, SegmentsData } from "@/components/admin/AdminSegmentsChart";
 import { AdminTopUsers, TopUser } from "@/components/admin/AdminTopUsers";
-import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, Sparkles, GraduationCap, Wallet, AlertTriangle, HeartPulse } from "lucide-react";
+import { ArrowLeft, RefreshCw, Shield, CalendarIcon, BarChart3, MessageSquare, CreditCard, Sparkles, GraduationCap, Wallet, AlertTriangle, HeartPulse, Gauge } from "lucide-react";
 import { PulseDashboard } from "@/components/admin/pulse/PulseDashboard";
 import { cn } from "@/lib/utils";
 

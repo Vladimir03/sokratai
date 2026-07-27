@@ -115,6 +115,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = true
   [functions.tutor-update-student]
     verify_jwt = true
+  [functions.web-vitals-report]
+    verify_jwt = false
   [functions.yookassa-create-payment]
     verify_jwt = true
   [functions.yookassa-webhook]

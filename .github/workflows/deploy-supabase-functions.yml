@@ -75,6 +75,7 @@ jobs:
           supabase functions deploy student-set-password --project-ref "$REF" --no-verify-jwt
           supabase functions deploy telegram-migrate-push --project-ref "$REF" --no-verify-jwt
           supabase functions deploy client-error-report --project-ref "$REF" --no-verify-jwt
+          supabase functions deploy web-vitals-report --project-ref "$REF" --no-verify-jwt
           supabase functions deploy oauth-google-init --project-ref "$REF" --no-verify-jwt
           supabase functions deploy oauth-google-callback --project-ref "$REF" --no-verify-jwt
           supabase functions deploy oauth-yandex-init --project-ref "$REF" --no-verify-jwt
