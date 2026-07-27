@@ -1034,6 +1034,21 @@ for (const [needle, why] of [
     fail(`scripts/deploy/deploy.sh: потерян «${needle}» в КОДЕ (не в комментарии) — ${why}`);
   }
 }
+// `npm ci --prefer-offline` ЗАПРЕЩЁН: флаг берёт метаданные пакетов из кэша
+// машины без ревалидации, поэтому деплой падает на версии, которая в реестре
+// есть, а в кэше VPS ещё нет (`ETARGET notarget ... picomatch@4.0.5`,
+// 2026-07-27 — третий оборванный деплой подряд). Детерминизм версий держит лок,
+// а не кэш. Проверяем именно строку установки, чтобы не запретить флаг там, где
+// он безобиден (напр. в комментарии-инструкции).
+for (const line of deployCode.split("\n")) {
+  if (!/\bnpm\s+ci\b/.test(line)) continue;
+  if (/--prefer-offline/.test(line)) {
+    fail(
+      `scripts/deploy/deploy.sh: «${line.trim()}» — --prefer-offline у npm ci ЗАПРЕЩЁН: ` +
+        "npm доверяет устаревшим метаданным кэша VPS и деплой падает ETARGET на существующей в реестре версии",
+    );
+  }
+}
 // Порядок «ассеты → корень»: merge пула обязан идти раньше замены корня, иначе
 // новый index.html может сослаться на ещё не залитый чанк.
 const assetsRsyncIdx = deployCode.indexOf("--size-only");
@@ -1064,10 +1079,16 @@ if (fs.existsSync(stubPath)) {
   warn("scripts/deploy/deploy-sokratai.stub.sh отсутствует — пропускаю проверку lock/branch-гардов");
 }
 const bashProbe = spawnSync("bash", ["-n", deployScriptPath], { cwd: rootDir, encoding: "utf8" });
-if (bashProbe.error) {
-  warn("bash недоступен — пропускаю синтаксическую проверку deploy.sh (на VPS её делает стаб)");
+const bashStderr = bashProbe.stderr ?? "";
+// `bash -n` сообщает о синтаксисе с префиксом имени файла (`deploy.sh: line N:`).
+// Если имени в stderr нет — упал не парсер, а сам интерпретатор: под Windows
+// `bash` в PATH нередко оказывается WSL-заглушкой без дистрибутива
+// (`execvpe(/bin/bash) failed`), и это давало ложный fail на корректном скрипте.
+const bashRan = bashProbe.status === 0 || /deploy\.sh/.test(bashStderr);
+if (bashProbe.error || !bashRan) {
+  warn("bash недоступен (или это WSL-заглушка) — пропускаю синтаксическую проверку deploy.sh (на VPS её делает стаб)");
 } else if (bashProbe.status !== 0) {
-  console.error(bashProbe.stderr ?? "");
+  console.error(bashStderr);
   fail("scripts/deploy/deploy.sh: синтаксическая ошибка (bash -n)");
 }
 ok("shell + deploy invariants pass (нет modulepreload /src/*, деплой сохраняет retention)");

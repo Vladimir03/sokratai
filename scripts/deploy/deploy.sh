@@ -19,6 +19,8 @@
 #      /.well-known/acme-challenge и тихо сломает продление TLS.
 #   5. Валидация dist ДО касания прода: упавший/OOM-нутый билд обязан
 #      оставить прод байт-в-байт (у VPS 1 GB RAM + 2 GB swap).
+#   6. `npm ci` БЕЗ `--prefer-offline`: деплой не должен зависеть от свежести
+#      npm-кэша машины (см. шаг 2/10).
 #
 # RETENTION_DAYS = контракт: сколько живёт устаревшая вкладка пользователя.
 #
@@ -92,7 +94,13 @@ fi
 SHA=$(git rev-parse --short HEAD)
 
 log "2/10 npm ci"
-npm ci --prefer-offline --no-audit --no-fund
+# БЕЗ --prefer-offline. Тот флаг заставлял npm брать МЕТАДАННЫЕ пакетов из
+# локального кэша без ревалидации, и деплой падал на версии, которая в реестре
+# есть, а в кэше VPS ещё нет: `ETARGET notarget No matching version found for
+# picomatch@4.0.5` (2026-07-27, третий оборванный деплой подряд). Детерминизм
+# версий даёт ЛОК, а не кэш; экономия ~40 сек не стоит зависимости деплоя от
+# свежести кэша конкретной машины. Гард — smoke-check §21.
+npm ci --no-audit --no-fund
 
 log "3/10 build ($SHA)"
 # postbuild-хук генерит dist/invite-og.html (scripts/generate-og-variants.mjs)
