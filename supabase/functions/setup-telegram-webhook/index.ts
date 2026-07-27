@@ -13,6 +13,25 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Ops-эндпоинт: перенастраивает webhook БОЕВОГО бота. До 2026-07-27
+  // исполнялся БЕЗ какой-либо авторизации — любой, кто знает URL, дёргал
+  // Telegram setWebhook (аудит declared-vs-live 2026-07-27).
+  // Гард fail-closed и на том же SCHEDULER_SECRET, что у cron-функций
+  // (notify-booking и др.) — секрет уже заведён, новых ops-шагов не нужно.
+  // Автовызовов у функции нет: ни CI, ни pg_cron, ни клиент её не дёргают,
+  // поэтому гард ничего не ломает — только ручной запуск станет с секретом.
+  const authHeader = req.headers.get('Authorization');
+  const expectedSecret = Deno.env.get('SCHEDULER_SECRET');
+  if (!expectedSecret || authHeader !== `Bearer ${expectedSecret}`) {
+    return new Response(
+      JSON.stringify({
+        error: 'Требуется ops-секрет. Вызывать вручную с SCHEDULER_SECRET.',
+        code: 'UNAUTHORIZED',
+      }),
+      { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    );
+  }
+
   try {
     if (!TELEGRAM_BOT_TOKEN) {
       throw new Error('TELEGRAM_BOT_TOKEN is not set');

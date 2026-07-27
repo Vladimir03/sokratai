@@ -5,6 +5,12 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.admin-ceo-dashboard]
     verify_jwt = false
+  [functions.admin-crm]
+    verify_jwt = false
+  [functions.admin-homework]
+    verify_jwt = false
+  [functions.admin-mock-exams]
+    verify_jwt = false
   [functions.assign-tutor-role]
     verify_jwt = false
   [functions.auth-email-hook]
@@ -13,20 +19,16 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.chat]
     verify_jwt = false
-  [functions.check-solutions]
-    verify_jwt = false
   [functions.claim-invite]
     verify_jwt = true
   [functions.client-error-report]
     verify_jwt = false
   [functions.email-verify]
     verify_jwt = false
-  [functions.get-solution]
-    verify_jwt = false
   [functions.health-check]
     verify_jwt = false
   [functions.homework-api]
-    verify_jwt = false
+    verify_jwt = true
   [functions.homework-generate-reference]
     verify_jwt = false
   [functions.homework-reminder]
@@ -48,6 +50,8 @@ project_id = "vrsseotrfmsxpbciyqzc"
   [functions.mock-exam-student-api]
     verify_jwt = false
   [functions.mock-exam-tutor-api]
+    verify_jwt = false
+  [functions.notify-booking]
     verify_jwt = false
   [functions.oauth-google-callback]
     verify_jwt = false

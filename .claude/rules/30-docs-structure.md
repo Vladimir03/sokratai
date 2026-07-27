@@ -16,7 +16,7 @@ docs/
 │   ├── features/        # Per-feature folders (spec + tasks + prompts)
 │   └── engineering/     # Architecture, auth, DB, telegram, overview
 │
-└── misc/                # Uncategorized (rag-bot-setup, etc.)
+└── misc/                # Uncategorized
 ```
 
 ## Rules

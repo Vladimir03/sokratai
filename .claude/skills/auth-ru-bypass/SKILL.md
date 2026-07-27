@@ -263,7 +263,7 @@ https://api.sokratai.ru/functions/v1/email-verify?token_hash={{ .TokenHash }}&ty
    ```yaml
    supabase functions deploy NEW_FUNCTION --no-verify-jwt
    ```
-3. Запусти `node scripts/supabase-drift-check.mjs` — должно показать `deploy not in config: (none)`
+3. Запусти `node scripts/supabase-drift-check.mjs` — должно показать `config not in deploy: (none)` **и** `deploy not in config: (none)`. Именно первая строка ловит симптом ниже (функция в репо, но её никто не деплоит); вторая — обратный случай. Если функцию сознательно деплоит Lovable-синк, а не workflow, её имя идёт в `DEPLOYED_OUTSIDE_WORKFLOW` внутри скрипта — иначе она навсегда останется в отчёте.
 
 **Симптом нарушения:** edge function существует в `supabase/functions/` но не deploy'ится на production → 404 для всех вызовов.
 
