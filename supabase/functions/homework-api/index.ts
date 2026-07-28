@@ -9525,6 +9525,12 @@ async function handleGetStudentProblem(
       max_score: targetTask.max_score,
       check_format: targetTask.check_format,
       task_kind: targetTask.task_kind,
+      // options_json (2026-07-28): варианты структурного теста. Поле уже было
+      // в SELECT, но объект ответа собирается ЯВНЫМ списком — без этой строки
+      // варианты не доезжали до ученика вообще. options_json student-safe
+      // (GRANT 20260727130000); ключ ответа остаётся в correct_answer, которого
+      // в этом SELECT нет.
+      options_json: targetTask.options_json ?? null,
     },
     task_total: tasks.length,
     task_score: taskScore,
