@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BadgeCheck, ChevronDown, ChevronUp, Loader2, Paperclip, Pencil, Send, X } from 'lucide-react';
 import { MathText } from '@/components/kb/ui/MathText';
-import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { normalizeOptionsJson } from '@/lib/taskOptions';
 import { toast } from 'sonner';
 import {

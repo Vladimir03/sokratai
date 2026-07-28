@@ -2,6 +2,8 @@ import { ChevronDown, ChevronUp, HelpCircle, Info, Lightbulb } from 'lucide-reac
 import { lazy, Suspense, useState } from 'react';
 import { StepIndicator } from './StepIndicator';
 import { TaskImagesGallery } from './TaskImagesGallery';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
+import { normalizeOptionsJson } from '@/lib/taskOptions';
 import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 
 const MathText = lazy(() =>
@@ -76,6 +78,13 @@ export interface ProblemContextTask {
   task_kind: 'numeric' | 'extended' | 'proof' | 'speaking';
   /** Plain task text (may contain inline `$…$` KaTeX). */
   body: string;
+  /**
+   * options_json (2026-07-28): варианты структурного теста. Рендерятся
+   * пронумерованным списком ПОД условием — как в бумажном КИМе, где варианты
+   * часть задания, а ответ ученик записывает цифрами (решение владельца).
+   * Ключ верного ответа сюда не приходит: student-API его не отдаёт (rule 40).
+   */
+  options_json?: unknown;
   /**
    * Dual-format `task_image_url` (single `storage://...` ref OR JSON-array).
    * Resolved through `parseAttachmentUrls` inside `TaskImagesGallery`.
@@ -161,6 +170,7 @@ export function ProblemContext({
   // popover-зависимостей (rule performance.md — ничего тяжёлого в hot-path).
   const [independenceOpen, setIndependenceOpen] = useState(false);
   const independenceHintId = `independence-hint-${task.task_id}`;
+  const structuredOptions = normalizeOptionsJson(task.options_json ?? null);
   return (
     <section
       aria-labelledby={headerId}
@@ -297,6 +307,23 @@ export function ProblemContext({
               <MathText text={task.body} className="block whitespace-pre-wrap" />
             </Suspense>
           </div>
+
+          {/* options_json: варианты — часть условия, а не способ ввода. Ответ
+              ученик записывает цифрами в поле ниже, как на ЕГЭ/ОГЭ. Пометок
+              верных здесь нет и быть не может: correct_answer в student-API
+              не входит (GRANT + column-whitelist, rule 40). */}
+          {structuredOptions ? (
+            <div className="mt-2.5">
+              <TaskOptionsList options={structuredOptions} />
+              <p className="mt-1.5 text-[12.5px] text-slate-500">
+                {structuredOptions.kind === 'matching'
+                  ? 'Запиши номера в порядке позиций левого столбца, без пробелов.'
+                  : structuredOptions.kind === 'single_choice'
+                    ? 'Запиши номер верного варианта.'
+                    : 'Запиши номера верных вариантов без пробелов, например 135.'}
+              </p>
+            </div>
+          ) : null}
 
           {/* Task images gallery — multi-photo (≤5), under body so the text
               stays the leading element. Q9 + Q10 from preview QA #1

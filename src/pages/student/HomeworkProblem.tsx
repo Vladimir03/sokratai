@@ -24,8 +24,6 @@ import {
   getSubmitSheetDraftKey,
 } from '@/components/student/homework-problem/submitSheetInternal';
 import { NumericAnswerComposer } from '@/components/student/homework-problem/NumericAnswerComposer';
-import { StructuredAnswerPanel } from '@/components/student/homework-problem/StructuredAnswerPanel';
-import { normalizeOptionsJson } from '@/lib/taskOptions';
 import { SubmitNudgeBanner } from '@/components/student/homework-problem/SubmitNudgeBanner';
 import { PostSubmissionNudge } from '@/components/pwa/PostSubmissionNudge';
 import { ChatChipRow } from '@/components/student/homework-problem/ChatChipRow';
@@ -173,13 +171,6 @@ export default function HomeworkProblem() {
   // (старый бэкенд) → обычная домашка.
   const isIndependent = data?.assignment.work_mode === 'independent';
   const isWorkCompleted = data?.thread?.status === 'completed';
-  // options_json (2026-07-27): структурный тест — вместо текстового ввода
-  // рендерится панель вариантов; не парсится → обычный ввод (deploy-skew-safe).
-  const structuredOptions = useMemo(
-    () => normalizeOptionsJson(data?.task.options_json ?? null),
-    [data?.task.options_json],
-  );
-
   // Lock html/body overflow while the problem screen is mounted —
   // prevents an outer page-level scrollbar on mobile when
   // visualViewport briefly reports a height larger than the actual
@@ -1443,6 +1434,9 @@ export default function HomeworkProblem() {
       independence_is_estimate: data.task_independence_is_estimate ?? false,
       task_kind: data.task.task_kind,
       body: data.task.task_text,
+      // options_json (2026-07-28): варианты идут в условие, а не в композер —
+      // ученик записывает цифры, как на ЕГЭ/ОГЭ (решение владельца).
+      options_json: data.task.options_json ?? null,
       image_url: data.task.task_image_url,
       done_task_indices: doneIndices,
       hint_count: hintCount,
@@ -1948,18 +1942,11 @@ export default function HomeworkProblem() {
         </div>
       ) : null}
 
-      {data.task.task_kind === 'numeric' && structuredOptions && !isCurrentCompleted ? (
-        // options_json: панель вариантов вместо текстового ввода. key = task.id —
-        // сброс выбора при переходе между задачами.
-        <StructuredAnswerPanel
-          key={data.task.id}
-          options={structuredOptions}
-          disabled={isStreaming}
-          isSubmitting={isInlineAnswerSubmitting}
-          isIndependent={isIndependent}
-          onSubmit={(serialized) => void handleInlineAnswerSubmit(serialized)}
-        />
-      ) : data.task.task_kind === 'numeric' ? (
+      {/* options_json (2026-07-28): панель выбора вариантов ЗАМЕНЕНА на обычный
+          ввод цифр — как на ЕГЭ/ОГЭ (решение владельца). Варианты ученик видит
+          в условии (ProblemContext), а в ответ записывает номера. Клик по
+          вариантам тренировал бы узнавание вместо воспроизведения. */}
+      {data.task.task_kind === 'numeric' ? (
         <NumericAnswerComposer
           answerDraft={answerDraft}
           onAnswerDraftChange={setAnswerDraft}
@@ -2002,9 +1989,10 @@ export default function HomeworkProblem() {
           uses SubmitCtaBar in the left aside). */}
       {/* homework-work-modes: numeric+tablet рендерил этот блок только ради
           discussion-композера — в самостоятельной он не нужен вовсе. */}
-      {/* options_json: у структурного теста NumericAnswerComposer заменён панелью
-          вариантов (без discussion-строки) → chat-композер нужен и на мобиле. */}
-      {(!isSpeaking && (data.task.task_kind !== 'numeric' || ((isTabletPlus || Boolean(structuredOptions)) && !isIndependent))) ? (
+      {/* options_json (2026-07-28): исключение под панель вариантов убрано —
+          структурный тест снова использует NumericAnswerComposer, а у него
+          discussion-строка своя. Условие вернулось к исходному. */}
+      {(!isSpeaking && (data.task.task_kind !== 'numeric' || (isTabletPlus && !isIndependent))) ? (
       <div className="flex flex-col gap-2 bg-white border-t border-socrat-border-light px-2.5 pt-2 pb-2.5 shrink-0">
         {/* Primary CTA — mobile-only AND extended/proof-only.
             - Tablet/desktop: SubmitCtaBar in the left aside owns it

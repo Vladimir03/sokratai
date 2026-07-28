@@ -19,7 +19,7 @@
 
 import { memo } from 'react';
 import { MathText } from '@/components/kb/ui/MathText';
-import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
 import { normalizeOptionsJson } from '@/lib/taskOptions';
 

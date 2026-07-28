@@ -27,7 +27,7 @@ import {
 } from '@/lib/attachmentRefs';
 import { compressForUpload } from '@/lib/imageCompression';
 import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
-import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { validateStructuredAnswer } from '@/lib/taskAnswerValidation';
 import { usePasteImages } from '@/hooks/usePasteImages';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';

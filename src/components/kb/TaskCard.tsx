@@ -5,7 +5,7 @@ import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
-import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
 import { cn } from '@/lib/utils';

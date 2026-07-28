@@ -34,7 +34,7 @@ import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import type { HWDraftTask } from '@/types/kb';
 import { deriveTaskKindFromCheckFormat } from '@/lib/checkFormatHelpers';
 import { normalizeOptionsJson } from '@/lib/taskOptions';
-import { TaskOptionsList } from '@/components/kb/ui/TaskOptionsList';
+import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { validateStructuredAnswer } from '@/lib/taskAnswerValidation';
 
 interface DraftTaskRowProps {
