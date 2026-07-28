@@ -212,6 +212,154 @@ export type Database = {
         }
         Relationships: []
       }
+      board_pages: {
+        Row: {
+          app_state: Json
+          background: string
+          board_id: string
+          created_at: string
+          elements: Json
+          grid_mm: number
+          id: string
+          page_index: number
+          updated_at: string
+        }
+        Insert: {
+          app_state?: Json
+          background?: string
+          board_id: string
+          created_at?: string
+          elements?: Json
+          grid_mm?: number
+          id?: string
+          page_index?: number
+          updated_at?: string
+        }
+        Update: {
+          app_state?: Json
+          background?: string
+          board_id?: string
+          created_at?: string
+          elements?: Json
+          grid_mm?: number
+          id?: string
+          page_index?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_pages_board_id_fkey"
+            columns: ["board_id"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_sessions: {
+        Row: {
+          board_id: string
+          chalk_holder: string | null
+          ended_at: string | null
+          id: string
+          lesson_id: string | null
+          started_at: string
+        }
+        Insert: {
+          board_id: string
+          chalk_holder?: string | null
+          ended_at?: string | null
+          id?: string
+          lesson_id?: string | null
+          started_at?: string
+        }
+        Update: {
+          board_id?: string
+          chalk_holder?: string | null
+          ended_at?: string | null
+          id?: string
+          lesson_id?: string | null
+          started_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_sessions_board_id_fkey"
+            columns: ["board_id"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_sessions_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      boards: {
+        Row: {
+          created_at: string
+          export_material_id: string | null
+          id: string
+          lesson_id: string | null
+          student_id: string | null
+          title: string | null
+          tutor_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          export_material_id?: string | null
+          id?: string
+          lesson_id?: string | null
+          student_id?: string | null
+          title?: string | null
+          tutor_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          export_material_id?: string | null
+          id?: string
+          lesson_id?: string | null
+          student_id?: string | null
+          title?: string | null
+          tutor_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "boards_export_material_id_fkey"
+            columns: ["export_material_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lesson_materials"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boards_lesson_id_fkey"
+            columns: ["lesson_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boards_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "boards_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       broadcast_logs: {
         Row: {
           broadcast_type: string
@@ -4910,6 +5058,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      board_owned_by_tutor: { Args: { _board_id: string }; Returns: boolean }
       book_lesson_slot: {
         Args: {
           _booking_link: string
