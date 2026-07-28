@@ -1,3 +1,7 @@
+// ПЕРВЫМ импортом: side-effect модуль патчит прототипы для Safari/iOS 15.0–15.3
+// (Array.at / Object.hasOwn — их тянут jspdf и svg2pdf.js). Порядок важен:
+// зависимости вычисляются в порядке импортов, поэтому патч должен стоять выше App.
+import "./lib/compat/legacySafari";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";

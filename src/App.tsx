@@ -83,6 +83,8 @@ const TutorMockExamVariantEditor = lazy(() => import("./pages/tutor/mock-exams/T
 const TutorMockExamDetail = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamDetail"));
 const TutorMockExamReview = lazy(() => import("./pages/tutor/mock-exams/TutorMockExamReview"));
 const TutorProfile = lazy(() => import("./pages/tutor/TutorProfile"));
+const TutorBoards = lazy(() => import("./pages/tutor/TutorBoards"));
+const Whiteboard = lazy(() => import("./pages/tutor/Whiteboard"));
 const AppFrame = lazy(() =>
   import("./components/tutor/chrome/AppFrame").then((m) => ({ default: m.AppFrame })),
 );
@@ -523,6 +525,11 @@ const App = () => (
               <Route path="mock-exams/:id/review/:studentId" element={<TutorMockExamReview />} />
               <Route path="mock-exams/:id" element={<TutorMockExamDetail />} />
               <Route path="mock-exams" element={<TutorMockExams />} />
+              {/* board/lesson/:lessonId ДО board/:boardId — иначе "lesson"
+                  захватится как идентификатор доски. */}
+              <Route path="board/lesson/:lessonId" element={<Whiteboard />} />
+              <Route path="board/:boardId" element={<Whiteboard />} />
+              <Route path="board" element={<TutorBoards />} />
               <Route path="assistant" element={<RedirectTutorAssistant />} />
               <Route path="knowledge/topic/:topicId" element={<CatalogTopicPage />} />
               <Route path="knowledge/ai-loader" element={<AiTaskLoaderPage />} />

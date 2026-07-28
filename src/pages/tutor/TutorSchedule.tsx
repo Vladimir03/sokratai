@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet, Ban } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet, Ban, PenLine } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -529,6 +530,8 @@ function GroupDetailsDialog({
   onOpenMaterials,
   students = [],
 }: GroupDetailsDialogProps) {
+  // См. комментарий у LessonDetailsDialog: доска открывается маршрутом-резолвером.
+  const navigate = useNavigate();
   const [moveDateTimeValue, setMoveDateTimeValue] = useState('');
   const [isActionSaving, setIsActionSaving] = useState(false);
   const [actionSummary, setActionSummary] = useState<GroupActionSummary | null>(null);
@@ -1347,6 +1350,17 @@ function GroupDetailsDialog({
                 >
                   <FileText className="mr-1.5 h-4 w-4" />
                   Материалы
+                </Button>
+              )}
+              {isUnifiedGroupLesson && mainLesson && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  style={{ touchAction: 'manipulation' }}
+                  onClick={() => navigate(`/tutor/board/lesson/${mainLesson.id}`)}
+                >
+                  <PenLine className="mr-1.5 h-4 w-4" />
+                  Доска
                 </Button>
               )}
               {isUnifiedGroupLesson && (
@@ -2949,6 +2963,10 @@ function LessonDetailsDialog({
   onOpenMaterials,
   onOpenPostLesson,
 }: LessonDetailsDialogProps) {
+  // Доска открывается по маршруту-резолверу /board/lesson/:id — она сама
+  // найдёт-или-создаст доску занятия. Так в этом high-risk файле остаётся
+  // чистая навигация, без async-логики и обработки ошибок.
+  const navigate = useNavigate();
   const [isCancelling, setIsCancelling] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -3509,6 +3527,14 @@ function LessonDetailsDialog({
               >
                 <FileText className="mr-1.5 h-4 w-4" />
                 Материалы
+              </Button>
+              <Button
+                variant="outline"
+                style={{ touchAction: 'manipulation' }}
+                onClick={() => navigate(`/tutor/board/lesson/${lesson.id}`)}
+              >
+                <PenLine className="mr-1.5 h-4 w-4" />
+                Доска
               </Button>
               <Button
                 variant="ghost"

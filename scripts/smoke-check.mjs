@@ -502,6 +502,10 @@ console.log("8. Homework constructor write-form query invariant (Phase 10, 2026-
 const writeFormPages = [
   // Pages with edit mode + local form state from server data:
   "src/pages/tutor/TutorHomeworkCreate.tsx",
+  // Онлайн-доска: на холсте лежит несохранённый рукописный ввод, фоновый
+  // refetch затёр бы его. Сейчас страница грузится без useQuery (проверка
+  // проходит вхолостую) — запись здесь фиксирует инвариант на будущее.
+  "src/pages/tutor/Whiteboard.tsx",
 ];
 
 const useQueryRe = /useQuery\s*\(\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\)/g;

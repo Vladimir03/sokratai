@@ -10,6 +10,7 @@ import {
   CreditCard,
   LogOut,
   MessagesSquare,
+  PenLine,
   LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -45,6 +46,9 @@ const NAV_GROUPS: readonly NavGroupDef[] = [
     items: [
       { href: '/tutor/home', icon: LayoutDashboard, label: 'Главная' },
       { href: '/tutor/schedule', icon: CalendarDays, label: 'Расписание' },
+      // Доска — инструмент времени урока, поэтому стоит рядом с расписанием,
+      // а не в «Материалах»: материалом она становится уже после занятия.
+      { href: '/tutor/board', icon: PenLine, label: 'Доска' },
       {
         href: '/tutor/homework',
         icon: BookOpen,
@@ -98,6 +102,7 @@ const PREFETCH_MAP: Record<string, () => Promise<unknown>> = {
   '/tutor/home': () => import('@/pages/tutor/TutorHome'),
   '/tutor/chat': () => import('@/pages/tutor/TutorChat'),
   '/tutor/schedule': () => import('@/pages/tutor/TutorSchedule'),
+  '/tutor/board': () => import('@/pages/tutor/TutorBoards'),
   '/tutor/homework': () => import('@/pages/tutor/TutorHomework'),
   '/tutor/mock-exams': () => import('@/pages/tutor/mock-exams/TutorMockExams'),
   '/tutor/students': () => import('@/pages/tutor/TutorStudents'),
