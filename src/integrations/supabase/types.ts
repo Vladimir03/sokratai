@@ -212,6 +212,103 @@ export type Database = {
         }
         Relationships: []
       }
+      board_guests: {
+        Row: {
+          board_id: string
+          created_at: string
+          display_name: string
+          guest_token: string
+          id: string
+          last_seen_at: string
+          revoked_at: string | null
+          share_link_id: string
+          tutor_student_id: string | null
+        }
+        Insert: {
+          board_id: string
+          created_at?: string
+          display_name: string
+          guest_token?: string
+          id?: string
+          last_seen_at?: string
+          revoked_at?: string | null
+          share_link_id: string
+          tutor_student_id?: string | null
+        }
+        Update: {
+          board_id?: string
+          created_at?: string
+          display_name?: string
+          guest_token?: string
+          id?: string
+          last_seen_at?: string
+          revoked_at?: string | null
+          share_link_id?: string
+          tutor_student_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_guests_board_id_fkey"
+            columns: ["board_id"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_guests_share_link_id_fkey"
+            columns: ["share_link_id"]
+            isOneToOne: false
+            referencedRelation: "board_share_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_guests_tutor_student_id_fkey"
+            columns: ["tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_page_revs: {
+        Row: {
+          board_id: string
+          page_id: string
+          rev: number
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          board_id: string
+          page_id: string
+          rev?: number
+          updated_at?: string
+          updated_by?: string
+        }
+        Update: {
+          board_id?: string
+          page_id?: string
+          rev?: number
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_page_revs_board_id_fkey"
+            columns: ["board_id"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_page_revs_page_id_fkey"
+            columns: ["page_id"]
+            isOneToOne: true
+            referencedRelation: "board_pages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       board_pages: {
         Row: {
           app_state: Json
@@ -223,6 +320,7 @@ export type Database = {
           id: string
           page_index: number
           updated_at: string
+          zone_tutor_student_id: string | null
         }
         Insert: {
           app_state?: Json
@@ -234,6 +332,7 @@ export type Database = {
           id?: string
           page_index?: number
           updated_at?: string
+          zone_tutor_student_id?: string | null
         }
         Update: {
           app_state?: Json
@@ -245,6 +344,7 @@ export type Database = {
           id?: string
           page_index?: number
           updated_at?: string
+          zone_tutor_student_id?: string | null
         }
         Relationships: [
           {
@@ -252,6 +352,13 @@ export type Database = {
             columns: ["board_id"]
             isOneToOne: false
             referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_pages_zone_tutor_student_id_fkey"
+            columns: ["zone_tutor_student_id"]
+            isOneToOne: false
+            referencedRelation: "tutor_students"
             referencedColumns: ["id"]
           },
         ]
@@ -294,6 +401,51 @@ export type Database = {
             columns: ["lesson_id"]
             isOneToOne: false
             referencedRelation: "tutor_lessons"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_share_links: {
+        Row: {
+          board_id: string
+          created_at: string
+          expires_at: string | null
+          id: string
+          revoked_at: string | null
+          slug: string
+          tutor_id: string
+        }
+        Insert: {
+          board_id: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          revoked_at?: string | null
+          slug: string
+          tutor_id: string
+        }
+        Update: {
+          board_id?: string
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          revoked_at?: string | null
+          slug?: string
+          tutor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_share_links_board_id_fkey"
+            columns: ["board_id"]
+            isOneToOne: false
+            referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_share_links_tutor_id_fkey"
+            columns: ["tutor_id"]
+            isOneToOne: false
+            referencedRelation: "tutors"
             referencedColumns: ["id"]
           },
         ]
@@ -5402,6 +5554,7 @@ export type Database = {
         Args: { _assignment_id: string }
         Returns: boolean
       }
+      is_board_participant: { Args: { _board_id: string }; Returns: boolean }
       is_chat_conversation_member: {
         Args: { _conversation_id: string }
         Returns: boolean
