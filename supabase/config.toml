@@ -125,6 +125,10 @@ project_id = "vrsseotrfmsxpbciyqzc"
     verify_jwt = false
   [functions.whiteboard-api]
     verify_jwt = true
+  [functions.whiteboard-student-api]
+    verify_jwt = true
+  [functions.whiteboard-public]
+    verify_jwt = false
   [functions.yookassa-create-payment]
     verify_jwt = true
   [functions.yookassa-webhook]

@@ -27,6 +27,8 @@ export interface BoardPageRow {
   app_state: Record<string, unknown> | null;
   background: BoardBackground;
   grid_mm: BoardGridMm;
+  /** Зона ученика (рулон = несколько строк одного ученика); NULL — лист репетитора. */
+  zone_tutor_student_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -118,11 +120,22 @@ export async function deleteBoard(boardId: string): Promise<void> {
 /** POST /boards/:id/pages */
 export async function createBoardPage(
   boardId: string,
-  input: { background?: BoardBackground; grid_mm?: BoardGridMm } = {},
+  input: {
+    background?: BoardBackground;
+    grid_mm?: BoardGridMm;
+    app_state?: Record<string, unknown>;
+  } = {},
 ): Promise<BoardPageRow> {
   const res = await invokeWhiteboard<{ page: BoardPageRow }>(
     `/boards/${encodeURIComponent(boardId)}/pages`,
-    { method: 'POST', body: { background: input.background ?? 'grid', grid_mm: input.grid_mm ?? 5 } },
+    {
+      method: 'POST',
+      body: {
+        background: input.background ?? 'grid',
+        grid_mm: input.grid_mm ?? 5,
+        ...(input.app_state ? { app_state: input.app_state } : {}),
+      },
+    },
   );
   return res.page;
 }
@@ -135,6 +148,7 @@ export async function saveBoardPage(
     app_state?: Record<string, unknown>;
     background?: BoardBackground;
     grid_mm?: BoardGridMm;
+    zone_tutor_student_id?: string | null;
   },
 ): Promise<BoardPageRow> {
   const res = await invokeWhiteboard<{ page: BoardPageRow }>(
@@ -156,5 +170,31 @@ export async function getOrCreateLessonBoard(lessonId: string): Promise<BoardWit
   return invokeWhiteboard<BoardWithPages>(
     `/lessons/${encodeURIComponent(lessonId)}/board`,
     { method: 'GET' },
+  );
+}
+
+/** POST /boards/:id/zones — раздать рулоны-зоны по группе занятия (идемпотентно). */
+export async function distributeZones(boardId: string): Promise<BoardPageRow[]> {
+  const res = await invokeWhiteboard<{ pages: BoardPageRow[] }>(
+    `/boards/${encodeURIComponent(boardId)}/zones`,
+    { method: 'POST', body: {} },
+  );
+  return res.pages ?? [];
+}
+
+/** POST /boards/:id/share — создать/получить гостевую ссылку (slug — bearer, не логировать). */
+export async function ensureShareLink(boardId: string): Promise<string> {
+  const res = await invokeWhiteboard<{ slug: string }>(
+    `/boards/${encodeURIComponent(boardId)}/share`,
+    { method: 'POST', body: {} },
+  );
+  return res.slug;
+}
+
+/** DELETE /boards/:id/share — отозвать гостевую ссылку (гости отваливаются сразу). */
+export async function revokeShareLink(boardId: string): Promise<void> {
+  await invokeWhiteboard<{ ok: true }>(
+    `/boards/${encodeURIComponent(boardId)}/share`,
+    { method: 'DELETE' },
   );
 }

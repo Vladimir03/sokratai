@@ -192,6 +192,115 @@ export function nextFramePlacement(
   return { x: maxRight + FRAME_GAP_MM, y: atY };
 }
 
+// ─── Сетка Chattern (Этап 2, решение владельца 29.07 вечер) ────────────────────
+//
+// Листы сидят в ячейках виртуальной сетки: колонка шагом «портрет+зазор»,
+// ряд шагом «высота портрета+зазор». Свободного таскания нет — раскладка
+// выводится из (col, row), что даёт предсказуемый порядок PDF и ноль UX-работы
+// (модель, в которой Елена уже мыслит по Chattern).
+//
+// Групповая схема «полоса + рулоны» (идея Елены): row 0 — общая полоса
+// (теория/PDF, пишет репетитор), столбец col — «рулон» ученика (листы вниз,
+// row ≥ 1). Порядок экспорта: полоса слева-направо, затем рулоны по столбцам.
+//
+// Ландшафтный лист шире ячейки — занимает ДВЕ колонки (col и col+1).
+
+export interface FrameCell {
+  col: number;
+  row: number;
+}
+
+export const CELL_STEP_X_MM = PAGE_WIDTH_MM + FRAME_GAP_MM; // 200
+export const CELL_STEP_Y_MM = PAGE_HEIGHT_MM + FRAME_GAP_MM; // 287
+
+export function cellToPlacement(cell: FrameCell): FramePlacement {
+  return { x: cell.col * CELL_STEP_X_MM, y: cell.row * CELL_STEP_Y_MM };
+}
+
+/** Сколько колонок занимает лист (ландшафт шире ячейки → 2). */
+export function cellSpan(orientation: PageOrientation): number {
+  return orientation === 'landscape' ? 2 : 1;
+}
+
+export function normalizeFrameCell(raw: unknown, fallbackIndex: number): FrameCell {
+  const obj = raw as { col?: unknown; row?: unknown; x?: unknown; y?: unknown } | null | undefined;
+  if (
+    obj && typeof obj.col === 'number' && typeof obj.row === 'number' &&
+    Number.isInteger(obj.col) && Number.isInteger(obj.row) &&
+    obj.col >= 0 && obj.row >= 0
+  ) {
+    return { col: obj.col, row: obj.row };
+  }
+  // Совместимость с Этапом 1 (свободные {x,y} успели уехать в прод утром 29.07):
+  // привязываем к ближайшей ячейке.
+  if (obj && typeof obj.x === 'number' && typeof obj.y === 'number' && Number.isFinite(obj.x)) {
+    return {
+      col: Math.max(0, Math.round(obj.x / CELL_STEP_X_MM)),
+      row: Math.max(0, Math.round(obj.y / CELL_STEP_Y_MM)),
+    };
+  }
+  // Доски Фазы 1: листы ложатся в общую полосу слева направо.
+  return { col: fallbackIndex, row: 0 };
+}
+
+export function cellOccupied(
+  cell: FrameCell,
+  frames: { cell: FrameCell; orientation: PageOrientation }[],
+  span = 1,
+): boolean {
+  for (let c = cell.col; c < cell.col + span; c++) {
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      const fSpan = cellSpan(f.orientation);
+      if (f.cell.row === cell.row && c >= f.cell.col && c < f.cell.col + fSpan) return true;
+    }
+  }
+  return false;
+}
+
+/** Следующая свободная ячейка в общей полосе (row 0), справа. */
+export function nextCellInStrip(
+  frames: { cell: FrameCell; orientation: PageOrientation }[],
+  span = 1,
+): FrameCell {
+  let col = 0;
+  for (let i = 0; i < frames.length; i++) {
+    if (frames[i].cell.row !== 0) continue;
+    const end = frames[i].cell.col + cellSpan(frames[i].orientation);
+    if (end > col) col = end;
+  }
+  const cell = { col, row: 0 };
+  return cellOccupied(cell, frames, span) ? { col: col + 1, row: 0 } : cell;
+}
+
+/** Следующая ячейка ВНИЗ рулона-столбца (row ≥ 1 — под полосой). */
+export function nextCellInColumn(
+  col: number,
+  frames: { cell: FrameCell; orientation: PageOrientation }[],
+): FrameCell {
+  let row = 1;
+  for (let i = 0; i < frames.length; i++) {
+    if (frames[i].cell.col === col && frames[i].cell.row >= row) {
+      row = frames[i].cell.row + 1;
+    }
+  }
+  return { col, row };
+}
+
+/**
+ * Порядок листов для PDF: выводится из структуры (челлендж «строки/столбцы на
+ * выбор» — отвергнут как настройка). Полоса row=0 слева-направо, затем рулоны:
+ * столбцы по col, внутри столбца сверху-вниз.
+ */
+export function compareCellsForExport(a: FrameCell, b: FrameCell): number {
+  const aStrip = a.row === 0 ? 0 : 1;
+  const bStrip = b.row === 0 ? 0 : 1;
+  if (aStrip !== bStrip) return aStrip - bStrip;
+  if (aStrip === 0) return a.col - b.col;
+  if (a.col !== b.col) return a.col - b.col;
+  return a.row - b.row;
+}
+
 export type BoardBackground = 'blank' | 'grid' | 'lines' | 'dots';
 export type BoardGridMm = 5 | 10;
 

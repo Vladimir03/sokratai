@@ -50,7 +50,41 @@ const VALID_GRID_MM = new Set([5, 10]);
 const BOARD_SELECT =
   "id, student_id, lesson_id, title, export_material_id, created_at, updated_at";
 const PAGE_SELECT =
-  "id, board_id, page_index, elements, app_state, background, grid_mm, created_at, updated_at";
+  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, created_at, updated_at";
+
+/**
+ * Сигнал синка (Этап 2): бамп rev после КАЖДОГО успешного сохранения листа.
+ * Fault-tolerant: сбой бампа не валит сохранение — сигнал догонится следующим.
+ */
+async function bumpPageRev(
+  db: SupabaseClient,
+  pageId: string,
+  boardId: string,
+  updatedBy: string,
+): Promise<void> {
+  try {
+    const { data } = await db
+      .from("board_page_revs")
+      .select("rev")
+      .eq("page_id", pageId)
+      .maybeSingle();
+    if (data) {
+      await db
+        .from("board_page_revs")
+        .update({ rev: (data.rev as number) + 1, updated_by: updatedBy, updated_at: new Date().toISOString() })
+        .eq("page_id", pageId);
+    } else {
+      await db
+        .from("board_page_revs")
+        .insert({ page_id: pageId, board_id: boardId, updated_by: updatedBy });
+    }
+  } catch (e) {
+    console.error("whiteboard_api_rev_bump_failed", {
+      page_id: pageId,
+      message: e instanceof Error ? e.message.slice(0, 120) : "unknown",
+    });
+  }
+}
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
@@ -462,16 +496,168 @@ async function handleCreatePage(
   }
 
   const nextIndex = last && last.length > 0 ? (last[0].page_index as number) + 1 : 0;
+  // app_state (позиция-ячейка сетки и пр.) — object; клиент досылает своё.
+  const appState =
+    body.app_state && typeof body.app_state === "object" && !Array.isArray(body.app_state)
+      ? body.app_state
+      : {};
   const { data, error } = await db
     .from("board_pages")
-    .insert({ board_id: boardId, page_index: nextIndex, background, grid_mm: gridMm })
+    .insert({ board_id: boardId, page_index: nextIndex, background, grid_mm: gridMm, app_state: appState })
     .select(PAGE_SELECT)
     .single();
   if (error || !data) {
     console.error("whiteboard_api_page_create_failed", { code: error?.code });
     return jsonError(cors, 500, "DB_ERROR", "Не удалось добавить страницу.");
   }
+  await bumpPageRev(db, data.id as string, boardId, "tutor");
   return jsonOk(cors, { page: data }, 201);
+}
+
+// ─── Зоны-рулоны (Этап 2, B2): раздача по группе занятия ─────────────────────
+
+async function handleDistributeZones(
+  db: SupabaseClient,
+  tutorPkId: string,
+  boardId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const board = await loadOwnedBoard(db, boardId, tutorPkId);
+  if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+
+  // Состав: группа занятия (живое членство) либо индивидуальный ученик доски.
+  let memberIds: string[] = [];
+  if (board.lesson_id) {
+    const { data: lesson } = await db
+      .from("tutor_lessons")
+      .select("id, group_source_tutor_group_id, tutor_student_id")
+      .eq("id", board.lesson_id as string)
+      .maybeSingle();
+    if (lesson?.group_source_tutor_group_id) {
+      const { data: members, error: membersError } = await db
+        .from("tutor_group_memberships")
+        .select("tutor_student_id, is_active, tutor_students!inner(id, archived_at)")
+        .eq("tutor_group_id", lesson.group_source_tutor_group_id)
+        .eq("is_active", true);
+      if (membersError) {
+        // Fail-closed на резолве получателей (rule 98).
+        return jsonError(cors, 503, "RECIPIENTS_LOOKUP_FAILED", "Не удалось получить состав группы. Попробуйте ещё раз.");
+      }
+      memberIds = (members ?? [])
+        .filter((m) => !(m.tutor_students as { archived_at: string | null }).archived_at)
+        .map((m) => m.tutor_student_id as string);
+    } else if (lesson?.tutor_student_id) {
+      memberIds = [lesson.tutor_student_id as string];
+    }
+  }
+  if (memberIds.length === 0 && board.student_id) {
+    memberIds = [board.student_id as string];
+  }
+  if (memberIds.length === 0) {
+    return jsonError(cors, 409, "NO_STUDENTS", "У занятия нет учеников — раздавать зоны некому.");
+  }
+
+  const { data: existingPages, error: pagesError } = await db
+    .from("board_pages")
+    .select("id, page_index, zone_tutor_student_id, app_state")
+    .eq("board_id", boardId);
+  if (pagesError) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось прочитать листы доски.");
+  }
+  const pages = existingPages ?? [];
+  const alreadyZoned = new Set(
+    pages.map((p) => p.zone_tutor_student_id as string | null).filter(Boolean),
+  );
+  // Занятые столбцы рулонов (row ≥ 1) — новые рулоны идут в свободные.
+  const usedCols = new Set<number>();
+  for (const p of pages) {
+    const frame = (p.app_state as { frame?: { col?: number; row?: number } } | null)?.frame;
+    if (frame && typeof frame.col === "number" && typeof frame.row === "number" && frame.row >= 1) {
+      usedCols.add(frame.col);
+    }
+  }
+  let nextIndex = pages.reduce((max, p) => Math.max(max, (p.page_index as number) ?? 0), -1) + 1;
+  let nextCol = 0;
+  const takeCol = () => {
+    while (usedCols.has(nextCol)) nextCol++;
+    usedCols.add(nextCol);
+    return nextCol;
+  };
+
+  const created: unknown[] = [];
+  for (const tutorStudentId of memberIds) {
+    if (alreadyZoned.has(tutorStudentId)) continue; // идемпотентность повторной раздачи
+    const col = takeCol();
+    const { data: page, error } = await db
+      .from("board_pages")
+      .insert({
+        board_id: boardId,
+        page_index: nextIndex++,
+        background: "grid",
+        grid_mm: 5,
+        zone_tutor_student_id: tutorStudentId,
+        app_state: { orientation: "portrait", frame: { col, row: 1 } },
+      })
+      .select(PAGE_SELECT)
+      .single();
+    if (error || !page) {
+      console.error("whiteboard_api_zone_create_failed", { code: error?.code });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось создать зону ученика.");
+    }
+    await bumpPageRev(db, page.id as string, boardId, "tutor");
+    created.push(page);
+  }
+
+  console.log("whiteboard_api_zones_distributed", { board_id: boardId, created: created.length });
+  return jsonOk(cors, { pages: created }, created.length > 0 ? 201 : 200);
+}
+
+// ─── Гостевая ссылка (Этап 2, B4): create-or-get / revoke ─────────────────────
+
+function generateSlug(): string {
+  // 12 hex (~48 бит) — паттерн join_code; НЕ crypto.randomUUID (единый стиль).
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function handleShareLink(
+  db: SupabaseClient,
+  tutorPkId: string,
+  boardId: string,
+  method: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const board = await loadOwnedBoard(db, boardId, tutorPkId);
+  if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+
+  if (method === "DELETE") {
+    await db
+      .from("board_share_links")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("board_id", boardId)
+      .is("revoked_at", null);
+    return jsonOk(cors, { ok: true });
+  }
+
+  const { data: existing } = await db
+    .from("board_share_links")
+    .select("slug")
+    .eq("board_id", boardId)
+    .is("revoked_at", null)
+    .maybeSingle();
+  if (existing?.slug) return jsonOk(cors, { slug: existing.slug });
+
+  const { data: createdLink, error } = await db
+    .from("board_share_links")
+    .insert({ board_id: boardId, tutor_id: tutorPkId, slug: generateSlug() })
+    .select("slug")
+    .single();
+  if (error || !createdLink) {
+    console.error("whiteboard_api_share_create_failed", { code: error?.code });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось создать ссылку.");
+  }
+  return jsonOk(cors, { slug: createdLink.slug }, 201);
 }
 
 async function handleSavePage(
@@ -542,6 +728,25 @@ async function handleSavePage(
     }
     patch.grid_mm = body.grid_mm;
   }
+  if ("zone_tutor_student_id" in body) {
+    // Назначение/снятие зоны — только репетитор, и только СВОЙ ученик (rule 60:
+    // tutor_students.tutor_id → tutors.id, сверяем с tutorPkId).
+    if (body.zone_tutor_student_id === null) {
+      patch.zone_tutor_student_id = null;
+    } else if (typeof body.zone_tutor_student_id === "string" && UUID_RE.test(body.zone_tutor_student_id)) {
+      const { data: student } = await db
+        .from("tutor_students")
+        .select("id, tutor_id")
+        .eq("id", body.zone_tutor_student_id)
+        .maybeSingle();
+      if (!student || student.tutor_id !== tutorPkId) {
+        return jsonError(cors, 404, "NOT_FOUND", "Ученик не найден.");
+      }
+      patch.zone_tutor_student_id = body.zone_tutor_student_id;
+    } else {
+      return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор ученика.");
+    }
+  }
   if (Object.keys(patch).length === 0) {
     return jsonError(cors, 400, "VALIDATION", "Нечего сохранять.");
   }
@@ -559,6 +764,7 @@ async function handleSavePage(
 
   // Доска «поднимается» в списке недавних — это и есть смысл её updated_at.
   await db.from("boards").update({ updated_at: new Date().toISOString() }).eq("id", page.board_id);
+  await bumpPageRev(db, pageId, page.board_id as string, "tutor");
 
   return jsonOk(cors, { page: data });
 }
@@ -653,6 +859,15 @@ Deno.serve(async (req) => {
       }
       if (segments.length === 3 && boardId && segments[2] === "pages" && method === "POST") {
         return handleCreatePage(db, tutorPkId, boardId, req, cors);
+      }
+      if (segments.length === 3 && boardId && segments[2] === "zones" && method === "POST") {
+        return handleDistributeZones(db, tutorPkId, boardId, cors);
+      }
+      if (
+        segments.length === 3 && boardId && segments[2] === "share" &&
+        (method === "POST" || method === "DELETE")
+      ) {
+        return handleShareLink(db, tutorPkId, boardId, method, cors);
       }
     }
 

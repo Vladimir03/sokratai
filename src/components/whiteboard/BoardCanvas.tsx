@@ -76,6 +76,18 @@ export interface BoardSelection {
   ids: string[];
 }
 
+/** «Призрачная» ячейка-плюс: клик создаёт лист в этой позиции сетки (Этап 2). */
+export interface GhostCell {
+  key: string;
+  /** Ячейка сетки — то, что уйдёт в app_state.frame нового листа. */
+  cell: { col: number; row: number };
+  placement: FramePlacement;
+  size: PageSizeMm;
+  label: string;
+  /** Лист какой зоны создать (рулон ученика) — прокидывается в onGhostClick. */
+  zoneTutorStudentId?: string | null;
+}
+
 interface BoardCanvasProps {
   frames: FrameView[];
   camera: CameraState;
@@ -95,6 +107,9 @@ interface BoardCanvasProps {
   onMoveSelection: (frameId: string, dx: number, dy: number) => void;
   onTransformElement: (frameId: string, id: string, patch: Partial<ImageElement>) => void;
   onRequestText: (frameId: string, x: number, y: number) => void;
+  /** Ячейки-плюсы для добавления листов (сетка Chattern). */
+  ghostCells?: GhostCell[];
+  onGhostClick?: (ghost: GhostCell) => void;
 }
 
 const ERASER_TOLERANCE_MM = 1.5;
@@ -303,6 +318,8 @@ export function BoardCanvas({
   onMoveSelection,
   onTransformElement,
   onRequestText,
+  ghostCells,
+  onGhostClick,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -672,6 +689,21 @@ export function BoardCanvas({
       const pointerId = event.pointerId;
       const pointerType = event.pointerType;
 
+      // Клик по «призрачной» ячейке — создать лист (до поиска рамок: ячейки
+      // лежат в пустых местах сетки).
+      if (onGhostClick && ghostCells && event.button === 0 && !readOnly) {
+        for (let i = 0; i < ghostCells.length; i++) {
+          const g = ghostCells[i];
+          if (
+            world.x >= g.placement.x && world.x <= g.placement.x + g.size.width &&
+            world.y >= g.placement.y && world.y <= g.placement.y + g.size.height
+          ) {
+            onGhostClick(g);
+            return;
+          }
+        }
+      }
+
       const frame = findFrameAt(world.x, world.y);
 
       // Пустой холст ИЛИ средняя кнопка — панорамирование одним указателем.
@@ -752,7 +784,7 @@ export function BoardCanvas({
         scheduleFrame();
       }
     },
-    [toWorld, findFrameAt, readOnly, tool, selection, selectedSet, onSelectionChange, onRequestText, eraseAtLocal, convertToPinch, scheduleFrame],
+    [toWorld, findFrameAt, readOnly, tool, selection, selectedSet, onSelectionChange, onRequestText, eraseAtLocal, convertToPinch, scheduleFrame, ghostCells, onGhostClick],
   );
 
   // ─── Pointer move ───────────────────────────────────────────────────────────
@@ -1035,6 +1067,58 @@ export function BoardCanvas({
           zoomHint={camera.zoom}
         />
       ))}
+
+      {/* Ячейки-плюсы: пунктирный контур с плюсом, клик = новый лист. */}
+      {!readOnly &&
+        (ghostCells ?? [])
+          .filter((g) =>
+            boundsIntersect(
+              { minX: g.placement.x, minY: g.placement.y, maxX: g.placement.x + g.size.width, maxY: g.placement.y + g.size.height },
+              cullWindow,
+            ),
+          )
+          .map((g) => (
+            <g key={g.key} style={{ cursor: 'pointer' }}>
+              <rect
+                x={g.placement.x}
+                y={g.placement.y}
+                width={g.size.width}
+                height={g.size.height}
+                fill="#FFFFFF"
+                fillOpacity={0.35}
+                stroke="#94A3B8"
+                strokeWidth={0.5}
+                strokeDasharray="4 3"
+                rx={2}
+              />
+              <line
+                x1={g.placement.x + g.size.width / 2 - 8}
+                y1={g.placement.y + g.size.height / 2}
+                x2={g.placement.x + g.size.width / 2 + 8}
+                y2={g.placement.y + g.size.height / 2}
+                stroke="#64748B"
+                strokeWidth={1.4}
+              />
+              <line
+                x1={g.placement.x + g.size.width / 2}
+                y1={g.placement.y + g.size.height / 2 - 8}
+                x2={g.placement.x + g.size.width / 2}
+                y2={g.placement.y + g.size.height / 2 + 8}
+                stroke="#64748B"
+                strokeWidth={1.4}
+              />
+              <text
+                x={g.placement.x + g.size.width / 2}
+                y={g.placement.y + g.size.height / 2 + 18}
+                textAnchor="middle"
+                fill="#64748B"
+                fontSize={5}
+                fontFamily="'Golos Text', system-ui, sans-serif"
+              >
+                {g.label}
+              </text>
+            </g>
+          ))}
 
       {/* Выделенные элементы поверх, с move-transform (в координатах их рамки). */}
       {selectionFrame && selectedElements.length > 0 && (

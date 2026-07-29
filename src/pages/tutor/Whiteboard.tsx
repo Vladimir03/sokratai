@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,15 +8,18 @@ import {
   type BoardSelection,
   type BoardTool,
   type FrameView,
+  type GhostCell,
 } from '@/components/whiteboard/BoardCanvas';
 import { BoardToolbar } from '@/components/whiteboard/BoardToolbar';
 import { PagesPanel } from '@/components/whiteboard/PagesPanel';
+import { supabase } from '@/lib/supabaseClient';
 import {
   type Board,
   type BoardPageRow,
   WhiteboardApiError,
   createBoardPage,
   deleteBoardPage,
+  distributeZones,
   getBoard,
   getOrCreateLessonBoard,
   saveBoardPage,
@@ -29,24 +32,28 @@ import {
   type FramePlacement,
   type ImageElement,
   type PageOrientation,
+  type FrameCell,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
+  PAGE_WIDTH_MM,
   bumpVersion,
   cameraToFitBounds,
+  cellToPlacement,
+  compareCellsForExport,
   createImage,
   createText,
   elementBoundsCached,
   frameWorldBounds,
-  nextFramePlacement,
+  nextCellInColumn,
+  nextCellInStrip,
   normalizeBackground,
-  normalizeFramePlacement,
+  normalizeFrameCell,
   normalizeGridMm,
   normalizeOrientation,
   pageSizeMm,
   parseElements,
   primeSeqCounter,
-  reassignIdentity,
   roundMm,
   translateElement,
   worldToViewportPx,
@@ -94,7 +101,11 @@ interface FrameState {
   background: BoardBackground;
   gridMm: BoardGridMm;
   orientation: PageOrientation;
+  /** Ячейка сетки Chattern; placement выводится. */
+  cell: FrameCell;
   placement: FramePlacement;
+  /** Зона ученика (рулон); null — лист репетитора. */
+  zoneTutorStudentId: string | null;
 }
 
 interface TextDraft {
@@ -109,13 +120,16 @@ function rowToFrameState(row: BoardPageRow, index: number): FrameState {
   const elements = parseElements(row.elements);
   primeSeqCounter(elements);
   const appState = (row.app_state ?? {}) as Record<string, unknown>;
+  const cell = normalizeFrameCell(appState.frame, index);
   return {
     id: row.id,
     elements,
     background: normalizeBackground(row.background),
     gridMm: normalizeGridMm(row.grid_mm),
     orientation: normalizeOrientation(appState.orientation),
-    placement: normalizeFramePlacement(appState.frame, index),
+    cell,
+    placement: cellToPlacement(cell),
+    zoneTutorStudentId: row.zone_tutor_student_id ?? null,
   };
 }
 
@@ -187,7 +201,7 @@ export default function Whiteboard() {
           elements: frame.elements,
           background: frame.background,
           grid_mm: frame.gridMm,
-          app_state: { orientation: frame.orientation, frame: frame.placement },
+          app_state: { orientation: frame.orientation, frame: frame.cell },
         });
       },
       onStatus: setSaveStatus,
@@ -485,35 +499,7 @@ export default function Whiteboard() {
 
   // ─── Рамки: добавить / удалить / перейти ───────────────────────────────────
 
-  const handleAddFrame = useCallback(async () => {
-    if (!board || pageBusy) return;
-    setPageBusy(true);
-    try {
-      await autosave.flush();
-      const created = await createBoardPage(board.id, {
-        background: activeFrame?.background ?? 'grid',
-        grid_mm: activeFrame?.gridMm ?? 5,
-      });
-      const placement = nextFramePlacement(
-        framesRef.current.map((f) => ({ placement: f.placement, size: pageSizeMm(f.orientation) })),
-      );
-      const newFrame: FrameState = {
-        ...rowToFrameState(created, framesRef.current.length),
-        orientation: activeFrame?.orientation ?? 'portrait',
-        placement,
-      };
-      applyFrames([...framesRef.current, newFrame]);
-      // Позиция и ориентация живут в app_state — досылаем первым автосейвом.
-      autosave.markDirty(newFrame.id);
-      setActiveFrameId(newFrame.id);
-      setSelection(null);
-      fitSingleFrame(newFrame, viewport);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось добавить лист');
-    } finally {
-      setPageBusy(false);
-    }
-  }, [board, pageBusy, autosave, activeFrame, applyFrames, fitSingleFrame, viewport]);
+  // handleAddFrame объявлен ниже, после createFrameAt (блок зон/сетки).
 
   const handleDeleteFrame = useCallback(
     async (index: number) => {
@@ -641,6 +627,183 @@ export default function Whiteboard() {
     [board, activeFrameId, handleCommitElement],
   );
 
+  // ─── Зоны-рулоны и сетка (Этап 2) ──────────────────────────────────────────
+
+  const [zoneNames, setZoneNames] = useState<Record<string, string>>({});
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // Имена учеников для подписей зон (репетиторский RLS на tutor_students).
+  useEffect(() => {
+    const ids = Array.from(
+      new Set(frames.map((f) => f.zoneTutorStudentId).filter((id): id is string => !!id)),
+    ).filter((id) => !zoneNames[id]);
+    if (ids.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('tutor_students')
+        .select('id, display_name')
+        .in('id', ids);
+      if (cancelled || !data) return;
+      const next: Record<string, string> = {};
+      for (const row of data) next[row.id] = row.display_name ?? 'Ученик';
+      setZoneNames((prev) => ({ ...prev, ...next }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [frames, zoneNames]);
+
+  /** Плюсы сетки: один справа в полосе + внизу каждого рулона. */
+  const ghostCells = useMemo<GhostCell[]>(() => {
+    const cellsInfo = frames.map((f) => ({ cell: f.cell, orientation: f.orientation }));
+    const out: GhostCell[] = [];
+    const stripCell = nextCellInStrip(cellsInfo);
+    out.push({
+      key: `strip-${stripCell.col}`,
+      cell: stripCell,
+      placement: cellToPlacement(stripCell),
+      size: pageSizeMm('portrait'),
+      label: 'Лист',
+    });
+    const rollCols = new Map<number, string | null>();
+    for (const f of frames) {
+      if (f.cell.row >= 1) rollCols.set(f.cell.col, f.zoneTutorStudentId);
+    }
+    rollCols.forEach((zoneId, col) => {
+      const cell = nextCellInColumn(col, cellsInfo);
+      out.push({
+        key: `roll-${col}-${cell.row}`,
+        cell,
+        placement: cellToPlacement(cell),
+        size: pageSizeMm('portrait'),
+        label: zoneId ? zoneNames[zoneId] ?? 'Лист' : 'Лист',
+        zoneTutorStudentId: zoneId,
+      });
+    });
+    return out;
+  }, [frames, zoneNames]);
+
+  const createFrameAt = useCallback(
+    async (cell: FrameCell, zoneTutorStudentId: string | null) => {
+      if (!board || pageBusy) return;
+      setPageBusy(true);
+      try {
+        await autosave.flush();
+        const created = await createBoardPage(board.id, {
+          background: activeFrame?.background ?? 'grid',
+          grid_mm: activeFrame?.gridMm ?? 5,
+          app_state: { orientation: 'portrait', frame: cell },
+        });
+        if (zoneTutorStudentId) {
+          await saveBoardPage(created.id, { zone_tutor_student_id: zoneTutorStudentId });
+        }
+        const newFrame: FrameState = {
+          ...rowToFrameState(created, framesRef.current.length),
+          cell,
+          placement: cellToPlacement(cell),
+          zoneTutorStudentId,
+        };
+        applyFrames([...framesRef.current, newFrame]);
+        setActiveFrameId(newFrame.id);
+        setSelection(null);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Не удалось добавить лист');
+      } finally {
+        setPageBusy(false);
+      }
+    },
+    [board, pageBusy, autosave, activeFrame, applyFrames],
+  );
+
+  const handleGhostClick = useCallback(
+    (ghost: GhostCell) => {
+      void createFrameAt(ghost.cell, ghost.zoneTutorStudentId ?? null);
+    },
+    [createFrameAt],
+  );
+
+  const handleAddFrame = useCallback(async () => {
+    const cellsInfo = framesRef.current.map((f) => ({ cell: f.cell, orientation: f.orientation }));
+    await createFrameAt(nextCellInStrip(cellsInfo), null);
+  }, [createFrameAt]);
+
+  const handleDistributeZones = useCallback(async () => {
+    if (!board || pageBusy) return;
+    setPageBusy(true);
+    try {
+      const pages = await distributeZones(board.id);
+      if (pages.length === 0) {
+        toast.message('Зоны уже розданы всем ученикам занятия.');
+        return;
+      }
+      const startIndex = framesRef.current.length;
+      const added = pages.map((row, i) => rowToFrameState(row, startIndex + i));
+      applyFrames([...framesRef.current, ...added]);
+      fitFrames(framesRef.current, viewport);
+      toast.success(`Создано зон: ${pages.length}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось раздать зоны');
+    } finally {
+      setPageBusy(false);
+    }
+  }, [board, pageBusy, applyFrames, fitFrames, viewport]);
+
+  /** Импорт PDF: страница → лист-подложка в общей полосе (воркфлоу Елены). */
+  const importPdf = useCallback(
+    async (file: File) => {
+      const currentBoard = board;
+      if (!currentBoard || importProgress) return;
+      setImportProgress({ done: 0, total: 0 });
+      try {
+        // pdf.worker — 533 КБ, поэтому только динамический import (rule performance).
+        const { renderPdfPagesToFiles } = await import('@/lib/pdfToImages');
+        const rendered = await renderPdfPagesToFiles(file, {
+          maxPages: 30,
+          onProgress: (done, total) => setImportProgress({ done, total }),
+        });
+        if (rendered.files.length === 0) throw new Error('В PDF не нашлось страниц');
+
+        for (let i = 0; i < rendered.files.length; i++) {
+          setImportProgress({ done: i + 1, total: rendered.files.length });
+          const cellsInfo = framesRef.current.map((f) => ({ cell: f.cell, orientation: f.orientation }));
+          const cell = nextCellInStrip(cellsInfo);
+          const created = await createBoardPage(currentBoard.id, {
+            background: 'blank',
+            grid_mm: 5,
+            app_state: { orientation: 'portrait', frame: cell },
+          });
+          const uploaded = await uploadBoardImage(rendered.files[i], currentBoard.id);
+          const size = pageSizeMm('portrait');
+          // Подложка на всю ширину листа, высота по аспекту (кап — высота листа).
+          const aspect = uploaded.naturalHeight / Math.max(1, uploaded.naturalWidth);
+          const w = PAGE_WIDTH_MM;
+          const h = Math.min(size.height, roundMm(w * aspect));
+          const image = createImage(0, 0, w, h, uploaded.ref);
+          const newFrame: FrameState = {
+            ...rowToFrameState(created, framesRef.current.length),
+            cell,
+            placement: cellToPlacement(cell),
+            elements: [image],
+          };
+          applyFrames([...framesRef.current, newFrame]);
+          autosave.markDirty(newFrame.id);
+          void resolveBoardImageUrl(uploaded.ref).then((url) => {
+            if (url) setImageUrls((prev) => ({ ...prev, [uploaded.ref]: url }));
+          });
+        }
+        fitFrames(framesRef.current, viewport);
+        toast.success(`Импортировано страниц: ${rendered.files.length}`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Не удалось импортировать PDF');
+      } finally {
+        setImportProgress(null);
+      }
+    },
+    [board, importProgress, applyFrames, autosave, fitFrames, viewport],
+  );
+
   // Ctrl+V: сначала ВНУТРЕННИЙ буфер (B3), затем картинки из ОС.
   const pasteImageHandler = usePasteImages({
     compress: false,
@@ -709,14 +872,25 @@ export default function Whiteboard() {
         f.background,
         f.gridMm,
         f.orientation,
+        f.cell,
         f.elements.map((el) => `${el.id}:${el.version}`),
       ]),
     );
   }, []);
 
   const buildPdfBlob = useCallback(async () => {
-    const source = framesRef.current;
-    if (source.length === 0) throw new Error('В доске нет листов');
+    // Порядок — из структуры сетки (полоса → рулоны по столбцам); пустые листы
+    // пропускаются (Chattern-паттерн: «сохраняются только страницы, где что-то
+    // изображено» — применён к ЭКСПОРТУ, хранение не трогаем).
+    // ⚠️ Решение владельца 30.07: лист с PDF-подложкой БЕЗ пометок — заполненный
+    // (подложка = элемент-картинка ⇒ length > 0 уже включает его). НЕ «умнеть»
+    // фильтром вида «есть ли что-то кроме подложки» — вариант из задачника,
+    // отданный без решённых страниц, обязан попасть в экспорт целиком.
+    const source = framesRef.current
+      .slice()
+      .sort((a, b) => compareCellsForExport(a.cell, b.cell))
+      .filter((f) => f.elements.length > 0);
+    if (source.length === 0) throw new Error('На доске нет заполненных листов');
     const refs: string[] = [];
     for (const frame of source) {
       for (const el of frame.elements) {
@@ -912,15 +1086,24 @@ export default function Whiteboard() {
     );
   }
 
-  const frameViews: FrameView[] = frames.map((f, i) => ({
-    id: f.id,
-    placement: f.placement,
-    size: pageSizeMm(f.orientation),
-    background: f.background,
-    gridMm: f.gridMm,
-    elements: f.elements,
-    title: `Лист ${i + 1}`,
-  }));
+  let stripCounter = 0;
+  const frameViews: FrameView[] = frames.map((f) => {
+    const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] ?? 'Ученик' : null;
+    // Подписи человеческие («Лист 3 · Маша»), НЕ координаты [0:0] — челлендж Chattern.
+    const title = zoneName
+      ? `${zoneName} · ${f.cell.row}`
+      : `Лист ${f.cell.row === 0 ? ++stripCounter : `${f.cell.col + 1}.${f.cell.row}`}`;
+    return {
+      id: f.id,
+      placement: f.placement,
+      size: pageSizeMm(f.orientation),
+      background: f.background,
+      gridMm: f.gridMm,
+      elements: f.elements,
+      title,
+      isZone: !!f.zoneTutorStudentId,
+    };
+  });
 
   const frameSummaries = frames.map((f) => ({
     id: f.id,
@@ -1017,6 +1200,20 @@ export default function Whiteboard() {
 
         {board.lesson_id && (
           <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleDistributeZones()}
+            disabled={pageBusy || exitPhase !== null}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Users className="mr-1.5 h-4 w-4" />
+            <span className="hidden sm:inline">Раздать зоны</span>
+            <span className="sm:hidden">Зоны</span>
+          </Button>
+        )}
+
+        {board.lesson_id && (
+          <Button
             size="sm"
             onClick={() => void handleAttachClick()}
             disabled={attaching || exporting}
@@ -1047,6 +1244,7 @@ export default function Whiteboard() {
         orientation={activeFrame?.orientation ?? 'portrait'}
         onOrientationChange={handleOrientationChange}
         onPickImage={() => fileInputRef.current?.click()}
+        onImportPdf={() => pdfInputRef.current?.click()}
         camera={{
           zoomPercent: Math.round((camera.zoom / HUNDRED_PERCENT_ZOOM) * 100),
           onZoomIn: () =>
@@ -1075,6 +1273,17 @@ export default function Whiteboard() {
           if (files.length > 0) void insertImageFiles(files);
         }}
       />
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) void importPdf(file);
+        }}
+      />
 
       <div ref={viewportRef} className="relative min-h-0 flex-1" {...dragHandlers}>
         <BoardCanvas
@@ -1094,6 +1303,8 @@ export default function Whiteboard() {
           onMoveSelection={handleMoveSelection}
           onTransformElement={handleTransformElement}
           onRequestText={handleRequestText}
+          ghostCells={ghostCells}
+          onGhostClick={handleGhostClick}
         />
 
         {textDraft && textDraftPx && (
@@ -1139,6 +1350,17 @@ export default function Whiteboard() {
         onAdd={() => void handleAddFrame()}
         onDelete={(index) => void handleDeleteFrame(index)}
       />
+
+      {importProgress && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80">
+          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-md">
+            <Loader2 className="h-5 w-5 animate-spin text-accent" />
+            <span className="text-slate-700">
+              Импортируем PDF… {importProgress.total > 0 ? `${importProgress.done}/${importProgress.total}` : ''}
+            </span>
+          </div>
+        </div>
+      )}
 
       {exitPhase && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80">

@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CELL_STEP_X_MM,
+  CELL_STEP_Y_MM,
   cameraToFitBounds,
   cameraWorldWindow,
+  cellToPlacement,
+  compareCellsForExport,
   frameWorldBounds,
+  nextCellInColumn,
+  nextCellInStrip,
   nextFramePlacement,
+  normalizeFrameCell,
   normalizeFramePlacement,
   screenToWorld,
   worldToViewportPx,
@@ -104,6 +111,61 @@ describe('раскладка рамок', () => {
       maxX: 190,
       maxY: 287,
     });
+  });
+});
+
+describe('сетка Chattern (Этап 2)', () => {
+  it('normalizeFrameCell: cell → как есть, legacy {x,y} → ближайшая ячейка, мусор → полоса', () => {
+    expect(normalizeFrameCell({ col: 2, row: 1 }, 5)).toEqual({ col: 2, row: 1 });
+    // Этап 1 успел записать свободные позиции — привязываем к сетке.
+    expect(normalizeFrameCell({ x: 400, y: 0 }, 0)).toEqual({ col: 2, row: 0 });
+    expect(normalizeFrameCell(undefined, 3)).toEqual({ col: 3, row: 0 });
+  });
+
+  it('nextCellInStrip идёт вправо по полосе; ландшафт занимает две колонки', () => {
+    const frames = [
+      { cell: { col: 0, row: 0 }, orientation: 'portrait' as const },
+      { cell: { col: 1, row: 0 }, orientation: 'landscape' as const },
+    ];
+    // Ландшафт на col 1 занимает 1..2 → следующая полосная ячейка col 3.
+    expect(nextCellInStrip(frames)).toEqual({ col: 3, row: 0 });
+    // Рулонные листы (row ≥ 1) на полосу не влияют.
+    expect(nextCellInStrip([{ cell: { col: 7, row: 2 }, orientation: 'portrait' }])).toEqual({ col: 0, row: 0 });
+  });
+
+  it('nextCellInColumn растит рулон вниз', () => {
+    const frames = [
+      { cell: { col: 1, row: 1 }, orientation: 'portrait' as const },
+      { cell: { col: 1, row: 2 }, orientation: 'portrait' as const },
+      { cell: { col: 2, row: 1 }, orientation: 'portrait' as const },
+    ];
+    expect(nextCellInColumn(1, frames)).toEqual({ col: 1, row: 3 });
+    expect(nextCellInColumn(2, frames)).toEqual({ col: 2, row: 2 });
+    expect(nextCellInColumn(5, frames)).toEqual({ col: 5, row: 1 });
+  });
+
+  it('порядок экспорта: полоса слева-направо, затем рулоны по столбцам сверху-вниз', () => {
+    const cells = [
+      { col: 1, row: 2 }, // рулон col1, второй лист
+      { col: 0, row: 1 }, // рулон col0
+      { col: 1, row: 0 }, // полоса, второй
+      { col: 0, row: 0 }, // полоса, первый
+      { col: 1, row: 1 }, // рулон col1, первый лист
+    ];
+    const sorted = cells.slice().sort(compareCellsForExport);
+    expect(sorted).toEqual([
+      { col: 0, row: 0 },
+      { col: 1, row: 0 },
+      { col: 0, row: 1 },
+      { col: 1, row: 1 },
+      { col: 1, row: 2 },
+    ]);
+  });
+
+  it('cellToPlacement кратен шагам сетки', () => {
+    const p = cellToPlacement({ col: 2, row: 1 });
+    expect(p.x).toBe(2 * CELL_STEP_X_MM);
+    expect(p.y).toBe(CELL_STEP_Y_MM);
   });
 });
 

@@ -2,6 +2,7 @@ import { memo } from 'react';
 import {
   Circle,
   Eraser,
+  FileUp,
   ImagePlus,
   LayoutGrid,
   Maximize,
@@ -61,6 +62,8 @@ interface BoardToolbarProps {
   onOrientationChange: (orientation: PageOrientation) => void;
   /** Открыть файловый пикер картинки (на планшете нативно предложит камеру). */
   onPickImage: () => void;
+  /** Импорт PDF: страницы становятся листами-подложками (воркфлоу Елены). */
+  onImportPdf: () => void;
   camera: CameraControls;
   canUndo: boolean;
   canRedo: boolean;
@@ -140,6 +143,7 @@ export const BoardToolbar = memo(function BoardToolbar({
   orientation,
   onOrientationChange,
   onPickImage,
+  onImportPdf,
   camera,
   canUndo,
   canRedo,
@@ -163,6 +167,9 @@ export const BoardToolbar = memo(function BoardToolbar({
         ))}
         <ToolbarButton label="Вставить изображение" disabled={disabled} onClick={onPickImage}>
           <ImagePlus className="h-4 w-4" />
+        </ToolbarButton>
+        <ToolbarButton label="Импорт PDF (страницы → листы)" disabled={disabled} onClick={onImportPdf}>
+          <FileUp className="h-4 w-4" />
         </ToolbarButton>
       </div>
 
