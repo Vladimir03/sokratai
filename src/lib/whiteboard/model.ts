@@ -120,7 +120,21 @@ export interface TextElement extends BoardElementBase {
   size: number;
 }
 
-export type BoardElement = StrokeElement | ShapeElement | TextElement;
+export interface ImageElement extends BoardElementBase {
+  type: 'image';
+  /** Левый верхний угол НЕповёрнутого прямоугольника, мм. */
+  x: number;
+  y: number;
+  /** Размеры в мм, всегда положительные. */
+  w: number;
+  h: number;
+  /** Поворот в градусах вокруг центра (запрос владельца: фото приходят боком). */
+  rotation: number;
+  /** `storage://board-images/...` — сам файл; URL резолвится при рендере. */
+  ref: string;
+}
+
+export type BoardElement = StrokeElement | ShapeElement | TextElement | ImageElement;
 
 export interface BoardPageScene {
   elements: BoardElement[];
@@ -190,6 +204,16 @@ export function createText(x: number, y: number, text: string, color: string, si
   return { ...baseFields(), type: 'text', x, y, text, color, size };
 }
 
+export function createImage(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  ref: string,
+): ImageElement {
+  return { ...baseFields(), type: 'image', x, y, w, h, rotation: 0, ref };
+}
+
 // ─── Геометрия ────────────────────────────────────────────────────────────────
 
 export interface BoardBounds {
@@ -241,6 +265,110 @@ function approxTextWidthMm(line: string, size: number): number {
   return line.length * size * 0.5;
 }
 
+/** Поворот точки вокруг центра на угол в градусах. */
+export function rotatePoint(
+  px: number,
+  py: number,
+  cx: number,
+  cy: number,
+  degrees: number,
+): { x: number; y: number } {
+  if (degrees === 0) return { x: px, y: py };
+  const rad = (degrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = px - cx;
+  const dy = py - cy;
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+function imageCorners(el: ImageElement): { x: number; y: number }[] {
+  const cx = el.x + el.w / 2;
+  const cy = el.y + el.h / 2;
+  return [
+    rotatePoint(el.x, el.y, cx, cy, el.rotation),
+    rotatePoint(el.x + el.w, el.y, cx, cy, el.rotation),
+    rotatePoint(el.x + el.w, el.y + el.h, cx, cy, el.rotation),
+    rotatePoint(el.x, el.y + el.h, cx, cy, el.rotation),
+  ];
+}
+
+export type ResizeCorner = 'nw' | 'ne' | 'se' | 'sw';
+
+/**
+ * Пересчёт прямоугольника при перетаскивании УГЛОВОЙ ручки с учётом поворота:
+ * противоположный угол остаётся неподвижным В МИРОВЫХ координатах (иначе
+ * повёрнутая картинка «плывёт» при каждом движении ручки).
+ *
+ * Математика: (w',h') = |R⁻¹(P_мир − O_мир)| покомпонентно; новый центр —
+ * из неподвижного угла обратным поворотом. `preserveAspect` (картинки) берёт
+ * максимальный из двух масштабов.
+ */
+export function resizeRectFromCorner(
+  rect: { x: number; y: number; w: number; h: number },
+  rotation: number,
+  corner: ResizeCorner,
+  pointerX: number,
+  pointerY: number,
+  preserveAspect: boolean,
+): { x: number; y: number; w: number; h: number } {
+  const cx = rect.x + rect.w / 2;
+  const cy = rect.y + rect.h / 2;
+  // Противоположный угол в локальных координатах.
+  const oppLocal = {
+    nw: { x: rect.x + rect.w, y: rect.y + rect.h },
+    ne: { x: rect.x, y: rect.y + rect.h },
+    se: { x: rect.x, y: rect.y },
+    sw: { x: rect.x + rect.w, y: rect.y },
+  }[corner];
+  const oppWorld = rotatePoint(oppLocal.x, oppLocal.y, cx, cy, rotation);
+
+  // Вектор «неподвижный угол → указатель» в локальной системе прямоугольника.
+  const local = rotatePoint(pointerX, pointerY, oppWorld.x, oppWorld.y, -rotation);
+  let w = Math.max(2, Math.abs(local.x - oppWorld.x));
+  let h = Math.max(2, Math.abs(local.y - oppWorld.y));
+  if (preserveAspect && rect.w > 0 && rect.h > 0) {
+    const scale = Math.max(w / rect.w, h / rect.h);
+    w = rect.w * scale;
+    h = rect.h * scale;
+  }
+
+  // Знаки направления от неподвижного угла к перетаскиваемому.
+  const sign = {
+    nw: { x: -1, y: -1 },
+    ne: { x: 1, y: -1 },
+    se: { x: 1, y: 1 },
+    sw: { x: -1, y: 1 },
+  }[corner];
+
+  // Центр нового прямоугольника: от неподвижного угла на половину диагонали,
+  // повёрнутую в мир.
+  const centerOffset = rotatePoint((sign.x * w) / 2, (sign.y * h) / 2, 0, 0, rotation);
+  const newCx = oppWorld.x + centerOffset.x;
+  const newCy = oppWorld.y + centerOffset.y;
+
+  return { x: roundMm(newCx - w / 2), y: roundMm(newCy - h / 2), w: roundMm(w), h: roundMm(h) };
+}
+
+/** Угол «центр → указатель» в градусах; 0° = ручка сверху. Снап к ключевым углам. */
+export function rotationFromPointer(
+  cx: number,
+  cy: number,
+  pointerX: number,
+  pointerY: number,
+): number {
+  const deg = (Math.atan2(pointerY - cy, pointerX - cx) * 180) / Math.PI + 90;
+  let normalized = ((deg % 360) + 360) % 360;
+  // Магнит к 0/90/180/270 (±5°): фото «боком» чаще всего нужно ровно на 90°.
+  for (const snap of [0, 90, 180, 270, 360]) {
+    if (Math.abs(normalized - snap) <= 5) {
+      normalized = snap % 360;
+      break;
+    }
+  }
+  return Math.round(normalized);
+}
+
 export function elementBounds(el: BoardElement): BoardBounds {
   if (el.type === 'stroke') {
     if (el.points.length < 2) {
@@ -269,6 +397,21 @@ export function elementBounds(el: BoardElement): BoardBounds {
       maxX: Math.max(el.x, el.x + el.w) + pad,
       maxY: Math.max(el.y, el.y + el.h) + pad,
     };
+  }
+  if (el.type === 'image') {
+    // Осевой bbox повёрнутого прямоугольника — по четырём углам.
+    const corners = imageCorners(el);
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < corners.length; i++) {
+      if (corners[i].x < minX) minX = corners[i].x;
+      if (corners[i].x > maxX) maxX = corners[i].x;
+      if (corners[i].y < minY) minY = corners[i].y;
+      if (corners[i].y > maxY) maxY = corners[i].y;
+    }
+    return { minX, minY, maxX, maxY };
   }
   const lines = textLines(el);
   let widest = 0;
@@ -336,7 +479,18 @@ export function hitTest(el: BoardElement, x: number, y: number, tolerance: numbe
     }
     return false;
   }
-  // Для фигур и текста попадание = попадание в bbox, а его уже проверил отсев выше.
+  if (el.type === 'image' && el.rotation !== 0) {
+    // Точное попадание в ПОВЁРНУТЫЙ прямоугольник: точка приводится в локальную
+    // систему обратным поворотом (bbox-отсев выше уже прошёл).
+    const cx = el.x + el.w / 2;
+    const cy = el.y + el.h / 2;
+    const local = rotatePoint(x, y, cx, cy, -el.rotation);
+    return (
+      local.x >= el.x - tolerance && local.x <= el.x + el.w + tolerance &&
+      local.y >= el.y - tolerance && local.y <= el.y + el.h + tolerance
+    );
+  }
+  // Для фигур, текста и неповёрнутых картинок попадание = bbox (проверен выше).
   return true;
 }
 
@@ -356,9 +510,9 @@ export function translateElement(el: BoardElement, dx: number, dy: number): Boar
     return bumpVersion(el, { points } as Partial<StrokeElement>);
   }
   return bumpVersion(el, {
-    x: roundMm((el as ShapeElement | TextElement).x + dx),
-    y: roundMm((el as ShapeElement | TextElement).y + dy),
-  } as Partial<ShapeElement | TextElement>);
+    x: roundMm((el as ShapeElement | TextElement | ImageElement).x + dx),
+    y: roundMm((el as ShapeElement | TextElement | ImageElement).y + dy),
+  } as Partial<ShapeElement | TextElement | ImageElement>);
 }
 
 // ─── Сериализация ─────────────────────────────────────────────────────────────
@@ -402,6 +556,25 @@ export function parseElements(raw: unknown): BoardElement[] {
         h: typeof s.h === 'number' ? s.h : 0,
         color: typeof s.color === 'string' ? s.color : BOARD_COLORS[0],
         size: typeof s.size === 'number' ? s.size : DEFAULT_PEN_SIZE_MM,
+      });
+    } else if (el.type === 'image') {
+      const s = el as Partial<ImageElement>;
+      if (
+        typeof s.x !== 'number' || typeof s.y !== 'number' ||
+        typeof s.w !== 'number' || typeof s.h !== 'number' ||
+        typeof s.ref !== 'string' || !s.ref.startsWith('storage://')
+      ) {
+        continue;
+      }
+      out.push({
+        ...base,
+        type: 'image',
+        x: s.x,
+        y: s.y,
+        w: Math.abs(s.w),
+        h: Math.abs(s.h),
+        rotation: typeof s.rotation === 'number' ? s.rotation : 0,
+        ref: s.ref,
       });
     } else if (el.type === 'text') {
       const s = el as Partial<TextElement>;

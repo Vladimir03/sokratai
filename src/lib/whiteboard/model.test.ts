@@ -4,6 +4,7 @@ import {
   PAGE_HEIGHT_MM,
   PAGE_WIDTH_MM,
   clampToPage,
+  createImage,
   createShape,
   createStroke,
   createText,
@@ -14,6 +15,9 @@ import {
   normalizeOrientation,
   pageSizeMm,
   parseElements,
+  resizeRectFromCorner,
+  rotatePoint,
+  rotationFromPointer,
   translateElement,
 } from './model';
 import { backgroundToSvg, elementToSvg, pageToSvgString } from './svg';
@@ -188,5 +192,70 @@ describe('SVG-слой (общий для экрана и PDF)', () => {
     expect(normalizeOrientation('landscape')).toBe('landscape');
     expect(normalizeOrientation('иное')).toBe('portrait');
     expect(normalizeOrientation(undefined)).toBe('portrait');
+  });
+});
+
+describe('картинки (Фаза 2а)', () => {
+  it('bounds повёрнутой картинки покрывают все четыре угла', () => {
+    const img = createImage(10, 10, 40, 20, 'storage://board-images/t/a.jpg');
+    const rotated = { ...img, rotation: 90 };
+    const b = elementBounds(rotated);
+    // При 90° ширина и высота меняются местами вокруг центра (30, 20).
+    expect(b.maxX - b.minX).toBeCloseTo(20, 1);
+    expect(b.maxY - b.minY).toBeCloseTo(40, 1);
+  });
+
+  it('hitTest уважает поворот: угол осевого bbox — промах', () => {
+    const img = { ...createImage(0, 0, 40, 10, 'storage://board-images/t/a.jpg'), rotation: 45 };
+    const b = elementBounds(img);
+    // Угол bbox лежит вне повёрнутого прямоугольника.
+    expect(hitTest(img, b.minX + 0.5, b.minY + 0.5, 0.1)).toBe(false);
+    // Центр — всегда попадание.
+    expect(hitTest(img, 20, 5, 0.1)).toBe(true);
+  });
+
+  it('resize от угла держит противоположный угол неподвижным (без поворота)', () => {
+    const next = resizeRectFromCorner({ x: 10, y: 10, w: 20, h: 10 }, 0, 'se', 50, 30, false);
+    // Противоположный угол se — это nw (10,10): остался на месте.
+    expect(next.x).toBeCloseTo(10);
+    expect(next.y).toBeCloseTo(10);
+    expect(next.w).toBeCloseTo(40);
+    expect(next.h).toBeCloseTo(20);
+  });
+
+  it('resize с preserveAspect сохраняет пропорции', () => {
+    const next = resizeRectFromCorner({ x: 0, y: 0, w: 40, h: 20 }, 0, 'se', 60, 21, true);
+    expect(next.w / next.h).toBeCloseTo(2, 2);
+  });
+
+  it('resize повёрнутого прямоугольника держит мировую позицию неподвижного угла', () => {
+    const rect = { x: 10, y: 10, w: 20, h: 10 };
+    const rotation = 30;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h / 2;
+    const nwWorld = rotatePoint(rect.x, rect.y, cx, cy, rotation);
+    const next = resizeRectFromCorner(rect, rotation, 'se', 45, 35, false);
+    const nextCx = next.x + next.w / 2;
+    const nextCy = next.y + next.h / 2;
+    const nwWorldAfter = rotatePoint(next.x, next.y, nextCx, nextCy, rotation);
+    expect(nwWorldAfter.x).toBeCloseTo(nwWorld.x, 1);
+    expect(nwWorldAfter.y).toBeCloseTo(nwWorld.y, 1);
+  });
+
+  it('rotationFromPointer: 0° сверху, магнит к 90°', () => {
+    // Указатель прямо над центром → 0°.
+    expect(rotationFromPointer(50, 50, 50, 10)).toBe(0);
+    // Указатель справа → 90°; в пределах ±5° прилипает ровно к 90.
+    expect(rotationFromPointer(50, 50, 90, 52)).toBe(90);
+  });
+
+  it('parseElements принимает картинку и отбрасывает не-storage ref', () => {
+    const parsed = parseElements([
+      { id: 'a', type: 'image', x: 1, y: 2, w: 30, h: 20, rotation: 90, ref: 'storage://board-images/t/a.jpg' },
+      { id: 'b', type: 'image', x: 1, y: 2, w: 30, h: 20, ref: 'https://evil.example/x.jpg' },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].type).toBe('image');
+    expect((parsed[0] as { rotation: number }).rotation).toBe(90);
   });
 });

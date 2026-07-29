@@ -20,11 +20,14 @@ import {
 import {
   type BoardElement,
   type BoardGridMm,
+  type ImageElement,
   type PageOrientation,
   type PageSizeMm,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
+  bumpVersion,
+  createImage,
   createText,
   elementBoundsCached,
   normalizeBackground,
@@ -33,10 +36,20 @@ import {
   pageSizeMm,
   parseElements,
   primeSeqCounter,
+  roundMm,
   translateElement,
 } from '@/lib/whiteboard/model';
+import type { ImageUrlMap } from '@/lib/whiteboard/svg';
+import {
+  MAX_IMAGES_PER_PAGE,
+  resolveBoardImageUrl,
+  resolveImagesAsDataUrls,
+  uploadBoardImage,
+} from '@/lib/whiteboard/boardImages';
 import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQueue';
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
+import { usePasteImages } from '@/hooks/usePasteImages';
+import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { deleteMaterial, uploadLessonPdf } from '@/lib/lessonMaterialsApi';
 import type { BoardBackground } from '@/lib/whiteboard/model';
 
@@ -119,6 +132,10 @@ export default function Whiteboard() {
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
   const [zoom, setZoom] = useState<BoardZoom>('fit');
   const [historyTick, setHistoryTick] = useState(0);
+  const [imageUrls, setImageUrls] = useState<ImageUrlMap>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  /** Битые ref не ретраим на каждый штрих — только плейсхолдер. */
+  const failedImageRefsRef = useRef<Set<string>>(new Set());
 
   // ⚠️ Зеркало страниц — СИНХРОННОЕ: applyPages обновляет ref в том же тике,
   // что и setState. Прежний вариант (sync в passive-эффекте) оставлял окно,
@@ -419,6 +436,118 @@ export default function Whiteboard() {
     setSelectedIds([]);
   }, []);
 
+  // ─── Картинки (Фаза 2а, W2.1) ───────────────────────────────────────────────
+
+  // Резолв signed URL для всех ref на страницах. Битые — в failed-набор, чтобы
+  // не долбить storage на каждый штрих (эффект зависит от pages).
+  useEffect(() => {
+    const refs = new Set<string>();
+    for (const page of pages) {
+      for (const el of page.elements) {
+        if (el.type === 'image') refs.add(el.ref);
+      }
+    }
+    const missing = Array.from(refs).filter(
+      (ref) => !imageUrls[ref] && !failedImageRefsRef.current.has(ref),
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const resolved: ImageUrlMap = {};
+      for (let i = 0; i < missing.length; i++) {
+        const url = await resolveBoardImageUrl(missing[i]);
+        if (url) resolved[missing[i]] = url;
+        else failedImageRefsRef.current.add(missing[i]);
+      }
+      if (!cancelled && Object.keys(resolved).length > 0) {
+        setImageUrls((prev) => ({ ...prev, ...resolved }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pages, imageUrls]);
+
+  const insertImageFiles = useCallback(
+    async (files: File[]) => {
+      const currentBoard = board;
+      const page = pagesRef.current[activeIndex];
+      if (!currentBoard || !page || files.length === 0) return;
+
+      const existing = page.elements.filter((el) => el.type === 'image').length;
+      const room = MAX_IMAGES_PER_PAGE - existing;
+      if (room <= 0) {
+        toast.error(
+          `На листе уже ${MAX_IMAGES_PER_PAGE} картинок (лимит, чтобы PDF не разрастался). Добавьте новый лист.`,
+        );
+        return;
+      }
+      const batch = files.slice(0, room);
+      if (batch.length < files.length) {
+        toast.message(`Добавлены первые ${batch.length} — лимит ${MAX_IMAGES_PER_PAGE} картинок на лист.`);
+      }
+
+      for (let i = 0; i < batch.length; i++) {
+        try {
+          const uploaded = await uploadBoardImage(batch[i], currentBoard.id);
+          const size = pageSizeMm(pagesRef.current[activeIndex]?.orientation ?? 'portrait');
+          // px → мм при 96 dpi; вписываем в 60% листа, каскад 5 мм от центра,
+          // чтобы серия вставок не легла стопкой точно друг на друга.
+          const pxToMm = 25.4 / 96;
+          let w = uploaded.naturalWidth * pxToMm;
+          let h = uploaded.naturalHeight * pxToMm;
+          const scale = Math.min(1, (size.width * 0.6) / w, (size.height * 0.6) / h);
+          w = roundMm(w * scale);
+          h = roundMm(h * scale);
+          const cascade = ((existing + i) % 4) * 5;
+          const x = roundMm(Math.max(0, (size.width - w) / 2 + cascade));
+          const y = roundMm(Math.max(0, (size.height - h) / 2 + cascade));
+          handleCommitElement(createImage(x, y, w, h, uploaded.ref));
+          // Прогреваем URL сразу — иначе на месте вставки мигает плейсхолдер.
+          void resolveBoardImageUrl(uploaded.ref).then((url) => {
+            if (url) setImageUrls((prev) => ({ ...prev, [uploaded.ref]: url }));
+          });
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : 'Не удалось добавить изображение');
+        }
+      }
+    },
+    [board, activeIndex, handleCommitElement],
+  );
+
+  // Ctrl+V на уровне окна (вставку в текстовые поля не перехватываем).
+  const pasteHandler = usePasteImages({
+    compress: false, // компрессия внутри uploadBoardImage — не жать дважды
+    onImagePasted: (file) => void insertImageFiles([file]),
+    successToast: null,
+    telemetryTag: 'board',
+  });
+  useEffect(() => {
+    const handler = (e: ClipboardEvent) => {
+      if (isEditableTarget(e.target)) return;
+      pasteHandler(e as unknown as React.ClipboardEvent);
+    };
+    window.addEventListener('paste', handler);
+    return () => window.removeEventListener('paste', handler);
+  }, [pasteHandler]);
+
+  const { dragHandlers, isDragging } = useDragDropFiles({
+    compress: false,
+    acceptedTypes: ['image/'],
+    onFilesDropped: (files) => void insertImageFiles(files),
+    successToast: null,
+    telemetryTag: 'board',
+  });
+
+  const handleTransformElement = useCallback(
+    (id: string, patch: Partial<ImageElement>) => {
+      updateActiveElements((elements) =>
+        elements.map((el) => (el.id === id ? bumpVersion(el as ImageElement, patch) : el)),
+      );
+    },
+    [updateActiveElements],
+  );
+
   // ─── Текст ──────────────────────────────────────────────────────────────────
 
   /**
@@ -470,6 +599,15 @@ export default function Whiteboard() {
   const buildPdfBlob = useCallback(async () => {
     const source = pagesRef.current;
     if (source.length === 0) throw new Error('В доске нет страниц');
+    // Картинки — data:-URL заранее (fail-closed: конспект с пустыми рамками
+    // вместо картинок хуже честной ошибки — тот же принцип, что со шрифтом).
+    const refs: string[] = [];
+    for (const page of source) {
+      for (const el of page.elements) {
+        if (el.type === 'image') refs.push(el.ref);
+      }
+    }
+    const pdfImageUrls = refs.length > 0 ? await resolveImagesAsDataUrls(refs) : undefined;
     const { exportBoardToPdf } = await import('@/lib/whiteboard/exportPdf');
     return exportBoardToPdf(
       source.map((p) => ({
@@ -478,7 +616,10 @@ export default function Whiteboard() {
         gridMm: p.gridMm,
         orientation: p.orientation,
       })),
-      { onPageStart: (done, total) => setExportProgress({ done, total }) },
+      {
+        onPageStart: (done, total) => setExportProgress({ done, total }),
+        imageUrls: pdfImageUrls,
+      },
     );
   }, []);
 
@@ -822,6 +963,7 @@ export default function Whiteboard() {
         onGridMmChange={(gridMm: BoardGridMm) => patchActivePage({ gridMm })}
         orientation={activePage?.orientation ?? 'portrait'}
         onOrientationChange={handleOrientationChange}
+        onPickImage={() => fileInputRef.current?.click()}
         zoom={zoom}
         onZoomChange={setZoom}
         canUndo={historyState.canUndo}
@@ -831,7 +973,25 @@ export default function Whiteboard() {
         disabled={pageBusy}
       />
 
-      <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-auto p-3">
+      {/* accept image/* без capture: iOS/Android сами предложат «Камера / Галерея / Файлы». */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          if (files.length > 0) void insertImageFiles(files);
+        }}
+      />
+
+      <div
+        ref={viewportRef}
+        className="relative min-h-0 flex-1 overflow-auto p-3"
+        {...dragHandlers}
+      >
         <div
           className="relative mx-auto bg-white shadow-sm ring-1 ring-slate-200"
           style={{
@@ -850,10 +1010,12 @@ export default function Whiteboard() {
               size={size}
               selectedIds={selectedIds}
               readOnly={pageBusy}
+              imageUrls={imageUrls}
               onCommitElement={handleCommitElement}
               onEraseElements={handleEraseElements}
               onSelectionChange={setSelectedIds}
               onMoveSelection={handleMoveSelection}
+              onTransformElement={handleTransformElement}
               onRequestText={handleRequestText}
               onPan={(dx, dy) => {
                 const el = viewportRef.current;
@@ -895,6 +1057,14 @@ export default function Whiteboard() {
             />
           )}
         </div>
+
+        {isDragging && (
+          <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/5">
+            <span className="rounded-md bg-white px-3 py-1.5 text-sm text-accent shadow-sm">
+              Отпустите, чтобы добавить на лист
+            </span>
+          </div>
+        )}
       </div>
 
       <PagesPanel

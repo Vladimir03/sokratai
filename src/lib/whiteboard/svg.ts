@@ -24,11 +24,18 @@ import {
 const PORTRAIT_SIZE: PageSizeMm = { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM };
 
 export interface SvgNodeSpec {
-  tag: 'path' | 'rect' | 'ellipse' | 'line' | 'text';
+  tag: 'path' | 'rect' | 'ellipse' | 'line' | 'text' | 'image';
   attrs: Record<string, string | number>;
   /** Только для <text>. */
   text?: string;
 }
+
+/**
+ * Резолв `storage://` → URL для <image>. Экран передаёт signed URL (host уже
+ * api.sokratai.ru — RU-safe), экспорт в PDF — data:-URL. Модель хранит только
+ * ref, поэтому обе подстановки живут снаружи.
+ */
+export type ImageUrlMap = Record<string, string>;
 
 /** Шрифт доски. Golos Text — брендовый (rule 90); в PDF подменяется на helvetica. */
 export const BOARD_FONT_FAMILY = "'Golos Text', system-ui, sans-serif";
@@ -98,7 +105,13 @@ const defaultOptionsSvgCache = new WeakMap<BoardElement, SvgNodeSpec[]>();
 export function elementToSvg(
   el: BoardElement,
   options: StrokeRenderOptions = DEFAULT_STROKE_OPTIONS,
+  imageUrls?: ImageUrlMap,
 ): SvgNodeSpec[] {
+  // Картинки НЕ кэшируются: их узел зависит от карты URL (signed URL живёт час,
+  // data:-URL другой). Штрихи — подавляющее большинство элементов — кэш держат.
+  if (el.type === 'image') {
+    return imageElementToSvg(el, imageUrls);
+  }
   if (options === DEFAULT_STROKE_OPTIONS) {
     const cached = defaultOptionsSvgCache.get(el);
     if (cached) return cached;
@@ -107,6 +120,46 @@ export function elementToSvg(
     return nodes;
   }
   return computeElementSvg(el, options);
+}
+
+function imageElementToSvg(
+  el: Extract<BoardElement, { type: 'image' }>,
+  imageUrls?: ImageUrlMap,
+): SvgNodeSpec[] {
+  const cx = el.x + el.w / 2;
+  const cy = el.y + el.h / 2;
+  const transform = el.rotation !== 0 ? `rotate(${el.rotation} ${round(cx)} ${round(cy)})` : '';
+  const url = imageUrls?.[el.ref];
+  if (!url) {
+    // URL ещё не разрезолвлен (или битый): рамка-плейсхолдер, НЕ raw <image>
+    // с пустым href (rule 40 — битые картинки через фолбэк).
+    return [{
+      tag: 'rect',
+      attrs: {
+        x: round(el.x),
+        y: round(el.y),
+        width: round(el.w),
+        height: round(el.h),
+        fill: '#F1F5F9',
+        stroke: '#CBD5E1',
+        'stroke-width': 0.3,
+        'stroke-dasharray': '2 1.5',
+        ...(transform ? { transform } : {}),
+      },
+    }];
+  }
+  return [{
+    tag: 'image',
+    attrs: {
+      x: round(el.x),
+      y: round(el.y),
+      width: round(el.w),
+      height: round(el.h),
+      href: url,
+      preserveAspectRatio: 'none',
+      ...(transform ? { transform } : {}),
+    },
+  }];
 }
 
 function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgNodeSpec[] {
@@ -145,7 +198,9 @@ function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgN
     return [{ tag: 'rect', attrs: { x: round(x), y: round(y), width: round(w), height: round(h), ...common } }];
   }
 
-  return textToSvg(el);
+  if (el.type === 'text') return textToSvg(el);
+  // image сюда не доходит (обслужен в elementToSvg до кэша).
+  return [];
 }
 
 function textToSvg(el: TextElement): SvgNodeSpec[] {
@@ -261,11 +316,12 @@ export function pageToSvgString(
   options: StrokeRenderOptions = DEFAULT_STROKE_OPTIONS,
   includeBackground = true,
   size: PageSizeMm = PORTRAIT_SIZE,
+  imageUrls?: ImageUrlMap,
 ): string {
   const nodes: SvgNodeSpec[] = [];
   if (includeBackground) nodes.push(...backgroundToSvg(background, gridMm, size));
   for (let i = 0; i < elements.length; i++) {
-    nodes.push(...elementToSvg(elements[i], options));
+    nodes.push(...elementToSvg(elements[i], options, imageUrls));
   }
   const body = nodes.map(nodeToString).join('');
   return (

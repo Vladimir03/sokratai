@@ -45,6 +45,8 @@ export interface BoardPdfOptions {
   includeBackground?: boolean;
   /** Прогресс по листам: вызывается ПЕРЕД обработкой каждой страницы (1-based). */
   onPageStart?: (page: number, total: number) => void;
+  /** `storage://` → data:-URL для картинок (boardImages.resolveImagesAsDataUrls). */
+  imageUrls?: Record<string, string>;
 }
 
 let cachedFontBase64: string | null = null;
@@ -143,6 +145,7 @@ export async function exportBoardToPdf(
       strokeOptions,
       includeBackground,
       size,
+      options.imageUrls,
     );
     // Последовательно, а не Promise.all: листы кладутся в один документ jsPDF,
     // и параллельная запись перемешала бы их порядок.

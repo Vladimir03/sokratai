@@ -3,7 +3,9 @@ import {
   type BoardElement,
   type BoardBackground,
   type BoardGridMm,
+  type ImageElement,
   type PageSizeMm,
+  type ResizeCorner,
   type ShapeKind,
   boundsIntersect,
   clampToPage,
@@ -11,9 +13,13 @@ import {
   createStroke,
   elementBoundsCached,
   hitTest,
+  resizeRectFromCorner,
+  rotatePoint,
+  rotationFromPointer,
   roundMm,
 } from '@/lib/whiteboard/model';
 import {
+  type ImageUrlMap,
   type StrokeRenderOptions,
   DEFAULT_STROKE_OPTIONS,
   backgroundToSvg,
@@ -53,12 +59,16 @@ interface BoardCanvasProps {
   strokeOptions?: StrokeRenderOptions;
   selectedIds: string[];
   readOnly?: boolean;
+  /** `storage://` → signed URL (Whiteboard резолвит и кэширует). */
+  imageUrls?: ImageUrlMap;
   onCommitElement: (element: BoardElement) => void;
   /** Итог жеста ластика, ОДИН вызов на жест. */
   onEraseElements: (ids: string[]) => void;
   onSelectionChange: (ids: string[]) => void;
   /** Итог перетаскивания, ОДИН вызов на жест (для истории undo). */
   onMoveSelection: (dx: number, dy: number) => void;
+  /** Итог resize/rotate, ОДИН вызов на жест. */
+  onTransformElement: (id: string, patch: Partial<ImageElement>) => void;
   onRequestText: (x: number, y: number) => void;
   /** Прокрутить контейнер листа на (dx, dy) px — двухпальцевое панорамирование. */
   onPan?: (dx: number, dy: number) => void;
@@ -69,8 +79,16 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
 
 /** Один элемент. memo по id+version — версия меняется при любой правке (model.ts). */
 const ElementNode = memo(
-  ({ element, options }: { element: BoardElement; options: StrokeRenderOptions }) => {
-    const nodes = elementToSvg(element, options);
+  ({
+    element,
+    options,
+    imageUrls,
+  }: {
+    element: BoardElement;
+    options: StrokeRenderOptions;
+    imageUrls?: ImageUrlMap;
+  }) => {
+    const nodes = elementToSvg(element, options, imageUrls);
     return (
       <>
         {nodes.map((node, i) => {
@@ -82,16 +100,20 @@ const ElementNode = memo(
               </text>
             );
           }
-          const Tag = node.tag as 'path' | 'rect' | 'ellipse' | 'line';
+          const Tag = node.tag as 'path' | 'rect' | 'ellipse' | 'line' | 'image';
           return <Tag key={key} {...(node.attrs as Record<string, string | number>)} />;
         })}
       </>
     );
   },
+  // Сравнение по ИДЕНТИЧНОСТИ элемента, не по id+version: элементы иммутабельны
+  // (правка = новый объект), поэтому для статичных ссылка стабильна и memo
+  // работает; а live/draft-элементы пересоздаются каждый кадр с ПОСТОЯННЫМИ
+  // id/version — сравнение по версии замораживало их превью на первом кадре.
   (prev, next) =>
-    prev.element.id === next.element.id &&
-    prev.element.version === next.element.version &&
-    prev.options === next.options,
+    prev.element === next.element &&
+    prev.options === next.options &&
+    (prev.element.type !== 'image' || prev.imageUrls === next.imageUrls),
 );
 ElementNode.displayName = 'ElementNode';
 
@@ -104,16 +126,18 @@ const SceneLayer = memo(
     elements,
     hiddenIds,
     options,
+    imageUrls,
   }: {
     elements: BoardElement[];
     hiddenIds: ReadonlySet<string>;
     options: StrokeRenderOptions;
+    imageUrls?: ImageUrlMap;
   }) => (
     <>
       {elements.map((element) =>
         hiddenIds.has(element.id) ? null : (
           <g key={element.id}>
-            <ElementNode element={element} options={options} />
+            <ElementNode element={element} options={options} imageUrls={imageUrls} />
           </g>
         ),
       )}
@@ -122,12 +146,13 @@ const SceneLayer = memo(
   (prev, next) =>
     prev.elements === next.elements &&
     prev.hiddenIds === next.hiddenIds &&
-    prev.options === next.options,
+    prev.options === next.options &&
+    prev.imageUrls === next.imageUrls,
 );
 SceneLayer.displayName = 'SceneLayer';
 
 interface DragState {
-  kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase' | 'pan';
+  kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase' | 'pan' | 'resize' | 'rotate';
   /** Жест принадлежит одному указателю; чужие события игнорируются. */
   pointerId: number;
   pointerType: string;
@@ -135,6 +160,19 @@ interface DragState {
   startY: number;
   /** Для pan — оба пальца. */
   panIds?: [number, number];
+  /** Для resize/rotate — целевой элемент и угол-ручка. */
+  targetId?: string;
+  corner?: ResizeCorner;
+}
+
+/** Live-патч трансформации (resize/rotate) — оригинал скрыт, рисуется копия с патчем. */
+interface TransformDraft {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
 }
 
 interface LiveShape {
@@ -156,10 +194,12 @@ export function BoardCanvas({
   strokeOptions = DEFAULT_STROKE_OPTIONS,
   selectedIds,
   readOnly = false,
+  imageUrls,
   onCommitElement,
   onEraseElements,
   onSelectionChange,
   onMoveSelection,
+  onTransformElement,
   onRequestText,
   onPan,
 }: BoardCanvasProps) {
@@ -179,11 +219,14 @@ export function BoardCanvas({
   const moveOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const rafRef = useRef<number | null>(null);
 
+  const transformDraftRef = useRef<TransformDraft | null>(null);
+
   const [livePoints, setLivePoints] = useState<number[] | null>(null);
   const [liveShape, setLiveShape] = useState<LiveShape | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(EMPTY_HIDDEN);
+  const [transformDraft, setTransformDraft] = useState<TransformDraft | null>(null);
 
   const backgroundNodes = useMemo(
     () => backgroundToSvg(background, gridMm, pageSize),
@@ -215,6 +258,7 @@ export function BoardCanvas({
       setMarquee(marqueeRef.current ? { ...marqueeRef.current } : null);
       setMoveOffset({ ...moveOffsetRef.current });
       setHiddenIds(erasedRef.current.size > 0 ? new Set(erasedRef.current) : EMPTY_HIDDEN);
+      setTransformDraft(transformDraftRef.current ? { ...transformDraftRef.current } : null);
     });
   }, []);
 
@@ -278,6 +322,7 @@ export function BoardCanvas({
     moveOffsetRef.current = { dx: 0, dy: 0 };
     erasedRef.current = new Set();
     panLastRef.current = null;
+    transformDraftRef.current = null;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -287,6 +332,7 @@ export function BoardCanvas({
     setMarquee(null);
     setMoveOffset({ dx: 0, dy: 0 });
     setHiddenIds(EMPTY_HIDDEN);
+    setTransformDraft(null);
   }, []);
 
   const finishDrag = useCallback(
@@ -337,11 +383,57 @@ export function BoardCanvas({
       } else if (drag.kind === 'erase') {
         // ОДИН коммит на весь жест: один шаг undo, одна пометка автосейва.
         if (erasedRef.current.size > 0) onEraseElements(Array.from(erasedRef.current));
+      } else if (drag.kind === 'resize' || drag.kind === 'rotate') {
+        const draft = transformDraftRef.current;
+        if (draft) {
+          onTransformElement(draft.id, {
+            x: draft.x,
+            y: draft.y,
+            w: draft.w,
+            h: draft.h,
+            rotation: draft.rotation,
+          });
+        }
       }
 
       resetLiveState();
     },
-    [color, size, elements, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, resetLiveState],
+    [color, size, elements, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, resetLiveState],
+  );
+
+  /** Старт resize/rotate с ручки выделенной картинки (stopPropagation — не рисуем). */
+  const startTransform = useCallback(
+    (
+      event: React.PointerEvent,
+      target: ImageElement,
+      kind: 'resize' | 'rotate',
+      corner?: ResizeCorner,
+    ) => {
+      if (readOnly || dragRef.current) return;
+      event.stopPropagation();
+      event.preventDefault();
+      rectRef.current = svgRef.current?.getBoundingClientRect() ?? null;
+      (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+      dragRef.current = {
+        kind,
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        startX: 0,
+        startY: 0,
+        targetId: target.id,
+        corner,
+      };
+      transformDraftRef.current = {
+        id: target.id,
+        x: target.x,
+        y: target.y,
+        w: target.w,
+        h: target.h,
+        rotation: target.rotation,
+      };
+      scheduleFrame();
+    },
+    [readOnly, scheduleFrame],
   );
 
   /** Второй палец во время touch-жеста → панорамирование (штрих отбрасывается). */
@@ -505,6 +597,36 @@ export function BoardCanvas({
       const raw = toMm(event.clientX, event.clientY);
       const { x, y } = clampToPage(raw.x, raw.y, pageSize);
 
+      if (drag.kind === 'resize' || drag.kind === 'rotate') {
+        // НЕклампленные координаты: ручка может выходить за лист, и зажим
+        // искажал бы геометрию (растяжение «прилипало» бы к краю).
+        const draft = transformDraftRef.current;
+        const original = elements.find((e) => e.id === drag.targetId);
+        if (draft && original && original.type === 'image') {
+          if (drag.kind === 'rotate') {
+            const cx = draft.x + draft.w / 2;
+            const cy = draft.y + draft.h / 2;
+            draft.rotation = rotationFromPointer(cx, cy, raw.x, raw.y);
+          } else if (drag.corner) {
+            const next = resizeRectFromCorner(
+              { x: original.x, y: original.y, w: original.w, h: original.h },
+              original.rotation,
+              drag.corner,
+              raw.x,
+              raw.y,
+              true,
+            );
+            draft.x = next.x;
+            draft.y = next.y;
+            draft.w = next.w;
+            draft.h = next.h;
+            draft.rotation = original.rotation;
+          }
+        }
+        scheduleFrame();
+        return;
+      }
+
       if (drag.kind === 'stroke') {
         const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
         livePointsRef.current?.push(roundMm(x), roundMm(y), pressure);
@@ -525,7 +647,7 @@ export function BoardCanvas({
 
       scheduleFrame();
     },
-    [readOnly, toMm, pageSize, eraseAt, scheduleFrame, onPan],
+    [readOnly, toMm, pageSize, eraseAt, scheduleFrame, onPan, elements],
   );
 
   // Указатель может уйти с элемента или быть отменён системой (жест, звонок) —
@@ -603,6 +725,35 @@ export function BoardCanvas({
   const isMoving = moveOffset.dx !== 0 || moveOffset.dy !== 0;
   const moveTransform = isMoving ? `translate(${moveOffset.dx} ${moveOffset.dy})` : undefined;
 
+  // Во время resize/rotate оригинал скрывается, поверх рисуется live-копия.
+  const hiddenForRender = useMemo(() => {
+    if (!transformDraft) return hiddenIds;
+    const combined = new Set(hiddenIds);
+    combined.add(transformDraft.id);
+    return combined;
+  }, [hiddenIds, transformDraft]);
+
+  const transformDraftElement: BoardElement | null = useMemo(() => {
+    if (!transformDraft) return null;
+    const original = elements.find((e) => e.id === transformDraft.id);
+    if (!original || original.type !== 'image') return null;
+    return {
+      ...original,
+      x: transformDraft.x,
+      y: transformDraft.y,
+      w: transformDraft.w,
+      h: transformDraft.h,
+      rotation: transformDraft.rotation,
+    };
+  }, [transformDraft, elements]);
+
+  // Ручки — только в режиме выделения, для РОВНО одной выбранной картинки.
+  const singleSelectedImage: ImageElement | null = useMemo(() => {
+    if (tool !== 'select' || selectedIds.length !== 1) return null;
+    const el = elements.find((e) => e.id === selectedIds[0]);
+    return el && el.type === 'image' ? el : null;
+  }, [tool, selectedIds, elements]);
+
   return (
     <svg
       ref={svgRef}
@@ -624,16 +775,31 @@ export function BoardCanvas({
         <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
       ))}
 
-      <SceneLayer elements={unselectedElements} hiddenIds={hiddenIds} options={strokeOptions} />
+      <SceneLayer
+        elements={unselectedElements}
+        hiddenIds={hiddenForRender}
+        options={strokeOptions}
+        imageUrls={imageUrls}
+      />
 
       {selectedElements.length > 0 && (
         <g opacity={0.7} transform={moveTransform}>
-          <SceneLayer elements={selectedElements} hiddenIds={hiddenIds} options={strokeOptions} />
+          <SceneLayer
+            elements={selectedElements}
+            hiddenIds={hiddenForRender}
+            options={strokeOptions}
+            imageUrls={imageUrls}
+          />
         </g>
       )}
 
       {liveStroke && <ElementNode element={liveStroke} options={strokeOptions} />}
       {liveShapeElement && <ElementNode element={liveShapeElement} options={strokeOptions} />}
+      {transformDraftElement && (
+        <g opacity={0.85}>
+          <ElementNode element={transformDraftElement} options={strokeOptions} imageUrls={imageUrls} />
+        </g>
+      )}
 
       {marquee && (
         <rect
@@ -662,6 +828,74 @@ export function BoardCanvas({
           pointerEvents="none"
         />
       )}
+
+      {/* Ручки resize/rotate выбранной картинки. Невидимый круг r=4 мм — тач-цель,
+          видимый r=1.6 — индикатор. Во время жеста следуют за live-копией. */}
+      {singleSelectedImage && !isMoving && (() => {
+        const g =
+          transformDraft && transformDraft.id === singleSelectedImage.id
+            ? transformDraft
+            : singleSelectedImage;
+        const cx = g.x + g.w / 2;
+        const cy = g.y + g.h / 2;
+        const corners: { corner: ResizeCorner; p: { x: number; y: number } }[] = [
+          { corner: 'nw', p: rotatePoint(g.x, g.y, cx, cy, g.rotation) },
+          { corner: 'ne', p: rotatePoint(g.x + g.w, g.y, cx, cy, g.rotation) },
+          { corner: 'se', p: rotatePoint(g.x + g.w, g.y + g.h, cx, cy, g.rotation) },
+          { corner: 'sw', p: rotatePoint(g.x, g.y + g.h, cx, cy, g.rotation) },
+        ];
+        const rotateHandle = rotatePoint(cx, g.y - 7, cx, cy, g.rotation);
+        const topEdge = rotatePoint(cx, g.y, cx, cy, g.rotation);
+        return (
+          <g>
+            <line
+              x1={topEdge.x}
+              y1={topEdge.y}
+              x2={rotateHandle.x}
+              y2={rotateHandle.y}
+              stroke="#1B6B4A"
+              strokeWidth={0.2}
+              pointerEvents="none"
+            />
+            {corners.map(({ corner, p }) => (
+              <g key={corner}>
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={4}
+                  fill="transparent"
+                  style={{ cursor: 'nwse-resize' }}
+                  onPointerDown={(e) => startTransform(e, singleSelectedImage, 'resize', corner)}
+                />
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={1.6}
+                  fill="#FFFFFF"
+                  stroke="#1B6B4A"
+                  strokeWidth={0.35}
+                  pointerEvents="none"
+                />
+              </g>
+            ))}
+            <circle
+              cx={rotateHandle.x}
+              cy={rotateHandle.y}
+              r={4}
+              fill="transparent"
+              style={{ cursor: 'grab' }}
+              onPointerDown={(e) => startTransform(e, singleSelectedImage, 'rotate')}
+            />
+            <circle
+              cx={rotateHandle.x}
+              cy={rotateHandle.y}
+              r={1.8}
+              fill="#1B6B4A"
+              pointerEvents="none"
+            />
+          </g>
+        );
+      })()}
     </svg>
   );
 }

@@ -2,6 +2,7 @@ import { memo } from 'react';
 import {
   Circle,
   Eraser,
+  ImagePlus,
   Maximize,
   Minus,
   MousePointer2,
@@ -53,6 +54,8 @@ interface BoardToolbarProps {
   onGridMmChange: (gridMm: BoardGridMm) => void;
   orientation: PageOrientation;
   onOrientationChange: (orientation: PageOrientation) => void;
+  /** Открыть файловый пикер картинки (на планшете нативно предложит камеру). */
+  onPickImage: () => void;
   zoom: BoardZoom;
   onZoomChange: (zoom: BoardZoom) => void;
   canUndo: boolean;
@@ -132,6 +135,7 @@ export const BoardToolbar = memo(function BoardToolbar({
   onGridMmChange,
   orientation,
   onOrientationChange,
+  onPickImage,
   zoom,
   onZoomChange,
   canUndo,
@@ -154,6 +158,9 @@ export const BoardToolbar = memo(function BoardToolbar({
             <Icon className="h-4 w-4" />
           </ToolbarButton>
         ))}
+        <ToolbarButton label="Вставить изображение" disabled={disabled} onClick={onPickImage}>
+          <ImagePlus className="h-4 w-4" />
+        </ToolbarButton>
       </div>
 
       <div className="flex items-center gap-1">
