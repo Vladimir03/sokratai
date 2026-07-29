@@ -233,7 +233,10 @@ export function HWDrawer({
   // Фаза 2: «Создать пробник» из корзины — только при включённом флаге пробников
   // (кэшированный useTutor; без флага кнопка скрыта, редактор всё равно за гейтом).
   const { tutor } = useTutor();
-  const mockExamsEnabled = Boolean(tutor?.feature_mock_exams_enabled);
+  const mockExamsEnabled = Boolean(
+    (tutor as { feature_mock_exams_enabled?: boolean | null } | null | undefined)
+      ?.feature_mock_exams_enabled,
+  );
   const { tasks, removeTask, updateSnapshot, clearDraft } = useHWDraftStore();
   // Профиль для дефолта предмета (кэш card-ключа тёплый — SideNav держит).
   const { data: tutorProfile } = useTutorProfile();

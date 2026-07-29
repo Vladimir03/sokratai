@@ -139,7 +139,8 @@ export async function renderPdfPagesToFiles(
 
   // Worker-на-вызов (ревью P2): свой port, terminate в конце — нет shared-state.
   const port = new PdfWorker();
-  const worker = new pdfjsLib.PDFWorker({ port });
+  // pdfjs 6 типизирует `port` как null — рантайм принимает Worker (см. коммент выше).
+  const worker = new pdfjsLib.PDFWorker({ port: port as unknown as null });
   const terminateWorker = () => {
     try {
       worker.destroy();

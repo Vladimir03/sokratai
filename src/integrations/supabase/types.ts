@@ -5958,6 +5958,19 @@ export type Database = {
         Args: { p_is_correct: boolean; p_user_id: string }
         Returns: undefined
       }
+      wb_bump_page_rev: {
+        Args: { p_board_id: string; p_page_id: string; p_updated_by: string }
+        Returns: number
+      }
+      wb_save_page_elements: {
+        Args: {
+          p_base_rev: number
+          p_elements: Json
+          p_page_id: string
+          p_updated_by: string
+        }
+        Returns: Json
+      }
       yookassa_activate_subscription: {
         Args: { p_payment_id: string }
         Returns: Json
