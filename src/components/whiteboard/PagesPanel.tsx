@@ -5,8 +5,8 @@ import {
   type BoardElement,
   type BoardBackground,
   type BoardGridMm,
-  PAGE_HEIGHT_MM,
-  PAGE_WIDTH_MM,
+  type PageOrientation,
+  pageSizeMm,
 } from '@/lib/whiteboard/model';
 import { DEFAULT_STROKE_OPTIONS, elementToSvg } from '@/lib/whiteboard/svg';
 
@@ -18,7 +18,10 @@ export interface BoardPageSummary {
   elements: BoardElement[];
   background: BoardBackground;
   gridMm: BoardGridMm;
+  orientation: PageOrientation;
 }
+
+const THUMB_HEIGHT_PX = 96;
 
 interface PagesPanelProps {
   pages: BoardPageSummary[];
@@ -35,9 +38,10 @@ interface PagesPanelProps {
  */
 const PageThumb = memo(
   function PageThumb({ page }: { page: BoardPageSummary }) {
+    const size = pageSizeMm(page.orientation);
     return (
       <svg
-        viewBox={`0 0 ${PAGE_WIDTH_MM} ${PAGE_HEIGHT_MM}`}
+        viewBox={`0 0 ${size.width} ${size.height}`}
         className="h-full w-full"
         aria-hidden="true"
       >
@@ -59,7 +63,9 @@ const PageThumb = memo(
     );
   },
   (prev, next) =>
-    prev.page.id === next.page.id && prev.page.elements === next.page.elements,
+    prev.page.id === next.page.id &&
+    prev.page.elements === next.page.elements &&
+    prev.page.orientation === next.page.orientation,
 );
 
 export const PagesPanel = memo(function PagesPanel({
@@ -74,17 +80,20 @@ export const PagesPanel = memo(function PagesPanel({
     // touch-pan-x: без него iOS Safari отдаёт touchstart кнопкам-миниатюрам и
     // горизонтальный свайп ленты не работает (rule 80).
     <div className="flex touch-pan-x items-end gap-2 overflow-x-auto border-t border-slate-200 bg-white px-3 py-2">
-      {pages.map((page, index) => (
+      {pages.map((page, index) => {
+        const size = pageSizeMm(page.orientation);
+        const thumbWidth = Math.round((THUMB_HEIGHT_PX * size.width) / size.height);
+        return (
         <div key={page.id} className="group relative shrink-0">
           <button
             type="button"
             onClick={() => onSelect(index)}
             disabled={disabled}
-            style={{ touchAction: 'manipulation' }}
+            style={{ touchAction: 'manipulation', width: `${thumbWidth}px`, height: `${THUMB_HEIGHT_PX}px` }}
             aria-label={`Страница ${index + 1}`}
             aria-current={index === activeIndex ? 'true' : undefined}
             className={cn(
-              'block h-24 w-[68px] overflow-hidden rounded-md border-2 bg-white transition-colors',
+              'block overflow-hidden rounded-md border-2 bg-white transition-colors',
               index === activeIndex ? 'border-accent' : 'border-slate-200 hover:border-slate-300',
               disabled && 'cursor-not-allowed opacity-50',
             )}
@@ -107,7 +116,8 @@ export const PagesPanel = memo(function PagesPanel({
             </button>
           )}
         </div>
-      ))}
+        );
+      })}
 
       <button
         type="button"

@@ -3,9 +3,8 @@ import {
   type BoardElement,
   type BoardBackground,
   type BoardGridMm,
+  type PageSizeMm,
   type ShapeKind,
-  PAGE_HEIGHT_MM,
-  PAGE_WIDTH_MM,
   boundsIntersect,
   clampToPage,
   createShape,
@@ -44,6 +43,8 @@ interface BoardCanvasProps {
   elements: BoardElement[];
   background: BoardBackground;
   gridMm: BoardGridMm;
+  /** Размер листа в мм — задаётся ориентацией страницы (model.pageSizeMm). */
+  pageSize: PageSizeMm;
   tool: BoardTool;
   color: string;
   size: number;
@@ -108,6 +109,7 @@ export function BoardCanvas({
   elements,
   background,
   gridMm,
+  pageSize,
   tool,
   color,
   size,
@@ -141,8 +143,8 @@ export function BoardCanvas({
   const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
   const backgroundNodes = useMemo(
-    () => backgroundToSvg(background, gridMm),
-    [background, gridMm],
+    () => backgroundToSvg(background, gridMm, pageSize),
+    [background, gridMm, pageSize],
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -166,14 +168,17 @@ export function BoardCanvas({
   );
 
   /** Координаты указателя → миллиметры страницы (по кэшированному rect). */
-  const toMm = useCallback((clientX: number, clientY: number) => {
-    const rect = rectRef.current ?? svgRef.current?.getBoundingClientRect() ?? null;
-    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
-    return {
-      x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH_MM,
-      y: ((clientY - rect.top) / rect.height) * PAGE_HEIGHT_MM,
-    };
-  }, []);
+  const toMm = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = rectRef.current ?? svgRef.current?.getBoundingClientRect() ?? null;
+      if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+      return {
+        x: ((clientX - rect.left) / rect.width) * pageSize.width,
+        y: ((clientY - rect.top) / rect.height) * pageSize.height,
+      };
+    },
+    [pageSize],
+  );
 
   const eraseAt = useCallback(
     (x: number, y: number) => {
@@ -265,9 +270,25 @@ export function BoardCanvas({
       // Не-primary касание (мультитач) не начинает новый жест.
       if (event.pointerType === 'touch' && !event.isPrimary) return;
 
+      // ⚠️ КРИТИЧНО для инструмента «Текст»: default-действие mousedown уводит
+      // фокус на body, и только что открытый textarea мгновенно ловил blur и
+      // закрывался ПУСТЫМ — поле «не вставлялось» (репорт владельца, дважды).
+      // Отменённый pointerdown подавляет compat-событие mousedown → фокус
+      // никто не крадёт. Заодно убирает случайное выделение текста при рисовании.
+      event.preventDefault();
+      // Фокус из редактируемых полей забираем сами, детерминированно: их blur
+      // (коммит названия/текста) обязан отработать ДО начала нового жеста.
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)
+      ) {
+        active.blur();
+      }
+
       rectRef.current = event.currentTarget.getBoundingClientRect();
       const raw = toMm(event.clientX, event.clientY);
-      const { x, y } = clampToPage(raw.x, raw.y);
+      const { x, y } = clampToPage(raw.x, raw.y, pageSize);
       event.currentTarget.setPointerCapture(event.pointerId);
       const pointerId = event.pointerId;
 
@@ -320,7 +341,7 @@ export function BoardCanvas({
         scheduleFrame();
       }
     },
-    [readOnly, toMm, tool, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
+    [readOnly, toMm, tool, pageSize, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
   );
 
   const handlePointerMove = useCallback(
@@ -329,7 +350,7 @@ export function BoardCanvas({
       if (!drag || readOnly) return;
       if (event.pointerId !== drag.pointerId) return;
       const raw = toMm(event.clientX, event.clientY);
-      const { x, y } = clampToPage(raw.x, raw.y);
+      const { x, y } = clampToPage(raw.x, raw.y, pageSize);
 
       if (drag.kind === 'stroke') {
         const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
@@ -351,7 +372,7 @@ export function BoardCanvas({
 
       scheduleFrame();
     },
-    [readOnly, toMm, eraseAt, scheduleFrame],
+    [readOnly, toMm, pageSize, eraseAt, scheduleFrame],
   );
 
   // Указатель может уйти с элемента или быть отменён системой (жест, звонок) —
@@ -430,7 +451,7 @@ export function BoardCanvas({
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${PAGE_WIDTH_MM} ${PAGE_HEIGHT_MM}`}
+      viewBox={`0 0 ${pageSize.width} ${pageSize.height}`}
       className="h-full w-full bg-white"
       role="img"
       aria-label="Холст доски. Рисование мышью, пальцем или стилусом."

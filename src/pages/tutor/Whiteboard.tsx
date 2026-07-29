@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip } from 'l
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { BoardCanvas, type BoardTool } from '@/components/whiteboard/BoardCanvas';
-import { BoardToolbar } from '@/components/whiteboard/BoardToolbar';
+import { BoardToolbar, type BoardZoom } from '@/components/whiteboard/BoardToolbar';
 import { PagesPanel } from '@/components/whiteboard/PagesPanel';
 import {
   type Board,
@@ -19,54 +19,49 @@ import {
 } from '@/lib/whiteboardApi';
 import {
   type BoardElement,
-  type BoardBackground,
   type BoardGridMm,
+  type PageOrientation,
+  type PageSizeMm,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
-  PAGE_HEIGHT_MM,
-  PAGE_WIDTH_MM,
   createText,
+  elementBoundsCached,
   normalizeBackground,
   normalizeGridMm,
+  normalizeOrientation,
+  pageSizeMm,
   parseElements,
   primeSeqCounter,
   translateElement,
 } from '@/lib/whiteboard/model';
+import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQueue';
+import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 import { deleteMaterial, uploadLessonPdf } from '@/lib/lessonMaterialsApi';
+import type { BoardBackground } from '@/lib/whiteboard/model';
 
-// Страница доски (Фаза 1, пересборка по ревью 5.6). Доска однопользовательская:
-// передача мела — Фаза 2.
+// Страница доски (Фаза 1; раунд 3 — архитектурный рефакторинг).
+//
+// Компонент — оркестратор: сетевое сохранение живёт в `AutosaveQueue`
+// (single-flight, ретраи — lib/whiteboard/autosaveQueue.ts, покрыт тестами),
+// undo/redo — в `SceneHistory` (lib/whiteboard/sceneHistory.ts). Здесь остаются
+// только React-состояние сцены, обработчики и разметка.
 //
 // Инварианты (не ломать):
 // • Данные грузятся вручную (useEffect + useState), а НЕ через useQuery: на
 //   холсте лежит несохранённый рукописный ввод, фоновый refetch по фокусу его
 //   затёр бы (класс инцидента tab-switch, smoke-check §8).
-// • Автосохранение — SINGLE-FLIGHT: одновременно максимум один сетевой цикл,
-//   очередь дренится до конца, при ошибке страницы возвращаются в очередь и
-//   ретраятся. Иначе два параллельных сейва могли записать старую сцену поверх
-//   новой (ревью 5.6, P0).
-// • «Сохранено» показывается ТОЛЬКО при пустой очереди без ошибок. Ошибка —
-//   явная и кликабельная.
-// • PDF-модуль (jsPDF + svg2pdf, ~200 КБ gzip) грузится динамически по первому
-//   экспорту — открытие доски не должно тянуть движок печати (ревью 5.6, P1).
-// • Все правки сцены и истории происходят в обработчиках событий, ВНЕ
-//   setState-updater'ов (updater обязан быть чистым, StrictMode зовёт его дважды).
-
-const AUTOSAVE_DELAY_MS = 900;
-const SAVE_RETRY_DELAY_MS = 5000;
-const HISTORY_LIMIT = 60;
+// • PDF-движок — только динамический import() по факту экспорта.
+// • Правки сцены и истории — в обработчиках событий, вне setState-updater'ов.
+// • Ориентация листа хранится в `board_pages.app_state.orientation` (jsonb) —
+//   правка схемы для неё не нужна.
 
 interface PageState {
   id: string;
   elements: BoardElement[];
   background: BoardBackground;
   gridMm: BoardGridMm;
-}
-
-interface HistoryEntry {
-  past: BoardElement[][];
-  future: BoardElement[][];
+  orientation: PageOrientation;
 }
 
 interface TextDraft {
@@ -76,16 +71,16 @@ interface TextDraft {
   value: string;
 }
 
-type SaveStatus = 'saved' | 'saving' | 'error';
-
 function rowToPageState(row: BoardPageRow): PageState {
   const elements = parseElements(row.elements);
   primeSeqCounter(elements);
+  const appState = (row.app_state ?? {}) as Record<string, unknown>;
   return {
     id: row.id,
     elements,
     background: normalizeBackground(row.background),
     gridMm: normalizeGridMm(row.grid_mm),
+    orientation: normalizeOrientation(appState.orientation),
   };
 }
 
@@ -111,36 +106,47 @@ export default function Whiteboard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Раздельные фазы занятости: общий `busy` показывал спиннер экспорта на
-  // кнопке прикрепления и наоборот (ревью 5.6).
   const [pageBusy, setPageBusy] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
   const [attaching, setAttaching] = useState(false);
   const [exitPhase, setExitPhase] = useState<null | 'saving' | 'attaching'>(null);
-
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
-  const [saveTick, setSaveTick] = useState(0);
+  const [saveStatus, setSaveStatus] = useState<AutosaveStatus>('saved');
 
   const [tool, setTool] = useState<BoardTool>('pen');
   const [color, setColor] = useState<string>(BOARD_COLORS[0]);
   const [size, setSize] = useState<number>(DEFAULT_PEN_SIZE_MM);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
-
-  const historyRef = useRef<Map<string, HistoryEntry>>(new Map());
+  const [zoom, setZoom] = useState<BoardZoom>('fit');
   const [historyTick, setHistoryTick] = useState(0);
-  const dirtyRef = useRef<Set<string>>(new Set());
-  const flushPromiseRef = useRef<Promise<boolean> | null>(null);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const pagesRef = useRef<PageState[]>([]);
   const textDraftRef = useRef<TextDraft | null>(null);
   const savedTitleRef = useRef<string>('');
-  /** Снимок, отправленный в последний экспорт, — чтобы не плодить одинаковые PDF. */
   const exportedSignatureRef = useRef<string | null>(null);
+  const historyRef = useRef(new SceneHistory());
 
-  // Синхронизация зеркал — ПОСЛЕ коммита, не в теле рендера (ревью 5.6, P2:
-  // в concurrent-режиме рендер может не закоммититься, и автосейв прочитал бы
-  // сцену, которой пользователь не видел).
+  // Очередь автосейва создаётся один раз; savePage читает СВЕЖУЮ страницу через
+  // pagesRef (зеркало синхронизируется после коммита, см. эффект ниже).
+  const autosaveRef = useRef<AutosaveQueue | null>(null);
+  if (autosaveRef.current === null) {
+    autosaveRef.current = new AutosaveQueue({
+      savePage: async (pageId: string) => {
+        const page = pagesRef.current.find((p) => p.id === pageId);
+        if (!page) return;
+        await saveBoardPage(page.id, {
+          elements: page.elements,
+          background: page.background,
+          grid_mm: page.gridMm,
+          app_state: { orientation: page.orientation },
+        });
+      },
+      onStatus: setSaveStatus,
+    });
+  }
+  const autosave = autosaveRef.current;
+
+  // Зеркала — ПОСЛЕ коммита, не в теле рендера (concurrent-безопасность).
   useEffect(() => {
     pagesRef.current = pages;
   }, [pages]);
@@ -149,6 +155,10 @@ export default function Whiteboard() {
   }, [textDraft]);
 
   const activePage = pages[activeIndex] ?? null;
+  const activeSize: PageSizeMm = useMemo(
+    () => pageSizeMm(activePage?.orientation ?? 'portrait'),
+    [activePage?.orientation],
+  );
 
   // ─── Загрузка ───────────────────────────────────────────────────────────────
 
@@ -171,8 +181,6 @@ export default function Whiteboard() {
         const next = data.pages.map(rowToPageState);
         setPages(next.length > 0 ? next : []);
         setActiveIndex(0);
-        // Адрес приводим к каноническому: перезагрузка по /lesson/:id иначе
-        // каждый раз заново резолвила бы доску.
         if (params.lessonId) {
           navigate(`/tutor/board/${data.board.id}`, { replace: true });
         }
@@ -190,76 +198,15 @@ export default function Whiteboard() {
     };
   }, [params.boardId, params.lessonId, navigate]);
 
-  // ─── Автосохранение: single-flight ──────────────────────────────────────────
-
-  /**
-   * Дренит очередь грязных страниц до конца. Возвращает true, когда всё
-   * сохранено. Повторный вызов во время работы возвращает ТОТ ЖЕ promise —
-   * второго параллельного цикла не бывает, поэтому более старый снапшот не
-   * может перезаписать более новый (ревью 5.6, P0).
-   */
-  const flushDirty = useCallback((): Promise<boolean> => {
-    if (flushPromiseRef.current) return flushPromiseRef.current;
-    if (dirtyRef.current.size === 0) return Promise.resolve(true);
-
-    const run = (async () => {
-      setSaveStatus('saving');
-      try {
-        while (dirtyRef.current.size > 0) {
-          const ids = Array.from(dirtyRef.current);
-          dirtyRef.current = new Set();
-          for (let i = 0; i < ids.length; i++) {
-            const page = pagesRef.current.find((p) => p.id === ids[i]);
-            if (!page) continue;
-            try {
-              // Последовательно: параллельный залп на плохой сети (RU DPI,
-              // rule 95) повышает шанс частичной потери.
-              await saveBoardPage(page.id, {
-                elements: page.elements,
-                background: page.background,
-                grid_mm: page.gridMm,
-              });
-            } catch (err) {
-              // Несохранённое возвращается в очередь целиком — терять молча нельзя.
-              for (let j = i; j < ids.length; j++) dirtyRef.current.add(ids[j]);
-              throw err;
-            }
-          }
-        }
-        setSaveStatus('saved');
-        return true;
-      } catch {
-        setSaveStatus('error');
-        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-        retryTimerRef.current = setTimeout(() => setSaveTick((t) => t + 1), SAVE_RETRY_DELAY_MS);
-        return false;
-      } finally {
-        flushPromiseRef.current = null;
-      }
-    })();
-
-    flushPromiseRef.current = run;
-    return run;
-  }, []);
-
-  useEffect(() => {
-    if (saveTick === 0) return;
-    const timer = setTimeout(() => {
-      void flushDirty();
-    }, AUTOSAVE_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [saveTick, flushDirty]);
-
+  // Уход со страницы — best-effort дожим очереди (+ beforeunload ниже).
   useEffect(
     () => () => {
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
-      // Уход со страницы — последняя best-effort попытка (плюс beforeunload ниже).
-      void flushDirty();
+      void autosave.flush();
+      autosave.dispose();
     },
-    [flushDirty],
+    [autosave],
   );
 
-  // Закрытие вкладки с несохранённым — браузерное предупреждение (ревью 5.6, P0).
   useEffect(() => {
     if (saveStatus === 'saved') return;
     const handler = (event: BeforeUnloadEvent) => {
@@ -270,32 +217,17 @@ export default function Whiteboard() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [saveStatus]);
 
-  const noteDirty = useCallback((pageId: string) => {
-    dirtyRef.current.add(pageId);
-    setSaveStatus((prev) => (prev === 'error' ? 'error' : 'saving'));
-    setSaveTick((t) => t + 1);
-  }, []);
-
-  // ─── Правки сцены (все — в обработчиках, вне updater'ов) ────────────────────
-
-  const pushHistory = useCallback((pageId: string, snapshot: BoardElement[]) => {
-    const entry = historyRef.current.get(pageId) ?? { past: [], future: [] };
-    // Дедуп по ссылке: burst-операции (ластик за один жест) дают серию вызовов
-    // с одним и тем же committed-снапшотом — в истории он нужен один раз.
-    if (entry.past[entry.past.length - 1] === snapshot) return;
-    entry.past.push(snapshot);
-    if (entry.past.length > HISTORY_LIMIT) entry.past.shift();
-    entry.future = [];
-    historyRef.current.set(pageId, entry);
-    setHistoryTick((t) => t + 1);
-  }, []);
+  // ─── Правки сцены ───────────────────────────────────────────────────────────
 
   const updateActiveElements = useCallback(
     (updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
       const page = pagesRef.current[activeIndex];
       if (!page) return;
-      if (recordHistory) pushHistory(page.id, page.elements);
-      noteDirty(page.id);
+      if (recordHistory) {
+        historyRef.current.push(page.id, page.elements);
+        setHistoryTick((t) => t + 1);
+      }
+      autosave.markDirty(page.id);
       setPages((prev) => {
         const idx = prev.findIndex((p) => p.id === page.id);
         if (idx < 0) return prev;
@@ -307,7 +239,7 @@ export default function Whiteboard() {
         return copy;
       });
     },
-    [activeIndex, noteDirty, pushHistory],
+    [activeIndex, autosave],
   );
 
   const handleCommitElement = useCallback(
@@ -326,7 +258,6 @@ export default function Whiteboard() {
     [updateActiveElements],
   );
 
-  /** Один вызов на жест (BoardCanvas коммитит на pointerup) → нормальная запись в историю. */
   const handleMoveSelection = useCallback(
     (dx: number, dy: number) => {
       if ((dx === 0 && dy === 0) || selectedIds.length === 0) return;
@@ -338,41 +269,38 @@ export default function Whiteboard() {
     [selectedIds, updateActiveElements],
   );
 
-  const handleUndo = useCallback(() => {
-    const page = pagesRef.current[activeIndex];
-    if (!page) return;
-    const entry = historyRef.current.get(page.id);
-    if (!entry || entry.past.length === 0) return;
-    const previous = entry.past.pop() as BoardElement[];
-    entry.future.push(page.elements);
-    setHistoryTick((t) => t + 1);
-    noteDirty(page.id);
-    setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: previous } : p)));
-  }, [activeIndex, noteDirty]);
+  const applyHistory = useCallback(
+    (direction: 'undo' | 'redo') => {
+      const page = pagesRef.current[activeIndex];
+      if (!page) return;
+      const history = historyRef.current;
+      const restored =
+        direction === 'undo'
+          ? history.undo(page.id, page.elements)
+          : history.redo(page.id, page.elements);
+      if (!restored) return;
+      setHistoryTick((t) => t + 1);
+      autosave.markDirty(page.id);
+      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: restored } : p)));
+    },
+    [activeIndex, autosave],
+  );
 
-  const handleRedo = useCallback(() => {
-    const page = pagesRef.current[activeIndex];
-    if (!page) return;
-    const entry = historyRef.current.get(page.id);
-    if (!entry || entry.future.length === 0) return;
-    const next = entry.future.pop() as BoardElement[];
-    entry.past.push(page.elements);
-    setHistoryTick((t) => t + 1);
-    noteDirty(page.id);
-    setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: next } : p)));
-  }, [activeIndex, noteDirty]);
+  const handleUndo = useCallback(() => applyHistory('undo'), [applyHistory]);
+  const handleRedo = useCallback(() => applyHistory('redo'), [applyHistory]);
 
   const historyState = useMemo(() => {
     void historyTick;
-    const entry = activePage ? historyRef.current.get(activePage.id) : undefined;
-    return { canUndo: (entry?.past.length ?? 0) > 0, canRedo: (entry?.future.length ?? 0) > 0 };
+    if (!activePage) return { canUndo: false, canRedo: false };
+    return {
+      canUndo: historyRef.current.canUndo(activePage.id),
+      canRedo: historyRef.current.canRedo(activePage.id),
+    };
   }, [activePage, historyTick]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
-      // Ctrl+Z в поле названия или в текстовом черновике должен править ТЕКСТ,
-      // а не отменять действия на холсте (ревью 5.6, P1).
       if (isEditableTarget(event.target)) return;
       const key = event.key.toLowerCase();
       if (key === 'z' && !event.shiftKey) {
@@ -387,16 +315,40 @@ export default function Whiteboard() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleUndo, handleRedo]);
 
-  // ─── Разлиновка ─────────────────────────────────────────────────────────────
+  // ─── Свойства страницы (разлиновка, ориентация) ─────────────────────────────
 
   const patchActivePage = useCallback(
-    (patch: Partial<Pick<PageState, 'background' | 'gridMm'>>) => {
+    (patch: Partial<Pick<PageState, 'background' | 'gridMm' | 'orientation'>>) => {
       const page = pagesRef.current[activeIndex];
       if (!page) return;
-      noteDirty(page.id);
+      autosave.markDirty(page.id);
       setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
     },
-    [activeIndex, noteDirty],
+    [activeIndex, autosave],
+  );
+
+  const handleOrientationChange = useCallback(
+    (orientation: PageOrientation) => {
+      const page = pagesRef.current[activeIndex];
+      if (!page || page.orientation === orientation) return;
+      // Контент за краем нового листа не удаляется, но в PDF не попадёт —
+      // предупреждаем заранее, а не после жалобы на «обрезанный конспект».
+      const next = pageSizeMm(orientation);
+      const overflows = page.elements.some((el) => {
+        const b = elementBoundsCached(el);
+        return b.maxX > next.width || b.maxY > next.height;
+      });
+      if (
+        overflows &&
+        !window.confirm(
+          'Часть содержимого окажется за краем листа в новой ориентации (в PDF она не попадёт, но не удалится). Продолжить?',
+        )
+      ) {
+        return;
+      }
+      patchActivePage({ orientation });
+    },
+    [activeIndex, patchActivePage],
   );
 
   // ─── Страницы ───────────────────────────────────────────────────────────────
@@ -405,12 +357,19 @@ export default function Whiteboard() {
     if (!board || pageBusy) return;
     setPageBusy(true);
     try {
-      await flushDirty();
+      await autosave.flush();
       const created = await createBoardPage(board.id, {
         background: activePage?.background ?? 'grid',
         grid_mm: activePage?.gridMm ?? 5,
       });
-      setPages((prev) => [...prev, rowToPageState(created)]);
+      const newPage: PageState = {
+        ...rowToPageState(created),
+        // Новый лист наследует ориентацию текущего (ориентация живёт в
+        // app_state и создаётся дефолтной — досылаем её первым же автосейвом).
+        orientation: activePage?.orientation ?? 'portrait',
+      };
+      if (newPage.orientation !== 'portrait') autosave.markDirty(newPage.id);
+      setPages((prev) => [...prev, newPage]);
       setActiveIndex(pagesRef.current.length);
       setSelectedIds([]);
     } catch (err) {
@@ -418,14 +377,12 @@ export default function Whiteboard() {
     } finally {
       setPageBusy(false);
     }
-  }, [board, pageBusy, flushDirty, activePage]);
+  }, [board, pageBusy, autosave, activePage]);
 
   const handleDeletePage = useCallback(
     async (index: number) => {
       const page = pagesRef.current[index];
       if (!page || pageBusy) return;
-      // Подтверждение обязательно: случайное касание стилусом маленькой кнопки
-      // удаляло страницу с целым конспектом без возможности отмены (ревью 5.6, P0).
       const count = page.elements.length;
       const message =
         count > 0
@@ -435,8 +392,8 @@ export default function Whiteboard() {
       setPageBusy(true);
       try {
         await deleteBoardPage(page.id);
-        historyRef.current.delete(page.id);
-        dirtyRef.current.delete(page.id);
+        historyRef.current.forget(page.id);
+        autosave.forget(page.id);
         setPages((prev) => prev.filter((_, i) => i !== index));
         setActiveIndex((prev) => Math.max(0, Math.min(prev, pagesRef.current.length - 2)));
         setSelectedIds([]);
@@ -446,7 +403,7 @@ export default function Whiteboard() {
         setPageBusy(false);
       }
     },
-    [pageBusy],
+    [pageBusy, autosave],
   );
 
   const handleSelectPage = useCallback((index: number) => {
@@ -458,10 +415,9 @@ export default function Whiteboard() {
 
   /**
    * Коммит через ref, вне setState-updater'ов. `expectedId` защищает от гонки
-   * blur ↔ pointerdown: клик по холсту с активным черновиком СНАЧАЛА коммитит
-   * старый и открывает новый (в pointerdown), а ПОТОМ приходит blur старого —
-   * без проверки id он стирал бы уже новый черновик. Именно так «текст не
-   * вставлялся» в ручном тесте владельца.
+   * blur ↔ pointerdown (см. также preventDefault в BoardCanvas.handlePointerDown —
+   * он убирает кражу фокуса default-действием mousedown, из-за которой поле
+   * закрывалось пустым сразу после открытия).
    */
   const commitTextDraft = useCallback(
     (expectedId?: number) => {
@@ -493,12 +449,11 @@ export default function Whiteboard() {
   // ─── Экспорт и прикрепление ────────────────────────────────────────────────
 
   const computeSignature = useCallback(() => {
-    // background/gridMm — часть подписи: их смена тоже меняет напечатанный лист
-    // (ревью 5.6 — прежняя подпись это упускала).
     return JSON.stringify(
       pagesRef.current.map((p) => [
         p.background,
         p.gridMm,
+        p.orientation,
         p.elements.map((el) => `${el.id}:${el.version}`),
       ]),
     );
@@ -507,11 +462,14 @@ export default function Whiteboard() {
   const buildPdfBlob = useCallback(async () => {
     const source = pagesRef.current;
     if (source.length === 0) throw new Error('В доске нет страниц');
-    // Динамический импорт: jsPDF + svg2pdf не должны грузиться при открытии
-    // доски — они нужны только на экспорте (ревью 5.6, P1: −200 КБ gzip из чанка).
     const { exportBoardToPdf } = await import('@/lib/whiteboard/exportPdf');
     return exportBoardToPdf(
-      source.map((p) => ({ elements: p.elements, background: p.background, gridMm: p.gridMm })),
+      source.map((p) => ({
+        elements: p.elements,
+        background: p.background,
+        gridMm: p.gridMm,
+        orientation: p.orientation,
+      })),
       { onPageStart: (done, total) => setExportProgress({ done, total }) },
     );
   }, []);
@@ -520,7 +478,7 @@ export default function Whiteboard() {
     if (exportProgress) return;
     setExportProgress({ done: 0, total: pagesRef.current.length });
     try {
-      await flushDirty();
+      await autosave.flush();
       const blob = await buildPdfBlob();
       const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
       const url = URL.createObjectURL(blob);
@@ -536,13 +494,8 @@ export default function Whiteboard() {
     } finally {
       setExportProgress(null);
     }
-  }, [exportProgress, flushDirty, buildPdfBlob, board]);
+  }, [exportProgress, autosave, buildPdfBlob, board]);
 
-  /**
-   * Прикрепление PDF к занятию — СУЩЕСТВУЮЩИМ путём `uploadLessonPdf` →
-   * tutor_lesson_materials(kind:'pdf'): ученик видит конспект без правок на
-   * своей стороне. Прошлый автоэкспорт удаляется (иначе кап в 5 PDF).
-   */
   const attachPdfToLesson = useCallback(async (): Promise<boolean> => {
     const currentBoard = board;
     if (!currentBoard?.lesson_id) return false;
@@ -572,7 +525,7 @@ export default function Whiteboard() {
     setAttaching(true);
     setExportProgress({ done: 0, total: pagesRef.current.length });
     try {
-      await flushDirty();
+      await autosave.flush();
       await attachPdfToLesson();
       toast.success('Конспект прикреплён к занятию');
     } catch (err) {
@@ -581,19 +534,13 @@ export default function Whiteboard() {
       setAttaching(false);
       setExportProgress(null);
     }
-  }, [attaching, exportProgress, flushDirty, attachPdfToLesson]);
+  }, [attaching, exportProgress, autosave, attachPdfToLesson]);
 
-  /**
-   * Выход с доски (кнопка «Доски»): дождаться сохранения, а для доски занятия —
-   * автоматически прикрепить конспект. Это и есть обещанное «закрыл урок —
-   * PDF сам в материалах» для естественного пути выхода (ревью 5.6, P0).
-   * Серверный finalizer «на закрытие вкладки» — Фаза 1.5.
-   */
   const handleExit = useCallback(async () => {
     if (exitPhase) return;
     setExitPhase('saving');
     try {
-      const saved = await flushDirty();
+      const saved = await autosave.flush();
       if (!saved) {
         const leaveAnyway = window.confirm(
           'Не удалось сохранить последние изменения (нет связи с сервером). Выйти без них?',
@@ -619,16 +566,10 @@ export default function Whiteboard() {
     } finally {
       setExitPhase(null);
     }
-  }, [exitPhase, flushDirty, board, computeSignature, attachPdfToLesson, navigate]);
+  }, [exitPhase, autosave, board, computeSignature, attachPdfToLesson, navigate]);
 
   // ─── Название ───────────────────────────────────────────────────────────────
 
-  /**
-   * Сравнение — с ПОСЛЕДНИМ СОХРАНЁННЫМ названием (ref), а не с board.title:
-   * onChange уже обновил board.title, поэтому сравнение с ним на blur всегда
-   * давало «ничего не изменилось» и название молча не сохранялось (баг из
-   * ручного теста владельца).
-   */
   const commitTitle = useCallback(async () => {
     const currentBoard = board;
     if (!currentBoard) return;
@@ -644,6 +585,33 @@ export default function Whiteboard() {
       );
     }
   }, [board]);
+
+  // ─── Зум ────────────────────────────────────────────────────────────────────
+
+  // Габариты вьюпорта — для режима «Вписать» (масштаб зависит от ориентации).
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) setViewport({ w: rect.width, h: rect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading]);
+
+  const sheetWidthPx = useMemo(() => {
+    if (!viewport) return null;
+    const ratio = activeSize.width / activeSize.height;
+    if (zoom === 'fit') {
+      // Вписать целиком: ограничение и по ширине, и по высоте.
+      return Math.max(120, Math.min(viewport.w, viewport.h * ratio));
+    }
+    return Math.max(120, (viewport.w * zoom) / 100);
+  }, [viewport, zoom, activeSize]);
 
   // ─── Рендер ─────────────────────────────────────────────────────────────────
 
@@ -671,6 +639,7 @@ export default function Whiteboard() {
     elements: p.elements,
     background: p.background,
     gridMm: p.gridMm,
+    orientation: p.orientation,
   }));
 
   const exporting = exportProgress !== null;
@@ -707,7 +676,7 @@ export default function Whiteboard() {
         {saveStatus === 'error' ? (
           <button
             type="button"
-            onClick={() => void flushDirty()}
+            onClick={() => void autosave.flush()}
             aria-live="polite"
             style={{ touchAction: 'manipulation' }}
             className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50"
@@ -780,6 +749,10 @@ export default function Whiteboard() {
         onBackgroundChange={(background) => patchActivePage({ background })}
         gridMm={activePage?.gridMm ?? 5}
         onGridMmChange={(gridMm: BoardGridMm) => patchActivePage({ gridMm })}
+        orientation={activePage?.orientation ?? 'portrait'}
+        onOrientationChange={handleOrientationChange}
+        zoom={zoom}
+        onZoomChange={setZoom}
         canUndo={historyState.canUndo}
         canRedo={historyState.canRedo}
         onUndo={handleUndo}
@@ -787,16 +760,20 @@ export default function Whiteboard() {
         disabled={pageBusy}
       />
 
-      <div className="relative min-h-0 flex-1 overflow-auto p-3">
+      <div ref={viewportRef} className="relative min-h-0 flex-1 overflow-auto p-3">
         <div
-          className="relative mx-auto h-full max-h-full bg-white shadow-sm ring-1 ring-slate-200"
-          style={{ aspectRatio: `${PAGE_WIDTH_MM} / ${PAGE_HEIGHT_MM}` }}
+          className="relative mx-auto bg-white shadow-sm ring-1 ring-slate-200"
+          style={{
+            width: sheetWidthPx ? `${Math.round(sheetWidthPx)}px` : '100%',
+            aspectRatio: `${activeSize.width} / ${activeSize.height}`,
+          }}
         >
           {activePage && (
             <BoardCanvas
               elements={activePage.elements}
               background={activePage.background}
               gridMm={activePage.gridMm}
+              pageSize={activeSize}
               tool={tool}
               color={color}
               size={size}
@@ -833,8 +810,8 @@ export default function Whiteboard() {
               }}
               placeholder="Текст. Enter — готово, Esc — отмена"
               style={{
-                left: `${(textDraft.x / PAGE_WIDTH_MM) * 100}%`,
-                top: `${(textDraft.y / PAGE_HEIGHT_MM) * 100}%`,
+                left: `${(textDraft.x / activeSize.width) * 100}%`,
+                top: `${(textDraft.y / activeSize.height) * 100}%`,
               }}
               className="absolute z-10 min-h-[44px] w-56 resize-none rounded-md border border-accent bg-white p-2 text-base shadow-sm focus:outline-none"
             />

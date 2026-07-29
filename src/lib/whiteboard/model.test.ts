@@ -11,6 +11,8 @@ import {
   hitTest,
   normalizeBackground,
   normalizeGridMm,
+  normalizeOrientation,
+  pageSizeMm,
   parseElements,
   translateElement,
 } from './model';
@@ -169,5 +171,22 @@ describe('SVG-слой (общий для экрана и PDF)', () => {
   it('при клетке 5 мм в ширину листа укладывается 36 клеток (модель тетради)', () => {
     // spec Р2: это и есть мост между экраном и бумагой.
     expect(PAGE_WIDTH_MM / 5).toBe(36);
+  });
+
+  it('горизонтальный лист меняет местами стороны и даёт +48% ширины', () => {
+    const portrait = pageSizeMm('portrait');
+    const landscape = pageSizeMm('landscape');
+    expect(landscape.width).toBe(portrait.height);
+    expect(landscape.height).toBe(portrait.width);
+    expect(landscape.width / portrait.width).toBeCloseTo(267 / 180, 2);
+
+    const markup = pageToSvgString([], 'grid', 5, undefined, true, landscape);
+    expect(markup).toContain(`viewBox="0 0 ${landscape.width} ${landscape.height}"`);
+  });
+
+  it('normalizeOrientation отбрасывает мусор к вертикальному', () => {
+    expect(normalizeOrientation('landscape')).toBe('landscape');
+    expect(normalizeOrientation('иное')).toBe('portrait');
+    expect(normalizeOrientation(undefined)).toBe('portrait');
   });
 });

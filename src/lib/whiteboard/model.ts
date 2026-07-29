@@ -15,10 +15,33 @@
 export const A4_WIDTH_MM = 210;
 export const A4_HEIGHT_MM = 297;
 export const PAGE_MARGIN_MM = 15;
-/** Ширина области контента: 210 − 2×15. При клетке 5 мм ровно 36 клеток. */
+/** Ширина области контента вертикального листа: 210 − 2×15. При клетке 5 мм ровно 36 клеток. */
 export const PAGE_WIDTH_MM = A4_WIDTH_MM - PAGE_MARGIN_MM * 2;
-/** Высота области контента: 297 − 2×15. */
+/** Высота области контента вертикального листа: 297 − 2×15. */
 export const PAGE_HEIGHT_MM = A4_HEIGHT_MM - PAGE_MARGIN_MM * 2;
+
+/**
+ * Ориентация листа — per-page (запрос владельца: больше места под схемы и
+ * широкие выкладки). Горизонтальный A4 даёт 267 мм ширины вместо 180 —
+ * +48% рабочей ширины при том же печатном листе. Хранится в
+ * `board_pages.app_state.orientation` (jsonb) — миграция не нужна.
+ */
+export type PageOrientation = 'portrait' | 'landscape';
+
+export interface PageSizeMm {
+  width: number;
+  height: number;
+}
+
+export function pageSizeMm(orientation: PageOrientation): PageSizeMm {
+  return orientation === 'landscape'
+    ? { width: PAGE_HEIGHT_MM, height: PAGE_WIDTH_MM }
+    : { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM };
+}
+
+export function normalizeOrientation(raw: unknown): PageOrientation {
+  return raw === 'landscape' ? 'landscape' : 'portrait';
+}
 
 export type BoardBackground = 'blank' | 'grid' | 'lines' | 'dots';
 export type BoardGridMm = 5 | 10;
@@ -198,10 +221,14 @@ export function roundMm(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
-export function clampToPage(x: number, y: number): { x: number; y: number } {
+export function clampToPage(
+  x: number,
+  y: number,
+  size: PageSizeMm = { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM },
+): { x: number; y: number } {
   return {
-    x: Math.min(Math.max(x, 0), PAGE_WIDTH_MM),
-    y: Math.min(Math.max(y, 0), PAGE_HEIGHT_MM),
+    x: Math.min(Math.max(x, 0), size.width),
+    y: Math.min(Math.max(y, 0), size.height),
   };
 }
 

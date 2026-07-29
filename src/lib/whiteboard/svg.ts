@@ -12,12 +12,16 @@ import {
   type BoardBackground,
   type BoardElement,
   type BoardGridMm,
+  type PageSizeMm,
   type StrokeElement,
   type TextElement,
   PAGE_HEIGHT_MM,
   PAGE_WIDTH_MM,
   textLines,
 } from './model';
+
+/** Дефолт — вертикальный лист; сигнатуры ниже принимают size опционально. */
+const PORTRAIT_SIZE: PageSizeMm = { width: PAGE_WIDTH_MM, height: PAGE_HEIGHT_MM };
 
 export interface SvgNodeSpec {
   tag: 'path' | 'rect' | 'ellipse' | 'line' | 'text';
@@ -176,13 +180,17 @@ const LINES_COLOR = '#CBD5E1';
  * «точка» дополнительно собирается в ОДИН `<path>` из вырожденных сегментов с
  * круглым концом — тысяча отдельных `<circle>` раздула бы и DOM, и PDF.
  */
-export function backgroundToSvg(background: BoardBackground, gridMm: BoardGridMm): SvgNodeSpec[] {
+export function backgroundToSvg(
+  background: BoardBackground,
+  gridMm: BoardGridMm,
+  size: PageSizeMm = PORTRAIT_SIZE,
+): SvgNodeSpec[] {
   if (background === 'blank') return [];
 
   if (background === 'dots') {
     const parts: string[] = [];
-    for (let y = gridMm; y < PAGE_HEIGHT_MM; y += gridMm) {
-      for (let x = gridMm; x < PAGE_WIDTH_MM; x += gridMm) {
+    for (let y = gridMm; y < size.height; y += gridMm) {
+      for (let x = gridMm; x < size.width; x += gridMm) {
         parts.push(`M${round(x)},${round(y)}l0.01,0`);
       }
     }
@@ -201,13 +209,13 @@ export function backgroundToSvg(background: BoardBackground, gridMm: BoardGridMm
 
   const parts: string[] = [];
   if (background === 'grid') {
-    for (let x = gridMm; x < PAGE_WIDTH_MM; x += gridMm) {
-      parts.push(`M${round(x)},0V${round(PAGE_HEIGHT_MM)}`);
+    for (let x = gridMm; x < size.width; x += gridMm) {
+      parts.push(`M${round(x)},0V${round(size.height)}`);
     }
   }
   const step = background === 'lines' ? Math.max(gridMm * 2, 8) : gridMm;
-  for (let y = step; y < PAGE_HEIGHT_MM; y += step) {
-    parts.push(`M0,${round(y)}H${round(PAGE_WIDTH_MM)}`);
+  for (let y = step; y < size.height; y += step) {
+    parts.push(`M0,${round(y)}H${round(size.width)}`);
   }
   if (parts.length === 0) return [];
   return [{
@@ -252,15 +260,16 @@ export function pageToSvgString(
   gridMm: BoardGridMm,
   options: StrokeRenderOptions = DEFAULT_STROKE_OPTIONS,
   includeBackground = true,
+  size: PageSizeMm = PORTRAIT_SIZE,
 ): string {
   const nodes: SvgNodeSpec[] = [];
-  if (includeBackground) nodes.push(...backgroundToSvg(background, gridMm));
+  if (includeBackground) nodes.push(...backgroundToSvg(background, gridMm, size));
   for (let i = 0; i < elements.length; i++) {
     nodes.push(...elementToSvg(elements[i], options));
   }
   const body = nodes.map(nodeToString).join('');
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_WIDTH_MM}mm" height="${PAGE_HEIGHT_MM}mm" ` +
-    `viewBox="0 0 ${PAGE_WIDTH_MM} ${PAGE_HEIGHT_MM}">${body}</svg>`
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size.width}mm" height="${size.height}mm" ` +
+    `viewBox="0 0 ${size.width} ${size.height}">${body}</svg>`
   );
 }

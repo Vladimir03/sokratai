@@ -2,25 +2,38 @@ import { memo } from 'react';
 import {
   Circle,
   Eraser,
+  Maximize,
   Minus,
   MousePointer2,
   PenLine,
+  RectangleHorizontal,
+  RectangleVertical,
   Redo2,
   Square,
   Type,
   Undo2,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { BoardTool } from './BoardCanvas';
 import {
   type BoardBackground,
   type BoardGridMm,
+  type PageOrientation,
   BACKGROUND_LABELS,
   BOARD_BACKGROUNDS,
   BOARD_COLORS,
   BOARD_GRID_STEPS,
   PEN_SIZES_MM,
 } from '@/lib/whiteboard/model';
+
+/** 'fit' — вписать лист целиком; число — процент ширины вьюпорта (100 = по ширине). */
+export type BoardZoom = 'fit' | number;
+
+export const ZOOM_MIN = 50;
+export const ZOOM_MAX = 300;
+export const ZOOM_STEP = 25;
 
 // Панель инструментов доски (задача W1.0.4 + разлиновка W1.6).
 // Набор намеренно минимальный: штрих, ластик, текст, три простые фигуры,
@@ -38,6 +51,10 @@ interface BoardToolbarProps {
   onBackgroundChange: (background: BoardBackground) => void;
   gridMm: BoardGridMm;
   onGridMmChange: (gridMm: BoardGridMm) => void;
+  orientation: PageOrientation;
+  onOrientationChange: (orientation: PageOrientation) => void;
+  zoom: BoardZoom;
+  onZoomChange: (zoom: BoardZoom) => void;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -113,6 +130,10 @@ export const BoardToolbar = memo(function BoardToolbar({
   onBackgroundChange,
   gridMm,
   onGridMmChange,
+  orientation,
+  onOrientationChange,
+  zoom,
+  onZoomChange,
   canUndo,
   canRedo,
   onUndo,
@@ -215,11 +236,61 @@ export const BoardToolbar = memo(function BoardToolbar({
       </div>
 
       <div className="flex items-center gap-1">
+        {/* Ориентация листа — per-page: горизонтальный A4 даёт +48% ширины
+            под схемы и выкладки (запрос владельца, раунд 3). */}
+        <ToolbarButton
+          label={orientation === 'portrait' ? 'Сделать лист горизонтальным' : 'Сделать лист вертикальным'}
+          disabled={disabled}
+          onClick={() => onOrientationChange(orientation === 'portrait' ? 'landscape' : 'portrait')}
+        >
+          {orientation === 'portrait' ? (
+            <RectangleHorizontal className="h-4 w-4" />
+          ) : (
+            <RectangleVertical className="h-4 w-4" />
+          )}
+        </ToolbarButton>
+      </div>
+
+      <div className="flex items-center gap-1">
         <ToolbarButton label="Отменить" disabled={disabled || !canUndo} onClick={onUndo}>
           <Undo2 className="h-4 w-4" />
         </ToolbarButton>
         <ToolbarButton label="Вернуть" disabled={disabled || !canRedo} onClick={onRedo}>
           <Redo2 className="h-4 w-4" />
+        </ToolbarButton>
+      </div>
+
+      <div className="ml-auto flex items-center gap-1">
+        <ToolbarButton
+          label="Мельче"
+          disabled={disabled || (zoom !== 'fit' && zoom <= ZOOM_MIN)}
+          onClick={() => onZoomChange(zoom === 'fit' ? 100 - ZOOM_STEP : Math.max(ZOOM_MIN, zoom - ZOOM_STEP))}
+        >
+          <ZoomOut className="h-4 w-4" />
+        </ToolbarButton>
+        <button
+          type="button"
+          title="По ширине экрана"
+          onClick={() => onZoomChange(100)}
+          disabled={disabled}
+          style={{ touchAction: 'manipulation' }}
+          className={cn(
+            'h-11 min-w-[3.5rem] rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-600 hover:bg-slate-50',
+            zoom !== 'fit' && 'border-accent text-accent',
+            disabled && 'cursor-not-allowed opacity-40',
+          )}
+        >
+          {zoom === 'fit' ? '—' : `${zoom}%`}
+        </button>
+        <ToolbarButton
+          label="Крупнее"
+          disabled={disabled || (zoom !== 'fit' && zoom >= ZOOM_MAX)}
+          onClick={() => onZoomChange(zoom === 'fit' ? 100 + ZOOM_STEP : Math.min(ZOOM_MAX, zoom + ZOOM_STEP))}
+        >
+          <ZoomIn className="h-4 w-4" />
+        </ToolbarButton>
+        <ToolbarButton label="Вписать лист целиком" active={zoom === 'fit'} disabled={disabled} onClick={() => onZoomChange('fit')}>
+          <Maximize className="h-4 w-4" />
         </ToolbarButton>
       </div>
     </div>

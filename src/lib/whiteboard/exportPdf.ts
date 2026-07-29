@@ -19,11 +19,11 @@ import {
   type BoardBackground,
   type BoardElement,
   type BoardGridMm,
+  type PageOrientation,
   A4_HEIGHT_MM,
   A4_WIDTH_MM,
-  PAGE_HEIGHT_MM,
   PAGE_MARGIN_MM,
-  PAGE_WIDTH_MM,
+  pageSizeMm,
 } from './model';
 import { DEFAULT_STROKE_OPTIONS, type StrokeRenderOptions, pageToSvgString } from './svg';
 
@@ -35,6 +35,8 @@ export interface BoardPdfPage {
   elements: BoardElement[];
   background: BoardBackground;
   gridMm: BoardGridMm;
+  /** Ориентация листа; по умолчанию вертикальный. */
+  orientation?: PageOrientation;
 }
 
 export interface BoardPdfOptions {
@@ -114,7 +116,8 @@ export async function exportBoardToPdf(
   const strokeOptions = options.strokeOptions ?? DEFAULT_STROKE_OPTIONS;
   const includeBackground = options.includeBackground ?? true;
 
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const firstOrientation = pages[0].orientation ?? 'portrait';
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: firstOrientation });
 
   const fontBase64 = await loadFontBase64();
   doc.addFileToVFS(FONT_VFS_NAME, fontBase64);
@@ -123,20 +126,23 @@ export async function exportBoardToPdf(
 
   for (let i = 0; i < pages.length; i++) {
     options.onPageStart?.(i + 1, pages.length);
+    const page = pages[i];
+    const orientation = page.orientation ?? 'portrait';
     if (i > 0) {
-      doc.addPage('a4', 'portrait');
+      doc.addPage('a4', orientation);
       // Отдаём кадр браузеру между листами: сборка синхронная и на 5–10
       // заполненных страницах иначе замораживает интерфейс целиком, включая
       // спиннер прогресса (ревью 5.6, P1).
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
-    const page = pages[i];
+    const size = pageSizeMm(orientation);
     const markup = pageToSvgString(
       page.elements,
       page.background,
       page.gridMm,
       strokeOptions,
       includeBackground,
+      size,
     );
     // Последовательно, а не Promise.all: листы кладутся в один документ jsPDF,
     // и параллельная запись перемешала бы их порядок.
@@ -144,8 +150,8 @@ export async function exportBoardToPdf(
       doc.svg(svg, {
         x: PAGE_MARGIN_MM,
         y: PAGE_MARGIN_MM,
-        width: PAGE_WIDTH_MM,
-        height: PAGE_HEIGHT_MM,
+        width: size.width,
+        height: size.height,
       }),
     );
   }
