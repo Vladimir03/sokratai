@@ -37,10 +37,39 @@ const IMAGE_URL_TTL_SEC = 4 * 3600;
 const BOARD_IMAGE_BUCKET = "board-images";
 
 /**
+ * Путь картинки ПРИНАДЛЕЖИТ этой доске: строго `tutor/<uid>/<boardId>/<file>`.
+ * Без этой проверки service_role-подпись работала бы как cross-board IDOR:
+ * участник вписывает в elements чужой ref — сервер подписывает его в обход
+ * storage-политик (внешнее ревью этапов 1–3, P0 №3).
+ */
+function isBoardImagePath(path: string, boardId: string): boolean {
+  const parts = path.split("/");
+  return (
+    parts.length === 4 &&
+    parts[0] === "tutor" &&
+    UUID_RE.test(parts[1]) &&
+    parts[2] === boardId &&
+    parts[3].length > 0
+  );
+}
+
+/** Есть ли в elements image-ref, НЕ принадлежащий доске (fail-closed на записи). */
+function hasForeignImageRef(elements: unknown[], boardId: string): boolean {
+  const prefix = `storage://${BOARD_IMAGE_BUCKET}/`;
+  for (const el of elements as { type?: string; ref?: string }[]) {
+    if (el?.type !== "image" || typeof el.ref !== "string") continue;
+    if (!el.ref.startsWith(prefix) || !isBoardImagePath(el.ref.slice(prefix.length), boardId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Signed URL картинок доски для участника. У ученика/гостя НЕТ storage-прав на
  * `board-images` (политики только на tutor-путь) — подписывает сервер, host
  * реврайтится на RU-safe api.sokratai.ru (rule 96: rewriteToProxy для signed
- * URL, уходящих в браузер).
+ * URL, уходящих в браузер). Подписываются ТОЛЬКО пути этой доски (P0 №3).
  */
 async function signBoardImages(
   db: SupabaseClient,
@@ -56,7 +85,8 @@ async function signBoardImages(
     const elements = Array.isArray(p.elements) ? (p.elements as { type?: string; ref?: string }[]) : [];
     for (const el of elements) {
       if (el?.type === "image" && typeof el.ref === "string" && el.ref.startsWith(prefix)) {
-        paths.add(el.ref.slice(prefix.length));
+        const path = el.ref.slice(prefix.length);
+        if (isBoardImagePath(path, boardId)) paths.add(path);
       }
     }
   }
@@ -179,18 +209,18 @@ async function resolveMyZoneStudentId(
   return (data?.id as string | undefined) ?? null;
 }
 
+/** Атомарный бамп сигнала (P0 №1: прежний SELECT→UPDATE терял инкременты). */
 async function bumpRev(db: SupabaseClient, pageId: string, boardId: string, updatedBy: string): Promise<number> {
-  const { data } = await db.from("board_page_revs").select("rev").eq("page_id", pageId).maybeSingle();
-  if (data) {
-    const next = (data.rev as number) + 1;
-    await db
-      .from("board_page_revs")
-      .update({ rev: next, updated_by: updatedBy, updated_at: new Date().toISOString() })
-      .eq("page_id", pageId);
-    return next;
+  const { data, error } = await db.rpc("wb_bump_page_rev", {
+    p_page_id: pageId,
+    p_board_id: boardId,
+    p_updated_by: updatedBy,
+  });
+  if (error) {
+    console.error("whiteboard_student_rev_bump_failed", { message: error.message.slice(0, 120) });
+    return 0;
   }
-  await db.from("board_page_revs").insert({ page_id: pageId, board_id: boardId, updated_by: updatedBy });
-  return 1;
+  return Number(data) || 0;
 }
 
 Deno.serve(async (req) => {
@@ -281,49 +311,65 @@ Deno.serve(async (req) => {
 
       const { data: page } = await db
         .from("board_pages")
-        .select(`${PAGE_SELECT}, boards!inner(tutor_id)`)
+        .select(`${PAGE_SELECT}, boards!inner(tutor_id, student_id, lesson_id)`)
         .eq("id", pageId)
         .maybeSingle();
       if (!page) return jsonError(cors, 404, "NOT_FOUND", "Лист не найден.");
 
-      const boardTutorId = (page.boards as { tutor_id: string }).tutor_id;
-      const myStudentId = await resolveMyZoneStudentId(db, userId, boardTutorId);
+      const boardRow = page.boards as { tutor_id: string; student_id: string | null; lesson_id: string | null };
+      const myStudentId = await resolveMyZoneStudentId(db, userId, boardRow.tutor_id);
       if (!myStudentId) return jsonError(cors, 403, "NOT_A_PARTICIPANT", "Вы не участник этой доски.");
       if (page.zone_tutor_student_id !== myStudentId) {
         return jsonError(cors, 403, "FOREIGN_ZONE", "Это не ваш лист — писать можно только в своей зоне.");
       }
+      // Живое участие в ДОСКЕ, не только связь с репетитором (ревью P0 №2):
+      // убранный из группы ученик сохраняет зону как артефакт урока, но
+      // ТОЛЬКО для чтения — запись в старую зону закрыта сразу.
+      const stillParticipant = await isParticipantStudent(db, userId, {
+        id: page.board_id as string,
+        student_id: boardRow.student_id,
+        lesson_id: boardRow.lesson_id,
+      });
+      if (!stillParticipant) {
+        return jsonError(cors, 403, "NOT_A_PARTICIPANT", "Вы больше не участвуете в этом занятии — лист доступен только для чтения.");
+      }
+      // Fail-closed: чужой image-ref в elements = попытка выписать подпись к
+      // чужому файлу через service_role (P0 №3).
+      if (hasForeignImageRef(body.elements, page.board_id as string)) {
+        return jsonError(cors, 400, "VALIDATION", "Некорректные данные листа.");
+      }
 
-      // Оптимистическая блокировка: чужой более свежий rev не затирается молча.
-      const { data: revRow } = await db
-        .from("board_page_revs")
-        .select("rev")
-        .eq("page_id", pageId)
-        .maybeSingle();
-      const currentRev = (revRow?.rev as number | undefined) ?? 1;
+      // CAS и бамп — одна транзакция (P0 №1): конкурирующий сейв той же базы
+      // не может молча затереть чужие изменения.
       const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
-      if (baseRev !== null && baseRev !== currentRev) {
+      const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
+        p_page_id: pageId,
+        p_elements: body.elements,
+        p_base_rev: baseRev,
+        p_updated_by: `student:${myStudentId}`,
+      });
+      if (casError || !cas) {
+        return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить лист.");
+      }
+      const outcome = cas as { status: string; rev?: number; elements?: unknown };
+      if (outcome.status === "not_found") return jsonError(cors, 404, "NOT_FOUND", "Лист не найден.");
+      if (outcome.status === "conflict") {
         return new Response(
           JSON.stringify({
             error: "Лист изменился с другого устройства.",
             code: "REV_CONFLICT",
-            rev: currentRev,
-            elements: page.elements,
+            rev: outcome.rev ?? 0,
+            elements: outcome.elements ?? [],
           }),
           { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
         );
       }
-
-      const { data: saved, error } = await db
+      const { data: saved } = await db
         .from("board_pages")
-        .update({ elements: body.elements })
-        .eq("id", pageId)
         .select(PAGE_SELECT)
-        .single();
-      if (error || !saved) {
-        return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить лист.");
-      }
-      const rev = await bumpRev(db, pageId, page.board_id as string, `student:${myStudentId}`);
-      return jsonOk(cors, { page: saved, rev });
+        .eq("id", pageId)
+        .maybeSingle();
+      return jsonOk(cors, { page: saved ?? { id: pageId }, rev: Number(outcome.rev) || 0 });
     }
 
     // POST /boards/:id/pages — добавить лист в свой рулон (вниз столбца)
@@ -336,12 +382,21 @@ Deno.serve(async (req) => {
 
       const { data: board } = await db
         .from("boards")
-        .select("id, tutor_id")
+        .select("id, tutor_id, student_id, lesson_id")
         .eq("id", boardId)
         .maybeSingle();
       if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
       const myStudentId = await resolveMyZoneStudentId(db, userId, board.tutor_id as string);
       if (!myStudentId) return jsonError(cors, 403, "NOT_A_PARTICIPANT", "Вы не участник этой доски.");
+      // Живое участие в доске (ревью P0 №2) — убранный из группы не растит рулон.
+      const stillParticipant = await isParticipantStudent(db, userId, {
+        id: board.id as string,
+        student_id: (board.student_id as string | null) ?? null,
+        lesson_id: (board.lesson_id as string | null) ?? null,
+      });
+      if (!stillParticipant) {
+        return jsonError(cors, 403, "NOT_A_PARTICIPANT", "Вы больше не участвуете в этом занятии — доска доступна только для чтения.");
+      }
 
       const { data: myPages } = await db
         .from("board_pages")

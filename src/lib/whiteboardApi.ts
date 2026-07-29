@@ -117,13 +117,15 @@ export async function deleteBoard(boardId: string): Promise<void> {
   });
 }
 
-/** POST /boards/:id/pages */
+/** POST /boards/:id/pages. `elements` — атомарное создание С контентом
+ * (PDF-импорт: обрыв сети не оставляет осиротевший пустой лист). */
 export async function createBoardPage(
   boardId: string,
   input: {
     background?: BoardBackground;
     grid_mm?: BoardGridMm;
     app_state?: Record<string, unknown>;
+    elements?: unknown[];
   } = {},
 ): Promise<BoardPageRow> {
   const res = await invokeWhiteboard<{ page: BoardPageRow }>(
@@ -134,6 +136,7 @@ export async function createBoardPage(
         background: input.background ?? 'grid',
         grid_mm: input.grid_mm ?? 5,
         ...(input.app_state ? { app_state: input.app_state } : {}),
+        ...(input.elements ? { elements: input.elements } : {}),
       },
     },
   );

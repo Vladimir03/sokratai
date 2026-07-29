@@ -38,8 +38,10 @@ export function copyElements(elements: BoardElement[]): number {
   };
   // Маркер в ОС-буфер: если пользователь потом сделает скриншот, ОС-буфер
   // перестанет совпадать с маркером и Ctrl+V честно вставит скриншот.
+  // writeText — Promise: отказ Safari/iOS прилетает АСИНХРОННО, синхронный
+  // try/catch его не ловит → был бы unhandled rejection в client_error.
   try {
-    void navigator.clipboard?.writeText?.(`${OS_MARKER_PREFIX}${clipSeq}`);
+    navigator.clipboard?.writeText?.(`${OS_MARKER_PREFIX}${clipSeq}`)?.catch(() => undefined);
   } catch {
     // Нет прав на clipboard — не страшно, внутренний буфер всё равно работает.
   }

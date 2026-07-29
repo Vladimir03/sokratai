@@ -39,6 +39,8 @@ import {
   PAGE_WIDTH_MM,
   bumpVersion,
   cameraToFitBounds,
+  cellOccupied,
+  cellSpan,
   cellToPlacement,
   compareCellsForExport,
   createImage,
@@ -98,6 +100,8 @@ import type { BoardBackground } from '@/lib/whiteboard/model';
 // • «Сохранено» — только при пустой очереди (single-flight, ревью р.4).
 
 const HUNDRED_PERCENT_ZOOM = 96 / 25.4; // px на мм при 100% (96 dpi)
+/** Зеркало серверного MAX_PAGES_PER_BOARD (whiteboard-api) — preflight импорта. */
+const MAX_BOARD_PAGES = 50;
 
 interface FrameState {
   id: string;
@@ -138,6 +142,27 @@ function rowToFrameState(row: BoardPageRow, index: number, rev = 0): FrameState 
     zoneTutorStudentId: row.zone_tutor_student_id ?? null,
     rev,
   };
+}
+
+/**
+ * Детерминированный ремонт коллизий ячеек (ревью P1): legacy-{x,y} округление
+ * и гонки параллельных созданий могут дать два листа в одной ячейке — тогда
+ * они физически перекрываются и порядок экспорта неоднозначен. Идём в порядке
+ * page_index (стабилен) и сдвигаем конфликтующий лист вправо по его ряду.
+ * Ремонт in-memory: сетка выводится из cell при каждой загрузке одинаково,
+ * а app_state допишется при первой правке листа.
+ */
+function deconflictCells(frames: FrameState[]): FrameState[] {
+  const placed: { cell: FrameCell; orientation: PageOrientation }[] = [];
+  return frames.map((f) => {
+    let cell = f.cell;
+    const span = cellSpan(f.orientation);
+    while (cellOccupied(cell, placed, span)) {
+      cell = { col: cell.col + 1, row: cell.row };
+    }
+    placed.push({ cell, orientation: f.orientation });
+    return cell === f.cell ? f : { ...f, cell, placement: cellToPlacement(cell) };
+  });
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -301,7 +326,7 @@ export default function Whiteboard() {
         if (cancelled) return;
         setBoard(data.board);
         savedTitleRef.current = data.board.title ?? '';
-        const next = data.pages.map((row, i) => rowToFrameState(row, i));
+        const next = deconflictCells(data.pages.map((row, i) => rowToFrameState(row, i)));
         applyFrames(next);
         setActiveFrameId(next[0]?.id ?? null);
         // Revs — base_rev для сохранений (Этап 3). Догружаем после кадров:
@@ -582,6 +607,17 @@ export default function Whiteboard() {
     (orientation: PageOrientation) => {
       const frame = activeFrame;
       if (!frame || frame.orientation === orientation) return;
+      // Ландшафт занимает ДВЕ колонки (ревью P1): если соседняя ячейка занята,
+      // лист перекрыл бы чужой рулон — блокируем с объяснением.
+      if (orientation === 'landscape') {
+        const others = framesRef.current
+          .filter((f) => f.id !== frame.id)
+          .map((f) => ({ cell: f.cell, orientation: f.orientation }));
+        if (cellOccupied({ col: frame.cell.col + 1, row: frame.cell.row }, others)) {
+          toast.error('Справа уже есть лист — альбомная ориентация не помещается.');
+          return;
+        }
+      }
       const next = pageSizeMm(orientation);
       const overflows = frame.elements.some((el) => {
         const b = elementBoundsCached(el);
@@ -960,16 +996,20 @@ export default function Whiteboard() {
           onProgress: (done, total) => setImportProgress({ done, total }),
         });
         if (rendered.files.length === 0) throw new Error('В PDF не нашлось страниц');
+        // Preflight лимита (ревью P1): падать ДО частичного импорта, не посреди.
+        if (framesRef.current.length + rendered.files.length > MAX_BOARD_PAGES) {
+          throw new Error(
+            `В доске максимум ${MAX_BOARD_PAGES} листов: сейчас ${framesRef.current.length}, в PDF ${rendered.files.length}. Разбейте PDF или начните новую доску.`,
+          );
+        }
 
         for (let i = 0; i < rendered.files.length; i++) {
           setImportProgress({ done: i + 1, total: rendered.files.length });
           const cellsInfo = framesRef.current.map((f) => ({ cell: f.cell, orientation: f.orientation }));
           const cell = nextCellInStrip(cellsInfo);
-          const created = await createBoardPage(currentBoard.id, {
-            background: 'blank',
-            grid_mm: 5,
-            app_state: { orientation: 'portrait', frame: cell },
-          });
+          // Порядок «upload → create С elements» (ревью P1): обрыв сети больше
+          // не оставляет осиротевший пустой лист — худший случай теперь
+          // безвредный orphan-файл в storage.
           const uploaded = await uploadBoardImage(rendered.files[i], currentBoard.id);
           const size = pageSizeMm('portrait');
           // Подложка на всю ширину листа, высота по аспекту (кап — высота листа).
@@ -977,14 +1017,18 @@ export default function Whiteboard() {
           const w = PAGE_WIDTH_MM;
           const h = Math.min(size.height, roundMm(w * aspect));
           const image = createImage(0, 0, w, h, uploaded.ref);
+          const created = await createBoardPage(currentBoard.id, {
+            background: 'blank',
+            grid_mm: 5,
+            app_state: { orientation: 'portrait', frame: cell },
+            elements: [image],
+          });
           const newFrame: FrameState = {
             ...rowToFrameState(created, framesRef.current.length, 1),
             cell,
             placement: cellToPlacement(cell),
-            elements: [image],
           };
           applyFrames([...framesRef.current, newFrame]);
-          autosave.markDirty(newFrame.id);
           void resolveBoardImageUrl(uploaded.ref).then((url) => {
             if (url) setImageUrls((prev) => ({ ...prev, [uploaded.ref]: url }));
           });
@@ -997,7 +1041,7 @@ export default function Whiteboard() {
         setImportProgress(null);
       }
     },
-    [board, importProgress, applyFrames, autosave, fitFrames, viewport],
+    [board, importProgress, applyFrames, fitFrames, viewport],
   );
 
   // Ctrl+V: сначала ВНУТРЕННИЙ буфер (B3), затем картинки из ОС.
@@ -1261,6 +1305,43 @@ export default function Whiteboard() {
     }
   }, [board]);
 
+  // frameViews — useMemo ОБЯЗАТЕЛЕН (ревью P1): без него каждый setCamera
+  // пересоздавал все FrameView, comparator FrameLayer падал на первом же
+  // `prev.frame === next.frame` и малый пан ререндерил все видимые листы,
+  // обесценивая квантованный cull. Зависит от frames/zoneNames — НЕ от камеры.
+  const frameViews: FrameView[] = useMemo(() => {
+    let stripCounter = 0;
+    return frames.map((f) => {
+      const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] ?? 'Ученик' : null;
+      // Подписи человеческие («Лист 3 · Маша»), НЕ координаты [0:0] — челлендж Chattern.
+      const title = zoneName
+        ? `${zoneName} · ${f.cell.row}`
+        : `Лист ${f.cell.row === 0 ? ++stripCounter : `${f.cell.col + 1}.${f.cell.row}`}`;
+      return {
+        id: f.id,
+        placement: f.placement,
+        size: pageSizeMm(f.orientation),
+        background: f.background,
+        gridMm: f.gridMm,
+        elements: f.elements,
+        title,
+        isZone: !!f.zoneTutorStudentId,
+      };
+    });
+  }, [frames, zoneNames]);
+
+  const frameSummaries = useMemo(
+    () =>
+      frames.map((f) => ({
+        id: f.id,
+        elements: f.elements,
+        background: f.background,
+        gridMm: f.gridMm,
+        orientation: f.orientation,
+      })),
+    [frames],
+  );
+
   // ─── Рендер ─────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -1281,33 +1362,6 @@ export default function Whiteboard() {
       </div>
     );
   }
-
-  let stripCounter = 0;
-  const frameViews: FrameView[] = frames.map((f) => {
-    const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] ?? 'Ученик' : null;
-    // Подписи человеческие («Лист 3 · Маша»), НЕ координаты [0:0] — челлендж Chattern.
-    const title = zoneName
-      ? `${zoneName} · ${f.cell.row}`
-      : `Лист ${f.cell.row === 0 ? ++stripCounter : `${f.cell.col + 1}.${f.cell.row}`}`;
-    return {
-      id: f.id,
-      placement: f.placement,
-      size: pageSizeMm(f.orientation),
-      background: f.background,
-      gridMm: f.gridMm,
-      elements: f.elements,
-      title,
-      isZone: !!f.zoneTutorStudentId,
-    };
-  });
-
-  const frameSummaries = frames.map((f) => ({
-    id: f.id,
-    elements: f.elements,
-    background: f.background,
-    gridMm: f.gridMm,
-    orientation: f.orientation,
-  }));
 
   const exporting = exportProgress !== null;
   const activeIndex = Math.max(0, frames.findIndex((f) => f.id === (activeFrame?.id ?? '')));

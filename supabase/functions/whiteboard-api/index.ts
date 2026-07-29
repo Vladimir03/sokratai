@@ -63,23 +63,15 @@ async function bumpPageRev(
   updatedBy: string,
 ): Promise<number> {
   try {
-    const { data } = await db
-      .from("board_page_revs")
-      .select("rev")
-      .eq("page_id", pageId)
-      .maybeSingle();
-    if (data) {
-      const next = (data.rev as number) + 1;
-      await db
-        .from("board_page_revs")
-        .update({ rev: next, updated_by: updatedBy, updated_at: new Date().toISOString() })
-        .eq("page_id", pageId);
-      return next;
-    }
-    await db
-      .from("board_page_revs")
-      .insert({ page_id: pageId, board_id: boardId, updated_by: updatedBy });
-    return 1;
+    // Атомарный upsert-инкремент (ревью этапов 1–3, P0 №1): прежний
+    // SELECT → UPDATE терял инкременты при конкурентных бампах.
+    const { data, error } = await db.rpc("wb_bump_page_rev", {
+      p_page_id: pageId,
+      p_board_id: boardId,
+      p_updated_by: updatedBy,
+    });
+    if (error) throw new Error(error.message);
+    return Number(data) || 0;
   } catch (e) {
     console.error("whiteboard_api_rev_bump_failed", {
       page_id: pageId,
@@ -506,9 +498,25 @@ async function handleCreatePage(
     body.app_state && typeof body.app_state === "object" && !Array.isArray(body.app_state)
       ? body.app_state
       : {};
+  // elements при создании (PDF-импорт, ревью P1): лист рождается СРАЗУ с
+  // подложкой — обрыв сети между create и save больше не оставляет пустой лист.
+  let elements: unknown[] = [];
+  if ("elements" in body) {
+    if (!Array.isArray(body.elements) || body.elements.length > MAX_ELEMENTS_PER_PAGE) {
+      return jsonError(cors, 400, "VALIDATION", "Некорректные данные страницы.");
+    }
+    elements = body.elements;
+  }
   const { data, error } = await db
     .from("board_pages")
-    .insert({ board_id: boardId, page_index: nextIndex, background, grid_mm: gridMm, app_state: appState })
+    .insert({
+      board_id: boardId,
+      page_index: nextIndex,
+      background,
+      grid_mm: gridMm,
+      app_state: appState,
+      ...(elements.length > 0 ? { elements } : {}),
+    })
     .select(PAGE_SELECT)
     .single();
   if (error || !data) {
@@ -756,48 +764,69 @@ async function handleSavePage(
     return jsonError(cors, 400, "VALIDATION", "Нечего сохранять.");
   }
 
-  // Оптимистическая блокировка (Этап 3): с появлением совместной работы
-  // репетитор может конкурировать с учеником В ЕГО ЗОНЕ — молча затирать
-  // более свежий rev нельзя. base_rev опционален (старые клиенты и патчи
-  // без elements сохраняют прежнее поведение).
-  const { data: revRow } = await db
-    .from("board_page_revs")
-    .select("rev")
-    .eq("page_id", pageId)
-    .maybeSingle();
-  const currentRev = Number(revRow?.rev ?? 1);
-  const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
-  if (baseRev !== null && "elements" in patch && baseRev !== currentRev) {
-    const { data: freshPage } = await db
-      .from("board_pages")
-      .select("elements")
-      .eq("id", pageId)
-      .maybeSingle();
-    return new Response(
-      JSON.stringify({
-        error: "Лист изменил другой участник.",
-        code: "REV_CONFLICT",
-        rev: currentRev,
-        elements: freshPage?.elements ?? [],
-      }),
-      { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
-    );
+  // Оптимистическая блокировка (Этап 3, доревизия по ревью P0 №1): CAS и бамп —
+  // ОДНА транзакция в RPC под FOR UPDATE. Прежний check-then-write пропускал
+  // одновременные сейвы с одинаковым base_rev (lost update). base_rev опционален
+  // (переходный клиент без него получает LWW, но бамп всё равно атомарный).
+  let rev = 0;
+  if ("elements" in patch) {
+    const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+    const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
+      p_page_id: pageId,
+      p_elements: patch.elements,
+      p_base_rev: baseRev,
+      p_updated_by: "tutor",
+    });
+    if (casError || !cas) {
+      console.error("whiteboard_api_page_cas_failed", { code: casError?.code });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить страницу.");
+    }
+    const outcome = cas as { status: string; rev?: number; elements?: unknown };
+    if (outcome.status === "not_found") {
+      return jsonError(cors, 404, "NOT_FOUND", "Страница не найдена.");
+    }
+    if (outcome.status === "conflict") {
+      return new Response(
+        JSON.stringify({
+          error: "Лист изменил другой участник.",
+          code: "REV_CONFLICT",
+          rev: outcome.rev ?? 0,
+          elements: outcome.elements ?? [],
+        }),
+        { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+      );
+    }
+    rev = Number(outcome.rev) || 0;
+    delete patch.elements;
   }
 
-  const { data, error } = await db
-    .from("board_pages")
-    .update(patch)
-    .eq("id", pageId)
-    .select(PAGE_SELECT)
-    .single();
-  if (error || !data) {
-    console.error("whiteboard_api_page_save_failed", { code: error?.code });
-    return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить страницу.");
+  let data: Record<string, unknown> | null = null;
+  if (Object.keys(patch).length > 0) {
+    const { data: updated, error } = await db
+      .from("board_pages")
+      .update(patch)
+      .eq("id", pageId)
+      .select(PAGE_SELECT)
+      .single();
+    if (error || !updated) {
+      console.error("whiteboard_api_page_save_failed", { code: error?.code });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось сохранить страницу.");
+    }
+    data = updated;
+    // Патч без elements (зона/разлиновка) — участникам тоже нужен сигнал.
+    if (rev === 0) rev = await bumpPageRev(db, pageId, page.board_id as string, "tutor");
+  } else {
+    const { data: fresh } = await db
+      .from("board_pages")
+      .select(PAGE_SELECT)
+      .eq("id", pageId)
+      .maybeSingle();
+    data = fresh ?? null;
   }
+  if (!data) return jsonError(cors, 404, "NOT_FOUND", "Страница не найдена.");
 
   // Доска «поднимается» в списке недавних — это и есть смысл её updated_at.
   await db.from("boards").update({ updated_at: new Date().toISOString() }).eq("id", page.board_id);
-  const rev = await bumpPageRev(db, pageId, page.board_id as string, "tutor");
 
   return jsonOk(cors, { page: data, rev });
 }

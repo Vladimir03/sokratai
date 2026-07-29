@@ -30,12 +30,15 @@ interface GuestFetchResult {
 
 async function guestFetch(
   path: string,
-  init: { method: 'GET' | 'POST'; body?: unknown } = { method: 'GET' },
+  init: { method: 'GET' | 'POST'; body?: unknown; guestToken?: string } = { method: 'GET' },
 ): Promise<GuestFetchResult> {
   const resp = await fetch(`${BASE}${path}`, {
     method: init.method,
     headers: {
       apikey: SUPABASE_PUBLISHABLE_KEY,
+      // bearer гостя — ЗАГОЛОВКОМ, не query: URL оседает в access-логах,
+      // истории и диагностических дампах (внешнее ревью, P1).
+      ...(init.guestToken ? { 'X-Guest-Token': init.guestToken } : {}),
       ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
@@ -128,9 +131,10 @@ export interface GuestBoardState {
 }
 
 export async function getGuestState(slug: string, guestToken: string): Promise<GuestBoardState> {
-  const res = await guestFetch(
-    `/share/${encodeURIComponent(slug)}/state?guest_token=${encodeURIComponent(guestToken)}`,
-  );
+  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/state`, {
+    method: 'GET',
+    guestToken,
+  });
   if (res.status === 401) {
     clearGuestToken(slug);
     throwGuestError(res, 'Доступ гостя не действует.');
@@ -168,9 +172,11 @@ export async function getGuestSignals(
   guestToken: string,
   since: string | null,
 ): Promise<{ revs: GuestSignal[]; now: string }> {
-  const qs = new URLSearchParams({ guest_token: guestToken });
-  if (since) qs.set('since', since);
-  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/signals?${qs.toString()}`);
+  const qs = since ? `?${new URLSearchParams({ since }).toString()}` : '';
+  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/signals${qs}`, {
+    method: 'GET',
+    guestToken,
+  });
   if (res.status !== 200) throwGuestError(res, 'Потеряна связь с доской.');
   return {
     revs: (res.body.revs as GuestSignal[] | undefined) ?? [],
@@ -186,8 +192,8 @@ export async function saveGuestPage(
   baseRev: number,
 ): Promise<SaveResult> {
   const res = await guestFetch(
-    `/share/${encodeURIComponent(slug)}/pages/${encodeURIComponent(pageId)}?guest_token=${encodeURIComponent(guestToken)}`,
-    { method: 'POST', body: { elements, base_rev: baseRev } },
+    `/share/${encodeURIComponent(slug)}/pages/${encodeURIComponent(pageId)}`,
+    { method: 'POST', body: { elements, base_rev: baseRev }, guestToken },
   );
   if (res.status === 409 && res.body.code === 'REV_CONFLICT') {
     return {

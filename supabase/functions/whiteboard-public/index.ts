@@ -5,9 +5,9 @@
 // Роуты:
 //   GET  /share/:slug                     — метаданные: название + кандидаты-ученики
 //   POST /share/:slug/join                — { tutor_student_id? | display_name } → guest_token
-//   GET  /share/:slug/state?guest_token=  — доска + листы (whitelist)
-//   GET  /share/:slug/signals?guest_token=&since= — поллинг revs (у гостя нет JWT → нет Realtime)
-//   POST /share/:slug/pages/:pageId?guest_token=  — { elements, base_rev } в СВОЮ зону
+//   GET  /share/:slug/state   — доска + листы (whitelist); токен в X-Guest-Token
+//   GET  /share/:slug/signals?since= — поллинг revs (у гостя нет JWT → нет Realtime)
+//   POST /share/:slug/pages/:pageId  — { elements, base_rev } в СВОЮ зону
 //
 // Идентификация — выбор «я — Маша» из живого списка группы (whiteboard.chat-паттерн);
 // свободное имя = зритель без зоны (read-only).
@@ -31,9 +31,38 @@ const PAGE_WHITELIST =
 const IMAGE_URL_TTL_SEC = 4 * 3600;
 const BOARD_IMAGE_BUCKET = "board-images";
 
-/** Signed URL картинок листов (у гостя нет storage-прав; host → RU-safe, rule 96). */
+/**
+ * Путь картинки принадлежит этой доске: строго `tutor/<uid>/<boardId>/<file>`.
+ * Иначе service_role-подпись = cross-board IDOR (ревью этапов 1–3, P0 №3).
+ */
+function isBoardImagePath(path: string, boardId: string): boolean {
+  const parts = path.split("/");
+  return (
+    parts.length === 4 &&
+    parts[0] === "tutor" &&
+    UUID_RE.test(parts[1]) &&
+    parts[2] === boardId &&
+    parts[3].length > 0
+  );
+}
+
+/** Есть ли в elements image-ref, НЕ принадлежащий доске (fail-closed на записи). */
+function hasForeignImageRef(elements: unknown[], boardId: string): boolean {
+  const prefix = `storage://${BOARD_IMAGE_BUCKET}/`;
+  for (const el of elements as { type?: string; ref?: string }[]) {
+    if (el?.type !== "image" || typeof el.ref !== "string") continue;
+    if (!el.ref.startsWith(prefix) || !isBoardImagePath(el.ref.slice(prefix.length), boardId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Signed URL картинок листов (у гостя нет storage-прав; host → RU-safe, rule 96).
+ * Подписываются ТОЛЬКО пути этой доски (P0 №3). */
 async function signBoardImages(
   db: SupabaseClient,
+  boardId: string,
   pages: { elements?: unknown }[],
 ): Promise<Record<string, string>> {
   const prefix = `storage://${BOARD_IMAGE_BUCKET}/`;
@@ -42,7 +71,8 @@ async function signBoardImages(
     const elements = Array.isArray(p.elements) ? (p.elements as { type?: string; ref?: string }[]) : [];
     for (const el of elements) {
       if (el?.type === "image" && typeof el.ref === "string" && el.ref.startsWith(prefix)) {
-        paths.add(el.ref.slice(prefix.length));
+        const path = el.ref.slice(prefix.length);
+        if (isBoardImagePath(path, boardId)) paths.add(path);
       }
     }
   }
@@ -61,7 +91,9 @@ async function signBoardImages(
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  // x-guest-token: bearer гостя едет ЗАГОЛОВКОМ, не query (ревью P1: URL
+  // попадает в access-логи и историю; заголовки — нет).
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-guest-token",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
@@ -182,14 +214,22 @@ Deno.serve(async (req) => {
     const slug = segments[1];
     const ip = clientIp(req);
 
-    // Общий троттл ДО резолва ссылки: иначе перебор slug'ов не ограничен ничем
-    // (роут-специфичные лимиты стоят уже после успешного резолва).
-    if (!(await throttleCheck(db, `wb:any:${ip}`, 120, 60_000))) {
+    // Двухуровневый троттл (доревизия по ревью P2: прежний общий 120/IP/мин
+    // душил ГРУППУ за одним RU NAT — 4 ученика × поллинг съедали лимит).
+    // 1) Широкая страховка на IP — только против потопа.
+    if (!(await throttleCheck(db, `wb:any:${ip}`, 600, 60_000))) {
       return jsonError(429, "THROTTLED", "Слишком много запросов. Попробуйте через минуту.");
     }
 
     const link = await resolveLink(db, slug);
-    if (!link) return jsonError(404, "NOT_FOUND", "Ссылка не действует. Попросите у репетитора новую.");
+    // 2) Перебор slug'ов режется по ПРОМАХАМ: легитимный трафик группы промахов
+    //    не делает, а брутфорс получает 429 после 20 мимо за 10 минут.
+    if (!link) {
+      if (!(await throttleCheck(db, `wb:miss:${ip}`, 20, 600_000))) {
+        return jsonError(429, "THROTTLED", "Слишком много запросов. Попробуйте позже.");
+      }
+      return jsonError(404, "NOT_FOUND", "Ссылка не действует. Попросите у репетитора новую.");
+    }
 
     // GET /share/:slug — метаданные
     if (req.method === "GET" && segments.length === 2) {
@@ -254,7 +294,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    const guestToken = url.searchParams.get("guest_token");
+    // Заголовок — канонический транспорт токена; query — переходный фолбэк
+    // для уже открытых вкладок старого клиента (убрать в Этапе 4).
+    const guestToken = req.headers.get("x-guest-token") ?? url.searchParams.get("guest_token");
     const guest = await resolveGuest(db, link.id, guestToken);
     if (!guest) return jsonError(401, "UNAUTHORIZED", "Доступ гостя не действует. Войдите по ссылке заново.");
 
@@ -279,7 +321,7 @@ Deno.serve(async (req) => {
         .eq("board_id", guest.board_id);
       await db.from("board_guests").update({ last_seen_at: new Date().toISOString() }).eq("id", guest.id);
       // Подписанные URL картинок: у гостя нет storage-прав, подписывает сервер.
-      const imageUrls = await signBoardImages(db, pages ?? []);
+      const imageUrls = await signBoardImages(db, guest.board_id, pages ?? []);
       return jsonOk({
         board: { id: board?.id, title: (board?.title as string | null) ?? null },
         my_tutor_student_id: guest.tutor_student_id,
@@ -339,30 +381,36 @@ Deno.serve(async (req) => {
       if (page.zone_tutor_student_id !== guest.tutor_student_id) {
         return jsonError(403, "FOREIGN_ZONE", "Это не ваш лист — писать можно только в своей зоне.");
       }
-
-      const { data: revRow } = await db
-        .from("board_page_revs")
-        .select("rev")
-        .eq("page_id", pageId)
-        .maybeSingle();
-      const currentRev = (revRow?.rev as number | undefined) ?? 1;
-      const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
-      if (baseRev !== null && baseRev !== currentRev) {
-        return jsonError(409, "REV_CONFLICT", "Лист изменился с другого устройства.", {
-          rev: currentRev,
-          elements: page.elements,
-        });
+      // Живое членство (ревью P0 №2): убранный из группы гость сохраняет зону
+      // как артефакт урока, но только для чтения — join-время не «замораживает» права.
+      const candidates = await listCandidates(db, guest.board_id);
+      if (!candidates.some((c) => c.tutor_student_id === guest.tutor_student_id)) {
+        return jsonError(403, "NOT_A_PARTICIPANT", "Вы больше не участвуете в этом занятии — доска доступна только для чтения.");
+      }
+      // Fail-closed: чужой image-ref = попытка подписи чужого файла (P0 №3).
+      if (hasForeignImageRef(body.elements, guest.board_id)) {
+        return jsonError(400, "VALIDATION", "Некорректные данные листа.");
       }
 
-      const { error } = await db.from("board_pages").update({ elements: body.elements }).eq("id", pageId);
-      if (error) return jsonError(500, "DB_ERROR", "Не удалось сохранить лист.");
-      const nextRev = currentRev + 1;
-      await db
-        .from("board_page_revs")
-        .update({ rev: nextRev, updated_by: `guest:${guest.id}`, updated_at: new Date().toISOString() })
-        .eq("page_id", pageId);
+      // CAS и бамп — одна транзакция (P0 №1).
+      const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+      const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
+        p_page_id: pageId,
+        p_elements: body.elements,
+        p_base_rev: baseRev,
+        p_updated_by: `guest:${guest.id}`,
+      });
+      if (casError || !cas) return jsonError(500, "DB_ERROR", "Не удалось сохранить лист.");
+      const outcome = cas as { status: string; rev?: number; elements?: unknown };
+      if (outcome.status === "not_found") return jsonError(404, "NOT_FOUND", "Лист не найден.");
+      if (outcome.status === "conflict") {
+        return jsonError(409, "REV_CONFLICT", "Лист изменился с другого устройства.", {
+          rev: outcome.rev ?? 0,
+          elements: outcome.elements ?? [],
+        });
+      }
       await db.from("board_guests").update({ last_seen_at: new Date().toISOString() }).eq("id", guest.id);
-      return jsonOk({ rev: nextRev });
+      return jsonOk({ rev: Number(outcome.rev) || 0 });
     }
 
     return jsonError(404, "NOT_FOUND", "Неизвестный маршрут.");

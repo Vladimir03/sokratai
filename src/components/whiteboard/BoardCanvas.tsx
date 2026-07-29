@@ -118,6 +118,8 @@ const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
 const CULL_QUANT_MM = 100;
 const CULL_MARGIN_MM = 150;
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+/** Тап ≤ 8 px = «клик по призрачной ячейке»; дальше — это пан. */
+const GHOST_TAP_SLOP_PX = 8;
 
 /** Один элемент. Сравнение по идентичности (см. разбор р.2а: id+version морозили live). */
 const ElementNode = memo(
@@ -206,12 +208,12 @@ const FrameLayer = memo(
       return out;
     }, [visibleElements, zoomHint]);
 
-    const titleColor = frame.isZone ? '#1B6B4A' : '#64748B';
-
     return (
       <g transform={`translate(${frame.placement.x} ${frame.placement.y})`}>
         {/* Лист: белая подложка + кайма (зона — акцентная). Тень не используем:
-            SVG-фильтры дороги на слабых WebKit (rule 80 аудитория). */}
+            SVG-фильтры дороги на слабых WebKit (rule 80 аудитория). Подпись
+            листа рендерится ВНЕ FrameLayer (screen-space слой в BoardCanvas):
+            её размер зависит от zoom, а memo этого слоя от камеры не зависит. */}
         <rect
           x={-0.5}
           y={-0.5}
@@ -221,15 +223,6 @@ const FrameLayer = memo(
           stroke={frame.isZone ? '#1B6B4A' : '#CBD5E1'}
           strokeWidth={frame.isZone ? 0.8 : 0.4}
         />
-        <text
-          x={0}
-          y={-2.5}
-          fill={titleColor}
-          fontSize={4}
-          fontFamily="'Golos Text', system-ui, sans-serif"
-        >
-          {frame.title}
-        </text>
         {backgroundNodes.map((node, i) => (
           <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
         ))}
@@ -327,6 +320,10 @@ export function BoardCanvas({
   const rectRef = useRef<DOMRect | null>(null);
   const touchPosRef = useRef(new Map<number, { x: number; y: number }>());
   const panLastRef = useRef<{ x: number; y: number; dist: number } | null>(null);
+  /** Кандидат «тап по призрачной ячейке» — создание решается на pointerup. */
+  const pendingGhostRef = useRef<
+    { ghost: GhostCell; startX: number; startY: number; pointerId: number } | null
+  >(null);
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
 
@@ -475,6 +472,7 @@ export function BoardCanvas({
     moveOffsetRef.current = { dx: 0, dy: 0 };
     erasedRef.current = new Set();
     panLastRef.current = null;
+    pendingGhostRef.current = null;
     transformDraftRef.current = null;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
@@ -525,6 +523,23 @@ export function BoardCanvas({
       rectRef.current = null;
       const frameId = drag.frameId;
 
+      // Тап по призрачной ячейке: жест остался паном того же указателя и не
+      // ушёл дальше tap-slop → создаём лист. Пан/pinch кандидата отменяют.
+      const pendingGhost = pendingGhostRef.current;
+      pendingGhostRef.current = null;
+      if (
+        pendingGhost &&
+        drag.kind === 'pan-canvas' &&
+        event &&
+        'clientX' in event &&
+        event.pointerId === pendingGhost.pointerId &&
+        Math.hypot(event.clientX - pendingGhost.startX, event.clientY - pendingGhost.startY) <
+          GHOST_TAP_SLOP_PX &&
+        onGhostClick
+      ) {
+        onGhostClick(pendingGhost.ghost);
+      }
+
       if (drag.kind === 'stroke' && frameId) {
         const points = livePointsRef.current;
         if (points && points.length >= 3) {
@@ -573,7 +588,7 @@ export function BoardCanvas({
 
       resetLiveState();
     },
-    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, resetLiveState],
+    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, onGhostClick, resetLiveState],
   );
 
   // ─── Трансформация картинок (ручки) ────────────────────────────────────────
@@ -689,8 +704,10 @@ export function BoardCanvas({
       const pointerId = event.pointerId;
       const pointerType = event.pointerType;
 
-      // Клик по «призрачной» ячейке — создать лист (до поиска рамок: ячейки
-      // лежат в пустых местах сетки).
+      // «Призрачная» ячейка: создание — НА POINTERUP с tap-slop (ревью P1:
+      // немедленный create на pointerdown превращал попытку начать пан с
+      // пустой ячейки планшета в сетевой запрос). Здесь только запоминаем
+      // кандидата и запускаем обычный пан; finishDrag решит, был ли это тап.
       if (onGhostClick && ghostCells && event.button === 0 && !readOnly) {
         for (let i = 0; i < ghostCells.length; i++) {
           const g = ghostCells[i];
@@ -698,7 +715,15 @@ export function BoardCanvas({
             world.x >= g.placement.x && world.x <= g.placement.x + g.size.width &&
             world.y >= g.placement.y && world.y <= g.placement.y + g.size.height
           ) {
-            onGhostClick(g);
+            pendingGhostRef.current = { ghost: g, startX: event.clientX, startY: event.clientY, pointerId };
+            dragRef.current = {
+              kind: 'pan-canvas',
+              pointerId,
+              pointerType,
+              startX: event.clientX,
+              startY: event.clientY,
+            };
+            panLastRef.current = { x: event.clientX, y: event.clientY, dist: 0 };
             return;
           }
         }
@@ -989,6 +1014,17 @@ export function BoardCanvas({
     return combined;
   }, [hiddenIds, transformDraft, selection, moveOffset]);
 
+  // Рамка, которой адресован hidden-набор: жест всегда один и внутри одной
+  // рамки, остальным отдаётся стабильный EMPTY_HIDDEN → их memo живёт.
+  const hiddenScopeFrameId =
+    transformDraft?.frameId ??
+    (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0) ? selection.frameId : null) ??
+    (hiddenIds.size > 0 ? gestureFrameId : null);
+
+  // LOD-порог — БАКЕТ, не сырой zoom: сырой менялся каждый кадр pinch-зума и
+  // ререндерил все FrameLayer. LOD переключается только на границе 0.5 px/мм.
+  const lodZoomBucket = camera.zoom < 0.5 ? 0.25 : 1;
+
   const selectionBox = useMemo(() => {
     if (!selection || !selectionFrame || selection.ids.length === 0) return null;
     let minX = Infinity;
@@ -1060,13 +1096,33 @@ export function BoardCanvas({
         <FrameLayer
           key={frame.id}
           frame={frame}
-          hiddenIds={hiddenForRender}
+          // Hidden-набор — ТОЛЬКО рамке активного жеста (ревью P1): новый Set
+          // на каждый шаг ластика инвалидировал memo ВСЕХ видимых листов.
+          hiddenIds={frame.id === hiddenScopeFrameId ? hiddenForRender : EMPTY_HIDDEN}
           options={strokeOptions}
           imageUrls={imageUrls}
           localCullWindow={localCullWindows.get(frame.id) ?? null}
-          zoomHint={camera.zoom}
+          zoomHint={lodZoomBucket}
         />
       ))}
+
+      {/* Подписи листов: screen-space (ревью P2 — на обзорном зуме 4 мм ≈ 0.8 px,
+          «чья зона?» было не прочесть). Инверсный масштаб с клампом ~12 px. */}
+      {visibleFrames.map((frame) => {
+        const labelMm = Math.max(4, 12 / camera.zoom);
+        return (
+          <text
+            key={`label-${frame.id}`}
+            x={frame.placement.x}
+            y={frame.placement.y - labelMm * 0.6}
+            fill={frame.isZone ? '#1B6B4A' : '#64748B'}
+            fontSize={labelMm}
+            fontFamily="'Golos Text', system-ui, sans-serif"
+          >
+            {frame.title}
+          </text>
+        );
+      })}
 
       {/* Ячейки-плюсы: пунктирный контур с плюсом, клик = новый лист. */}
       {!readOnly &&

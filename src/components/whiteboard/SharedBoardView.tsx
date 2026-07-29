@@ -454,6 +454,32 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
     }
   }, [addingPage, applyFrames, viewport]);
 
+  // frameViews — useMemo (ревью P1): иначе каждый setCamera пересоздаёт
+  // FrameView и роняет memo FrameLayer (см. Whiteboard.tsx).
+  const frameViews: FrameView[] = useMemo(
+    () =>
+      frames.map((f, i) => {
+        const isMine = !!myZoneId && f.zoneTutorStudentId === myZoneId;
+        const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] : null;
+        return {
+          id: f.id,
+          placement: f.placement,
+          size: pageSizeMm(f.orientation),
+          background: f.background,
+          gridMm: f.gridMm,
+          elements: f.elements,
+          title: isMine
+            ? `Мой лист${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
+            : zoneName
+              ? `${zoneName}${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
+              : `Лист ${i + 1}`,
+          isZone: !!f.zoneTutorStudentId,
+          writable: isMine,
+        };
+      }),
+    [frames, myZoneId, zoneNames],
+  );
+
   // ─── Рендер ─────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -471,26 +497,6 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
       </div>
     );
   }
-
-  const frameViews: FrameView[] = frames.map((f, i) => {
-    const isMine = !!myZoneId && f.zoneTutorStudentId === myZoneId;
-    const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] : null;
-    return {
-      id: f.id,
-      placement: f.placement,
-      size: pageSizeMm(f.orientation),
-      background: f.background,
-      gridMm: f.gridMm,
-      elements: f.elements,
-      title: isMine
-        ? `Мой лист${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
-        : zoneName
-          ? `${zoneName}${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
-          : `Лист ${i + 1}`,
-      isZone: !!f.zoneTutorStudentId,
-      writable: isMine,
-    };
-  });
 
   const textDraftFrame = textDraft ? frames.find((f) => f.id === textDraft.frameId) : null;
   const textDraftPx =
