@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Check, Download, Loader2, Paperclip } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { BoardCanvas, type BoardTool } from '@/components/whiteboard/BoardCanvas';
@@ -18,8 +18,8 @@ import {
   updateBoard,
 } from '@/lib/whiteboardApi';
 import {
-  type BoardBackground,
   type BoardElement,
+  type BoardBackground,
   type BoardGridMm,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
@@ -33,17 +33,28 @@ import {
   primeSeqCounter,
   translateElement,
 } from '@/lib/whiteboard/model';
-import { boardPdfFileName, exportBoardToPdf } from '@/lib/whiteboard/exportPdf';
 import { deleteMaterial, uploadLessonPdf } from '@/lib/lessonMaterialsApi';
 
-// Страница доски (Фаза 1). Доска ОДНОПОЛЬЗОВАТЕЛЬСКАЯ: передача мела — Фаза 2.
+// Страница доски (Фаза 1, пересборка по ревью 5.6). Доска однопользовательская:
+// передача мела — Фаза 2.
 //
-// ⚠️ Данные загружаются вручную (useEffect + useState), а НЕ через useQuery.
-// Это осознанно: на доске лежит несохранённый рукописный ввод, и фоновый
-// refetch по возврату фокуса затёр бы его — тот самый класс потери формы при
-// смене вкладки, из-за которого в конструкторе ДЗ появился гард smoke-check §8.
+// Инварианты (не ломать):
+// • Данные грузятся вручную (useEffect + useState), а НЕ через useQuery: на
+//   холсте лежит несохранённый рукописный ввод, фоновый refetch по фокусу его
+//   затёр бы (класс инцидента tab-switch, smoke-check §8).
+// • Автосохранение — SINGLE-FLIGHT: одновременно максимум один сетевой цикл,
+//   очередь дренится до конца, при ошибке страницы возвращаются в очередь и
+//   ретраятся. Иначе два параллельных сейва могли записать старую сцену поверх
+//   новой (ревью 5.6, P0).
+// • «Сохранено» показывается ТОЛЬКО при пустой очереди без ошибок. Ошибка —
+//   явная и кликабельная.
+// • PDF-модуль (jsPDF + svg2pdf, ~200 КБ gzip) грузится динамически по первому
+//   экспорту — открытие доски не должно тянуть движок печати (ревью 5.6, P1).
+// • Все правки сцены и истории происходят в обработчиках событий, ВНЕ
+//   setState-updater'ов (updater обязан быть чистым, StrictMode зовёт его дважды).
 
 const AUTOSAVE_DELAY_MS = 900;
+const SAVE_RETRY_DELAY_MS = 5000;
 const HISTORY_LIMIT = 60;
 
 interface PageState {
@@ -58,6 +69,15 @@ interface HistoryEntry {
   future: BoardElement[][];
 }
 
+interface TextDraft {
+  id: number;
+  x: number;
+  y: number;
+  value: string;
+}
+
+type SaveStatus = 'saved' | 'saving' | 'error';
+
 function rowToPageState(row: BoardPageRow): PageState {
   const elements = parseElements(row.elements);
   primeSeqCounter(elements);
@@ -69,6 +89,18 @@ function rowToPageState(row: BoardPageRow): PageState {
   };
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT' ||
+    target.isContentEditable
+  );
+}
+
+let textDraftSeq = 0;
+
 export default function Whiteboard() {
   const params = useParams<{ boardId?: string; lessonId?: string }>();
   const navigate = useNavigate();
@@ -78,23 +110,43 @@ export default function Whiteboard() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [saving, setSaving] = useState(false);
+
+  // Раздельные фазы занятости: общий `busy` показывал спиннер экспорта на
+  // кнопке прикрепления и наоборот (ревью 5.6).
+  const [pageBusy, setPageBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [attaching, setAttaching] = useState(false);
+  const [exitPhase, setExitPhase] = useState<null | 'saving' | 'attaching'>(null);
+
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  const [saveTick, setSaveTick] = useState(0);
 
   const [tool, setTool] = useState<BoardTool>('pen');
   const [color, setColor] = useState<string>(BOARD_COLORS[0]);
   const [size, setSize] = useState<number>(DEFAULT_PEN_SIZE_MM);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [textDraft, setTextDraft] = useState<{ x: number; y: number; value: string } | null>(null);
+  const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
 
   const historyRef = useRef<Map<string, HistoryEntry>>(new Map());
   const [historyTick, setHistoryTick] = useState(0);
   const dirtyRef = useRef<Set<string>>(new Set());
+  const flushPromiseRef = useRef<Promise<boolean> | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pagesRef = useRef<PageState[]>([]);
+  const textDraftRef = useRef<TextDraft | null>(null);
+  const savedTitleRef = useRef<string>('');
   /** Снимок, отправленный в последний экспорт, — чтобы не плодить одинаковые PDF. */
   const exportedSignatureRef = useRef<string | null>(null);
 
-  pagesRef.current = pages;
+  // Синхронизация зеркал — ПОСЛЕ коммита, не в теле рендера (ревью 5.6, P2:
+  // в concurrent-режиме рендер может не закоммититься, и автосейв прочитал бы
+  // сцену, которой пользователь не видел).
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+  useEffect(() => {
+    textDraftRef.current = textDraft;
+  }, [textDraft]);
 
   const activePage = pages[activeIndex] ?? null;
 
@@ -115,6 +167,7 @@ export default function Whiteboard() {
       .then((data) => {
         if (cancelled) return;
         setBoard(data.board);
+        savedTitleRef.current = data.board.title ?? '';
         const next = data.pages.map(rowToPageState);
         setPages(next.length > 0 ? next : []);
         setActiveIndex(0);
@@ -137,58 +190,99 @@ export default function Whiteboard() {
     };
   }, [params.boardId, params.lessonId, navigate]);
 
-  // ─── Автосохранение ─────────────────────────────────────────────────────────
+  // ─── Автосохранение: single-flight ──────────────────────────────────────────
 
-  const flushDirty = useCallback(async () => {
-    const ids = Array.from(dirtyRef.current);
-    if (ids.length === 0) return;
-    dirtyRef.current = new Set();
-    setSaving(true);
-    try {
-      for (let i = 0; i < ids.length; i++) {
-        const page = pagesRef.current.find((p) => p.id === ids[i]);
-        if (!page) continue;
-        // Последовательно: страниц единицы, а параллельный залп на плохой сети
-        // (RU DPI, rule 95) увеличил бы шанс, что часть записей потеряется.
-        await saveBoardPage(page.id, {
-          elements: page.elements,
-          background: page.background,
-          grid_mm: page.gridMm,
-        });
+  /**
+   * Дренит очередь грязных страниц до конца. Возвращает true, когда всё
+   * сохранено. Повторный вызов во время работы возвращает ТОТ ЖЕ promise —
+   * второго параллельного цикла не бывает, поэтому более старый снапшот не
+   * может перезаписать более новый (ревью 5.6, P0).
+   */
+  const flushDirty = useCallback((): Promise<boolean> => {
+    if (flushPromiseRef.current) return flushPromiseRef.current;
+    if (dirtyRef.current.size === 0) return Promise.resolve(true);
+
+    const run = (async () => {
+      setSaveStatus('saving');
+      try {
+        while (dirtyRef.current.size > 0) {
+          const ids = Array.from(dirtyRef.current);
+          dirtyRef.current = new Set();
+          for (let i = 0; i < ids.length; i++) {
+            const page = pagesRef.current.find((p) => p.id === ids[i]);
+            if (!page) continue;
+            try {
+              // Последовательно: параллельный залп на плохой сети (RU DPI,
+              // rule 95) повышает шанс частичной потери.
+              await saveBoardPage(page.id, {
+                elements: page.elements,
+                background: page.background,
+                grid_mm: page.gridMm,
+              });
+            } catch (err) {
+              // Несохранённое возвращается в очередь целиком — терять молча нельзя.
+              for (let j = i; j < ids.length; j++) dirtyRef.current.add(ids[j]);
+              throw err;
+            }
+          }
+        }
+        setSaveStatus('saved');
+        return true;
+      } catch {
+        setSaveStatus('error');
+        if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = setTimeout(() => setSaveTick((t) => t + 1), SAVE_RETRY_DELAY_MS);
+        return false;
+      } finally {
+        flushPromiseRef.current = null;
       }
-    } catch (err) {
-      // Возвращаем страницы в очередь: несохранённый конспект молча терять нельзя.
-      for (let i = 0; i < ids.length; i++) dirtyRef.current.add(ids[i]);
-      toast.error(err instanceof Error ? err.message : 'Не удалось сохранить доску');
-    } finally {
-      setSaving(false);
-    }
+    })();
+
+    flushPromiseRef.current = run;
+    return run;
   }, []);
 
   useEffect(() => {
-    if (dirtyRef.current.size === 0) return;
+    if (saveTick === 0) return;
     const timer = setTimeout(() => {
       void flushDirty();
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [pages, flushDirty]);
+  }, [saveTick, flushDirty]);
 
-  // Уход со страницы — досохраняем то, что не успел дебаунс.
   useEffect(
     () => () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      // Уход со страницы — последняя best-effort попытка (плюс beforeunload ниже).
       void flushDirty();
     },
     [flushDirty],
   );
 
-  // ─── Правки сцены ───────────────────────────────────────────────────────────
+  // Закрытие вкладки с несохранённым — браузерное предупреждение (ревью 5.6, P0).
+  useEffect(() => {
+    if (saveStatus === 'saved') return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [saveStatus]);
 
-  const markDirty = useCallback((pageId: string) => {
+  const noteDirty = useCallback((pageId: string) => {
     dirtyRef.current.add(pageId);
+    setSaveStatus((prev) => (prev === 'error' ? 'error' : 'saving'));
+    setSaveTick((t) => t + 1);
   }, []);
+
+  // ─── Правки сцены (все — в обработчиках, вне updater'ов) ────────────────────
 
   const pushHistory = useCallback((pageId: string, snapshot: BoardElement[]) => {
     const entry = historyRef.current.get(pageId) ?? { past: [], future: [] };
+    // Дедуп по ссылке: burst-операции (ластик за один жест) дают серию вызовов
+    // с одним и тем же committed-снапшотом — в истории он нужен один раз.
+    if (entry.past[entry.past.length - 1] === snapshot) return;
     entry.past.push(snapshot);
     if (entry.past.length > HISTORY_LIMIT) entry.past.shift();
     entry.future = [];
@@ -198,19 +292,22 @@ export default function Whiteboard() {
 
   const updateActiveElements = useCallback(
     (updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
+      const page = pagesRef.current[activeIndex];
+      if (!page) return;
+      if (recordHistory) pushHistory(page.id, page.elements);
+      noteDirty(page.id);
       setPages((prev) => {
-        const page = prev[activeIndex];
-        if (!page) return prev;
-        const nextElements = updater(page.elements);
-        if (nextElements === page.elements) return prev;
-        if (recordHistory) pushHistory(page.id, page.elements);
-        markDirty(page.id);
+        const idx = prev.findIndex((p) => p.id === page.id);
+        if (idx < 0) return prev;
+        const current = prev[idx];
+        const nextElements = updater(current.elements);
+        if (nextElements === current.elements) return prev;
         const copy = prev.slice();
-        copy[activeIndex] = { ...page, elements: nextElements };
+        copy[idx] = { ...current, elements: nextElements };
         return copy;
       });
     },
-    [activeIndex, markDirty, pushHistory],
+    [activeIndex, noteDirty, pushHistory],
   );
 
   const handleCommitElement = useCallback(
@@ -229,41 +326,41 @@ export default function Whiteboard() {
     [updateActiveElements],
   );
 
+  /** Один вызов на жест (BoardCanvas коммитит на pointerup) → нормальная запись в историю. */
   const handleMoveSelection = useCallback(
     (dx: number, dy: number) => {
       if ((dx === 0 && dy === 0) || selectedIds.length === 0) return;
       const moving = new Set(selectedIds);
-      // recordHistory=false: перетаскивание идёт десятками событий, и каждое
-      // в истории превратило бы Ctrl+Z в покадровую перемотку.
-      updateActiveElements(
-        (elements) => elements.map((el) => (moving.has(el.id) ? translateElement(el, dx, dy) : el)),
-        false,
+      updateActiveElements((elements) =>
+        elements.map((el) => (moving.has(el.id) ? translateElement(el, dx, dy) : el)),
       );
     },
     [selectedIds, updateActiveElements],
   );
 
   const handleUndo = useCallback(() => {
-    if (!activePage) return;
-    const entry = historyRef.current.get(activePage.id);
+    const page = pagesRef.current[activeIndex];
+    if (!page) return;
+    const entry = historyRef.current.get(page.id);
     if (!entry || entry.past.length === 0) return;
     const previous = entry.past.pop() as BoardElement[];
-    entry.future.push(activePage.elements);
-    historyRef.current.set(activePage.id, entry);
+    entry.future.push(page.elements);
     setHistoryTick((t) => t + 1);
-    updateActiveElements(() => previous, false);
-  }, [activePage, updateActiveElements]);
+    noteDirty(page.id);
+    setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: previous } : p)));
+  }, [activeIndex, noteDirty]);
 
   const handleRedo = useCallback(() => {
-    if (!activePage) return;
-    const entry = historyRef.current.get(activePage.id);
+    const page = pagesRef.current[activeIndex];
+    if (!page) return;
+    const entry = historyRef.current.get(page.id);
     if (!entry || entry.future.length === 0) return;
     const next = entry.future.pop() as BoardElement[];
-    entry.past.push(activePage.elements);
-    historyRef.current.set(activePage.id, entry);
+    entry.past.push(page.elements);
     setHistoryTick((t) => t + 1);
-    updateActiveElements(() => next, false);
-  }, [activePage, updateActiveElements]);
+    noteDirty(page.id);
+    setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: next } : p)));
+  }, [activeIndex, noteDirty]);
 
   const historyState = useMemo(() => {
     void historyTick;
@@ -274,6 +371,9 @@ export default function Whiteboard() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
+      // Ctrl+Z в поле названия или в текстовом черновике должен править ТЕКСТ,
+      // а не отменять действия на холсте (ревью 5.6, P1).
+      if (isEditableTarget(event.target)) return;
       const key = event.key.toLowerCase();
       if (key === 'z' && !event.shiftKey) {
         event.preventDefault();
@@ -291,23 +391,19 @@ export default function Whiteboard() {
 
   const patchActivePage = useCallback(
     (patch: Partial<Pick<PageState, 'background' | 'gridMm'>>) => {
-      setPages((prev) => {
-        const page = prev[activeIndex];
-        if (!page) return prev;
-        markDirty(page.id);
-        const copy = prev.slice();
-        copy[activeIndex] = { ...page, ...patch };
-        return copy;
-      });
+      const page = pagesRef.current[activeIndex];
+      if (!page) return;
+      noteDirty(page.id);
+      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
     },
-    [activeIndex, markDirty],
+    [activeIndex, noteDirty],
   );
 
   // ─── Страницы ───────────────────────────────────────────────────────────────
 
   const handleAddPage = useCallback(async () => {
-    if (!board || busy) return;
-    setBusy(true);
+    if (!board || pageBusy) return;
+    setPageBusy(true);
     try {
       await flushDirty();
       const created = await createBoardPage(board.id, {
@@ -320,15 +416,23 @@ export default function Whiteboard() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось добавить страницу');
     } finally {
-      setBusy(false);
+      setPageBusy(false);
     }
-  }, [board, busy, flushDirty, activePage]);
+  }, [board, pageBusy, flushDirty, activePage]);
 
   const handleDeletePage = useCallback(
     async (index: number) => {
       const page = pagesRef.current[index];
-      if (!page || busy) return;
-      setBusy(true);
+      if (!page || pageBusy) return;
+      // Подтверждение обязательно: случайное касание стилусом маленькой кнопки
+      // удаляло страницу с целым конспектом без возможности отмены (ревью 5.6, P0).
+      const count = page.elements.length;
+      const message =
+        count > 0
+          ? `Удалить страницу ${index + 1}? На ней ${count} объект(ов) — отменить удаление будет нельзя.`
+          : `Удалить пустую страницу ${index + 1}?`;
+      if (!window.confirm(message)) return;
+      setPageBusy(true);
       try {
         await deleteBoardPage(page.id);
         historyRef.current.delete(page.id);
@@ -339,10 +443,10 @@ export default function Whiteboard() {
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Не удалось удалить страницу');
       } finally {
-        setBusy(false);
+        setPageBusy(false);
       }
     },
-    [busy],
+    [pageBusy],
   );
 
   const handleSelectPage = useCallback((index: number) => {
@@ -352,31 +456,73 @@ export default function Whiteboard() {
 
   // ─── Текст ──────────────────────────────────────────────────────────────────
 
-  const commitTextDraft = useCallback(() => {
-    setTextDraft((draft) => {
-      if (draft && draft.value.trim()) {
-        handleCommitElement(createText(draft.x, draft.y, draft.value.trim(), color, DEFAULT_TEXT_SIZE_MM));
+  /**
+   * Коммит через ref, вне setState-updater'ов. `expectedId` защищает от гонки
+   * blur ↔ pointerdown: клик по холсту с активным черновиком СНАЧАЛА коммитит
+   * старый и открывает новый (в pointerdown), а ПОТОМ приходит blur старого —
+   * без проверки id он стирал бы уже новый черновик. Именно так «текст не
+   * вставлялся» в ручном тесте владельца.
+   */
+  const commitTextDraft = useCallback(
+    (expectedId?: number) => {
+      const draft = textDraftRef.current;
+      if (!draft) return;
+      if (expectedId !== undefined && draft.id !== expectedId) return;
+      if (draft.value.trim()) {
+        handleCommitElement(
+          createText(draft.x, draft.y, draft.value.trim(), color, DEFAULT_TEXT_SIZE_MM),
+        );
       }
-      return null;
-    });
-  }, [color, handleCommitElement]);
+      textDraftRef.current = null;
+      setTextDraft(null);
+    },
+    [color, handleCommitElement],
+  );
 
-  // ─── Экспорт ────────────────────────────────────────────────────────────────
+  const handleRequestText = useCallback(
+    (x: number, y: number) => {
+      commitTextDraft();
+      textDraftSeq += 1;
+      const draft = { id: textDraftSeq, x, y, value: '' };
+      textDraftRef.current = draft;
+      setTextDraft(draft);
+    },
+    [commitTextDraft],
+  );
+
+  // ─── Экспорт и прикрепление ────────────────────────────────────────────────
+
+  const computeSignature = useCallback(() => {
+    // background/gridMm — часть подписи: их смена тоже меняет напечатанный лист
+    // (ревью 5.6 — прежняя подпись это упускала).
+    return JSON.stringify(
+      pagesRef.current.map((p) => [
+        p.background,
+        p.gridMm,
+        p.elements.map((el) => `${el.id}:${el.version}`),
+      ]),
+    );
+  }, []);
 
   const buildPdfBlob = useCallback(async () => {
     const source = pagesRef.current;
     if (source.length === 0) throw new Error('В доске нет страниц');
+    // Динамический импорт: jsPDF + svg2pdf не должны грузиться при открытии
+    // доски — они нужны только на экспорте (ревью 5.6, P1: −200 КБ gzip из чанка).
+    const { exportBoardToPdf } = await import('@/lib/whiteboard/exportPdf');
     return exportBoardToPdf(
       source.map((p) => ({ elements: p.elements, background: p.background, gridMm: p.gridMm })),
+      { onPageStart: (done, total) => setExportProgress({ done, total }) },
     );
   }, []);
 
   const handleDownload = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
+    if (exportProgress) return;
+    setExportProgress({ done: 0, total: pagesRef.current.length });
     try {
       await flushDirty();
       const blob = await buildPdfBlob();
+      const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -388,52 +534,116 @@ export default function Whiteboard() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось собрать PDF');
     } finally {
-      setBusy(false);
+      setExportProgress(null);
     }
-  }, [busy, flushDirty, buildPdfBlob, board]);
+  }, [exportProgress, flushDirty, buildPdfBlob, board]);
 
   /**
-   * Главное действие Фазы 1 (W1.10): конспект оказывается в материалах занятия
-   * БЕЗ ручного скачивания и прикрепления.
-   *
-   * ⚠️ Прикрепление идёт СУЩЕСТВУЮЩИМ путём `uploadLessonPdf` → tutor_lesson_materials
-   * (kind:'pdf') — тем же, которым репетитор грузит конспекты руками. Новой сущности
-   * здесь быть не должно: ученик видит материал без единой правки на своей стороне.
+   * Прикрепление PDF к занятию — СУЩЕСТВУЮЩИМ путём `uploadLessonPdf` →
+   * tutor_lesson_materials(kind:'pdf'): ученик видит конспект без правок на
+   * своей стороне. Прошлый автоэкспорт удаляется (иначе кап в 5 PDF).
    */
-  const handleAttachToLesson = useCallback(async () => {
-    if (!board?.lesson_id || busy) return;
-    setBusy(true);
+  const attachPdfToLesson = useCallback(async (): Promise<boolean> => {
+    const currentBoard = board;
+    if (!currentBoard?.lesson_id) return false;
+    const signature = computeSignature();
+    if (signature === exportedSignatureRef.current && currentBoard.export_material_id) {
+      return true;
+    }
+
+    const blob = await buildPdfBlob();
+    const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
+    const fileName = boardPdfFileName(currentBoard.title, new Date());
+    const file = new File([blob], fileName, { type: 'application/pdf' });
+    const material = await uploadLessonPdf(file, currentBoard.lesson_id, fileName);
+
+    const previousId = currentBoard.export_material_id;
+    const updated = await updateBoard(currentBoard.id, { export_material_id: material.id });
+    setBoard(updated);
+    exportedSignatureRef.current = signature;
+    if (previousId) {
+      await deleteMaterial(previousId).catch(() => undefined);
+    }
+    return true;
+  }, [board, computeSignature, buildPdfBlob]);
+
+  const handleAttachClick = useCallback(async () => {
+    if (attaching || exportProgress) return;
+    setAttaching(true);
+    setExportProgress({ done: 0, total: pagesRef.current.length });
     try {
       await flushDirty();
-      const signature = JSON.stringify(
-        pagesRef.current.map((p) => p.elements.map((el) => `${el.id}:${el.version}`)),
-      );
-      if (signature === exportedSignatureRef.current && board.export_material_id) {
-        toast.success('Конспект уже прикреплён к занятию');
-        return;
-      }
-
-      const blob = await buildPdfBlob();
-      const fileName = boardPdfFileName(board.title, new Date());
-      const file = new File([blob], fileName, { type: 'application/pdf' });
-      const material = await uploadLessonPdf(file, board.lesson_id, fileName);
-
-      // Прошлый автоэкспорт убираем: иначе каждое «прикрепить» съедало бы слот
-      // из пяти, и ученик видел бы пять версий одного конспекта.
-      const previousId = board.export_material_id;
-      const updated = await updateBoard(board.id, { export_material_id: material.id });
-      setBoard(updated);
-      exportedSignatureRef.current = signature;
-      if (previousId) {
-        await deleteMaterial(previousId).catch(() => undefined);
-      }
+      await attachPdfToLesson();
       toast.success('Конспект прикреплён к занятию');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось прикрепить конспект');
     } finally {
-      setBusy(false);
+      setAttaching(false);
+      setExportProgress(null);
     }
-  }, [board, busy, flushDirty, buildPdfBlob]);
+  }, [attaching, exportProgress, flushDirty, attachPdfToLesson]);
+
+  /**
+   * Выход с доски (кнопка «Доски»): дождаться сохранения, а для доски занятия —
+   * автоматически прикрепить конспект. Это и есть обещанное «закрыл урок —
+   * PDF сам в материалах» для естественного пути выхода (ревью 5.6, P0).
+   * Серверный finalizer «на закрытие вкладки» — Фаза 1.5.
+   */
+  const handleExit = useCallback(async () => {
+    if (exitPhase) return;
+    setExitPhase('saving');
+    try {
+      const saved = await flushDirty();
+      if (!saved) {
+        const leaveAnyway = window.confirm(
+          'Не удалось сохранить последние изменения (нет связи с сервером). Выйти без них?',
+        );
+        if (!leaveAnyway) return;
+        navigate('/tutor/board');
+        return;
+      }
+      const hasContent = pagesRef.current.some((p) => p.elements.length > 0);
+      if (board?.lesson_id && hasContent && computeSignature() !== exportedSignatureRef.current) {
+        setExitPhase('attaching');
+        try {
+          await attachPdfToLesson();
+          toast.success('Конспект прикреплён к занятию');
+        } catch (err) {
+          toast.error(
+            `Конспект не прикрепился: ${err instanceof Error ? err.message : 'ошибка'}. ` +
+              'Доска сохранена — можно прикрепить позже кнопкой на доске.',
+          );
+        }
+      }
+      navigate('/tutor/board');
+    } finally {
+      setExitPhase(null);
+    }
+  }, [exitPhase, flushDirty, board, computeSignature, attachPdfToLesson, navigate]);
+
+  // ─── Название ───────────────────────────────────────────────────────────────
+
+  /**
+   * Сравнение — с ПОСЛЕДНИМ СОХРАНЁННЫМ названием (ref), а не с board.title:
+   * onChange уже обновил board.title, поэтому сравнение с ним на blur всегда
+   * давало «ничего не изменилось» и название молча не сохранялось (баг из
+   * ручного теста владельца).
+   */
+  const commitTitle = useCallback(async () => {
+    const currentBoard = board;
+    if (!currentBoard) return;
+    const title = (currentBoard.title ?? '').trim();
+    if (title === savedTitleRef.current) return;
+    try {
+      const updated = await updateBoard(currentBoard.id, { title: title || null });
+      savedTitleRef.current = updated.title ?? '';
+      setBoard((prev) => (prev ? { ...prev, title: updated.title } : prev));
+    } catch (err) {
+      toast.error(
+        `Название не сохранилось: ${err instanceof Error ? err.message : 'ошибка сети'}`,
+      );
+    }
+  }, [board]);
 
   // ─── Рендер ─────────────────────────────────────────────────────────────────
 
@@ -463,15 +673,19 @@ export default function Whiteboard() {
     gridMm: p.gridMm,
   }));
 
+  const exporting = exportProgress !== null;
+
   return (
-    // Динамическая единица высоты (dvh): на iOS адресная строка съедает часть
-    // статической вьюпорт-высоты, и низ панели страниц уходил бы за экран (rule 80).
-    <div className="flex h-[100dvh] flex-col bg-slate-50">
-      <header className="flex items-center gap-3 border-b border-slate-200 bg-white px-3 py-2">
+    // fixed inset-0: редактор занимает ВЕСЬ экран поверх AppFrame — на планшете
+    // и телефоне рамка кабинета съедала место холста (ревью 5.6, P1). Высоту
+    // держит inset, а не vh-единицы (rule 80).
+    <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
+      <header className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate('/tutor/board')}
+          onClick={() => void handleExit()}
+          disabled={exitPhase !== null}
           style={{ touchAction: 'manipulation' }}
         >
           <ArrowLeft className="mr-1.5 h-4 w-4" />
@@ -482,54 +696,75 @@ export default function Whiteboard() {
           value={board.title ?? ''}
           placeholder="Без названия"
           onChange={(e) => setBoard({ ...board, title: e.target.value })}
-          onBlur={(e) => {
-            const title = e.target.value.trim();
-            if (title !== (board.title ?? '')) {
-              void updateBoard(board.id, { title: title || null }).catch(() => undefined);
-            }
+          onBlur={() => void commitTitle()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
           }}
           // 16px (text-base) обязателен на инпутах — иначе Safari iOS зумит (rule 80).
           className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1 text-base font-medium text-slate-900 hover:border-slate-200 focus:border-accent focus:outline-none"
         />
 
-        <span className="hidden shrink-0 items-center gap-1.5 text-sm text-slate-500 sm:flex">
-          {saving ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Сохраняем
-            </>
-          ) : (
-            <>
-              <Check className="h-3.5 w-3.5 text-accent" />
-              Сохранено
-            </>
-          )}
-        </span>
+        {saveStatus === 'error' ? (
+          <button
+            type="button"
+            onClick={() => void flushDirty()}
+            aria-live="polite"
+            style={{ touchAction: 'manipulation' }}
+            className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-sm text-red-600 hover:bg-red-50"
+          >
+            <AlertTriangle className="h-4 w-4" />
+            <span className="hidden sm:inline">Не сохранено — повторить</span>
+          </button>
+        ) : (
+          <span
+            aria-live="polite"
+            className="flex shrink-0 items-center gap-1.5 px-1 text-sm text-slate-500"
+          >
+            {saveStatus === 'saving' ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span className="hidden sm:inline">Сохраняем</span>
+              </>
+            ) : (
+              <>
+                <Check className="h-3.5 w-3.5 text-accent" />
+                <span className="hidden sm:inline">Сохранено</span>
+              </>
+            )}
+          </span>
+        )}
 
         <Button
           variant="outline"
           size="sm"
-          onClick={handleDownload}
-          disabled={busy}
+          onClick={() => void handleDownload()}
+          disabled={exporting || attaching}
           style={{ touchAction: 'manipulation' }}
         >
-          <Download className="mr-1.5 h-4 w-4" />
-          PDF
+          {exporting && !attaching ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="mr-1.5 h-4 w-4" />
+          )}
+          {exporting && !attaching && exportProgress
+            ? `${exportProgress.done}/${exportProgress.total}`
+            : 'PDF'}
         </Button>
 
         {board.lesson_id && (
           <Button
             size="sm"
-            onClick={handleAttachToLesson}
-            disabled={busy}
+            onClick={() => void handleAttachClick()}
+            disabled={attaching || exporting}
             style={{ touchAction: 'manipulation' }}
           >
-            {busy ? (
+            {attaching ? (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
             ) : (
               <Paperclip className="mr-1.5 h-4 w-4" />
             )}
-            Прикрепить к занятию
+            <span className="hidden sm:inline">Прикрепить к занятию</span>
+            <span className="sm:hidden">К занятию</span>
           </Button>
         )}
       </header>
@@ -549,7 +784,7 @@ export default function Whiteboard() {
         canRedo={historyState.canRedo}
         onUndo={handleUndo}
         onRedo={handleRedo}
-        disabled={busy}
+        disabled={pageBusy}
       />
 
       <div className="relative min-h-0 flex-1 overflow-auto p-3">
@@ -566,31 +801,42 @@ export default function Whiteboard() {
               color={color}
               size={size}
               selectedIds={selectedIds}
-              readOnly={busy}
+              readOnly={pageBusy}
               onCommitElement={handleCommitElement}
               onEraseElements={handleEraseElements}
               onSelectionChange={setSelectedIds}
               onMoveSelection={handleMoveSelection}
-              onRequestText={(x, y) => setTextDraft({ x, y, value: '' })}
+              onRequestText={handleRequestText}
             />
           )}
 
           {textDraft && (
             <textarea
+              key={textDraft.id}
               autoFocus
               value={textDraft.value}
-              onChange={(e) => setTextDraft({ ...textDraft, value: e.target.value })}
-              onBlur={commitTextDraft}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setTextDraft(null);
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitTextDraft();
+              onChange={(e) => {
+                const next = { ...textDraft, value: e.target.value };
+                textDraftRef.current = next;
+                setTextDraft(next);
               }}
-              placeholder="Текст, Esc — отмена"
+              onBlur={() => commitTextDraft(textDraft.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  textDraftRef.current = null;
+                  setTextDraft(null);
+                } else if (e.key === 'Enter' && !e.shiftKey) {
+                  // Enter — готово (привычно для подписи); новая строка — Shift+Enter.
+                  e.preventDefault();
+                  commitTextDraft(textDraft.id);
+                }
+              }}
+              placeholder="Текст. Enter — готово, Esc — отмена"
               style={{
                 left: `${(textDraft.x / PAGE_WIDTH_MM) * 100}%`,
                 top: `${(textDraft.y / PAGE_HEIGHT_MM) * 100}%`,
               }}
-              className="absolute z-10 min-h-[44px] w-48 resize-none rounded-md border border-accent bg-white p-2 text-base shadow-sm focus:outline-none"
+              className="absolute z-10 min-h-[44px] w-56 resize-none rounded-md border border-accent bg-white p-2 text-base shadow-sm focus:outline-none"
             />
           )}
         </div>
@@ -599,11 +845,22 @@ export default function Whiteboard() {
       <PagesPanel
         pages={pageSummaries}
         activeIndex={activeIndex}
-        disabled={busy}
+        disabled={pageBusy}
         onSelect={handleSelectPage}
-        onAdd={handleAddPage}
-        onDelete={handleDeletePage}
+        onAdd={() => void handleAddPage()}
+        onDelete={(index) => void handleDeletePage(index)}
       />
+
+      {exitPhase && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/80">
+          <div className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-md">
+            <Loader2 className="h-5 w-5 animate-spin text-accent" />
+            <span className="text-slate-700">
+              {exitPhase === 'saving' ? 'Сохраняем доску…' : 'Прикрепляем конспект к занятию…'}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

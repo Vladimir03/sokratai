@@ -382,9 +382,13 @@ async function handleLessonBoard(
   lessonId: string,
   cors: Record<string, string>,
 ): Promise<Response> {
+  // ⚠️ FK-дрейф (rule 60): boards.student_id → tutor_students.id, и в занятии это
+  // `tutor_student_id`. Поле `tutor_lessons.student_id` — это profiles.id (auth uid),
+  // его вставка сюда валится на FK (ревью 5.6 + репорт владельца: «доска из
+  // занятия не создаётся»).
   const { data: lesson } = await db
     .from("tutor_lessons")
-    .select("id, tutor_id, student_id")
+    .select("id, tutor_id, tutor_student_id")
     .eq("id", lessonId)
     .maybeSingle();
   if (!lesson || lesson.tutor_id !== tutorPkId) {
@@ -405,7 +409,11 @@ async function handleLessonBoard(
   return createBoardWithFirstPage(
     db,
     tutorPkId,
-    { title: null, student_id: (lesson.student_id as string | null) ?? null, lesson_id: lessonId },
+    {
+      title: null,
+      student_id: (lesson.tutor_student_id as string | null) ?? null,
+      lesson_id: lessonId,
+    },
     cors,
   );
 }

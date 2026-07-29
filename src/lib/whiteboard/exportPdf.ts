@@ -41,6 +41,8 @@ export interface BoardPdfOptions {
   strokeOptions?: StrokeRenderOptions;
   /** Печатать ли разлиновку. По умолчанию да — с клеткой конспект читается привычнее. */
   includeBackground?: boolean;
+  /** Прогресс по листам: вызывается ПЕРЕД обработкой каждой страницы (1-based). */
+  onPageStart?: (page: number, total: number) => void;
 }
 
 let cachedFontBase64: string | null = null;
@@ -57,15 +59,24 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-async function loadFontBase64(): Promise<string | null> {
+/**
+ * Fail-closed (ревью 5.6, P1): молчаливый фолбэк на helvetica отдал бы ученику
+ * PDF, где вся кириллица — вопросительные знаки, и никто бы этого не заметил
+ * до жалобы. Лучше честная ошибка с предложением повторить.
+ */
+async function loadFontBase64(): Promise<string> {
   if (cachedFontBase64) return cachedFontBase64;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    const resp = await fetch(FONT_URL);
-    if (!resp.ok) return null;
+    const resp = await fetch(FONT_URL, { signal: controller.signal });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     cachedFontBase64 = arrayBufferToBase64(await resp.arrayBuffer());
     return cachedFontBase64;
   } catch {
-    return null;
+    throw new Error('Не удалось загрузить шрифт для PDF. Проверьте сеть и повторите.');
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -106,14 +117,19 @@ export async function exportBoardToPdf(
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
   const fontBase64 = await loadFontBase64();
-  if (fontBase64) {
-    doc.addFileToVFS(FONT_VFS_NAME, fontBase64);
-    doc.addFont(FONT_VFS_NAME, FONT_NAME, 'normal');
-    doc.setFont(FONT_NAME);
-  }
+  doc.addFileToVFS(FONT_VFS_NAME, fontBase64);
+  doc.addFont(FONT_VFS_NAME, FONT_NAME, 'normal');
+  doc.setFont(FONT_NAME);
 
   for (let i = 0; i < pages.length; i++) {
-    if (i > 0) doc.addPage('a4', 'portrait');
+    options.onPageStart?.(i + 1, pages.length);
+    if (i > 0) {
+      doc.addPage('a4', 'portrait');
+      // Отдаём кадр браузеру между листами: сборка синхронная и на 5–10
+      // заполненных страницах иначе замораживает интерфейс целиком, включая
+      // спиннер прогресса (ревью 5.6, P1).
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
     const page = pages[i];
     const markup = pageToSvgString(
       page.elements,

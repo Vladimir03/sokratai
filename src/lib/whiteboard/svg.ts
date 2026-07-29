@@ -82,10 +82,30 @@ function round(value: number): number {
 
 // ─── Элементы ─────────────────────────────────────────────────────────────────
 
+/**
+ * Кэш узлов для дефолтных опций штриха. Элементы иммутабельны, поэтому WeakMap
+ * по ссылке корректен. Главный выгодополучатель — миниатюры страниц: без кэша
+ * активная миниатюра на каждый закоммиченный штрих прогоняла perfect-freehand
+ * по ВСЕЙ странице заново (ревью 5.6, P1). Холст тоже выигрывает при
+ * переключении страниц (remount пересчитывал все контуры).
+ */
+const defaultOptionsSvgCache = new WeakMap<BoardElement, SvgNodeSpec[]>();
+
 export function elementToSvg(
   el: BoardElement,
   options: StrokeRenderOptions = DEFAULT_STROKE_OPTIONS,
 ): SvgNodeSpec[] {
+  if (options === DEFAULT_STROKE_OPTIONS) {
+    const cached = defaultOptionsSvgCache.get(el);
+    if (cached) return cached;
+    const nodes = computeElementSvg(el, options);
+    defaultOptionsSvgCache.set(el, nodes);
+    return nodes;
+  }
+  return computeElementSvg(el, options);
+}
+
+function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgNodeSpec[] {
   if (el.type === 'stroke') {
     const d = strokeToPathData(el, options);
     if (!d) return [];

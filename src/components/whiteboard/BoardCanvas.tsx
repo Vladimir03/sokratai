@@ -10,7 +10,7 @@ import {
   clampToPage,
   createShape,
   createStroke,
-  elementBounds,
+  elementBoundsCached,
   hitTest,
   roundMm,
 } from '@/lib/whiteboard/model';
@@ -21,15 +21,22 @@ import {
   elementToSvg,
 } from '@/lib/whiteboard/svg';
 
-// Холст доски (задачи W1.0.2–W1.0.4).
+// Холст доски (задачи W1.0.2–W1.0.4; hot-path пересобран по ревью 5.6).
 //
-// Рендер — SVG с viewBox в МИЛЛИМЕТРАХ, поэтому геометрия одна и та же на экране
-// и в PDF, а верстка тянется под любой размер без пересчёта координат.
+// Рендер — SVG с viewBox в МИЛЛИМЕТРАХ: геометрия одна и та же на экране и в PDF.
 //
-// ⚠️ Живой штрих вынесен в ОТДЕЛЬНЫЙ слой и не попадает в общий массив элементов
-// до отпускания пера. Иначе каждое движение указателя перерисовывало бы весь
-// конспект — это и есть та «просадка на длинных страницах», из-за которой доски
-// начинают «виснуть» (spec §8).
+// Три перф-инварианта (ревью 5.6, не ломать):
+// 1. Живой ввод накапливается в ref и попадает в React-state МАКСИМУМ раз за
+//    кадр (rAF). Прямой setState на каждый pointermove давал квадратичную
+//    работу по длине штриха.
+// 2. Перетаскивание выделения — CSS/SVG transform поверх статичных элементов;
+//    новые объекты создаются ОДИН раз, на pointerup. Map по всем элементам на
+//    каждое движение — то, из-за чего курсор отставал от стилуса.
+// 3. Коммиты элементов происходят вне setState-updater'ов (finishDrag читает
+//    ref'ы) — updater обязан быть чистым, в StrictMode он исполняется дважды.
+//
+// Multi-pointer: drag привязан к pointerId. Ладонь или второй палец во время
+// письма пером не обрывают и не перехватывают штрих.
 
 export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line';
 
@@ -46,6 +53,7 @@ interface BoardCanvasProps {
   onCommitElement: (element: BoardElement) => void;
   onEraseElements: (ids: string[]) => void;
   onSelectionChange: (ids: string[]) => void;
+  /** Итог перетаскивания, ОДИН вызов на жест (для истории undo). */
   onMoveSelection: (dx: number, dy: number) => void;
   onRequestText: (x: number, y: number) => void;
 }
@@ -82,10 +90,18 @@ ElementNode.displayName = 'ElementNode';
 
 interface DragState {
   kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase';
+  /** Жест принадлежит одному указателю; чужие события игнорируются. */
+  pointerId: number;
   startX: number;
   startY: number;
-  lastX: number;
-  lastY: number;
+}
+
+interface LiveShape {
+  kind: ShapeKind;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export function BoardCanvas({
@@ -107,9 +123,22 @@ export function BoardCanvas({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const erasedRef = useRef<Set<string>>(new Set());
+  // Rect кэшируется на pointerdown: getBoundingClientRect на каждом pointermove —
+  // принудительный layout в самом горячем месте (ревью 5.6).
+  const rectRef = useRef<DOMRect | null>(null);
+
+  // Источники правды живого ввода — ref'ы; состояние ниже только для рендера
+  // и обновляется не чаще раза за кадр.
+  const livePointsRef = useRef<number[] | null>(null);
+  const liveShapeRef = useRef<LiveShape | null>(null);
+  const marqueeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const moveOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const rafRef = useRef<number | null>(null);
+
   const [livePoints, setLivePoints] = useState<number[] | null>(null);
-  const [liveShape, setLiveShape] = useState<BoardElement | null>(null);
+  const [liveShape, setLiveShape] = useState<LiveShape | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
 
   const backgroundNodes = useMemo(
     () => backgroundToSvg(background, gridMm),
@@ -118,12 +147,28 @@ export function BoardCanvas({
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
-  /** Координаты указателя → миллиметры страницы. */
+  const scheduleFrame = useCallback(() => {
+    if (rafRef.current !== null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setLivePoints(livePointsRef.current ? livePointsRef.current.slice() : null);
+      setLiveShape(liveShapeRef.current ? { ...liveShapeRef.current } : null);
+      setMarquee(marqueeRef.current ? { ...marqueeRef.current } : null);
+      setMoveOffset({ ...moveOffsetRef.current });
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    },
+    [],
+  );
+
+  /** Координаты указателя → миллиметры страницы (по кэшированному rect). */
   const toMm = useCallback((clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return { x: 0, y: 0 };
-    const rect = svg.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+    const rect = rectRef.current ?? svgRef.current?.getBoundingClientRect() ?? null;
+    if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
     return {
       x: ((clientX - rect.left) / rect.width) * PAGE_WIDTH_MM,
       y: ((clientY - rect.top) / rect.height) * PAGE_HEIGHT_MM,
@@ -146,16 +191,88 @@ export function BoardCanvas({
     [elements, onEraseElements],
   );
 
+  const resetLiveState = useCallback(() => {
+    livePointsRef.current = null;
+    liveShapeRef.current = null;
+    marqueeRef.current = null;
+    moveOffsetRef.current = { dx: 0, dy: 0 };
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    setLivePoints(null);
+    setLiveShape(null);
+    setMarquee(null);
+    setMoveOffset({ dx: 0, dy: 0 });
+  }, []);
+
+  const finishDrag = useCallback(
+    (event?: PointerEvent | React.PointerEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      // Завершает жест только ТОТ указатель, что его начал: отпущенная ладонь
+      // не должна обрывать штрих пера (ревью 5.6, P1).
+      if (event && event.pointerId !== drag.pointerId) return;
+      dragRef.current = null;
+      rectRef.current = null;
+
+      if (drag.kind === 'stroke') {
+        const points = livePointsRef.current;
+        if (points && points.length >= 3) {
+          onCommitElement(createStroke(points, color, size));
+        }
+      } else if (drag.kind === 'shape') {
+        const shape = liveShapeRef.current;
+        // Отбрасываем «случайный клик»: фигура меньше половины миллиметра — промах.
+        if (shape && (Math.abs(shape.w) > 0.5 || Math.abs(shape.h) > 0.5)) {
+          onCommitElement(
+            createShape(shape.kind, shape.x, shape.y, shape.w, shape.h, color, size),
+          );
+        }
+      } else if (drag.kind === 'marquee') {
+        const box = marqueeRef.current;
+        if (box) {
+          const region = {
+            minX: Math.min(box.x, box.x + box.w),
+            minY: Math.min(box.y, box.y + box.h),
+            maxX: Math.max(box.x, box.x + box.w),
+            maxY: Math.max(box.y, box.y + box.h),
+          };
+          const ids = elements
+            .filter((el) => boundsIntersect(elementBoundsCached(el), region))
+            .map((el) => el.id);
+          if (ids.length > 0) onSelectionChange(ids);
+        }
+      } else if (drag.kind === 'move') {
+        const { dx, dy } = moveOffsetRef.current;
+        if (dx !== 0 || dy !== 0) onMoveSelection(roundMm(dx), roundMm(dy));
+      } else if (drag.kind === 'erase') {
+        erasedRef.current = new Set();
+      }
+
+      resetLiveState();
+    },
+    [color, size, elements, onCommitElement, onSelectionChange, onMoveSelection, resetLiveState],
+  );
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
       if (readOnly) return;
       // Только основная кнопка / касание: правый клик не должен рисовать.
       if (event.button !== 0) return;
+      // Жест уже идёт → второй указатель (ладонь, второй палец) игнорируется.
+      if (dragRef.current) return;
+      // Не-primary касание (мультитач) не начинает новый жест.
+      if (event.pointerType === 'touch' && !event.isPrimary) return;
+
+      rectRef.current = event.currentTarget.getBoundingClientRect();
       const raw = toMm(event.clientX, event.clientY);
       const { x, y } = clampToPage(raw.x, raw.y);
       event.currentTarget.setPointerCapture(event.pointerId);
+      const pointerId = event.pointerId;
 
       if (tool === 'text') {
+        rectRef.current = null;
         onRequestText(roundMm(x), roundMm(y));
         return;
       }
@@ -164,21 +281,23 @@ export function BoardCanvas({
         // Настоящее давление есть только у стилуса; мышь и палец всегда шлют 0.5,
         // и доверять их «нажиму» — значит получить случайные утолщения.
         const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        dragRef.current = { kind: 'stroke', startX: x, startY: y, lastX: x, lastY: y };
-        setLivePoints([roundMm(x), roundMm(y), pressure]);
+        dragRef.current = { kind: 'stroke', pointerId, startX: x, startY: y };
+        livePointsRef.current = [roundMm(x), roundMm(y), pressure];
+        scheduleFrame();
         return;
       }
 
       if (tool === 'eraser') {
         erasedRef.current = new Set();
-        dragRef.current = { kind: 'erase', startX: x, startY: y, lastX: x, lastY: y };
+        dragRef.current = { kind: 'erase', pointerId, startX: x, startY: y };
         eraseAt(x, y);
         return;
       }
 
       if (tool === 'rect' || tool === 'ellipse' || tool === 'line') {
-        dragRef.current = { kind: 'shape', startX: x, startY: y, lastX: x, lastY: y };
-        setLiveShape(createShape(tool as ShapeKind, roundMm(x), roundMm(y), 0, 0, color, size));
+        dragRef.current = { kind: 'shape', pointerId, startX: x, startY: y };
+        liveShapeRef.current = { kind: tool as ShapeKind, x: roundMm(x), y: roundMm(y), w: 0, h: 0 };
+        scheduleFrame();
         return;
       }
 
@@ -192,93 +311,53 @@ export function BoardCanvas({
       }
       if (hitId) {
         if (!selectedSet.has(hitId)) onSelectionChange([hitId]);
-        dragRef.current = { kind: 'move', startX: x, startY: y, lastX: x, lastY: y };
+        dragRef.current = { kind: 'move', pointerId, startX: x, startY: y };
+        moveOffsetRef.current = { dx: 0, dy: 0 };
       } else {
         onSelectionChange([]);
-        dragRef.current = { kind: 'marquee', startX: x, startY: y, lastX: x, lastY: y };
-        setMarquee({ x, y, w: 0, h: 0 });
+        dragRef.current = { kind: 'marquee', pointerId, startX: x, startY: y };
+        marqueeRef.current = { x, y, w: 0, h: 0 };
+        scheduleFrame();
       }
     },
-    [readOnly, toMm, tool, onRequestText, color, size, eraseAt, elements, selectedSet, onSelectionChange],
+    [readOnly, toMm, tool, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
   );
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
       const drag = dragRef.current;
       if (!drag || readOnly) return;
+      if (event.pointerId !== drag.pointerId) return;
       const raw = toMm(event.clientX, event.clientY);
       const { x, y } = clampToPage(raw.x, raw.y);
 
       if (drag.kind === 'stroke') {
-        // Настоящее давление есть только у стилуса; мышь и палец всегда шлют 0.5,
-        // и доверять их «нажиму» — значит получить случайные утолщения.
         const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        setLivePoints((prev) => (prev ? [...prev, roundMm(x), roundMm(y), pressure] : prev));
+        livePointsRef.current?.push(roundMm(x), roundMm(y), pressure);
       } else if (drag.kind === 'erase') {
         eraseAt(x, y);
+        return;
       } else if (drag.kind === 'shape') {
-        setLiveShape((prev) =>
-          prev && prev.type === 'shape'
-            ? { ...prev, w: roundMm(x - drag.startX), h: roundMm(y - drag.startY) }
-            : prev,
-        );
+        const shape = liveShapeRef.current;
+        if (shape) {
+          shape.w = roundMm(x - drag.startX);
+          shape.h = roundMm(y - drag.startY);
+        }
       } else if (drag.kind === 'marquee') {
-        setMarquee({ x: drag.startX, y: drag.startY, w: x - drag.startX, h: y - drag.startY });
+        marqueeRef.current = { x: drag.startX, y: drag.startY, w: x - drag.startX, h: y - drag.startY };
       } else if (drag.kind === 'move') {
-        onMoveSelection(roundMm(x - drag.lastX), roundMm(y - drag.lastY));
+        moveOffsetRef.current = { dx: x - drag.startX, dy: y - drag.startY };
       }
 
-      drag.lastX = x;
-      drag.lastY = y;
+      scheduleFrame();
     },
-    [readOnly, toMm, eraseAt, onMoveSelection],
+    [readOnly, toMm, eraseAt, scheduleFrame],
   );
-
-  const finishDrag = useCallback(() => {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag) return;
-
-    if (drag.kind === 'stroke') {
-      setLivePoints((points) => {
-        if (points && points.length >= 3) {
-          onCommitElement(createStroke(points, color, size));
-        }
-        return null;
-      });
-    } else if (drag.kind === 'shape') {
-      setLiveShape((shape) => {
-        // Отбрасываем «случайный клик»: фигура меньше половины миллиметра — промах.
-        if (shape && shape.type === 'shape' && (Math.abs(shape.w) > 0.5 || Math.abs(shape.h) > 0.5)) {
-          onCommitElement(shape);
-        }
-        return null;
-      });
-    } else if (drag.kind === 'marquee') {
-      setMarquee((box) => {
-        if (box) {
-          const region = {
-            minX: Math.min(box.x, box.x + box.w),
-            minY: Math.min(box.y, box.y + box.h),
-            maxX: Math.max(box.x, box.x + box.w),
-            maxY: Math.max(box.y, box.y + box.h),
-          };
-          const ids = elements
-            .filter((el) => boundsIntersect(elementBounds(el), region))
-            .map((el) => el.id);
-          if (ids.length > 0) onSelectionChange(ids);
-        }
-        return null;
-      });
-    } else if (drag.kind === 'erase') {
-      erasedRef.current = new Set();
-    }
-  }, [color, size, elements, onCommitElement, onSelectionChange]);
 
   // Указатель может уйти с элемента или быть отменён системой (жест, звонок) —
   // без завершения drag остался бы «прилипший» штрих.
   useEffect(() => {
-    const handleUp = () => finishDrag();
+    const handleUp = (event: PointerEvent) => finishDrag(event);
     window.addEventListener('pointerup', handleUp);
     window.addEventListener('pointercancel', handleUp);
     return () => {
@@ -287,9 +366,44 @@ export function BoardCanvas({
     };
   }, [finishDrag]);
 
-  const liveStroke = useMemo(
-    () => (livePoints && livePoints.length >= 3 ? createStroke(livePoints, color, size) : null),
+  // Живой штрих — ephemeral-объект БЕЗ модельных фабрик: createStroke двигает
+  // глобальные id/seq-счётчики, а useMemo может исполняться повторно (ревью 5.6, P2).
+  const liveStroke: BoardElement | null = useMemo(
+    () =>
+      livePoints && livePoints.length >= 3
+        ? {
+            id: '__live__',
+            version: 1,
+            versionNonce: 0,
+            seq: Number.MAX_SAFE_INTEGER,
+            type: 'stroke',
+            points: livePoints,
+            color,
+            size,
+          }
+        : null,
     [livePoints, color, size],
+  );
+
+  const liveShapeElement: BoardElement | null = useMemo(
+    () =>
+      liveShape
+        ? {
+            id: '__live_shape__',
+            version: 1,
+            versionNonce: 0,
+            seq: Number.MAX_SAFE_INTEGER,
+            type: 'shape',
+            kind: liveShape.kind,
+            x: liveShape.x,
+            y: liveShape.y,
+            w: liveShape.w,
+            h: liveShape.h,
+            color,
+            size,
+          }
+        : null,
+    [liveShape, color, size],
   );
 
   const selectionBox = useMemo(() => {
@@ -300,7 +414,7 @@ export function BoardCanvas({
     let maxY = -Infinity;
     for (let i = 0; i < elements.length; i++) {
       if (!selectedSet.has(elements[i].id)) continue;
-      const b = elementBounds(elements[i]);
+      const b = elementBoundsCached(elements[i]);
       if (b.minX < minX) minX = b.minX;
       if (b.minY < minY) minY = b.minY;
       if (b.maxX > maxX) maxX = b.maxX;
@@ -310,11 +424,16 @@ export function BoardCanvas({
     return { x: minX - 1, y: minY - 1, w: maxX - minX + 2, h: maxY - minY + 2 };
   }, [selectedIds, elements, selectedSet]);
 
+  const isMoving = moveOffset.dx !== 0 || moveOffset.dy !== 0;
+  const moveTransform = isMoving ? `translate(${moveOffset.dx} ${moveOffset.dy})` : undefined;
+
   return (
     <svg
       ref={svgRef}
       viewBox={`0 0 ${PAGE_WIDTH_MM} ${PAGE_HEIGHT_MM}`}
       className="h-full w-full bg-white"
+      role="img"
+      aria-label="Холст доски. Рисование мышью, пальцем или стилусом."
       // touch-none: без него iOS перехватывает жест и вместо линии скроллит
       // страницу (rule 80). Курсор — подсказка активного инструмента.
       style={{
@@ -329,14 +448,23 @@ export function BoardCanvas({
         <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
       ))}
 
-      {elements.map((element) => (
-        <g key={element.id} opacity={selectedSet.has(element.id) ? 0.7 : 1}>
-          <ElementNode element={element} options={strokeOptions} />
-        </g>
-      ))}
+      {/* Перетаскивание — transform на группе выделенных: элементы не пересоздаются
+          до pointerup, статичная часть страницы вообще не перерисовывается. */}
+      {elements.map((element) => {
+        const isSelected = selectedSet.has(element.id);
+        return (
+          <g
+            key={element.id}
+            opacity={isSelected ? 0.7 : 1}
+            transform={isSelected ? moveTransform : undefined}
+          >
+            <ElementNode element={element} options={strokeOptions} />
+          </g>
+        );
+      })}
 
       {liveStroke && <ElementNode element={liveStroke} options={strokeOptions} />}
-      {liveShape && <ElementNode element={liveShape} options={strokeOptions} />}
+      {liveShapeElement && <ElementNode element={liveShapeElement} options={strokeOptions} />}
 
       {marquee && (
         <rect
@@ -354,8 +482,8 @@ export function BoardCanvas({
 
       {selectionBox && (
         <rect
-          x={selectionBox.x}
-          y={selectionBox.y}
+          x={selectionBox.x + moveOffset.dx}
+          y={selectionBox.y + moveOffset.dy}
           width={selectionBox.w}
           height={selectionBox.h}
           fill="none"

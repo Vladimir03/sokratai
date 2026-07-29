@@ -176,6 +176,23 @@ export interface BoardBounds {
   maxY: number;
 }
 
+/**
+ * Кэш границ. Элементы иммутабельны (любая правка = новый объект через
+ * bumpVersion), поэтому WeakMap по ссылке корректен и чистится GC сам.
+ * Нужен ластику и выделению: без кэша каждый pointermove пересчитывал бы
+ * границы КАЖДОГО штриха по всем его точкам (ревью 5.6, P1 hot path).
+ */
+const boundsCache = new WeakMap<BoardElement, BoardBounds>();
+
+export function elementBoundsCached(el: BoardElement): BoardBounds {
+  let bounds = boundsCache.get(el);
+  if (!bounds) {
+    bounds = elementBounds(el);
+    boundsCache.set(el, bounds);
+  }
+  return bounds;
+}
+
 /** Округление до 0.01 мм: 10 микрон — заведомо тоньше пера, а jsonb вдвое легче. */
 export function roundMm(value: number): number {
   return Math.round(value * 100) / 100;
@@ -263,6 +280,16 @@ function pointSegmentDistance(
  * прямоугольник вокруг диагональной линии.
  */
 export function hitTest(el: BoardElement, x: number, y: number, tolerance: number): boolean {
+  // Быстрый отсев по кэшированному bbox ДО обхода сегментов: ластик зовёт
+  // hitTest для всех элементов на каждый pointermove, и без отсева это
+  // O(все точки страницы) на событие (ревью 5.6, P1).
+  const bb = elementBoundsCached(el);
+  if (
+    x < bb.minX - tolerance || x > bb.maxX + tolerance ||
+    y < bb.minY - tolerance || y > bb.maxY + tolerance
+  ) {
+    return false;
+  }
   if (el.type === 'stroke') {
     const reach = tolerance + el.size / 2;
     if (el.points.length < 3) return false;
@@ -282,9 +309,8 @@ export function hitTest(el: BoardElement, x: number, y: number, tolerance: numbe
     }
     return false;
   }
-  const b = elementBounds(el);
-  return x >= b.minX - tolerance && x <= b.maxX + tolerance &&
-    y >= b.minY - tolerance && y <= b.maxY + tolerance;
+  // Для фигур и текста попадание = попадание в bbox, а его уже проверил отсев выше.
+  return true;
 }
 
 export function boundsIntersect(a: BoardBounds, b: BoardBounds): boolean {

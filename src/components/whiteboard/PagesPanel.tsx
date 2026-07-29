@@ -71,7 +71,9 @@ export const PagesPanel = memo(function PagesPanel({
   onDelete,
 }: PagesPanelProps) {
   return (
-    <div className="flex items-end gap-2 overflow-x-auto border-t border-slate-200 bg-white px-3 py-2">
+    // touch-pan-x: без него iOS Safari отдаёт touchstart кнопкам-миниатюрам и
+    // горизонтальный свайп ленты не работает (rule 80).
+    <div className="flex touch-pan-x items-end gap-2 overflow-x-auto border-t border-slate-200 bg-white px-3 py-2">
       {pages.map((page, index) => (
         <div key={page.id} className="group relative shrink-0">
           <button
@@ -90,6 +92,8 @@ export const PagesPanel = memo(function PagesPanel({
             <PageThumb page={page} />
           </button>
           <span className="mt-1 block text-center text-xs text-slate-500">{index + 1}</span>
+          {/* group-focus-within: до кнопки можно добраться клавиатурой, а не
+              только hover'ом (ревью 5.6, P2). Само удаление за confirm-гейтом. */}
           {pages.length > 1 && (
             <button
               type="button"
@@ -97,7 +101,7 @@ export const PagesPanel = memo(function PagesPanel({
               disabled={disabled}
               aria-label={`Удалить страницу ${index + 1}`}
               style={{ touchAction: 'manipulation' }}
-              className="absolute -right-1 -top-1 hidden h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:text-red-600 group-hover:flex focus:flex"
+              className="absolute -right-1.5 -top-1.5 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 hover:text-red-600 group-hover:flex group-focus-within:flex focus:flex"
             >
               <Trash2 className="h-3 w-3" />
             </button>

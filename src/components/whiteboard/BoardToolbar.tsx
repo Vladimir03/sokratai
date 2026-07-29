@@ -57,6 +57,15 @@ const TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
 
 const SIZE_LABELS = ['Тонко', 'Обычно', 'Толсто'];
 
+// Имена словами, не hex: скринридер читал «Цвет #2563EB» (ревью 5.6, P2).
+const COLOR_NAMES: Record<string, string> = {
+  '#0F172A': 'Чёрный',
+  '#1B6B4A': 'Зелёный',
+  '#DC2626': 'Красный',
+  '#2563EB': 'Синий',
+  '#D97706': 'Оранжевый',
+};
+
 function ToolbarButton({
   active,
   label,
@@ -80,7 +89,8 @@ function ToolbarButton({
       onClick={onClick}
       style={{ touchAction: 'manipulation' }}
       className={cn(
-        'flex h-10 w-10 items-center justify-center rounded-lg border transition-colors',
+        // 44×44 — минимальная тач-цель для стилуса и пальца (ревью 5.6, iOS HIG).
+        'flex h-11 w-11 items-center justify-center rounded-lg border transition-colors',
         active
           ? 'border-accent bg-accent text-white'
           : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
@@ -127,21 +137,30 @@ export const BoardToolbar = memo(function BoardToolbar({
 
       <div className="flex items-center gap-1">
         {BOARD_COLORS.map((c) => (
+          // Кнопка 44×44 (тач-цель), видимый кружок меньше — внутри.
           <button
             key={c}
             type="button"
-            title={`Цвет ${c}`}
-            aria-label={`Цвет ${c}`}
+            title={COLOR_NAMES[c] ?? 'Цвет'}
+            aria-label={`Цвет: ${COLOR_NAMES[c] ?? c}`}
             aria-pressed={color === c}
             disabled={disabled}
             onClick={() => onColorChange(c)}
-            style={{ backgroundColor: c, touchAction: 'manipulation' }}
+            style={{ touchAction: 'manipulation' }}
             className={cn(
-              'h-7 w-7 rounded-full border-2 transition-transform',
-              color === c ? 'border-slate-900' : 'border-white',
+              'flex h-11 w-8 items-center justify-center rounded-md',
               disabled && 'cursor-not-allowed opacity-40',
             )}
-          />
+          >
+            <span
+              aria-hidden="true"
+              style={{ backgroundColor: c }}
+              className={cn(
+                'block h-7 w-7 rounded-full border-2',
+                color === c ? 'border-slate-900' : 'border-white',
+              )}
+            />
+          </button>
         ))}
       </div>
 
