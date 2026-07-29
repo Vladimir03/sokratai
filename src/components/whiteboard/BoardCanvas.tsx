@@ -1,22 +1,27 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type BoardBounds,
   type BoardElement,
   type BoardBackground,
   type BoardGridMm,
+  type CameraState,
+  type FramePlacement,
   type ImageElement,
   type PageSizeMm,
   type ResizeCorner,
   type ShapeKind,
   boundsIntersect,
-  clampToPage,
+  cameraWorldWindow,
   createShape,
   createStroke,
   elementBoundsCached,
+  frameWorldBounds,
   hitTest,
   resizeRectFromCorner,
   rotatePoint,
   rotationFromPointer,
   roundMm,
+  zoomCameraAt,
 } from '@/lib/whiteboard/model';
 import {
   type ImageUrlMap,
@@ -26,58 +31,80 @@ import {
   elementToSvg,
 } from '@/lib/whiteboard/svg';
 
-// Холст доски (задачи W1.0.2–W1.0.4; hot-path пересобран по ревью 5.6, р.2–4).
+// Холст доски — Фаза P0, B0: бесконечный холст с рамками-страницами (Р1 отменён
+// решением владельца 29.07 по итогам живых прогонов).
 //
-// Перф-инварианты (не ломать):
-// 1. Живой ввод накапливается в ref и попадает в React-state МАКСИМУМ раз за
-//    кадр (rAF).
-// 2. Перетаскивание выделения — SVG transform поверх статичных слоёв; коммит
-//    ОДИН, на pointerup.
-// 3. Статичная сцена — отдельный memo-слой (SceneLayer): при рисовании и
-//    перетаскивании reconcile сотен <g> не происходит вовсе (ревью р.4, P1).
-// 4. Ластик копит попадания в ref, скрывает их per-frame и коммитит ОДНИМ
-//    вызовом на pointerup — один шаг undo на жест и ноль перерендеров
-//    родителя во время жеста (ревью р.4, P1).
-// 5. Коммиты — вне setState-updater'ов (finishDrag читает ref'ы).
+// Система координат: МИР в мм; рамка лежит в placement, её элементы — в
+// ЛОКАЛЬНЫХ мм рамки (наследие Фазы 1, благодаря которому exportPdf и вся
+// геометрия элементов не менялись). Камера {cx, cy, zoom} — viewBox = её окно.
 //
-// Указатели: жест привязан к pointerId (ладонь не обрывает штрих). Второй
-// ПАЛЕЦ во время рисования пальцем переключает жест в панорамирование
-// (незавершённый штрих отбрасывается) — иначе увеличенный лист на планшете
-// невозможно прокрутить (ревью р.4, P1).
+// Жесты:
+// • внутри рамки — инструменты (штрих/ластик/текст/фигуры/select), как в Фазе 1;
+// • по пустому холсту — панорамирование ОДНИМ указателем (любой инструмент);
+// • два пальца — pan + pinch-zoom; колесо — зум к курсору (стандарт досок,
+//   плавный фактор — закрывает B19 «резкий шаг зума»), Shift+колесо — гор. пан.
+//
+// Перф-инварианты (ревью 5.6 р.2–4 + виртуализация B0, НЕ ломать):
+// 1. Живой ввод — ref + rAF (≤1 setState за кадр).
+// 2. Culling: рамка вне окна камеры не монтируется ВООБЩЕ; элементы внутри
+//    видимой рамки отбираются по кэшированным bbox. Окно отбора КВАНТОВАНО
+//    (шаг 100 мм, запас 150 мм): identity стабильна при малых панах → memo
+//    слоёв не сбрасывается на каждый кадр движения камеры.
+// 3. Статичные слои — memo (FrameLayer); перетаскивание — transform-обёртка.
+// 4. Ластик копит попадания и коммитит одним вызовом на pointerup.
+// 5. Коммиты — вне setState-updater'ов; жест привязан к pointerId.
 
 export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line';
 
-interface BoardCanvasProps {
-  elements: BoardElement[];
+export interface FrameView {
+  id: string;
+  placement: FramePlacement;
+  size: PageSizeMm;
   background: BoardBackground;
   gridMm: BoardGridMm;
-  /** Размер листа в мм — задаётся ориентацией страницы (model.pageSizeMm). */
-  pageSize: PageSizeMm;
+  elements: BoardElement[];
+  /** Подпись рамки: «Лист N» или имя ученика зоны. */
+  title: string;
+  /** Рамка-зона ученика (подсветка + чужая для записи не-владельцу). */
+  isZone?: boolean;
+  /** Локальная блокировка записи (для студ./гост. страниц чужих зон — Этап 3). */
+  writable?: boolean;
+}
+
+export interface BoardSelection {
+  frameId: string;
+  ids: string[];
+}
+
+interface BoardCanvasProps {
+  frames: FrameView[];
+  camera: CameraState;
+  viewport: { w: number; h: number };
+  onCameraChange: (camera: CameraState) => void;
   tool: BoardTool;
   color: string;
   size: number;
   strokeOptions?: StrokeRenderOptions;
-  selectedIds: string[];
+  selection: BoardSelection | null;
   readOnly?: boolean;
-  /** `storage://` → signed URL (Whiteboard резолвит и кэширует). */
   imageUrls?: ImageUrlMap;
-  onCommitElement: (element: BoardElement) => void;
-  /** Итог жеста ластика, ОДИН вызов на жест. */
-  onEraseElements: (ids: string[]) => void;
-  onSelectionChange: (ids: string[]) => void;
-  /** Итог перетаскивания, ОДИН вызов на жест (для истории undo). */
-  onMoveSelection: (dx: number, dy: number) => void;
-  /** Итог resize/rotate, ОДИН вызов на жест. */
-  onTransformElement: (id: string, patch: Partial<ImageElement>) => void;
-  onRequestText: (x: number, y: number) => void;
-  /** Прокрутить контейнер листа на (dx, dy) px — двухпальцевое панорамирование. */
-  onPan?: (dx: number, dy: number) => void;
+  onSelectionChange: (selection: BoardSelection | null) => void;
+  /** Все коммиты адресуются рамке. Локальные координаты. Один вызов на жест. */
+  onCommitElement: (frameId: string, element: BoardElement) => void;
+  onEraseElements: (frameId: string, ids: string[]) => void;
+  onMoveSelection: (frameId: string, dx: number, dy: number) => void;
+  onTransformElement: (frameId: string, id: string, patch: Partial<ImageElement>) => void;
+  onRequestText: (frameId: string, x: number, y: number) => void;
 }
 
 const ERASER_TOLERANCE_MM = 1.5;
 const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
+/** Квант окна отбора: identity окна меняется раз в 100 мм пути камеры. */
+const CULL_QUANT_MM = 100;
+const CULL_MARGIN_MM = 150;
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 
-/** Один элемент. memo по id+version — версия меняется при любой правке (model.ts). */
+/** Один элемент. Сравнение по идентичности (см. разбор р.2а: id+version морозили live). */
 const ElementNode = memo(
   ({
     element,
@@ -106,10 +133,6 @@ const ElementNode = memo(
       </>
     );
   },
-  // Сравнение по ИДЕНТИЧНОСТИ элемента, не по id+version: элементы иммутабельны
-  // (правка = новый объект), поэтому для статичных ссылка стабильна и memo
-  // работает; а live/draft-элементы пересоздаются каждый кадр с ПОСТОЯННЫМИ
-  // id/version — сравнение по версии замораживало их превью на первом кадре.
   (prev, next) =>
     prev.element === next.element &&
     prev.options === next.options &&
@@ -118,61 +141,130 @@ const ElementNode = memo(
 ElementNode.displayName = 'ElementNode';
 
 /**
- * Статичный слой сцены. Пока рисуется штрих или тащится выделение, пропсы
- * слоя не меняются — reconcile сотен групп не происходит (ревью р.4, P1).
+ * Рамка целиком: подложка-лист, разлиновка, подпись, статичные элементы
+ * (с culling по локальному окну). Memo держится, пока не меняются элементы,
+ * hidden-набор или квантованное окно.
  */
-const SceneLayer = memo(
+const FrameLayer = memo(
   ({
-    elements,
+    frame,
     hiddenIds,
     options,
     imageUrls,
+    localCullWindow,
+    zoomHint,
   }: {
-    elements: BoardElement[];
+    frame: FrameView;
     hiddenIds: ReadonlySet<string>;
     options: StrokeRenderOptions;
     imageUrls?: ImageUrlMap;
-  }) => (
-    <>
-      {elements.map((element) =>
-        hiddenIds.has(element.id) ? null : (
-          <g key={element.id}>
-            <ElementNode element={element} options={options} imageUrls={imageUrls} />
-          </g>
-        ),
-      )}
-    </>
-  ),
+    /** Квантованное окно камеры в ЛОКАЛЬНЫХ координатах рамки; null = рамка видна целиком. */
+    localCullWindow: BoardBounds | null;
+    /** Порог «слишком мелко» для пропуска микро-элементов (LOD, px/мм). */
+    zoomHint: number;
+  }) => {
+    const backgroundNodes = useMemo(
+      () => backgroundToSvg(frame.background, frame.gridMm, frame.size),
+      [frame.background, frame.gridMm, frame.size],
+    );
+
+    const visibleElements = useMemo(() => {
+      if (!localCullWindow) return frame.elements;
+      const out: BoardElement[] = [];
+      for (let i = 0; i < frame.elements.length; i++) {
+        if (boundsIntersect(elementBoundsCached(frame.elements[i]), localCullWindow)) {
+          out.push(frame.elements[i]);
+        }
+      }
+      return out;
+    }, [frame.elements, localCullWindow]);
+
+    // LOD: на дальнем зуме (< ~0.5 px/мм) элементы мельче 2 мм неразличимы —
+    // не рендерим (research: стандартный приём против «подвисает через полгода»).
+    const lodElements = useMemo(() => {
+      if (zoomHint >= 0.5) return visibleElements;
+      const out: BoardElement[] = [];
+      for (let i = 0; i < visibleElements.length; i++) {
+        const b = elementBoundsCached(visibleElements[i]);
+        if (b.maxX - b.minX >= 2 || b.maxY - b.minY >= 2) out.push(visibleElements[i]);
+      }
+      return out;
+    }, [visibleElements, zoomHint]);
+
+    const titleColor = frame.isZone ? '#1B6B4A' : '#64748B';
+
+    return (
+      <g transform={`translate(${frame.placement.x} ${frame.placement.y})`}>
+        {/* Лист: белая подложка + кайма (зона — акцентная). Тень не используем:
+            SVG-фильтры дороги на слабых WebKit (rule 80 аудитория). */}
+        <rect
+          x={-0.5}
+          y={-0.5}
+          width={frame.size.width + 1}
+          height={frame.size.height + 1}
+          fill="#FFFFFF"
+          stroke={frame.isZone ? '#1B6B4A' : '#CBD5E1'}
+          strokeWidth={frame.isZone ? 0.8 : 0.4}
+        />
+        <text
+          x={0}
+          y={-2.5}
+          fill={titleColor}
+          fontSize={4}
+          fontFamily="'Golos Text', system-ui, sans-serif"
+        >
+          {frame.title}
+        </text>
+        {backgroundNodes.map((node, i) => (
+          <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
+        ))}
+        {lodElements.map((element) =>
+          hiddenIds.has(element.id) ? null : (
+            <g key={element.id}>
+              <ElementNode element={element} options={options} imageUrls={imageUrls} />
+            </g>
+          ),
+        )}
+      </g>
+    );
+  },
   (prev, next) =>
-    prev.elements === next.elements &&
+    prev.frame === next.frame &&
     prev.hiddenIds === next.hiddenIds &&
     prev.options === next.options &&
-    prev.imageUrls === next.imageUrls,
+    prev.imageUrls === next.imageUrls &&
+    boundsEqual(prev.localCullWindow, next.localCullWindow) &&
+    prev.zoomHint === next.zoomHint,
 );
-SceneLayer.displayName = 'SceneLayer';
+FrameLayer.displayName = 'FrameLayer';
 
-interface DragState {
-  kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase' | 'pan' | 'resize' | 'rotate';
-  /** Жест принадлежит одному указателю; чужие события игнорируются. */
-  pointerId: number;
-  pointerType: string;
-  startX: number;
-  startY: number;
-  /** Для pan — оба пальца. */
-  panIds?: [number, number];
-  /** Для resize/rotate — целевой элемент и угол-ручка. */
-  targetId?: string;
-  corner?: ResizeCorner;
+function boundsEqual(a: BoardBounds | null, b: BoardBounds | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.minX === b.minX && a.minY === b.minY && a.maxX === b.maxX && a.maxY === b.maxY;
 }
 
-/** Live-патч трансформации (resize/rotate) — оригинал скрыт, рисуется копия с патчем. */
-interface TransformDraft {
-  id: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  rotation: number;
+interface DragState {
+  kind:
+    | 'stroke'
+    | 'shape'
+    | 'marquee'
+    | 'move'
+    | 'erase'
+    | 'pan-canvas'
+    | 'pinch'
+    | 'resize'
+    | 'rotate';
+  pointerId: number;
+  pointerType: string;
+  /** Рамка жеста (для pan/pinch — не задана). */
+  frameId?: string;
+  /** Локальные координаты старта в рамке. */
+  startX: number;
+  startY: number;
+  panIds?: [number, number];
+  targetId?: string;
+  corner?: ResizeCorner;
 }
 
 interface LiveShape {
@@ -183,43 +275,50 @@ interface LiveShape {
   h: number;
 }
 
+interface TransformDraft {
+  id: string;
+  frameId: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+}
+
 export function BoardCanvas({
-  elements,
-  background,
-  gridMm,
-  pageSize,
+  frames,
+  camera,
+  viewport,
+  onCameraChange,
   tool,
   color,
   size,
   strokeOptions = DEFAULT_STROKE_OPTIONS,
-  selectedIds,
+  selection,
   readOnly = false,
   imageUrls,
+  onSelectionChange,
   onCommitElement,
   onEraseElements,
-  onSelectionChange,
   onMoveSelection,
   onTransformElement,
   onRequestText,
-  onPan,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const erasedRef = useRef<Set<string>>(new Set());
   const rectRef = useRef<DOMRect | null>(null);
-  /** Живые позиции касаний (для панорамирования двумя пальцами). */
   const touchPosRef = useRef(new Map<number, { x: number; y: number }>());
-  const panLastRef = useRef<{ x: number; y: number } | null>(null);
+  const panLastRef = useRef<{ x: number; y: number; dist: number } | null>(null);
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
 
-  // Источники правды живого ввода — ref'ы; состояние ниже только для рендера
-  // и обновляется не чаще раза за кадр.
   const livePointsRef = useRef<number[] | null>(null);
   const liveShapeRef = useRef<LiveShape | null>(null);
   const marqueeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const moveOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const rafRef = useRef<number | null>(null);
-
   const transformDraftRef = useRef<TransformDraft | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   const [livePoints, setLivePoints] = useState<number[] | null>(null);
   const [liveShape, setLiveShape] = useState<LiveShape | null>(null);
@@ -227,27 +326,109 @@ export function BoardCanvas({
   const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(EMPTY_HIDDEN);
   const [transformDraft, setTransformDraft] = useState<TransformDraft | null>(null);
+  /** Рамка активного жеста — стейт (а не чтение dragRef в memo: ref без ре-рендера). */
+  const [gestureFrameId, setGestureFrameId] = useState<string | null>(null);
 
-  const backgroundNodes = useMemo(
-    () => backgroundToSvg(background, gridMm, pageSize),
-    [background, gridMm, pageSize],
+  // ─── Камера: окно, квантованный cull, видимые рамки ────────────────────────
+
+  const worldWindow = useMemo(
+    () => cameraWorldWindow(camera, viewport),
+    [camera, viewport],
   );
 
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Квантование: окно отбора прыгает шагами CULL_QUANT_MM, identity стабильна
+  // при малых панах → FrameLayer-memo не сбрасывается каждый кадр движения.
+  const cullWindow = useMemo<BoardBounds>(() => {
+    const q = CULL_QUANT_MM;
+    return {
+      minX: Math.floor((worldWindow.minX - CULL_MARGIN_MM) / q) * q,
+      minY: Math.floor((worldWindow.minY - CULL_MARGIN_MM) / q) * q,
+      maxX: Math.ceil((worldWindow.maxX + CULL_MARGIN_MM) / q) * q,
+      maxY: Math.ceil((worldWindow.maxY + CULL_MARGIN_MM) / q) * q,
+    };
+  }, [worldWindow]);
 
-  // Раздельные слои: transform перетаскивания живёт на обёртке выделенного
-  // слоя, статичный слой во время жеста не трогается вовсе.
-  const { selectedElements, unselectedElements } = useMemo(() => {
-    if (selectedSet.size === 0) {
-      return { selectedElements: [] as BoardElement[], unselectedElements: elements };
+  const visibleFrames = useMemo(
+    () => frames.filter((f) => boundsIntersect(frameWorldBounds(f.placement, f.size), cullWindow)),
+    [frames, cullWindow],
+  );
+
+  /** Локальное окно отбора для рамки; null — рамка внутри окна целиком (без фильтра). */
+  const localCullWindows = useMemo(() => {
+    const map = new Map<string, BoardBounds | null>();
+    for (let i = 0; i < visibleFrames.length; i++) {
+      const f = visibleFrames[i];
+      const fb = frameWorldBounds(f.placement, f.size);
+      const fullyInside =
+        fb.minX >= cullWindow.minX && fb.maxX <= cullWindow.maxX &&
+        fb.minY >= cullWindow.minY && fb.maxY <= cullWindow.maxY;
+      map.set(
+        f.id,
+        fullyInside
+          ? null
+          : {
+              minX: cullWindow.minX - f.placement.x,
+              minY: cullWindow.minY - f.placement.y,
+              maxX: cullWindow.maxX - f.placement.x,
+              maxY: cullWindow.maxY - f.placement.y,
+            },
+      );
     }
-    const selected: BoardElement[] = [];
-    const unselected: BoardElement[] = [];
-    for (let i = 0; i < elements.length; i++) {
-      (selectedSet.has(elements[i].id) ? selected : unselected).push(elements[i]);
-    }
-    return { selectedElements: selected, unselectedElements: unselected };
-  }, [elements, selectedSet]);
+    return map;
+  }, [visibleFrames, cullWindow]);
+
+  const frameById = useMemo(() => {
+    const map = new Map<string, FrameView>();
+    for (let i = 0; i < frames.length; i++) map.set(frames[i].id, frames[i]);
+    return map;
+  }, [frames]);
+
+  const selectionFrame = selection ? frameById.get(selection.frameId) ?? null : null;
+  const selectedSet = useMemo(() => new Set(selection?.ids ?? []), [selection]);
+
+  // ─── Координаты ─────────────────────────────────────────────────────────────
+
+  /** Клиентские px → мировые мм (через rect и окно камеры — без искажения). */
+  const toWorld = useCallback(
+    (clientX: number, clientY: number) => {
+      let rect = rectRef.current;
+      if (!rect) {
+        rect = svgRef.current?.getBoundingClientRect() ?? null;
+        rectRef.current = rect;
+      }
+      if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
+      const cam = cameraRef.current;
+      return {
+        x: cam.cx + (clientX - rect.left - rect.width / 2) / cam.zoom,
+        y: cam.cy + (clientY - rect.top - rect.height / 2) / cam.zoom,
+      };
+    },
+    [],
+  );
+
+  /** Верхняя (последняя в порядке массива) рамка под мировой точкой. */
+  const findFrameAt = useCallback(
+    (wx: number, wy: number): FrameView | null => {
+      for (let i = frames.length - 1; i >= 0; i--) {
+        const b = frameWorldBounds(frames[i].placement, frames[i].size);
+        if (wx >= b.minX && wx <= b.maxX && wy >= b.minY && wy <= b.maxY) return frames[i];
+      }
+      return null;
+    },
+    [frames],
+  );
+
+  // Камера двигается жестами → rect не устаревает, но скролл страницы всё ещё
+  // возможен (мобильный тулбар) — сбрасываем кэш (ревью р.4).
+  useEffect(() => {
+    const invalidate = () => {
+      rectRef.current = null;
+    };
+    window.addEventListener('scroll', invalidate, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', invalidate, true);
+  }, []);
+
+  // ─── rAF-конвейер живого ввода ──────────────────────────────────────────────
 
   const scheduleFrame = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -259,6 +440,7 @@ export function BoardCanvas({
       setMoveOffset({ ...moveOffsetRef.current });
       setHiddenIds(erasedRef.current.size > 0 ? new Set(erasedRef.current) : EMPTY_HIDDEN);
       setTransformDraft(transformDraftRef.current ? { ...transformDraftRef.current } : null);
+      setGestureFrameId(dragRef.current?.frameId ?? null);
     });
   }, []);
 
@@ -267,52 +449,6 @@ export function BoardCanvas({
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     },
     [],
-  );
-
-  // Скролл контейнера ВО ВРЕМЯ жеста делает кэшированный rect неверным — линия
-  // уезжала бы от стилуса (ревью р.4, P1). Любой скролл инвалидирует кэш;
-  // toMm перечитает и снова закэширует.
-  useEffect(() => {
-    const invalidate = () => {
-      rectRef.current = null;
-    };
-    window.addEventListener('scroll', invalidate, { capture: true, passive: true });
-    return () => window.removeEventListener('scroll', invalidate, true);
-  }, []);
-
-  /** Координаты указателя → миллиметры страницы (rect кэшируется лениво). */
-  const toMm = useCallback(
-    (clientX: number, clientY: number) => {
-      let rect = rectRef.current;
-      if (!rect) {
-        rect = svgRef.current?.getBoundingClientRect() ?? null;
-        rectRef.current = rect;
-      }
-      if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
-      return {
-        x: ((clientX - rect.left) / rect.width) * pageSize.width,
-        y: ((clientY - rect.top) / rect.height) * pageSize.height,
-      };
-    },
-    [pageSize],
-  );
-
-  const eraseAt = useCallback(
-    (x: number, y: number) => {
-      // Только пометка в ref + кадр: НИКАКИХ коммитов наверх во время жеста —
-      // иначе каждый задетый штрих перерендеривал родителя и миниатюру.
-      let changed = false;
-      for (let i = elements.length - 1; i >= 0; i--) {
-        const el = elements[i];
-        if (erasedRef.current.has(el.id)) continue;
-        if (hitTest(el, x, y, ERASER_TOLERANCE_MM)) {
-          erasedRef.current.add(el.id);
-          changed = true;
-        }
-      }
-      if (changed) scheduleFrame();
-    },
-    [elements, scheduleFrame],
   );
 
   const resetLiveState = useCallback(() => {
@@ -333,60 +469,82 @@ export function BoardCanvas({
     setMoveOffset({ dx: 0, dy: 0 });
     setHiddenIds(EMPTY_HIDDEN);
     setTransformDraft(null);
+    setGestureFrameId(null);
   }, []);
+
+  // ─── Ластик ─────────────────────────────────────────────────────────────────
+
+  const eraseAtLocal = useCallback(
+    (frame: FrameView, lx: number, ly: number) => {
+      if (frame.writable === false) return;
+      let changed = false;
+      for (let i = frame.elements.length - 1; i >= 0; i--) {
+        const el = frame.elements[i];
+        if (erasedRef.current.has(el.id)) continue;
+        if (hitTest(el, lx, ly, ERASER_TOLERANCE_MM)) {
+          erasedRef.current.add(el.id);
+          changed = true;
+        }
+      }
+      if (changed) scheduleFrame();
+    },
+    [scheduleFrame],
+  );
+
+  // ─── Завершение жеста ───────────────────────────────────────────────────────
 
   const finishDrag = useCallback(
     (event?: PointerEvent | React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      // Завершает жест только участвующий в нём указатель.
       if (event) {
         const belongs =
-          drag.kind === 'pan'
+          drag.kind === 'pinch'
             ? drag.panIds?.includes(event.pointerId) ?? false
             : event.pointerId === drag.pointerId;
         if (!belongs) return;
       }
       dragRef.current = null;
       rectRef.current = null;
+      const frameId = drag.frameId;
 
-      if (drag.kind === 'stroke') {
+      if (drag.kind === 'stroke' && frameId) {
         const points = livePointsRef.current;
         if (points && points.length >= 3) {
-          onCommitElement(createStroke(points, color, size));
+          onCommitElement(frameId, createStroke(points, color, size));
         }
-      } else if (drag.kind === 'shape') {
+      } else if (drag.kind === 'shape' && frameId) {
         const shape = liveShapeRef.current;
-        // Отбрасываем «случайный клик»: фигура меньше половины миллиметра — промах.
         if (shape && (Math.abs(shape.w) > 0.5 || Math.abs(shape.h) > 0.5)) {
           onCommitElement(
+            frameId,
             createShape(shape.kind, shape.x, shape.y, shape.w, shape.h, color, size),
           );
         }
-      } else if (drag.kind === 'marquee') {
+      } else if (drag.kind === 'marquee' && frameId) {
         const box = marqueeRef.current;
-        if (box) {
+        const frame = frameById.get(frameId);
+        if (box && frame) {
           const region = {
             minX: Math.min(box.x, box.x + box.w),
             minY: Math.min(box.y, box.y + box.h),
             maxX: Math.max(box.x, box.x + box.w),
             maxY: Math.max(box.y, box.y + box.h),
           };
-          const ids = elements
+          const ids = frame.elements
             .filter((el) => boundsIntersect(elementBoundsCached(el), region))
             .map((el) => el.id);
-          if (ids.length > 0) onSelectionChange(ids);
+          onSelectionChange(ids.length > 0 ? { frameId, ids } : null);
         }
-      } else if (drag.kind === 'move') {
+      } else if (drag.kind === 'move' && frameId) {
         const { dx, dy } = moveOffsetRef.current;
-        if (dx !== 0 || dy !== 0) onMoveSelection(roundMm(dx), roundMm(dy));
-      } else if (drag.kind === 'erase') {
-        // ОДИН коммит на весь жест: один шаг undo, одна пометка автосейва.
-        if (erasedRef.current.size > 0) onEraseElements(Array.from(erasedRef.current));
+        if (dx !== 0 || dy !== 0) onMoveSelection(frameId, roundMm(dx), roundMm(dy));
+      } else if (drag.kind === 'erase' && frameId) {
+        if (erasedRef.current.size > 0) onEraseElements(frameId, Array.from(erasedRef.current));
       } else if (drag.kind === 'resize' || drag.kind === 'rotate') {
         const draft = transformDraftRef.current;
         if (draft) {
-          onTransformElement(draft.id, {
+          onTransformElement(draft.frameId, draft.id, {
             x: draft.x,
             y: draft.y,
             w: draft.w,
@@ -398,13 +556,15 @@ export function BoardCanvas({
 
       resetLiveState();
     },
-    [color, size, elements, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, resetLiveState],
+    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, resetLiveState],
   );
 
-  /** Старт resize/rotate с ручки выделенной картинки (stopPropagation — не рисуем). */
+  // ─── Трансформация картинок (ручки) ────────────────────────────────────────
+
   const startTransform = useCallback(
     (
       event: React.PointerEvent,
+      frameId: string,
       target: ImageElement,
       kind: 'resize' | 'rotate',
       corner?: ResizeCorner,
@@ -418,6 +578,7 @@ export function BoardCanvas({
         kind,
         pointerId: event.pointerId,
         pointerType: event.pointerType,
+        frameId,
         startX: 0,
         startY: 0,
         targetId: target.id,
@@ -425,6 +586,7 @@ export function BoardCanvas({
       };
       transformDraftRef.current = {
         id: target.id,
+        frameId,
         x: target.x,
         y: target.y,
         w: target.w,
@@ -436,29 +598,31 @@ export function BoardCanvas({
     [readOnly, scheduleFrame],
   );
 
-  /** Второй палец во время touch-жеста → панорамирование (штрих отбрасывается). */
-  const convertToPan = useCallback(
+  // ─── Pinch (два пальца): pan + zoom ────────────────────────────────────────
+
+  const convertToPinch = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
       const drag = dragRef.current;
       if (!drag) return;
-      // Накопленные ластиком удаления коммитим — они уже показаны пользователю.
-      if (drag.kind === 'erase' && erasedRef.current.size > 0) {
-        onEraseElements(Array.from(erasedRef.current));
+      if (drag.kind === 'erase' && drag.frameId && erasedRef.current.size > 0) {
+        onEraseElements(drag.frameId, Array.from(erasedRef.current));
       }
       const first = touchPosRef.current.get(drag.pointerId);
       const second = { x: event.clientX, y: event.clientY };
+      const a = first ?? second;
       dragRef.current = {
-        kind: 'pan',
+        kind: 'pinch',
         pointerId: -1,
         pointerType: 'touch',
         startX: 0,
         startY: 0,
         panIds: [drag.pointerId, event.pointerId],
       };
-      panLastRef.current = first
-        ? { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
-        : second;
-      // Незавершённый штрих/фигуру отбрасываем: намерение было «прокрутить».
+      panLastRef.current = {
+        x: (a.x + second.x) / 2,
+        y: (a.y + second.y) / 2,
+        dist: Math.hypot(second.x - a.x, second.y - a.y),
+      };
       livePointsRef.current = null;
       liveShapeRef.current = null;
       marqueeRef.current = null;
@@ -469,11 +633,11 @@ export function BoardCanvas({
     [onEraseElements, scheduleFrame],
   );
 
+  // ─── Pointer down ───────────────────────────────────────────────────────────
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
-      if (readOnly) return;
-      // Только основная кнопка / касание: правый клик не должен рисовать.
-      if (event.button !== 0) return;
+      if (event.button !== 0 && event.button !== 1) return;
 
       if (event.pointerType === 'touch') {
         touchPosRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -481,27 +645,19 @@ export function BoardCanvas({
 
       const drag = dragRef.current;
       if (drag) {
-        // Второй ПАЛЕЦ поверх пальцевого жеста = панорамирование. Всё прочее
-        // (ладонь при пере, третий палец) — игнорируется.
         if (
-          onPan &&
           event.pointerType === 'touch' &&
           drag.pointerType === 'touch' &&
-          drag.kind !== 'pan'
+          drag.kind !== 'pinch'
         ) {
-          convertToPan(event);
+          convertToPinch(event);
         }
         return;
       }
 
-      // ⚠️ КРИТИЧНО для инструмента «Текст»: default-действие mousedown уводит
-      // фокус на body, и только что открытый textarea мгновенно ловил blur и
-      // закрывался ПУСТЫМ — поле «не вставлялось» (репорт владельца, дважды).
-      // Отменённый pointerdown подавляет compat-событие mousedown → фокус
-      // никто не крадёт. Заодно убирает случайное выделение текста при рисовании.
+      // preventDefault: default-действие mousedown крадёт фокус у textarea
+      // текста (раунд 3 — «текст не вставлялся»). Blur редактируемых — явно.
       event.preventDefault();
-      // Фокус из редактируемых полей забираем сами, детерминированно: их blur
-      // (коммит названия/текста) обязан отработать ДО начала нового жеста.
       const active = document.activeElement;
       if (
         active instanceof HTMLElement &&
@@ -511,109 +667,163 @@ export function BoardCanvas({
       }
 
       rectRef.current = event.currentTarget.getBoundingClientRect();
-      const raw = toMm(event.clientX, event.clientY);
-      const { x, y } = clampToPage(raw.x, raw.y, pageSize);
+      const world = toWorld(event.clientX, event.clientY);
       event.currentTarget.setPointerCapture(event.pointerId);
       const pointerId = event.pointerId;
       const pointerType = event.pointerType;
 
+      const frame = findFrameAt(world.x, world.y);
+
+      // Пустой холст ИЛИ средняя кнопка — панорамирование одним указателем.
+      if (!frame || event.button === 1) {
+        dragRef.current = {
+          kind: 'pan-canvas',
+          pointerId,
+          pointerType,
+          startX: event.clientX,
+          startY: event.clientY,
+        };
+        panLastRef.current = { x: event.clientX, y: event.clientY, dist: 0 };
+        return;
+      }
+
+      if (readOnly || frame.writable === false) {
+        // Чужая/read-only рамка: жест превращается в пан (можно осматривать).
+        dragRef.current = {
+          kind: 'pan-canvas',
+          pointerId,
+          pointerType,
+          startX: event.clientX,
+          startY: event.clientY,
+        };
+        panLastRef.current = { x: event.clientX, y: event.clientY, dist: 0 };
+        return;
+      }
+
+      const lx = roundMm(world.x - frame.placement.x);
+      const ly = roundMm(world.y - frame.placement.y);
+
       if (tool === 'text') {
         rectRef.current = null;
-        onRequestText(roundMm(x), roundMm(y));
+        onRequestText(frame.id, lx, ly);
         return;
       }
 
       if (tool === 'pen') {
-        // Настоящее давление есть только у стилуса; мышь и палец всегда шлют 0.5,
-        // и доверять их «нажиму» — значит получить случайные утолщения.
         const pressure = pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        dragRef.current = { kind: 'stroke', pointerId, pointerType, startX: x, startY: y };
-        livePointsRef.current = [roundMm(x), roundMm(y), pressure];
+        dragRef.current = { kind: 'stroke', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
+        livePointsRef.current = [lx, ly, pressure];
         scheduleFrame();
         return;
       }
 
       if (tool === 'eraser') {
         erasedRef.current = new Set();
-        dragRef.current = { kind: 'erase', pointerId, pointerType, startX: x, startY: y };
-        eraseAt(x, y);
+        dragRef.current = { kind: 'erase', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
+        eraseAtLocal(frame, lx, ly);
         return;
       }
 
       if (tool === 'rect' || tool === 'ellipse' || tool === 'line') {
-        dragRef.current = { kind: 'shape', pointerId, pointerType, startX: x, startY: y };
-        liveShapeRef.current = { kind: tool as ShapeKind, x: roundMm(x), y: roundMm(y), w: 0, h: 0 };
+        dragRef.current = { kind: 'shape', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
+        liveShapeRef.current = { kind: tool as ShapeKind, x: lx, y: ly, w: 0, h: 0 };
         scheduleFrame();
         return;
       }
 
-      // select: клик по элементу — выделяем и готовимся тащить; по пустому — рамка.
+      // select
       let hitId: string | null = null;
-      for (let i = elements.length - 1; i >= 0; i--) {
-        if (hitTest(elements[i], x, y, 1)) {
-          hitId = elements[i].id;
+      for (let i = frame.elements.length - 1; i >= 0; i--) {
+        if (hitTest(frame.elements[i], lx, ly, 1)) {
+          hitId = frame.elements[i].id;
           break;
         }
       }
       if (hitId) {
-        if (!selectedSet.has(hitId)) onSelectionChange([hitId]);
-        dragRef.current = { kind: 'move', pointerId, pointerType, startX: x, startY: y };
+        if (!(selection && selection.frameId === frame.id && selectedSet.has(hitId))) {
+          onSelectionChange({ frameId: frame.id, ids: [hitId] });
+        }
+        dragRef.current = { kind: 'move', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
         moveOffsetRef.current = { dx: 0, dy: 0 };
       } else {
-        onSelectionChange([]);
-        dragRef.current = { kind: 'marquee', pointerId, pointerType, startX: x, startY: y };
-        marqueeRef.current = { x, y, w: 0, h: 0 };
+        onSelectionChange(null);
+        dragRef.current = { kind: 'marquee', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
+        marqueeRef.current = { x: lx, y: ly, w: 0, h: 0 };
         scheduleFrame();
       }
     },
-    [readOnly, toMm, tool, pageSize, onPan, convertToPan, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
+    [toWorld, findFrameAt, readOnly, tool, selection, selectedSet, onSelectionChange, onRequestText, eraseAtLocal, convertToPinch, scheduleFrame],
   );
+
+  // ─── Pointer move ───────────────────────────────────────────────────────────
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
       const drag = dragRef.current;
-      if (!drag || readOnly) return;
+      if (!drag) return;
 
       if (event.pointerType === 'touch' && touchPosRef.current.has(event.pointerId)) {
         touchPosRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
       }
 
-      if (drag.kind === 'pan') {
+      if (drag.kind === 'pinch') {
         if (!drag.panIds?.includes(event.pointerId)) return;
         const [a, b] = drag.panIds;
         const pa = touchPosRef.current.get(a);
         const pb = touchPosRef.current.get(b);
         if (!pa || !pb || !panLastRef.current) return;
         const centroid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
-        const dx = centroid.x - panLastRef.current.x;
-        const dy = centroid.y - panLastRef.current.y;
-        panLastRef.current = centroid;
-        // Контент следует за пальцами: скролл в противоход.
-        onPan?.(-dx, -dy);
+        const dist = Math.hypot(pb.x - pa.x, pb.y - pa.y);
+        const last = panLastRef.current;
+        const cam = cameraRef.current;
+        let next: CameraState = {
+          ...cam,
+          cx: cam.cx - (centroid.x - last.x) / cam.zoom,
+          cy: cam.cy - (centroid.y - last.y) / cam.zoom,
+        };
+        if (last.dist > 20 && dist > 20) {
+          next = zoomCameraAt(next, dist / last.dist, toWorld(centroid.x, centroid.y));
+        }
+        panLastRef.current = { ...centroid, dist };
+        onCameraChange(next);
+        return;
+      }
+
+      if (drag.kind === 'pan-canvas') {
+        if (event.pointerId !== drag.pointerId) return;
+        const last = panLastRef.current;
+        if (!last) return;
+        const cam = cameraRef.current;
+        onCameraChange({
+          ...cam,
+          cx: cam.cx - (event.clientX - last.x) / cam.zoom,
+          cy: cam.cy - (event.clientY - last.y) / cam.zoom,
+        });
+        panLastRef.current = { x: event.clientX, y: event.clientY, dist: 0 };
         return;
       }
 
       if (event.pointerId !== drag.pointerId) return;
-      const raw = toMm(event.clientX, event.clientY);
-      const { x, y } = clampToPage(raw.x, raw.y, pageSize);
+      const world = toWorld(event.clientX, event.clientY);
+      const frame = drag.frameId ? frameById.get(drag.frameId) : null;
 
       if (drag.kind === 'resize' || drag.kind === 'rotate') {
-        // НЕклампленные координаты: ручка может выходить за лист, и зажим
-        // искажал бы геометрию (растяжение «прилипало» бы к краю).
         const draft = transformDraftRef.current;
-        const original = elements.find((e) => e.id === drag.targetId);
-        if (draft && original && original.type === 'image') {
+        const original = frame?.elements.find((e) => e.id === drag.targetId);
+        if (draft && frame && original && original.type === 'image') {
+          const lx = world.x - frame.placement.x;
+          const ly = world.y - frame.placement.y;
           if (drag.kind === 'rotate') {
             const cx = draft.x + draft.w / 2;
             const cy = draft.y + draft.h / 2;
-            draft.rotation = rotationFromPointer(cx, cy, raw.x, raw.y);
+            draft.rotation = rotationFromPointer(cx, cy, lx, ly);
           } else if (drag.corner) {
             const next = resizeRectFromCorner(
               { x: original.x, y: original.y, w: original.w, h: original.h },
               original.rotation,
               drag.corner,
-              raw.x,
-              raw.y,
+              lx,
+              ly,
               true,
             );
             draft.x = next.x;
@@ -627,31 +837,33 @@ export function BoardCanvas({
         return;
       }
 
+      if (!frame) return;
+      const lx = roundMm(world.x - frame.placement.x);
+      const ly = roundMm(world.y - frame.placement.y);
+
       if (drag.kind === 'stroke') {
         const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        livePointsRef.current?.push(roundMm(x), roundMm(y), pressure);
+        livePointsRef.current?.push(lx, ly, pressure);
       } else if (drag.kind === 'erase') {
-        eraseAt(x, y);
+        eraseAtLocal(frame, lx, ly);
         return;
       } else if (drag.kind === 'shape') {
         const shape = liveShapeRef.current;
         if (shape) {
-          shape.w = roundMm(x - drag.startX);
-          shape.h = roundMm(y - drag.startY);
+          shape.w = roundMm(lx - drag.startX);
+          shape.h = roundMm(ly - drag.startY);
         }
       } else if (drag.kind === 'marquee') {
-        marqueeRef.current = { x: drag.startX, y: drag.startY, w: x - drag.startX, h: y - drag.startY };
+        marqueeRef.current = { x: drag.startX, y: drag.startY, w: lx - drag.startX, h: ly - drag.startY };
       } else if (drag.kind === 'move') {
-        moveOffsetRef.current = { dx: x - drag.startX, dy: y - drag.startY };
+        moveOffsetRef.current = { dx: lx - drag.startX, dy: ly - drag.startY };
       }
 
       scheduleFrame();
     },
-    [readOnly, toMm, pageSize, eraseAt, scheduleFrame, onPan, elements],
+    [toWorld, frameById, eraseAtLocal, scheduleFrame, onCameraChange],
   );
 
-  // Указатель может уйти с элемента или быть отменён системой (жест, звонок) —
-  // без завершения drag остался бы «прилипший» штрих.
   useEffect(() => {
     const handleUp = (event: PointerEvent) => {
       touchPosRef.current.delete(event.pointerId);
@@ -665,8 +877,36 @@ export function BoardCanvas({
     };
   }, [finishDrag]);
 
-  // Живой штрих — ephemeral-объект БЕЗ модельных фабрик: createStroke двигает
-  // глобальные id/seq-счётчики, а useMemo может исполняться повторно.
+  // ─── Колесо: зум к курсору (B19 — мягкий шаг), Shift — горизонтальный пан ──
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    // Нативный listener с passive:false: React onWheel пассивен и не даёт
+    // preventDefault → страница зумилась бы вместе с холстом.
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      const cam = cameraRef.current;
+      if (event.shiftKey && !event.ctrlKey) {
+        onCameraChange({ ...cam, cx: cam.cx + event.deltaY / cam.zoom });
+        return;
+      }
+      const factor = Math.exp(-event.deltaY * WHEEL_ZOOM_SENSITIVITY);
+      const clamped = Math.min(1.25, Math.max(0.8, factor));
+      onCameraChange(zoomCameraAt(cam, clamped, toWorld(event.clientX, event.clientY)));
+    };
+    svg.addEventListener('wheel', handleWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', handleWheel);
+  }, [toWorld, onCameraChange]);
+
+  // ─── Live-слои и выделение (мировые координаты через рамку жеста) ──────────
+
+  const gestureFramePlacement = useMemo(() => {
+    const id = gestureFrameId ?? selection?.frameId;
+    if (!id) return null;
+    return frameById.get(id)?.placement ?? null;
+  }, [frameById, gestureFrameId, selection]);
+
   const liveStroke: BoardElement | null = useMemo(
     () =>
       livePoints && livePoints.length >= 3
@@ -705,14 +945,28 @@ export function BoardCanvas({
     [liveShape, color, size],
   );
 
+  const hiddenForRender = useMemo(() => {
+    const extra = new Set<string>();
+    if (transformDraft) extra.add(transformDraft.id);
+    if (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0)) {
+      for (const id of selection.ids) extra.add(id);
+    }
+    if (extra.size === 0) return hiddenIds;
+    const combined = new Set(hiddenIds);
+    extra.forEach((id) => combined.add(id));
+    return combined;
+  }, [hiddenIds, transformDraft, selection, moveOffset]);
+
   const selectionBox = useMemo(() => {
-    if (selectedElements.length === 0) return null;
+    if (!selection || !selectionFrame || selection.ids.length === 0) return null;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (let i = 0; i < selectedElements.length; i++) {
-      const b = elementBoundsCached(selectedElements[i]);
+    for (let i = 0; i < selectionFrame.elements.length; i++) {
+      const el = selectionFrame.elements[i];
+      if (!selectedSet.has(el.id)) continue;
+      const b = elementBoundsCached(el);
       if (b.minX < minX) minX = b.minX;
       if (b.minY < minY) minY = b.minY;
       if (b.maxX > maxX) maxX = b.maxX;
@@ -720,22 +974,17 @@ export function BoardCanvas({
     }
     if (minX === Infinity) return null;
     return { x: minX - 1, y: minY - 1, w: maxX - minX + 2, h: maxY - minY + 2 };
-  }, [selectedElements]);
+  }, [selection, selectionFrame, selectedSet]);
 
-  const isMoving = moveOffset.dx !== 0 || moveOffset.dy !== 0;
-  const moveTransform = isMoving ? `translate(${moveOffset.dx} ${moveOffset.dy})` : undefined;
-
-  // Во время resize/rotate оригинал скрывается, поверх рисуется live-копия.
-  const hiddenForRender = useMemo(() => {
-    if (!transformDraft) return hiddenIds;
-    const combined = new Set(hiddenIds);
-    combined.add(transformDraft.id);
-    return combined;
-  }, [hiddenIds, transformDraft]);
+  const selectedElements = useMemo(() => {
+    if (!selection || !selectionFrame) return [];
+    return selectionFrame.elements.filter((el) => selectedSet.has(el.id));
+  }, [selection, selectionFrame, selectedSet]);
 
   const transformDraftElement: BoardElement | null = useMemo(() => {
     if (!transformDraft) return null;
-    const original = elements.find((e) => e.id === transformDraft.id);
+    const frame = frameById.get(transformDraft.frameId);
+    const original = frame?.elements.find((e) => e.id === transformDraft.id);
     if (!original || original.type !== 'image') return null;
     return {
       ...original,
@@ -745,66 +994,78 @@ export function BoardCanvas({
       h: transformDraft.h,
       rotation: transformDraft.rotation,
     };
-  }, [transformDraft, elements]);
+  }, [transformDraft, frameById]);
 
-  // Ручки — только в режиме выделения, для РОВНО одной выбранной картинки.
   const singleSelectedImage: ImageElement | null = useMemo(() => {
-    if (tool !== 'select' || selectedIds.length !== 1) return null;
-    const el = elements.find((e) => e.id === selectedIds[0]);
+    if (tool !== 'select' || !selection || selection.ids.length !== 1 || !selectionFrame) return null;
+    const el = selectionFrame.elements.find((e) => e.id === selection.ids[0]);
     return el && el.type === 'image' ? el : null;
-  }, [tool, selectedIds, elements]);
+  }, [tool, selection, selectionFrame]);
+
+  const isMoving = moveOffset.dx !== 0 || moveOffset.dy !== 0;
+
+  const windowW = worldWindow.maxX - worldWindow.minX;
+  const windowH = worldWindow.maxY - worldWindow.minY;
 
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${pageSize.width} ${pageSize.height}`}
-      className="h-full w-full bg-white"
+      viewBox={`${worldWindow.minX} ${worldWindow.minY} ${windowW} ${windowH}`}
+      className="h-full w-full"
       role="img"
-      aria-label="Холст доски. Рисование мышью, пальцем или стилусом; двумя пальцами — прокрутка."
-      // touch-none: без него iOS перехватывает жест и вместо линии скроллит
-      // страницу (rule 80). Прокрутка увеличенного листа — двумя пальцами (onPan).
+      aria-label="Холст доски. Рисование внутри листов; пустое место и два пальца — перемещение по холсту; колесо — масштаб."
       style={{
         touchAction: 'none',
-        cursor: readOnly ? 'default' : tool === 'select' ? 'default' : 'crosshair',
+        background: '#EEF2F7',
+        cursor:
+          tool === 'select' ? 'default' : readOnly ? 'grab' : 'crosshair',
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishDrag}
     >
-      {backgroundNodes.map((node, i) => (
-        <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
+      {visibleFrames.map((frame) => (
+        <FrameLayer
+          key={frame.id}
+          frame={frame}
+          hiddenIds={hiddenForRender}
+          options={strokeOptions}
+          imageUrls={imageUrls}
+          localCullWindow={localCullWindows.get(frame.id) ?? null}
+          zoomHint={camera.zoom}
+        />
       ))}
 
-      <SceneLayer
-        elements={unselectedElements}
-        hiddenIds={hiddenForRender}
-        options={strokeOptions}
-        imageUrls={imageUrls}
-      />
-
-      {selectedElements.length > 0 && (
-        <g opacity={0.7} transform={moveTransform}>
-          <SceneLayer
-            elements={selectedElements}
-            hiddenIds={hiddenForRender}
-            options={strokeOptions}
-            imageUrls={imageUrls}
-          />
+      {/* Выделенные элементы поверх, с move-transform (в координатах их рамки). */}
+      {selectionFrame && selectedElements.length > 0 && (
+        <g
+          transform={`translate(${selectionFrame.placement.x + moveOffset.dx} ${selectionFrame.placement.y + moveOffset.dy})`}
+        >
+          {selectedElements.map((el) => (
+            <g key={el.id}>
+              <ElementNode element={el} options={strokeOptions} imageUrls={imageUrls} />
+            </g>
+          ))}
         </g>
       )}
 
-      {liveStroke && <ElementNode element={liveStroke} options={strokeOptions} />}
-      {liveShapeElement && <ElementNode element={liveShapeElement} options={strokeOptions} />}
-      {transformDraftElement && (
-        <g opacity={0.85}>
-          <ElementNode element={transformDraftElement} options={strokeOptions} imageUrls={imageUrls} />
+      {/* Живые слои — в системе рамки жеста. */}
+      {gestureFramePlacement && (liveStroke || liveShapeElement || transformDraftElement) && (
+        <g transform={`translate(${gestureFramePlacement.x} ${gestureFramePlacement.y})`}>
+          {liveStroke && <ElementNode element={liveStroke} options={strokeOptions} />}
+          {liveShapeElement && <ElementNode element={liveShapeElement} options={strokeOptions} />}
+          {transformDraftElement && (
+            <g opacity={0.85}>
+              <ElementNode element={transformDraftElement} options={strokeOptions} imageUrls={imageUrls} />
+            </g>
+          )}
         </g>
       )}
 
-      {marquee && (
+      {marquee && gestureFramePlacement && (
         <rect
-          x={Math.min(marquee.x, marquee.x + marquee.w)}
-          y={Math.min(marquee.y, marquee.y + marquee.h)}
+          x={gestureFramePlacement.x + Math.min(marquee.x, marquee.x + marquee.w)}
+          y={gestureFramePlacement.y + Math.min(marquee.y, marquee.y + marquee.h)}
           width={Math.abs(marquee.w)}
           height={Math.abs(marquee.h)}
           fill="#1B6B4A"
@@ -815,27 +1076,29 @@ export function BoardCanvas({
         />
       )}
 
-      {selectionBox && (
+      {/* Выделение — КОНТУР, не затемнение: opacity 0.7 читалась как «штрих
+          стал полупрозрачным» (B14, репорт Елены). */}
+      {selectionBox && selectionFrame && (
         <rect
-          x={selectionBox.x + moveOffset.dx}
-          y={selectionBox.y + moveOffset.dy}
+          x={selectionFrame.placement.x + selectionBox.x + moveOffset.dx}
+          y={selectionFrame.placement.y + selectionBox.y + moveOffset.dy}
           width={selectionBox.w}
           height={selectionBox.h}
           fill="none"
           stroke="#1B6B4A"
-          strokeWidth={0.3}
+          strokeWidth={0.35}
           strokeDasharray="1.5 1"
           pointerEvents="none"
         />
       )}
 
-      {/* Ручки resize/rotate выбранной картинки. Невидимый круг r=4 мм — тач-цель,
-          видимый r=1.6 — индикатор. Во время жеста следуют за live-копией. */}
-      {singleSelectedImage && !isMoving && (() => {
+      {singleSelectedImage && selectionFrame && !isMoving && (() => {
         const g =
           transformDraft && transformDraft.id === singleSelectedImage.id
             ? transformDraft
             : singleSelectedImage;
+        const fx = selectionFrame.placement.x;
+        const fy = selectionFrame.placement.y;
         const cx = g.x + g.w / 2;
         const cy = g.y + g.h / 2;
         const corners: { corner: ResizeCorner; p: { x: number; y: number } }[] = [
@@ -847,7 +1110,7 @@ export function BoardCanvas({
         const rotateHandle = rotatePoint(cx, g.y - 7, cx, cy, g.rotation);
         const topEdge = rotatePoint(cx, g.y, cx, cy, g.rotation);
         return (
-          <g>
+          <g transform={`translate(${fx} ${fy})`}>
             <line
               x1={topEdge.x}
               y1={topEdge.y}
@@ -865,7 +1128,9 @@ export function BoardCanvas({
                   r={4}
                   fill="transparent"
                   style={{ cursor: 'nwse-resize' }}
-                  onPointerDown={(e) => startTransform(e, singleSelectedImage, 'resize', corner)}
+                  onPointerDown={(e) =>
+                    startTransform(e, selectionFrame.id, singleSelectedImage, 'resize', corner)
+                  }
                 />
                 <circle
                   cx={p.x}
@@ -884,7 +1149,9 @@ export function BoardCanvas({
               r={4}
               fill="transparent"
               style={{ cursor: 'grab' }}
-              onPointerDown={(e) => startTransform(e, singleSelectedImage, 'rotate')}
+              onPointerDown={(e) =>
+                startTransform(e, selectionFrame.id, singleSelectedImage, 'rotate')
+              }
             />
             <circle
               cx={rotateHandle.x}

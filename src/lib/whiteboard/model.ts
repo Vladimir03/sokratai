@@ -43,6 +43,155 @@ export function normalizeOrientation(raw: unknown): PageOrientation {
   return raw === 'landscape' ? 'landscape' : 'portrait';
 }
 
+// ─── Холст и камера (Фаза P0, B0 — Р1 отменён решением владельца 29.07) ───────
+//
+// Доска — бесконечный холст в МИРОВЫХ миллиметрах; рамка (= строка board_pages)
+// лежит на нём в позиции `FramePlacement`, а её элементы остаются в ЛОКАЛЬНЫХ
+// координатах рамки. Поэтому exportPdf и вся геометрия элементов Фазы 1
+// переживают переход без правок: мир = позиция рамки + локаль.
+//
+// Камера: центр в мировых мм + zoom (экранных px на мм). Follow-режим (B1)
+// передаёт ВИДИМЫЕ ГРАНИЦЫ сцены, а не zoom — ведомый делает fit-contain
+// в своё окно (паттерн Excalidraw: разные окна, одна и та же область).
+
+export interface FramePlacement {
+  x: number;
+  y: number;
+}
+
+/** Зазор между авто-разложенными рамками (существующие доски → рамки в ряд). */
+export const FRAME_GAP_MM = 20;
+
+export interface CameraState {
+  /** Центр вьюпорта в мировых мм. */
+  cx: number;
+  cy: number;
+  /** Экранных px на мм. 3.78 ≈ 100% (96 dpi). */
+  zoom: number;
+}
+
+export const CAMERA_ZOOM_MIN = 0.2;
+export const CAMERA_ZOOM_MAX = 20;
+
+export function clampZoom(zoom: number): number {
+  return Math.min(CAMERA_ZOOM_MAX, Math.max(CAMERA_ZOOM_MIN, zoom));
+}
+
+/** Экранные px (относительно вьюпорта) → мировые мм. */
+export function screenToWorld(
+  px: number,
+  py: number,
+  camera: CameraState,
+  viewport: { w: number; h: number },
+): { x: number; y: number } {
+  return {
+    x: camera.cx + (px - viewport.w / 2) / camera.zoom,
+    y: camera.cy + (py - viewport.h / 2) / camera.zoom,
+  };
+}
+
+/** Мировые мм → px вьюпорта (для HTML-оверлеев поверх холста: textarea текста). */
+export function worldToViewportPx(
+  wx: number,
+  wy: number,
+  camera: CameraState,
+  viewport: { w: number; h: number },
+): { x: number; y: number } {
+  return {
+    x: (wx - camera.cx) * camera.zoom + viewport.w / 2,
+    y: (wy - camera.cy) * camera.zoom + viewport.h / 2,
+  };
+}
+
+/** Мировое окно камеры в мм (для viewBox и culling). */
+export function cameraWorldWindow(
+  camera: CameraState,
+  viewport: { w: number; h: number },
+): BoardBounds {
+  const halfW = viewport.w / 2 / camera.zoom;
+  const halfH = viewport.h / 2 / camera.zoom;
+  return {
+    minX: camera.cx - halfW,
+    minY: camera.cy - halfH,
+    maxX: camera.cx + halfW,
+    maxY: camera.cy + halfH,
+  };
+}
+
+/**
+ * Камера, вмещающая bounds целиком (fit-contain) с полем `paddingPx`.
+ * Используется и для «Вписать рамку», и для follow-режима (B1).
+ */
+export function cameraToFitBounds(
+  bounds: BoardBounds,
+  viewport: { w: number; h: number },
+  paddingPx = 24,
+): CameraState {
+  const w = Math.max(1, bounds.maxX - bounds.minX);
+  const h = Math.max(1, bounds.maxY - bounds.minY);
+  const zoom = clampZoom(
+    Math.min((viewport.w - paddingPx * 2) / w, (viewport.h - paddingPx * 2) / h),
+  );
+  return {
+    cx: (bounds.minX + bounds.maxX) / 2,
+    cy: (bounds.minY + bounds.maxY) / 2,
+    zoom,
+  };
+}
+
+/** Зум к точке: мировая точка под курсором остаётся под курсором. */
+export function zoomCameraAt(
+  camera: CameraState,
+  factor: number,
+  anchorWorld: { x: number; y: number },
+): CameraState {
+  const zoom = clampZoom(camera.zoom * factor);
+  if (zoom === camera.zoom) return camera;
+  const scale = camera.zoom / zoom;
+  return {
+    zoom,
+    cx: anchorWorld.x - (anchorWorld.x - camera.cx) * scale,
+    cy: anchorWorld.y - (anchorWorld.y - camera.cy) * scale,
+  };
+}
+
+export function normalizeFramePlacement(raw: unknown, fallbackIndex: number): FramePlacement {
+  const obj = raw as { x?: unknown; y?: unknown } | null | undefined;
+  if (obj && typeof obj.x === 'number' && typeof obj.y === 'number' &&
+      Number.isFinite(obj.x) && Number.isFinite(obj.y)) {
+    return { x: obj.x, y: obj.y };
+  }
+  // Доски Фазы 1 без позиций: рамки ложатся в ряд слева направо.
+  return { x: fallbackIndex * (PAGE_WIDTH_MM + FRAME_GAP_MM), y: 0 };
+}
+
+/** Мировой bbox рамки. */
+export function frameWorldBounds(placement: FramePlacement, size: PageSizeMm): BoardBounds {
+  return {
+    minX: placement.x,
+    minY: placement.y,
+    maxX: placement.x + size.width,
+    maxY: placement.y + size.height,
+  };
+}
+
+/** Следующая свободная позиция для новой рамки: справа от самой правой. */
+export function nextFramePlacement(
+  frames: { placement: FramePlacement; size: PageSizeMm }[],
+): FramePlacement {
+  if (frames.length === 0) return { x: 0, y: 0 };
+  let maxRight = -Infinity;
+  let atY = 0;
+  for (let i = 0; i < frames.length; i++) {
+    const right = frames[i].placement.x + frames[i].size.width;
+    if (right > maxRight) {
+      maxRight = right;
+      atY = frames[i].placement.y;
+    }
+  }
+  return { x: maxRight + FRAME_GAP_MM, y: atY };
+}
+
 export type BoardBackground = 'blank' | 'grid' | 'lines' | 'dots';
 export type BoardGridMm = 5 | 10;
 
@@ -180,6 +329,15 @@ function baseFields(): BoardElementBase {
 /** Возвращает НОВЫЙ объект с инкрементом версии — элементы иммутабельны. */
 export function bumpVersion<T extends BoardElement>(el: T, patch: Partial<T>): T {
   return { ...el, ...patch, version: el.version + 1, versionNonce: nextNonce() };
+}
+
+/**
+ * Клон как НОВАЯ сущность: свежие id/seq/nonce, version с единицы. Для вставки
+ * из буфера: два элемента с одним id сломали бы memo-рендер и выделение, а
+ * старый seq утопил бы копию под более новыми элементами.
+ */
+export function reassignIdentity<T extends BoardElement>(el: T): T {
+  return { ...el, id: createElementId(), seq: nextSeq(), version: 1, versionNonce: nextNonce() };
 }
 
 // ─── Фабрики ──────────────────────────────────────────────────────────────────

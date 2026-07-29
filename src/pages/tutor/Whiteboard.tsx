@@ -3,8 +3,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { BoardCanvas, type BoardTool } from '@/components/whiteboard/BoardCanvas';
-import { BoardToolbar, type BoardZoom } from '@/components/whiteboard/BoardToolbar';
+import {
+  BoardCanvas,
+  type BoardSelection,
+  type BoardTool,
+  type FrameView,
+} from '@/components/whiteboard/BoardCanvas';
+import { BoardToolbar } from '@/components/whiteboard/BoardToolbar';
 import { PagesPanel } from '@/components/whiteboard/PagesPanel';
 import {
   type Board,
@@ -20,26 +25,40 @@ import {
 import {
   type BoardElement,
   type BoardGridMm,
+  type CameraState,
+  type FramePlacement,
   type ImageElement,
   type PageOrientation,
-  type PageSizeMm,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
   bumpVersion,
+  cameraToFitBounds,
   createImage,
   createText,
   elementBoundsCached,
+  frameWorldBounds,
+  nextFramePlacement,
   normalizeBackground,
+  normalizeFramePlacement,
   normalizeGridMm,
   normalizeOrientation,
   pageSizeMm,
   parseElements,
   primeSeqCounter,
+  reassignIdentity,
   roundMm,
   translateElement,
+  worldToViewportPx,
+  zoomCameraAt,
 } from '@/lib/whiteboard/model';
 import type { ImageUrlMap } from '@/lib/whiteboard/svg';
+import {
+  copyElements,
+  hasInternalClipboard,
+  pasteElements,
+  shouldUseInternalClipboard,
+} from '@/lib/whiteboard/boardClipboard';
 import {
   MAX_IMAGES_PER_PAGE,
   resolveBoardImageUrl,
@@ -53,38 +72,40 @@ import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { deleteMaterial, uploadLessonPdf } from '@/lib/lessonMaterialsApi';
 import type { BoardBackground } from '@/lib/whiteboard/model';
 
-// Страница доски (Фаза 1; раунд 3 — архитектурный рефакторинг).
+// Страница доски — Фаза P0: бесконечный холст с рамками-страницами (B0, Р1
+// отменён решением владельца 29.07) + внутренний clipboard (B3).
 //
-// Компонент — оркестратор: сетевое сохранение живёт в `AutosaveQueue`
-// (single-flight, ретраи — lib/whiteboard/autosaveQueue.ts, покрыт тестами),
-// undo/redo — в `SceneHistory` (lib/whiteboard/sceneHistory.ts). Здесь остаются
-// только React-состояние сцены, обработчики и разметка.
+// Компонент — оркестратор: сеть в AutosaveQueue, undo в SceneHistory, геометрия
+// в model.ts. Рамка = строка board_pages; позиция рамки — app_state.frame,
+// элементы в ЛОКАЛЬНЫХ координатах рамки (exportPdf Фазы 1 не менялся).
 //
 // Инварианты (не ломать):
-// • Данные грузятся вручную (useEffect + useState), а НЕ через useQuery: на
-//   холсте лежит несохранённый рукописный ввод, фоновый refetch по фокусу его
-//   затёр бы (класс инцидента tab-switch, smoke-check §8).
-// • PDF-движок — только динамический import() по факту экспорта.
-// • Правки сцены и истории — в обработчиках событий, вне setState-updater'ов.
-// • Ориентация листа хранится в `board_pages.app_state.orientation` (jsonb) —
-//   правка схемы для неё не нужна.
+// • Данные вручную (useEffect+useState), НЕ useQuery — фоновый refetch затёр бы
+//   несохранённый ввод (smoke-check §8).
+// • PDF-движок — только динамический import().
+// • Правки сцены/истории — в обработчиках, вне setState-updater'ов.
+// • «Сохранено» — только при пустой очереди (single-flight, ревью р.4).
 
-interface PageState {
+const HUNDRED_PERCENT_ZOOM = 96 / 25.4; // px на мм при 100% (96 dpi)
+
+interface FrameState {
   id: string;
   elements: BoardElement[];
   background: BoardBackground;
   gridMm: BoardGridMm;
   orientation: PageOrientation;
+  placement: FramePlacement;
 }
 
 interface TextDraft {
   id: number;
+  frameId: string;
   x: number;
   y: number;
   value: string;
 }
 
-function rowToPageState(row: BoardPageRow): PageState {
+function rowToFrameState(row: BoardPageRow, index: number): FrameState {
   const elements = parseElements(row.elements);
   primeSeqCounter(elements);
   const appState = (row.app_state ?? {}) as Record<string, unknown>;
@@ -94,6 +115,7 @@ function rowToPageState(row: BoardPageRow): PageState {
     background: normalizeBackground(row.background),
     gridMm: normalizeGridMm(row.grid_mm),
     orientation: normalizeOrientation(appState.orientation),
+    placement: normalizeFramePlacement(appState.frame, index),
   };
 }
 
@@ -114,8 +136,8 @@ export default function Whiteboard() {
   const navigate = useNavigate();
 
   const [board, setBoard] = useState<Board | null>(null);
-  const [pages, setPages] = useState<PageState[]>([]);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [frames, setFrames] = useState<FrameState[]>([]);
+  const [activeFrameId, setActiveFrameId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -128,40 +150,44 @@ export default function Whiteboard() {
   const [tool, setTool] = useState<BoardTool>('pen');
   const [color, setColor] = useState<string>(BOARD_COLORS[0]);
   const [size, setSize] = useState<number>(DEFAULT_PEN_SIZE_MM);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selection, setSelection] = useState<BoardSelection | null>(null);
   const [textDraft, setTextDraft] = useState<TextDraft | null>(null);
-  const [zoom, setZoom] = useState<BoardZoom>('fit');
+  const [camera, setCamera] = useState<CameraState>({ cx: 90, cy: 130, zoom: 1.5 });
   const [historyTick, setHistoryTick] = useState(0);
   const [imageUrls, setImageUrls] = useState<ImageUrlMap>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  /** Битые ref не ретраим на каждый штрих — только плейсхолдер. */
   const failedImageRefsRef = useRef<Set<string>>(new Set());
 
-  // ⚠️ Зеркало страниц — СИНХРОННОЕ: applyPages обновляет ref в том же тике,
-  // что и setState. Прежний вариант (sync в passive-эффекте) оставлял окно,
-  // в котором ответ автосейва мог перечитать УСТАРЕВШУЮ сцену и честно
-  // объявить «Сохранено» без последнего штриха (ревью р.4, P0). Рендер
-  // по-прежнему читает state; ref — источник правды для сети и жестов.
-  const pagesRef = useRef<PageState[]>([]);
+  const framesRef = useRef<FrameState[]>([]);
+  const cameraRef = useRef(camera);
+  cameraRef.current = camera;
   const textDraftRef = useRef<TextDraft | null>(null);
   const savedTitleRef = useRef<string>('');
   const exportedSignatureRef = useRef<string | null>(null);
   const historyRef = useRef(new SceneHistory());
   const attachPromiseRef = useRef<Promise<boolean> | null>(null);
 
-  // Очередь автосейва создаётся один раз; savePage читает СВЕЖУЮ страницу через
-  // pagesRef (зеркало синхронизируется после коммита, см. эффект ниже).
+  /** Единственная точка записи рамок: ref и state — синхронно (P0 ревью р.4). */
+  const applyFrames = useCallback((next: FrameState[]) => {
+    framesRef.current = next;
+    setFrames(next);
+  }, []);
+
+  useEffect(() => {
+    textDraftRef.current = textDraft;
+  }, [textDraft]);
+
   const autosaveRef = useRef<AutosaveQueue | null>(null);
   if (autosaveRef.current === null) {
     autosaveRef.current = new AutosaveQueue({
       savePage: async (pageId: string) => {
-        const page = pagesRef.current.find((p) => p.id === pageId);
-        if (!page) return;
-        await saveBoardPage(page.id, {
-          elements: page.elements,
-          background: page.background,
-          grid_mm: page.gridMm,
-          app_state: { orientation: page.orientation },
+        const frame = framesRef.current.find((f) => f.id === pageId);
+        if (!frame) return;
+        await saveBoardPage(frame.id, {
+          elements: frame.elements,
+          background: frame.background,
+          grid_mm: frame.gridMm,
+          app_state: { orientation: frame.orientation, frame: frame.placement },
         });
       },
       onStatus: setSaveStatus,
@@ -169,21 +195,48 @@ export default function Whiteboard() {
   }
   const autosave = autosaveRef.current;
 
-  /** Единственная точка записи страниц: ref и state меняются вместе. */
-  const applyPages = useCallback((next: PageState[]) => {
-    pagesRef.current = next;
-    setPages(next);
-  }, []);
+  const activeFrame = useMemo(
+    () => frames.find((f) => f.id === activeFrameId) ?? frames[0] ?? null,
+    [frames, activeFrameId],
+  );
+
+  // ─── Вьюпорт ────────────────────────────────────────────────────────────────
+
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
 
   useEffect(() => {
-    textDraftRef.current = textDraft;
-  }, [textDraft]);
+    const el = viewportRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect && rect.width > 0) setViewport({ w: rect.width, h: rect.height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loading]);
 
-  const activePage = pages[activeIndex] ?? null;
-  const activeSize: PageSizeMm = useMemo(
-    () => pageSizeMm(activePage?.orientation ?? 'portrait'),
-    [activePage?.orientation],
+  const fitFrames = useCallback(
+    (list: FrameState[], vp: { w: number; h: number }) => {
+      if (list.length === 0) return;
+      let bounds = frameWorldBounds(list[0].placement, pageSizeMm(list[0].orientation));
+      for (let i = 1; i < list.length; i++) {
+        const b = frameWorldBounds(list[i].placement, pageSizeMm(list[i].orientation));
+        bounds = {
+          minX: Math.min(bounds.minX, b.minX),
+          minY: Math.min(bounds.minY, b.minY),
+          maxX: Math.max(bounds.maxX, b.maxX),
+          maxY: Math.max(bounds.maxY, b.maxY),
+        };
+      }
+      setCamera(cameraToFitBounds(bounds, vp));
+    },
+    [],
   );
+
+  const fitSingleFrame = useCallback((frame: FrameState, vp: { w: number; h: number }) => {
+    setCamera(cameraToFitBounds(frameWorldBounds(frame.placement, pageSizeMm(frame.orientation)), vp));
+  }, []);
 
   // ─── Загрузка ───────────────────────────────────────────────────────────────
 
@@ -203,9 +256,16 @@ export default function Whiteboard() {
         if (cancelled) return;
         setBoard(data.board);
         savedTitleRef.current = data.board.title ?? '';
-        const next = data.pages.map(rowToPageState);
-        applyPages(next.length > 0 ? next : []);
-        setActiveIndex(0);
+        const next = data.pages.map(rowToFrameState);
+        applyFrames(next);
+        setActiveFrameId(next[0]?.id ?? null);
+        if (next.length > 0) {
+          // Открытие: один лист — вписать его; несколько — показать всю доску
+          // (репетитор группы сразу видит все зоны, кейс Елены).
+          const vp = { w: window.innerWidth, h: Math.max(320, window.innerHeight - 180) };
+          if (next.length === 1) fitSingleFrame(next[0], vp);
+          else fitFrames(next, vp);
+        }
         if (params.lessonId) {
           navigate(`/tutor/board/${data.board.id}`, { replace: true });
         }
@@ -221,9 +281,8 @@ export default function Whiteboard() {
     return () => {
       cancelled = true;
     };
-  }, [params.boardId, params.lessonId, navigate, applyPages]);
+  }, [params.boardId, params.lessonId, navigate, applyFrames, fitFrames, fitSingleFrame]);
 
-  // Уход со страницы — best-effort дожим очереди (+ beforeunload ниже).
   useEffect(
     () => () => {
       void autosave.flush();
@@ -242,71 +301,84 @@ export default function Whiteboard() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [saveStatus]);
 
-  // ─── Правки сцены ───────────────────────────────────────────────────────────
+  // ─── Правки сцены (адресуются рамке) ───────────────────────────────────────
 
-  const updateActiveElements = useCallback(
-    (updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
-      const current = pagesRef.current;
-      const page = current[activeIndex];
-      if (!page) return;
-      const nextElements = updater(page.elements);
-      if (nextElements === page.elements) return;
+  const updateFrameElements = useCallback(
+    (frameId: string, updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
+      const current = framesRef.current;
+      const idx = current.findIndex((f) => f.id === frameId);
+      if (idx < 0) return;
+      const frame = current[idx];
+      const nextElements = updater(frame.elements);
+      if (nextElements === frame.elements) return;
       if (recordHistory) {
-        historyRef.current.push(page.id, page.elements);
+        historyRef.current.push(frame.id, frame.elements);
         setHistoryTick((t) => t + 1);
       }
       const copy = current.slice();
-      copy[activeIndex] = { ...page, elements: nextElements };
-      // Порядок важен: сначала синхронное зеркало (applyPages), потом markDirty —
-      // очередь автосейва при любом раскладе читает уже новую сцену.
-      applyPages(copy);
-      autosave.markDirty(page.id);
+      copy[idx] = { ...frame, elements: nextElements };
+      applyFrames(copy);
+      autosave.markDirty(frame.id);
+      setActiveFrameId(frame.id);
     },
-    [activeIndex, autosave, applyPages],
+    [autosave, applyFrames],
   );
 
   const handleCommitElement = useCallback(
-    (element: BoardElement) => {
-      updateActiveElements((elements) => [...elements, element]);
+    (frameId: string, element: BoardElement) => {
+      updateFrameElements(frameId, (elements) => [...elements, element]);
     },
-    [updateActiveElements],
+    [updateFrameElements],
   );
 
   const handleEraseElements = useCallback(
-    (ids: string[]) => {
+    (frameId: string, ids: string[]) => {
       if (ids.length === 0) return;
       const removal = new Set(ids);
-      updateActiveElements((elements) => elements.filter((el) => !removal.has(el.id)));
+      updateFrameElements(frameId, (elements) => elements.filter((el) => !removal.has(el.id)));
     },
-    [updateActiveElements],
+    [updateFrameElements],
   );
 
   const handleMoveSelection = useCallback(
-    (dx: number, dy: number) => {
-      if ((dx === 0 && dy === 0) || selectedIds.length === 0) return;
-      const moving = new Set(selectedIds);
-      updateActiveElements((elements) =>
+    (frameId: string, dx: number, dy: number) => {
+      if ((dx === 0 && dy === 0) || !selection || selection.frameId !== frameId) return;
+      const moving = new Set(selection.ids);
+      updateFrameElements(frameId, (elements) =>
         elements.map((el) => (moving.has(el.id) ? translateElement(el, dx, dy) : el)),
       );
     },
-    [selectedIds, updateActiveElements],
+    [selection, updateFrameElements],
+  );
+
+  const handleTransformElement = useCallback(
+    (frameId: string, id: string, patch: Partial<ImageElement>) => {
+      updateFrameElements(frameId, (elements) =>
+        elements.map((el) => (el.id === id ? bumpVersion(el as ImageElement, patch) : el)),
+      );
+    },
+    [updateFrameElements],
   );
 
   const applyHistory = useCallback(
     (direction: 'undo' | 'redo') => {
-      const page = pagesRef.current[activeIndex];
-      if (!page) return;
+      const frameId = activeFrameId ?? framesRef.current[0]?.id;
+      if (!frameId) return;
+      const frame = framesRef.current.find((f) => f.id === frameId);
+      if (!frame) return;
       const history = historyRef.current;
       const restored =
         direction === 'undo'
-          ? history.undo(page.id, page.elements)
-          : history.redo(page.id, page.elements);
+          ? history.undo(frame.id, frame.elements)
+          : history.redo(frame.id, frame.elements);
       if (!restored) return;
       setHistoryTick((t) => t + 1);
-      applyPages(pagesRef.current.map((p) => (p.id === page.id ? { ...p, elements: restored } : p)));
-      autosave.markDirty(page.id);
+      applyFrames(
+        framesRef.current.map((f) => (f.id === frame.id ? { ...f, elements: restored } : f)),
+      );
+      autosave.markDirty(frame.id);
     },
-    [activeIndex, autosave, applyPages],
+    [activeFrameId, autosave, applyFrames],
   );
 
   const handleUndo = useCallback(() => applyHistory('undo'), [applyHistory]);
@@ -314,12 +386,48 @@ export default function Whiteboard() {
 
   const historyState = useMemo(() => {
     void historyTick;
-    if (!activePage) return { canUndo: false, canRedo: false };
+    const id = activeFrame?.id;
+    if (!id) return { canUndo: false, canRedo: false };
     return {
-      canUndo: historyRef.current.canUndo(activePage.id),
-      canRedo: historyRef.current.canRedo(activePage.id),
+      canUndo: historyRef.current.canUndo(id),
+      canRedo: historyRef.current.canRedo(id),
     };
-  }, [activePage, historyTick]);
+  }, [activeFrame, historyTick]);
+
+  // ─── Клавиатура: undo/redo + внутренний clipboard (B3) ─────────────────────
+
+  const handleCopySelection = useCallback((): boolean => {
+    const sel = selection;
+    if (!sel || sel.ids.length === 0) return false;
+    const frame = framesRef.current.find((f) => f.id === sel.frameId);
+    if (!frame) return false;
+    const picked = new Set(sel.ids);
+    const count = copyElements(frame.elements.filter((el) => picked.has(el.id)));
+    if (count > 0) toast.message(`Скопировано объектов: ${count}`);
+    return count > 0;
+  }, [selection]);
+
+  const pasteInternal = useCallback(() => {
+    const current = framesRef.current;
+    if (current.length === 0) return;
+    // Цель вставки: рамка под центром вьюпорта, иначе активная.
+    const cam = cameraRef.current;
+    const target =
+      current.find((f) => {
+        const b = frameWorldBounds(f.placement, pageSizeMm(f.orientation));
+        return cam.cx >= b.minX && cam.cx <= b.maxX && cam.cy >= b.minY && cam.cy <= b.maxY;
+      }) ?? current.find((f) => f.id === activeFrameId) ?? current[0];
+    const size = pageSizeMm(target.orientation);
+    const local = {
+      x: Math.min(Math.max(cam.cx - target.placement.x, 10), size.width - 10),
+      y: Math.min(Math.max(cam.cy - target.placement.y, 10), size.height - 10),
+    };
+    const clones = pasteElements(local);
+    if (clones.length === 0) return;
+    updateFrameElements(target.id, (elements) => [...elements, ...clones]);
+    setSelection({ frameId: target.id, ids: clones.map((c) => c.id) });
+    setTool('select');
+  }, [activeFrameId, updateFrameElements]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -332,32 +440,33 @@ export default function Whiteboard() {
       } else if (key === 'y' || (key === 'z' && event.shiftKey)) {
         event.preventDefault();
         handleRedo();
+      } else if (key === 'c') {
+        // B3: Ctrl+C копирует выделение доски (раньше не перехватывался вовсе).
+        if (handleCopySelection()) event.preventDefault();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, handleCopySelection]);
 
-  // ─── Свойства страницы (разлиновка, ориентация) ─────────────────────────────
+  // ─── Свойства рамки ─────────────────────────────────────────────────────────
 
-  const patchActivePage = useCallback(
-    (patch: Partial<Pick<PageState, 'background' | 'gridMm' | 'orientation'>>) => {
-      const page = pagesRef.current[activeIndex];
-      if (!page) return;
-      applyPages(pagesRef.current.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
-      autosave.markDirty(page.id);
+  const patchFrame = useCallback(
+    (frameId: string, patch: Partial<Pick<FrameState, 'background' | 'gridMm' | 'orientation' | 'placement'>>) => {
+      const frame = framesRef.current.find((f) => f.id === frameId);
+      if (!frame) return;
+      applyFrames(framesRef.current.map((f) => (f.id === frameId ? { ...f, ...patch } : f)));
+      autosave.markDirty(frameId);
     },
-    [activeIndex, autosave, applyPages],
+    [autosave, applyFrames],
   );
 
   const handleOrientationChange = useCallback(
     (orientation: PageOrientation) => {
-      const page = pagesRef.current[activeIndex];
-      if (!page || page.orientation === orientation) return;
-      // Контент за краем нового листа не удаляется, но в PDF не попадёт —
-      // предупреждаем заранее, а не после жалобы на «обрезанный конспект».
+      const frame = activeFrame;
+      if (!frame || frame.orientation === orientation) return;
       const next = pageSizeMm(orientation);
-      const overflows = page.elements.some((el) => {
+      const overflows = frame.elements.some((el) => {
         const b = elementBoundsCached(el);
         return b.maxX > next.width || b.maxY > next.height;
       });
@@ -369,81 +478,88 @@ export default function Whiteboard() {
       ) {
         return;
       }
-      patchActivePage({ orientation });
+      patchFrame(frame.id, { orientation });
     },
-    [activeIndex, patchActivePage],
+    [activeFrame, patchFrame],
   );
 
-  // ─── Страницы ───────────────────────────────────────────────────────────────
+  // ─── Рамки: добавить / удалить / перейти ───────────────────────────────────
 
-  const handleAddPage = useCallback(async () => {
+  const handleAddFrame = useCallback(async () => {
     if (!board || pageBusy) return;
     setPageBusy(true);
     try {
       await autosave.flush();
       const created = await createBoardPage(board.id, {
-        background: activePage?.background ?? 'grid',
-        grid_mm: activePage?.gridMm ?? 5,
+        background: activeFrame?.background ?? 'grid',
+        grid_mm: activeFrame?.gridMm ?? 5,
       });
-      const newPage: PageState = {
-        ...rowToPageState(created),
-        // Новый лист наследует ориентацию текущего (ориентация живёт в
-        // app_state и создаётся дефолтной — досылаем её первым же автосейвом).
-        orientation: activePage?.orientation ?? 'portrait',
+      const placement = nextFramePlacement(
+        framesRef.current.map((f) => ({ placement: f.placement, size: pageSizeMm(f.orientation) })),
+      );
+      const newFrame: FrameState = {
+        ...rowToFrameState(created, framesRef.current.length),
+        orientation: activeFrame?.orientation ?? 'portrait',
+        placement,
       };
-      const nextPages = [...pagesRef.current, newPage];
-      applyPages(nextPages);
-      if (newPage.orientation !== 'portrait') autosave.markDirty(newPage.id);
-      setActiveIndex(nextPages.length - 1);
-      setSelectedIds([]);
+      applyFrames([...framesRef.current, newFrame]);
+      // Позиция и ориентация живут в app_state — досылаем первым автосейвом.
+      autosave.markDirty(newFrame.id);
+      setActiveFrameId(newFrame.id);
+      setSelection(null);
+      fitSingleFrame(newFrame, viewport);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось добавить страницу');
+      toast.error(err instanceof Error ? err.message : 'Не удалось добавить лист');
     } finally {
       setPageBusy(false);
     }
-  }, [board, pageBusy, autosave, activePage, applyPages]);
+  }, [board, pageBusy, autosave, activeFrame, applyFrames, fitSingleFrame, viewport]);
 
-  const handleDeletePage = useCallback(
+  const handleDeleteFrame = useCallback(
     async (index: number) => {
-      const page = pagesRef.current[index];
-      if (!page || pageBusy) return;
-      const count = page.elements.length;
+      const frame = framesRef.current[index];
+      if (!frame || pageBusy) return;
+      const count = frame.elements.length;
       const message =
         count > 0
-          ? `Удалить страницу ${index + 1}? На ней ${count} объект(ов) — отменить удаление будет нельзя.`
-          : `Удалить пустую страницу ${index + 1}?`;
+          ? `Удалить лист ${index + 1}? На нём ${count} объект(ов) — отменить удаление будет нельзя.`
+          : `Удалить пустой лист ${index + 1}?`;
       if (!window.confirm(message)) return;
       setPageBusy(true);
       try {
-        await deleteBoardPage(page.id);
-        historyRef.current.forget(page.id);
-        autosave.forget(page.id);
-        const nextPages = pagesRef.current.filter((_, i) => i !== index);
-        applyPages(nextPages);
-        setActiveIndex((prev) => Math.max(0, Math.min(prev, nextPages.length - 1)));
-        setSelectedIds([]);
+        await deleteBoardPage(frame.id);
+        historyRef.current.forget(frame.id);
+        autosave.forget(frame.id);
+        const next = framesRef.current.filter((_, i) => i !== index);
+        applyFrames(next);
+        setActiveFrameId((prev) => (prev === frame.id ? next[0]?.id ?? null : prev));
+        setSelection(null);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Не удалось удалить страницу');
+        toast.error(err instanceof Error ? err.message : 'Не удалось удалить лист');
       } finally {
         setPageBusy(false);
       }
     },
-    [pageBusy, autosave, applyPages],
+    [pageBusy, autosave, applyFrames],
   );
 
-  const handleSelectPage = useCallback((index: number) => {
-    setActiveIndex(index);
-    setSelectedIds([]);
-  }, []);
+  const handleSelectFrame = useCallback(
+    (index: number) => {
+      const frame = framesRef.current[index];
+      if (!frame) return;
+      setActiveFrameId(frame.id);
+      setSelection(null);
+      fitSingleFrame(frame, viewport);
+    },
+    [fitSingleFrame, viewport],
+  );
 
-  // ─── Картинки (Фаза 2а, W2.1) ───────────────────────────────────────────────
+  // ─── Картинки ───────────────────────────────────────────────────────────────
 
-  // Резолв signed URL для всех ref на страницах. Битые — в failed-набор, чтобы
-  // не долбить storage на каждый штрих (эффект зависит от pages).
   useEffect(() => {
     const refs = new Set<string>();
-    for (const page of pages) {
-      for (const el of page.elements) {
+    for (const frame of frames) {
+      for (const el of frame.elements) {
         if (el.type === 'image') refs.add(el.ref);
       }
     }
@@ -466,15 +582,24 @@ export default function Whiteboard() {
     return () => {
       cancelled = true;
     };
-  }, [pages, imageUrls]);
+  }, [frames, imageUrls]);
 
   const insertImageFiles = useCallback(
     async (files: File[]) => {
       const currentBoard = board;
-      const page = pagesRef.current[activeIndex];
-      if (!currentBoard || !page || files.length === 0) return;
+      const current = framesRef.current;
+      if (!currentBoard || current.length === 0 || files.length === 0) return;
 
-      const existing = page.elements.filter((el) => el.type === 'image').length;
+      // Целевая рамка — под центром вьюпорта (жалоба Егора «вставляется где
+      // хочет»: раньше вставка шла в центр листа, который при зуме был вне экрана).
+      const cam = cameraRef.current;
+      const target =
+        current.find((f) => {
+          const b = frameWorldBounds(f.placement, pageSizeMm(f.orientation));
+          return cam.cx >= b.minX && cam.cx <= b.maxX && cam.cy >= b.minY && cam.cy <= b.maxY;
+        }) ?? current.find((f) => f.id === activeFrameId) ?? current[0];
+
+      const existing = target.elements.filter((el) => el.type === 'image').length;
       const room = MAX_IMAGES_PER_PAGE - existing;
       if (room <= 0) {
         toast.error(
@@ -490,9 +615,7 @@ export default function Whiteboard() {
       for (let i = 0; i < batch.length; i++) {
         try {
           const uploaded = await uploadBoardImage(batch[i], currentBoard.id);
-          const size = pageSizeMm(pagesRef.current[activeIndex]?.orientation ?? 'portrait');
-          // px → мм при 96 dpi; вписываем в 60% листа, каскад 5 мм от центра,
-          // чтобы серия вставок не легла стопкой точно друг на друга.
+          const size = pageSizeMm(target.orientation);
           const pxToMm = 25.4 / 96;
           let w = uploaded.naturalWidth * pxToMm;
           let h = uploaded.naturalHeight * pxToMm;
@@ -500,10 +623,13 @@ export default function Whiteboard() {
           w = roundMm(w * scale);
           h = roundMm(h * scale);
           const cascade = ((existing + i) % 4) * 5;
-          const x = roundMm(Math.max(0, (size.width - w) / 2 + cascade));
-          const y = roundMm(Math.max(0, (size.height - h) / 2 + cascade));
-          handleCommitElement(createImage(x, y, w, h, uploaded.ref));
-          // Прогреваем URL сразу — иначе на месте вставки мигает плейсхолдер.
+          const centerLocal = {
+            x: Math.min(Math.max(cam.cx - target.placement.x, w / 2), size.width - w / 2),
+            y: Math.min(Math.max(cam.cy - target.placement.y, h / 2), size.height - h / 2),
+          };
+          const x = roundMm(Math.max(0, centerLocal.x - w / 2 + cascade));
+          const y = roundMm(Math.max(0, centerLocal.y - h / 2 + cascade));
+          handleCommitElement(target.id, createImage(x, y, w, h, uploaded.ref));
           void resolveBoardImageUrl(uploaded.ref).then((url) => {
             if (url) setImageUrls((prev) => ({ ...prev, [uploaded.ref]: url }));
           });
@@ -512,12 +638,12 @@ export default function Whiteboard() {
         }
       }
     },
-    [board, activeIndex, handleCommitElement],
+    [board, activeFrameId, handleCommitElement],
   );
 
-  // Ctrl+V на уровне окна (вставку в текстовые поля не перехватываем).
-  const pasteHandler = usePasteImages({
-    compress: false, // компрессия внутри uploadBoardImage — не жать дважды
+  // Ctrl+V: сначала ВНУТРЕННИЙ буфер (B3), затем картинки из ОС.
+  const pasteImageHandler = usePasteImages({
+    compress: false,
     onImagePasted: (file) => void insertImageFiles([file]),
     successToast: null,
     telemetryTag: 'board',
@@ -525,11 +651,16 @@ export default function Whiteboard() {
   useEffect(() => {
     const handler = (e: ClipboardEvent) => {
       if (isEditableTarget(e.target)) return;
-      pasteHandler(e as unknown as React.ClipboardEvent);
+      if (shouldUseInternalClipboard(e)) {
+        e.preventDefault();
+        pasteInternal();
+        return;
+      }
+      pasteImageHandler(e as unknown as React.ClipboardEvent);
     };
     window.addEventListener('paste', handler);
     return () => window.removeEventListener('paste', handler);
-  }, [pasteHandler]);
+  }, [pasteImageHandler, pasteInternal]);
 
   const { dragHandlers, isDragging } = useDragDropFiles({
     compress: false,
@@ -539,23 +670,8 @@ export default function Whiteboard() {
     telemetryTag: 'board',
   });
 
-  const handleTransformElement = useCallback(
-    (id: string, patch: Partial<ImageElement>) => {
-      updateActiveElements((elements) =>
-        elements.map((el) => (el.id === id ? bumpVersion(el as ImageElement, patch) : el)),
-      );
-    },
-    [updateActiveElements],
-  );
-
   // ─── Текст ──────────────────────────────────────────────────────────────────
 
-  /**
-   * Коммит через ref, вне setState-updater'ов. `expectedId` защищает от гонки
-   * blur ↔ pointerdown (см. также preventDefault в BoardCanvas.handlePointerDown —
-   * он убирает кражу фокуса default-действием mousedown, из-за которой поле
-   * закрывалось пустым сразу после открытия).
-   */
   const commitTextDraft = useCallback(
     (expectedId?: number) => {
       const draft = textDraftRef.current;
@@ -563,6 +679,7 @@ export default function Whiteboard() {
       if (expectedId !== undefined && draft.id !== expectedId) return;
       if (draft.value.trim()) {
         handleCommitElement(
+          draft.frameId,
           createText(draft.x, draft.y, draft.value.trim(), color, DEFAULT_TEXT_SIZE_MM),
         );
       }
@@ -573,48 +690,47 @@ export default function Whiteboard() {
   );
 
   const handleRequestText = useCallback(
-    (x: number, y: number) => {
+    (frameId: string, x: number, y: number) => {
       commitTextDraft();
       textDraftSeq += 1;
-      const draft = { id: textDraftSeq, x, y, value: '' };
+      const draft = { id: textDraftSeq, frameId, x, y, value: '' };
       textDraftRef.current = draft;
       setTextDraft(draft);
+      setActiveFrameId(frameId);
     },
     [commitTextDraft],
   );
 
-  // ─── Экспорт и прикрепление ────────────────────────────────────────────────
+  // ─── Экспорт и прикрепление (обходит рамки листами — критерий Фазы 1) ──────
 
   const computeSignature = useCallback(() => {
     return JSON.stringify(
-      pagesRef.current.map((p) => [
-        p.background,
-        p.gridMm,
-        p.orientation,
-        p.elements.map((el) => `${el.id}:${el.version}`),
+      framesRef.current.map((f) => [
+        f.background,
+        f.gridMm,
+        f.orientation,
+        f.elements.map((el) => `${el.id}:${el.version}`),
       ]),
     );
   }, []);
 
   const buildPdfBlob = useCallback(async () => {
-    const source = pagesRef.current;
-    if (source.length === 0) throw new Error('В доске нет страниц');
-    // Картинки — data:-URL заранее (fail-closed: конспект с пустыми рамками
-    // вместо картинок хуже честной ошибки — тот же принцип, что со шрифтом).
+    const source = framesRef.current;
+    if (source.length === 0) throw new Error('В доске нет листов');
     const refs: string[] = [];
-    for (const page of source) {
-      for (const el of page.elements) {
+    for (const frame of source) {
+      for (const el of frame.elements) {
         if (el.type === 'image') refs.push(el.ref);
       }
     }
     const pdfImageUrls = refs.length > 0 ? await resolveImagesAsDataUrls(refs) : undefined;
     const { exportBoardToPdf } = await import('@/lib/whiteboard/exportPdf');
     return exportBoardToPdf(
-      source.map((p) => ({
-        elements: p.elements,
-        background: p.background,
-        gridMm: p.gridMm,
-        orientation: p.orientation,
+      source.map((f) => ({
+        elements: f.elements,
+        background: f.background,
+        gridMm: f.gridMm,
+        orientation: f.orientation,
       })),
       {
         onPageStart: (done, total) => setExportProgress({ done, total }),
@@ -625,7 +741,7 @@ export default function Whiteboard() {
 
   const handleDownload = useCallback(async () => {
     if (exportProgress) return;
-    setExportProgress({ done: 0, total: pagesRef.current.length });
+    setExportProgress({ done: 0, total: framesRef.current.length });
     try {
       await autosave.flush();
       const blob = await buildPdfBlob();
@@ -645,11 +761,6 @@ export default function Whiteboard() {
     }
   }, [exportProgress, autosave, buildPdfBlob, board]);
 
-  /**
-   * SINGLE-FLIGHT (ревью р.4, P1): ручная кнопка и авто-прикрепление при выходе
-   * могли пойти параллельно и загрузить два PDF. Повторный вызов получает тот
-   * же promise; после завершения слот освобождается.
-   */
   const attachPdfToLesson = useCallback((): Promise<boolean> => {
     if (attachPromiseRef.current) return attachPromiseRef.current;
     const run = (async (): Promise<boolean> => {
@@ -659,13 +770,11 @@ export default function Whiteboard() {
       if (signature === exportedSignatureRef.current && currentBoard.export_material_id) {
         return true;
       }
-
       const blob = await buildPdfBlob();
       const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
       const fileName = boardPdfFileName(currentBoard.title, new Date());
       const file = new File([blob], fileName, { type: 'application/pdf' });
       const material = await uploadLessonPdf(file, currentBoard.lesson_id, fileName);
-
       const previousId = currentBoard.export_material_id;
       const updated = await updateBoard(currentBoard.id, { export_material_id: material.id });
       setBoard(updated);
@@ -684,7 +793,7 @@ export default function Whiteboard() {
   const handleAttachClick = useCallback(async () => {
     if (attaching || exportProgress) return;
     setAttaching(true);
-    setExportProgress({ done: 0, total: pagesRef.current.length });
+    setExportProgress({ done: 0, total: framesRef.current.length });
     try {
       await autosave.flush();
       await attachPdfToLesson();
@@ -710,15 +819,13 @@ export default function Whiteboard() {
         navigate('/tutor/board');
         return;
       }
-      const hasContent = pagesRef.current.some((p) => p.elements.length > 0);
+      const hasContent = framesRef.current.some((f) => f.elements.length > 0);
       if (board?.lesson_id && hasContent && computeSignature() !== exportedSignatureRef.current) {
         setExitPhase('attaching');
         try {
           await attachPdfToLesson();
           toast.success('Конспект прикреплён к занятию');
         } catch (err) {
-          // НЕ закрываем редактор молча (ревью р.4, P0): главный Job — PDF в
-          // занятии, и уход при его провале должен быть осознанным выбором.
           const leaveWithoutPdf = window.confirm(
             `Конспект не прикрепился к занятию: ${err instanceof Error ? err.message : 'ошибка сети'}.\n\n` +
               'Доска сохранена. Выйти БЕЗ PDF в занятии? «Отмена» — остаться и повторить.',
@@ -732,14 +839,7 @@ export default function Whiteboard() {
     }
   }, [exitPhase, autosave, board, computeSignature, attachPdfToLesson, navigate]);
 
-  // ─── Back-гард ──────────────────────────────────────────────────────────────
-  //
-  // Браузерный Back / свайп назад — SPA-навигация: beforeunload НЕ срабатывает,
-  // и unmount уносил несохранённое и обходил авто-прикрепление (ревью р.4, P0).
-  // BrowserRouter без data-роутера не даёт useBlocker, поэтому классический
-  // трап: сторожевая запись в history; popstate при «есть что терять» возвращает
-  // запись и проводит уход через штатный handleExit. Когда терять нечего —
-  // отпускаем назад без вмешательства.
+  // ─── Back-гард (P0 ревью р.4) ───────────────────────────────────────────────
 
   const saveStatusRef = useRef(saveStatus);
   useEffect(() => {
@@ -751,8 +851,6 @@ export default function Whiteboard() {
   }, [board]);
 
   useEffect(() => {
-    // Сторожевая запись — один раз на маунт (в эффекте слушателя её пересоздание
-    // плодило бы записи при каждой смене deps).
     window.history.pushState({ __boardGuard: true }, '');
   }, []);
 
@@ -761,16 +859,13 @@ export default function Whiteboard() {
       const b = boardStateRef.current;
       const attachPending =
         !!b?.lesson_id &&
-        pagesRef.current.some((p) => p.elements.length > 0) &&
+        framesRef.current.some((f) => f.elements.length > 0) &&
         computeSignature() !== exportedSignatureRef.current;
       const needsGuard = saveStatusRef.current !== 'saved' || attachPending;
       if (!needsGuard) {
-        // Сторожевая запись уже поглощена этим popstate — уходим ещё на шаг,
-        // на настоящую предыдущую страницу.
         window.history.back();
         return;
       }
-      // Возвращаем сторожа и проводим уход по-человечески: flush → attach → навигация.
       window.history.pushState({ __boardGuard: true }, '');
       void handleExit();
     };
@@ -796,33 +891,6 @@ export default function Whiteboard() {
     }
   }, [board]);
 
-  // ─── Зум ────────────────────────────────────────────────────────────────────
-
-  // Габариты вьюпорта — для режима «Вписать» (масштаб зависит от ориентации).
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [viewport, setViewport] = useState<{ w: number; h: number } | null>(null);
-
-  useEffect(() => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      const rect = entries[0]?.contentRect;
-      if (rect) setViewport({ w: rect.width, h: rect.height });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [loading]);
-
-  const sheetWidthPx = useMemo(() => {
-    if (!viewport) return null;
-    const ratio = activeSize.width / activeSize.height;
-    if (zoom === 'fit') {
-      // Вписать целиком: ограничение и по ширине, и по высоте.
-      return Math.max(120, Math.min(viewport.w, viewport.h * ratio));
-    }
-    return Math.max(120, (viewport.w * zoom) / 100);
-  }, [viewport, zoom, activeSize]);
-
   // ─── Рендер ─────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -844,28 +912,44 @@ export default function Whiteboard() {
     );
   }
 
-  const pageSummaries = pages.map((p) => ({
-    id: p.id,
-    elements: p.elements,
-    background: p.background,
-    gridMm: p.gridMm,
-    orientation: p.orientation,
+  const frameViews: FrameView[] = frames.map((f, i) => ({
+    id: f.id,
+    placement: f.placement,
+    size: pageSizeMm(f.orientation),
+    background: f.background,
+    gridMm: f.gridMm,
+    elements: f.elements,
+    title: `Лист ${i + 1}`,
+  }));
+
+  const frameSummaries = frames.map((f) => ({
+    id: f.id,
+    elements: f.elements,
+    background: f.background,
+    gridMm: f.gridMm,
+    orientation: f.orientation,
   }));
 
   const exporting = exportProgress !== null;
+  const activeIndex = Math.max(0, frames.findIndex((f) => f.id === (activeFrame?.id ?? '')));
+
+  const textDraftFrame = textDraft ? frames.find((f) => f.id === textDraft.frameId) : null;
+  const textDraftPx = textDraft && textDraftFrame
+    ? worldToViewportPx(
+        textDraftFrame.placement.x + textDraft.x,
+        textDraftFrame.placement.y + textDraft.y,
+        camera,
+        viewport,
+      )
+    : null;
 
   return (
-    // fixed inset-0: редактор занимает ВЕСЬ экран поверх AppFrame — на планшете
-    // и телефоне рамка кабинета съедала место холста (ревью 5.6, P1). Высоту
-    // держит inset, а не vh-единицы (rule 80).
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
       <header className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => void handleExit()}
-          // attaching тоже блокирует: параллельные «Прикрепить» и «Доски»
-          // загружали два PDF (ревью р.4, P1; плюс single-flight в attachPdfToLesson).
           disabled={exitPhase !== null || attaching}
           style={{ touchAction: 'manipulation' }}
         >
@@ -881,7 +965,6 @@ export default function Whiteboard() {
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
-          // 16px (text-base) обязателен на инпутах — иначе Safari iOS зумит (rule 80).
           className="min-w-0 flex-1 rounded-md border border-transparent px-2 py-1 text-base font-medium text-slate-900 hover:border-slate-200 focus:border-accent focus:outline-none"
         />
 
@@ -957,15 +1040,22 @@ export default function Whiteboard() {
         onColorChange={setColor}
         size={size}
         onSizeChange={setSize}
-        background={activePage?.background ?? 'grid'}
-        onBackgroundChange={(background) => patchActivePage({ background })}
-        gridMm={activePage?.gridMm ?? 5}
-        onGridMmChange={(gridMm: BoardGridMm) => patchActivePage({ gridMm })}
-        orientation={activePage?.orientation ?? 'portrait'}
+        background={activeFrame?.background ?? 'grid'}
+        onBackgroundChange={(background) => activeFrame && patchFrame(activeFrame.id, { background })}
+        gridMm={activeFrame?.gridMm ?? 5}
+        onGridMmChange={(gridMm: BoardGridMm) => activeFrame && patchFrame(activeFrame.id, { gridMm })}
+        orientation={activeFrame?.orientation ?? 'portrait'}
         onOrientationChange={handleOrientationChange}
         onPickImage={() => fileInputRef.current?.click()}
-        zoom={zoom}
-        onZoomChange={setZoom}
+        camera={{
+          zoomPercent: Math.round((camera.zoom / HUNDRED_PERCENT_ZOOM) * 100),
+          onZoomIn: () =>
+            setCamera((c) => zoomCameraAt(c, 1.25, { x: c.cx, y: c.cy })),
+          onZoomOut: () =>
+            setCamera((c) => zoomCameraAt(c, 0.8, { x: c.cx, y: c.cy })),
+          onFitFrame: () => activeFrame && fitSingleFrame(activeFrame, viewport),
+          onFitAll: () => fitFrames(framesRef.current, viewport),
+        }}
         canUndo={historyState.canUndo}
         canRedo={historyState.canRedo}
         onUndo={handleUndo}
@@ -973,7 +1063,6 @@ export default function Whiteboard() {
         disabled={pageBusy}
       />
 
-      {/* accept image/* без capture: iOS/Android сами предложат «Камера / Галерея / Файлы». */}
       <input
         ref={fileInputRef}
         type="file"
@@ -987,76 +1076,51 @@ export default function Whiteboard() {
         }}
       />
 
-      <div
-        ref={viewportRef}
-        className="relative min-h-0 flex-1 overflow-auto p-3"
-        {...dragHandlers}
-      >
-        <div
-          className="relative mx-auto bg-white shadow-sm ring-1 ring-slate-200"
-          style={{
-            width: sheetWidthPx ? `${Math.round(sheetWidthPx)}px` : '100%',
-            aspectRatio: `${activeSize.width} / ${activeSize.height}`,
-          }}
-        >
-          {activePage && (
-            <BoardCanvas
-              elements={activePage.elements}
-              background={activePage.background}
-              gridMm={activePage.gridMm}
-              pageSize={activeSize}
-              tool={tool}
-              color={color}
-              size={size}
-              selectedIds={selectedIds}
-              readOnly={pageBusy}
-              imageUrls={imageUrls}
-              onCommitElement={handleCommitElement}
-              onEraseElements={handleEraseElements}
-              onSelectionChange={setSelectedIds}
-              onMoveSelection={handleMoveSelection}
-              onTransformElement={handleTransformElement}
-              onRequestText={handleRequestText}
-              onPan={(dx, dy) => {
-                const el = viewportRef.current;
-                if (el) {
-                  el.scrollLeft += dx;
-                  el.scrollTop += dy;
-                }
-              }}
-            />
-          )}
+      <div ref={viewportRef} className="relative min-h-0 flex-1" {...dragHandlers}>
+        <BoardCanvas
+          frames={frameViews}
+          camera={camera}
+          viewport={viewport}
+          onCameraChange={setCamera}
+          tool={tool}
+          color={color}
+          size={size}
+          selection={selection}
+          readOnly={pageBusy}
+          imageUrls={imageUrls}
+          onSelectionChange={setSelection}
+          onCommitElement={handleCommitElement}
+          onEraseElements={handleEraseElements}
+          onMoveSelection={handleMoveSelection}
+          onTransformElement={handleTransformElement}
+          onRequestText={handleRequestText}
+        />
 
-          {textDraft && (
-            <textarea
-              key={textDraft.id}
-              autoFocus
-              value={textDraft.value}
-              onChange={(e) => {
-                const next = { ...textDraft, value: e.target.value };
-                textDraftRef.current = next;
-                setTextDraft(next);
-              }}
-              onBlur={() => commitTextDraft(textDraft.id)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  textDraftRef.current = null;
-                  setTextDraft(null);
-                } else if (e.key === 'Enter' && !e.shiftKey) {
-                  // Enter — готово (привычно для подписи); новая строка — Shift+Enter.
-                  e.preventDefault();
-                  commitTextDraft(textDraft.id);
-                }
-              }}
-              placeholder="Текст. Enter — готово, Esc — отмена"
-              style={{
-                left: `${(textDraft.x / activeSize.width) * 100}%`,
-                top: `${(textDraft.y / activeSize.height) * 100}%`,
-              }}
-              className="absolute z-10 min-h-[44px] w-56 resize-none rounded-md border border-accent bg-white p-2 text-base shadow-sm focus:outline-none"
-            />
-          )}
-        </div>
+        {textDraft && textDraftPx && (
+          <textarea
+            key={textDraft.id}
+            autoFocus
+            value={textDraft.value}
+            onChange={(e) => {
+              const next = { ...textDraft, value: e.target.value };
+              textDraftRef.current = next;
+              setTextDraft(next);
+            }}
+            onBlur={() => commitTextDraft(textDraft.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                textDraftRef.current = null;
+                setTextDraft(null);
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                commitTextDraft(textDraft.id);
+              }
+            }}
+            placeholder="Текст. Enter — готово, Esc — отмена"
+            style={{ left: `${textDraftPx.x}px`, top: `${textDraftPx.y}px` }}
+            className="absolute z-10 min-h-[44px] w-56 resize-none rounded-md border border-accent bg-white p-2 text-base shadow-sm focus:outline-none"
+          />
+        )}
 
         {isDragging && (
           <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/5">
@@ -1068,12 +1132,12 @@ export default function Whiteboard() {
       </div>
 
       <PagesPanel
-        pages={pageSummaries}
+        pages={frameSummaries}
         activeIndex={activeIndex}
         disabled={pageBusy}
-        onSelect={handleSelectPage}
-        onAdd={() => void handleAddPage()}
-        onDelete={(index) => void handleDeletePage(index)}
+        onSelect={handleSelectFrame}
+        onAdd={() => void handleAddFrame()}
+        onDelete={(index) => void handleDeleteFrame(index)}
       />
 
       {exitPhase && (

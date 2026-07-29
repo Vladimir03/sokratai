@@ -3,6 +3,7 @@ import {
   Circle,
   Eraser,
   ImagePlus,
+  LayoutGrid,
   Maximize,
   Minus,
   MousePointer2,
@@ -29,12 +30,16 @@ import {
   PEN_SIZES_MM,
 } from '@/lib/whiteboard/model';
 
-/** 'fit' — вписать лист целиком; число — процент ширины вьюпорта (100 = по ширине). */
-export type BoardZoom = 'fit' | number;
-
-export const ZOOM_MIN = 50;
-export const ZOOM_MAX = 300;
-export const ZOOM_STEP = 25;
+/** Контролы камеры холста (B0): проценты — только индикация, живёт в camera.zoom. */
+export interface CameraControls {
+  zoomPercent: number;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  /** Вписать активный лист. */
+  onFitFrame: () => void;
+  /** Показать всю доску (grid-обзор зон Елены). */
+  onFitAll: () => void;
+}
 
 // Панель инструментов доски (задача W1.0.4 + разлиновка W1.6).
 // Набор намеренно минимальный: штрих, ластик, текст, три простые фигуры,
@@ -56,8 +61,7 @@ interface BoardToolbarProps {
   onOrientationChange: (orientation: PageOrientation) => void;
   /** Открыть файловый пикер картинки (на планшете нативно предложит камеру). */
   onPickImage: () => void;
-  zoom: BoardZoom;
-  onZoomChange: (zoom: BoardZoom) => void;
+  camera: CameraControls;
   canUndo: boolean;
   canRedo: boolean;
   onUndo: () => void;
@@ -136,8 +140,7 @@ export const BoardToolbar = memo(function BoardToolbar({
   orientation,
   onOrientationChange,
   onPickImage,
-  zoom,
-  onZoomChange,
+  camera,
   canUndo,
   canRedo,
   onUndo,
@@ -268,36 +271,23 @@ export const BoardToolbar = memo(function BoardToolbar({
       </div>
 
       <div className="ml-auto flex items-center gap-1">
-        <ToolbarButton
-          label="Мельче"
-          disabled={disabled || (zoom !== 'fit' && zoom <= ZOOM_MIN)}
-          onClick={() => onZoomChange(zoom === 'fit' ? 100 - ZOOM_STEP : Math.max(ZOOM_MIN, zoom - ZOOM_STEP))}
-        >
+        <ToolbarButton label="Мельче" disabled={disabled} onClick={camera.onZoomOut}>
           <ZoomOut className="h-4 w-4" />
         </ToolbarButton>
-        <button
-          type="button"
-          title="По ширине экрана"
-          onClick={() => onZoomChange(100)}
-          disabled={disabled}
-          style={{ touchAction: 'manipulation' }}
-          className={cn(
-            'h-11 min-w-[3.5rem] rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-600 hover:bg-slate-50',
-            zoom !== 'fit' && 'border-accent text-accent',
-            disabled && 'cursor-not-allowed opacity-40',
-          )}
+        <span
+          aria-live="off"
+          className="flex h-11 min-w-[3.5rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-sm tabular-nums text-slate-600"
         >
-          {zoom === 'fit' ? '—' : `${zoom}%`}
-        </button>
-        <ToolbarButton
-          label="Крупнее"
-          disabled={disabled || (zoom !== 'fit' && zoom >= ZOOM_MAX)}
-          onClick={() => onZoomChange(zoom === 'fit' ? 100 + ZOOM_STEP : Math.min(ZOOM_MAX, zoom + ZOOM_STEP))}
-        >
+          {camera.zoomPercent}%
+        </span>
+        <ToolbarButton label="Крупнее" disabled={disabled} onClick={camera.onZoomIn}>
           <ZoomIn className="h-4 w-4" />
         </ToolbarButton>
-        <ToolbarButton label="Вписать лист целиком" active={zoom === 'fit'} disabled={disabled} onClick={() => onZoomChange('fit')}>
+        <ToolbarButton label="Вписать активный лист" disabled={disabled} onClick={camera.onFitFrame}>
           <Maximize className="h-4 w-4" />
+        </ToolbarButton>
+        <ToolbarButton label="Вся доска (все листы)" disabled={disabled} onClick={camera.onFitAll}>
+          <LayoutGrid className="h-4 w-4" />
         </ToolbarButton>
       </div>
     </div>
