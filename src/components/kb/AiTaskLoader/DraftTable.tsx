@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { AlertTriangle, Check, ChevronDown, Image as ImageIcon, Trash2, X } from 'lucide-react';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
+import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cn } from '@/lib/utils';
 import type { ExtractedTask } from '@/lib/kbAiExtractApi';
@@ -62,11 +63,20 @@ const DraftRow = memo(function DraftRow({
   onChangeOverride,
 }: DraftRowProps) {
   const answerEmpty = !draft.answer || draft.answer.trim() === '';
-  const kimNum = override.kimNumber.trim() ? parseInt(override.kimNumber.trim(), 10) : null;
-  const autoScore = getKimPrimaryScoreForSubject(subject, override.exam || null, kimNum);
+  const isOlympiad = override.exam === 'olympiad';
+  const kimNum =
+    !isOlympiad && override.kimNumber.trim() ? parseInt(override.kimNumber.trim(), 10) : null;
+  const autoScore = isOlympiad
+    ? (override.difficulty.trim() ? parseInt(override.difficulty.trim(), 10) : null)
+    : getKimPrimaryScoreForSubject(subject, overrideExamToDb(override.exam), kimNum);
   const topicUnmatched = !override.topicId && draft.topic_suggestion.trim() !== '';
-  // Темы ЕГЭ/ОГЭ дублируются по именам — при заданном экзамене скоупим список.
-  const topicOptions = override.exam ? topics.filter((t) => t.exam === override.exam) : topics;
+  // Темы ЕГЭ/ОГЭ дублируются по именам — при заданном экзамене скоупим список;
+  // «Олимпиада» — только олимпиадные темы (ВОЛНА 8, kind-aware).
+  const topicOptions = isOlympiad
+    ? topics.filter((t) => t.kind === 'olympiad')
+    : override.exam === 'ege' || override.exam === 'oge'
+      ? topics.filter((t) => t.exam === override.exam)
+      : topics;
   const hasImage = draft.attachment_ref !== null;
   const hasCrop = hasImage && crop !== null && crop.status !== 'full' && crop.bbox !== null;
 
@@ -130,15 +140,19 @@ const DraftRow = memo(function DraftRow({
             <option value="">—</option>
             <option value="ege">ЕГЭ</option>
             <option value="oge">ОГЭ</option>
+            <option value="olympiad">Олимп.</option>
+            <option value="other">Другое</option>
           </select>
         </td>
-        {/* КИМ (+ provenance-чип: откуда номер — маркер файла / AI / вручную) */}
+        {/* КИМ (+ provenance-чип: откуда номер — маркер файла / AI / вручную).
+            Олимпиада КИМ не несёт — инпут выключен, сложность в карточке. */}
         <td className="px-1.5 py-2">
           <input
             type="text"
             inputMode="numeric"
-            value={override.kimNumber}
-            disabled={disabled}
+            value={isOlympiad ? '' : override.kimNumber}
+            title={isOlympiad ? 'У олимпиадных задач № КИМ нет — сложность в карточке' : undefined}
+            disabled={disabled || isOlympiad}
             onChange={(e) =>
               onChangeOverride(index, {
                 kimNumber: e.target.value.replace(/\D/g, ''),

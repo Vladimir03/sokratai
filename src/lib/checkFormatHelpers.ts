@@ -44,6 +44,50 @@ export function inferCheckFormatFromKim(
 }
 
 /**
+ * Subject/exam-aware инфер формата проверки по № КИМ (ВОЛНА 8, 2026-07-23,
+ * AI-загрузчик). Физика — legacy-поведение `inferCheckFormatFromKim` (ЕГЭ
+ * [21,26] независимо от exam — обратная совместимость, регресс-гарантия);
+ * остальные предметы — `part2KimRange` профиля ВЫБРАННОГО экзамена
+ * (social:ege = [17,25]); нет exam/профиля → short_answer.
+ * Образец — `inferVariantTaskPart` (variantTaskDraft.ts).
+ */
+export function inferCheckFormatForSubject(
+  subject: string | null | undefined,
+  exam: 'ege' | 'oge' | null | undefined,
+  kimNumber: number | null | undefined,
+): CheckFormat {
+  const subj = subject ?? 'physics';
+  if (subj === 'physics') return inferCheckFormatFromKim(kimNumber);
+  const range = exam ? getExamProfile(subj, exam)?.part2KimRange : undefined;
+  if (kimNumber && range && kimNumber >= range[0] && kimNumber <= range[1]) {
+    return 'detailed_solution';
+  }
+  return 'short_answer';
+}
+
+/**
+ * Резолв формата для AI-загрузчика (ВОЛНА 8): тот же приоритет, что
+ * `resolveCheckFormatFromKb` (explicit → legacy answer_format → инфер по КИМ),
+ * но КИМ-эвристика — subject/exam-aware (`inferCheckFormatForSubject`), а не
+ * только физика. `resolveCheckFormatFromKb` НЕ трогаем — его зовут HWDrawer /
+ * hwDraftStore (path B ДЗ), там смена семантики = отдельное решение.
+ */
+export function resolveCheckFormatForLoader(input: {
+  check_format?: string | null;
+  answer_format?: string | null;
+  kim_number?: number | null;
+  subject?: string | null;
+  exam?: 'ege' | 'oge' | null;
+}): CheckFormat {
+  if (input.check_format === 'short_answer' || input.check_format === 'detailed_solution') {
+    return input.check_format;
+  }
+  const fromAnswerFormat = mapAnswerFormatToCheckFormat(input.answer_format);
+  if (fromAnswerFormat) return fromAnswerFormat;
+  return inferCheckFormatForSubject(input.subject, input.exam ?? null, input.kim_number);
+}
+
+/**
  * Resolve `check_format` from a KB task in priority:
  *   1. Explicit `check_format` field if valid
  *   2. Legacy `answer_format` mapping

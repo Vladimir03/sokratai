@@ -12,10 +12,12 @@ import {
 import { toast } from 'sonner';
 import { MathText } from '@/components/kb/ui/MathText';
 import { BboxEditor } from '@/components/kb/AiTaskLoader/BboxEditor';
+import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { CropState, ReviewOverrides } from '@/components/kb/AiTaskLoader/reviewTypes';
-import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
+import { resolveCheckFormatForLoader } from '@/lib/checkFormatHelpers';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { useKbSources, useSubtopics } from '@/hooks/useKnowledgeBase';
+import { compressForUpload } from '@/lib/imageCompression';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
 import { cn } from '@/lib/utils';
 import type { ExtractedTask, ImageBbox } from '@/lib/kbAiExtractApi';
@@ -54,6 +56,11 @@ interface DraftCardProps {
    * Балл остаются: едут в снимок и авто-балл ФИПИ).
    */
   showTaxonomy?: boolean;
+  /** ВОЛНА 8: скриншоты решения (refs kb-attachments; состояние живёт в Flow). */
+  solutionRefs?: string[];
+  onSolutionRefsChange?: (index: number, refs: string[]) => void;
+  /** ВОЛНА 8: личные папки для per-task селекта «Папка» (undefined = скрыт, hw/mock). */
+  folders?: { id: string; name: string; depth: number }[];
 }
 
 const CONFIDENCE_META: Record<
@@ -65,7 +72,12 @@ const CONFIDENCE_META: Record<
   low: { label: 'Ответ не распознан', className: 'bg-amber-100 text-amber-800' },
 };
 
-const EXAM_LABELS: Record<string, string> = { ege: 'ЕГЭ', oge: 'ОГЭ' };
+const EXAM_LABELS: Record<string, string> = {
+  ege: 'ЕГЭ',
+  oge: 'ОГЭ',
+  olympiad: 'Олимпиада',
+  other: 'Другое',
+};
 
 const SELECT_CLASS =
   'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]';
@@ -153,6 +165,9 @@ function DraftCardComponent({
   hideSelect,
   onRemove,
   showTaxonomy = true,
+  solutionRefs,
+  onSolutionRefsChange,
+  folders,
 }: DraftCardProps) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
@@ -160,6 +175,10 @@ function DraftCardComponent({
   const [refineOpen, setRefineOpen] = useState(false);
   const [refineComment, setRefineComment] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // ВОЛНА 8: скриншоты решения — refs в Flow, превью-URLs локально.
+  const [uploadingSolution, setUploadingSolution] = useState(false);
+  const [solutionUrls, setSolutionUrls] = useState<Record<string, string>>({});
+  const solutionFileInputRef = useRef<HTMLInputElement>(null);
 
   const hasOverride = override !== undefined && onOverrideChange !== undefined;
   // Подтемы/источники — quiet-хуки (staleTime 10 мин, дедуп по ключу); монтируются
@@ -188,24 +207,31 @@ function DraftCardComponent({
   const effKim = hasOverride
     ? (override.kimNumber.trim() ? parseInt(override.kimNumber.trim(), 10) : null)
     : draft.kim_number;
-  const effExam = hasOverride ? (override.exam || null) : draft.exam;
+  const isOlympiad = hasOverride && override.exam === 'olympiad';
+  const effExam = hasOverride ? overrideExamToDb(override.exam) : draft.exam;
   // P1-4: grading mode resolved exactly as the commit does (so the badge matches
-  // what's persisted to kb_tasks.check_format).
+  // what's persisted to kb_tasks.check_format). ВОЛНА 8: subject/exam-aware авто.
+  const autoCheckFormat = resolveCheckFormatForLoader({
+    check_format: draft.check_format,
+    answer_format: draft.answer_format,
+    kim_number: isOlympiad ? null : effKim,
+    subject,
+    exam: effExam,
+  });
+  const effCheckFormat = hasOverride && override.checkFormat ? override.checkFormat : autoCheckFormat;
   const checkFormatLabel =
-    resolveCheckFormatFromKb({
-      check_format: draft.check_format,
-      answer_format: draft.answer_format,
-      kim_number: effKim,
-      subject,
-    }) === 'detailed_solution'
-      ? 'Развёрнутое решение'
-      : 'Краткий ответ';
-  const autoScore = getKimPrimaryScoreForSubject(subject, effExam, effKim);
+    effCheckFormat === 'detailed_solution' ? 'Развёрнутое решение' : 'Краткий ответ';
+  const autoScore = isOlympiad
+    ? (override.difficulty.trim() ? parseInt(override.difficulty.trim(), 10) : null)
+    : getKimPrimaryScoreForSubject(subject, effExam, effKim);
   // Темы ЕГЭ и ОГЭ имеют одинаковые имена («Кинематика» ×2) — при выбранном
-  // экзамене скоупим список, иначе селект пестрит дублями.
-  const topicOptions = (topics ?? []).filter(
-    (t) => !hasOverride || !override.exam || t.exam === override.exam,
-  );
+  // экзамене скоупим список; «Олимпиада» — только kind='olympiad' (ВОЛНА 8).
+  const topicOptions = (topics ?? []).filter((t) => {
+    if (!hasOverride) return true;
+    if (override.exam === 'olympiad') return t.kind === 'olympiad';
+    if (override.exam === 'ege' || override.exam === 'oge') return t.exam === override.exam;
+    return true;
+  });
 
   const activeCropBbox = crop && crop.status !== 'full' ? crop.bbox : null;
 
@@ -240,6 +266,72 @@ function DraftCardComponent({
     setRefineOpen(false);
   };
 
+  // ── ВОЛНА 8: скриншоты решения (upload/paste; компрессия обязательна, rule 40) ──
+  const canAddSolutionImages =
+    onSolutionRefsChange !== undefined && (solutionRefs?.length ?? 0) < 5;
+
+  const uploadSolutionFiles = async (files: File[]) => {
+    if (!onSolutionRefsChange) return;
+    const current = solutionRefs ?? [];
+    const room = 5 - current.length;
+    if (room <= 0) {
+      toast.error('Максимум 5 фото решения');
+      return;
+    }
+    const batch = files.slice(0, room);
+    setUploadingSolution(true);
+    try {
+      const newRefs: string[] = [];
+      for (const raw of batch) {
+        const validationError = validateImageFile(raw);
+        if (validationError) {
+          toast.error(validationError);
+          continue;
+        }
+        const compressed = await compressForUpload(raw);
+        const res = await uploadKBTaskImage(compressed);
+        newRefs.push(res.storageRef);
+      }
+      if (newRefs.length > 0) onSolutionRefsChange(index, [...current, ...newRefs]);
+    } catch {
+      toast.error('Не удалось загрузить фото решения');
+    } finally {
+      setUploadingSolution(false);
+    }
+  };
+
+  const handleSolutionPaste = (e: React.ClipboardEvent) => {
+    if (!canAddSolutionImages) return;
+    const images = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+      f.type.startsWith('image/'),
+    );
+    if (images.length === 0) return;
+    e.preventDefault();
+    void uploadSolutionFiles(images);
+  };
+
+  // Превью-URLs для solution-refs (лениво, per раскрытая карточка).
+  useEffect(() => {
+    const refs = (solutionRefs ?? []).filter((r) => !(r in solutionUrls));
+    if (refs.length === 0) return;
+    let cancelled = false;
+    void Promise.all(refs.map(async (ref) => ({ ref, url: await getKBImageSignedUrl(ref) }))).then(
+      (rows) => {
+        if (cancelled) return;
+        setSolutionUrls((prev) => {
+          const next = { ...prev };
+          for (const { ref, url } of rows) if (url) next[ref] = url;
+          return next;
+        });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // solutionUrls намеренно вне deps: догружаем только НОВЫЕ refs (анти-цикл).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solutionRefs]);
+
   return (
     <div
       className={cn(
@@ -262,8 +354,14 @@ function DraftCardComponent({
           )}
           <span className="flex flex-wrap items-center gap-1.5">
             <Chip>№ {index + 1}</Chip>
-            {effExam ? <Chip>{EXAM_LABELS[effExam] ?? effExam}</Chip> : null}
-            {effKim !== null && Number.isFinite(effKim) ? <Chip>КИМ № {effKim}</Chip> : null}
+            {hasOverride && (override.exam === 'olympiad' || override.exam === 'other') ? (
+              <Chip>{EXAM_LABELS[override.exam]}</Chip>
+            ) : effExam ? (
+              <Chip>{EXAM_LABELS[effExam] ?? effExam}</Chip>
+            ) : null}
+            {!isOlympiad && effKim !== null && Number.isFinite(effKim) ? (
+              <Chip>КИМ № {effKim}</Chip>
+            ) : null}
             <Chip>{checkFormatLabel}</Chip>
             {!hasOverride && draft.topic_suggestion ? <Chip>{draft.topic_suggestion}</Chip> : null}
           </span>
@@ -350,11 +448,76 @@ function DraftCardComponent({
       <textarea
         value={draft.solution ?? ''}
         onChange={(e) => onChange(index, { solution: e.target.value || null })}
+        onPaste={handleSolutionPaste}
         disabled={disabled}
         rows={2}
         className="w-full resize-y rounded-lg border border-socrat-border px-3 py-2 text-[16px] leading-relaxed transition-colors focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
-        placeholder="Ход решения (если есть в материале или хотите добавить)"
+        placeholder={
+          onSolutionRefsChange
+            ? 'Ход решения (текст; скриншот — Ctrl+V прямо сюда)'
+            : 'Ход решения (если есть в материале или хотите добавить)'
+        }
       />
+
+      {/* ВОЛНА 8: фото решения (скриншоты) — превью + добавление/удаление */}
+      {onSolutionRefsChange ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {(solutionRefs ?? []).map((ref) => (
+            <div key={ref} className="relative">
+              {solutionUrls[ref] ? (
+                <img
+                  loading="lazy"
+                  src={solutionUrls[ref]}
+                  alt="Фото решения"
+                  className="h-14 w-14 rounded-lg border border-socrat-border object-cover"
+                />
+              ) : (
+                <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-socrat-border bg-socrat-surface">
+                  <ImagePlus className="h-4 w-4 animate-pulse text-slate-300" aria-hidden="true" />
+                </div>
+              )}
+              <button
+                type="button"
+                disabled={disabled || uploadingSolution}
+                onClick={() =>
+                  onSolutionRefsChange(index, (solutionRefs ?? []).filter((r) => r !== ref))
+                }
+                aria-label="Убрать фото решения"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-sm transition-colors hover:bg-red-600 [touch-action:manipulation]"
+              >
+                <Trash2 className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+          {canAddSolutionImages ? (
+            <button
+              type="button"
+              disabled={disabled || uploadingSolution}
+              onClick={() => solutionFileInputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-socrat-border bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:border-socrat-primary/40 hover:text-socrat-primary disabled:opacity-50 [touch-action:manipulation]"
+            >
+              {uploadingSolution ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+              Фото решения
+            </button>
+          ) : null}
+          <input
+            ref={solutionFileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              if (files.length > 0) void uploadSolutionFiles(files);
+            }}
+            className="hidden"
+          />
+        </div>
+      ) : null}
 
       {/* Критерии — редактируемо (#54); tutor-only */}
       <label className="mb-1 mt-3 flex items-center gap-1 text-xs font-semibold text-socrat-primary">
@@ -378,7 +541,7 @@ function DraftCardComponent({
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <div>
-              <label className={LEGEND_CLASS}>Экзамен</label>
+              <label className={LEGEND_CLASS}>Тип</label>
               <select
                 value={override.exam}
                 onChange={(e) =>
@@ -387,29 +550,50 @@ function DraftCardComponent({
                 disabled={disabled}
                 className={SELECT_CLASS}
               >
-                <option value="">—</option>
+                <option value="">Не указан</option>
                 <option value="ege">ЕГЭ</option>
                 <option value="oge">ОГЭ</option>
+                <option value="olympiad">Олимпиада</option>
+                <option value="other">Другое (школьный, IELTS…)</option>
               </select>
             </div>
-            <div>
-              <label className={LEGEND_CLASS}>№ КИМ</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={override.kimNumber}
-                onChange={(e) =>
-                  onOverrideChange(index, {
-                    kimNumber: e.target.value.replace(/\D/g, ''),
-                    primaryScore: '',
-                    kimSource: e.target.value.replace(/\D/g, '') ? 'manual' : null,
-                  })
-                }
-                disabled={disabled}
-                placeholder="1–30"
-                className={INPUT_CLASS}
-              />
-            </div>
+            {isOlympiad ? (
+              <div>
+                <label className={LEGEND_CLASS}>Сложность 1–5</label>
+                <select
+                  value={override.difficulty}
+                  onChange={(e) =>
+                    onOverrideChange(index, { difficulty: e.target.value, primaryScore: '' })
+                  }
+                  disabled={disabled}
+                  className={SELECT_CLASS}
+                >
+                  <option value="">—</option>
+                  {['1', '2', '3', '4', '5'].map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className={LEGEND_CLASS}>№ КИМ</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={override.kimNumber}
+                  onChange={(e) =>
+                    onOverrideChange(index, {
+                      kimNumber: e.target.value.replace(/\D/g, ''),
+                      primaryScore: '',
+                      kimSource: e.target.value.replace(/\D/g, '') ? 'manual' : null,
+                    })
+                  }
+                  disabled={disabled}
+                  placeholder="1–30"
+                  className={INPUT_CLASS}
+                />
+              </div>
+            )}
             <div>
               <label className={LEGEND_CLASS}>Балл</label>
               <input
@@ -424,6 +608,43 @@ function DraftCardComponent({
                 className={INPUT_CLASS}
               />
             </div>
+            <div>
+              <label className={LEGEND_CLASS}>Формат проверки</label>
+              <select
+                value={override.checkFormat}
+                onChange={(e) =>
+                  onOverrideChange(index, {
+                    checkFormat: e.target.value as ReviewOverrides['checkFormat'],
+                  })
+                }
+                disabled={disabled}
+                className={SELECT_CLASS}
+              >
+                <option value="">
+                  {`Авто: ${autoCheckFormat === 'detailed_solution' ? 'Развёрнутое решение' : 'Краткий ответ'}`}
+                </option>
+                <option value="short_answer">Краткий ответ</option>
+                <option value="detailed_solution">Развёрнутое решение</option>
+              </select>
+            </div>
+            {folders && folders.length > 0 ? (
+              <div className="col-span-2">
+                <label className={LEGEND_CLASS}>Папка</label>
+                <select
+                  value={override.folderId ?? ''}
+                  onChange={(e) => onOverrideChange(index, { folderId: e.target.value || null })}
+                  disabled={disabled}
+                  className={SELECT_CLASS}
+                >
+                  <option value="">Папка пачки (как выбрано при загрузке)</option>
+                  {folders.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {'　'.repeat(f.depth)}{f.depth > 0 ? '└ ' : ''}{f.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
           {showTaxonomy ? (
             <>

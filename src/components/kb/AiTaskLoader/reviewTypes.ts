@@ -1,4 +1,35 @@
 import type { ExtractedTask, ImageBbox } from '@/lib/kbAiExtractApi';
+import type { ExamType, KBFolderTreeNode } from '@/types/kb';
+
+/** Flatten folder tree into { id, name, depth } for <select> options (mirror
+ *  CreateTaskModal). Живёт здесь (не в компонент-файле) ради react-refresh. */
+export function flattenTree(
+  nodes: KBFolderTreeNode[],
+  depth = 0,
+): { id: string; name: string; depth: number }[] {
+  const result: { id: string; name: string; depth: number }[] = [];
+  for (const node of nodes) {
+    result.push({ id: node.id, name: node.name, depth });
+    if (node.children.length > 0) {
+      result.push(...flattenTree(node.children, depth + 1));
+    }
+  }
+  return result;
+}
+
+/**
+ * «Тип» задачи в ревью (ВОЛНА 8, 2026-07-23). БД-enum `exam_type` = только
+ * ege/oge (расширять НЕЛЬЗЯ — готча ALTER TYPE, skill kb-module): `olympiad`
+ * и `other` (школьный экзамен, IELTS…) живут как `exam = NULL` в БД —
+ * решение владельца, ноль миграций. Единственный конвертер на границе
+ * БД/скоринга — `overrideExamToDb`.
+ */
+export type ReviewExam = '' | 'ege' | 'oge' | 'olympiad' | 'other';
+
+/** ege/oge → как есть; ''/olympiad/other → null (exam-колонка БД, авто-балл, чекеры). */
+export function overrideExamToDb(exam: ReviewExam): ExamType | null {
+  return exam === 'ege' || exam === 'oge' ? exam : null;
+}
 
 /**
  * Review-модель AI-загрузчика (волна 2, 2026-07-11).
@@ -13,7 +44,7 @@ export interface ReviewOverrides {
   topicId: string | null;
   subtopicId: string | null;
   sourceLabel: string;
-  exam: '' | 'ege' | 'oge';
+  exam: ReviewExam;
   /** Текстовый стейт инпута (пусто = нет КИМ). */
   kimNumber: string;
   /**
@@ -25,6 +56,22 @@ export interface ReviewOverrides {
   kimSource: 'marker' | 'ai' | 'manual' | null;
   /** Пусто = авто-балл по КИМ (физика) / без балла. */
   primaryScore: string;
+  /**
+   * ВОЛНА 8: сложность 1–5 олимпиадной задачи (текстовый стейт селекта;
+   * пусто = не задана). Пишется в `difficulty` И `primary_score` — зеркало
+   * CreateTaskModal. Используется только при exam === 'olympiad'.
+   */
+  difficulty: string;
+  /**
+   * ВОЛНА 8: формат проверки; '' = авто (по № КИМ через subject-aware
+   * `inferCheckFormatForSubject` — физика ЕГЭ 21–26, social ЕГЭ 17–25 → развёрнутое).
+   */
+  checkFormat: '' | 'short_answer' | 'detailed_solution';
+  /**
+   * ВОЛНА 8: папка НА ЗАДАНИЕ (запрос владельца «каждому заданию — своя папка»);
+   * null = папка пачки (folderId Flow). Только KB-назначение.
+   */
+  folderId: string | null;
 }
 
 /**
@@ -63,7 +110,7 @@ export interface ExtractCompleteness {
  * Рендерится только для KB-назначения (`kb_folder`); hw/mock шлют пустой объект.
  */
 export interface BatchClassification {
-  exam: '' | 'ege' | 'oge';
+  exam: ReviewExam;
   topicId: string;
   subtopicId: string;
 }
@@ -104,6 +151,8 @@ export interface AiLoaderCommitItem {
   override: ReviewOverrides;
   /** Финальный ref картинки: кроп-ref | оригинал | null (убрана / сбой кропа). */
   attachmentRef: string | null;
+  /** ВОЛНА 8: refs скриншотов решения (kb-attachments), загруженных в ревью. */
+  solutionRefs: string[];
 }
 
 /** Состояние для гарда закрытия Sheet-хоста (потеря черновиков / активный extract). */

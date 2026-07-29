@@ -6,6 +6,7 @@ import { InputStage } from '@/components/kb/AiTaskLoader/InputStage';
 import { DraftCard } from '@/components/kb/AiTaskLoader/DraftCard';
 import { DraftTable } from '@/components/kb/AiTaskLoader/DraftTable';
 import { BulkActionsBar } from '@/components/kb/AiTaskLoader/BulkActionsBar';
+import { flattenTree, overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type {
   AiLoaderCommitItem,
   AiLoaderDestination,
@@ -17,7 +18,8 @@ import type {
   RowStatus,
 } from '@/components/kb/AiTaskLoader/reviewTypes';
 import { useCreateTasksBulk, useTopics } from '@/hooks/useKnowledgeBase';
-import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
+import { useFolderTree } from '@/hooks/useFolders';
+import { resolveCheckFormatForLoader } from '@/lib/checkFormatHelpers';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { cropImageToFile } from '@/lib/cropImage';
 import { deleteKBTaskImage, getKBImageSignedUrl, serializeAttachmentUrls, uploadKBTaskImage } from '@/lib/kbApi';
@@ -50,15 +52,27 @@ import { cn } from '@/lib/utils';
 function applyOverridePatch(
   o: ReviewOverrides,
   patch: Partial<ReviewOverrides>,
-  topicExamById: Map<string, ExamType | null>,
+  topicMetaById: Map<string, { exam: ExamType | null; kind: string }>,
 ): ReviewOverrides {
   const next = { ...o, ...patch };
   if (patch.exam !== undefined) {
     if (patch.primaryScore === undefined) next.primaryScore = '';
-    const topicExam = next.topicId ? topicExamById.get(next.topicId) ?? null : null;
-    if (topicExam && topicExam !== (next.exam || null)) {
-      next.topicId = null;
-      next.subtopicId = null;
+    const meta = next.topicId ? topicMetaById.get(next.topicId) : undefined;
+    if (meta) {
+      // ВОЛНА 8 (kind-aware): «Олимпиада» держит ТОЛЬКО олимпиадные темы;
+      // ege/oge — прежняя логика (тема ЧУЖОГО экзамена сбрасывается; тема без
+      // exam — kind='olympiad' — тоже не подходит ege/oge и сбрасывается через
+      // kind-ветку); ''/other — сброс exam-темы (прежнее поведение '').
+      const fits =
+        next.exam === 'olympiad'
+          ? meta.kind === 'olympiad'
+          : next.exam === 'ege' || next.exam === 'oge'
+            ? meta.kind !== 'olympiad' && (meta.exam === null || meta.exam === next.exam)
+            : !meta.exam;
+      if (!fits) {
+        next.topicId = null;
+        next.subtopicId = null;
+      }
     }
   }
   return next;
@@ -83,11 +97,14 @@ function initReviewView(): ReviewView {
 /** Build a CreateKBTaskInput from a draft + резолвнутые overrides ревью (волна 2). */
 function draftToCreateInput(
   draft: ExtractedTask,
-  folderId: string,
+  /** Папка пачки; ov.folderId (per-task, ВОЛНА 8) побеждает. */
+  batchFolderId: string,
   ov: ReviewOverrides,
   subject: string,
   /** undefined = attachment из черновика; string|null = явная замена (кроп / без картинки). */
   attachmentRefOverride: string | null | undefined,
+  /** ВОЛНА 8: refs скриншотов решения, загруженных в ревью. */
+  solutionRefs: string[],
 ): CreateKBTaskInput {
   const answer = draft.answer?.trim();
   const sourceLabel = ov.sourceLabel.trim();
@@ -96,26 +113,38 @@ function draftToCreateInput(
   const attachmentUrl = attachmentRef
     ? serializeAttachmentUrls([attachmentRef]) ?? undefined
     : undefined;
-  const exam = ov.exam || null;
-  const kimNum = ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
+  const solutionAttachmentUrl =
+    solutionRefs.length > 0 ? serializeAttachmentUrls(solutionRefs) ?? undefined : undefined;
+  // ВОЛНА 8: olympiad/other живут как exam NULL в БД (overrideExamToDb).
+  const exam = overrideExamToDb(ov.exam);
+  const isOlympiad = ov.exam === 'olympiad';
+  // Олимпиадная задача КИМ не несёт (зеркало CreateTaskModal: тип «Олимпиада»
+  // очищает № КИМ), сложность 1–5 → difficulty И primary_score.
+  const kimNum = !isOlympiad && ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
+  const difficultyNum = isOlympiad && ov.difficulty.trim() ? parseInt(ov.difficulty.trim(), 10) : null;
   // P1-4: persist the grading mode so the task grades by the ФИПИ rubric on ДЗ
-  // import. № КИМ-эвристика — только физика (review P2 2026-07-06).
-  const checkFormat = resolveCheckFormatFromKb({
-    check_format: draft.check_format,
-    answer_format: draft.answer_format,
-    kim_number: kimNum,
-    subject,
-  });
+  // import. ВОЛНА 8: явный выбор тутора в ревью → subject/exam-aware авто по КИМ.
+  const checkFormat =
+    ov.checkFormat ||
+    resolveCheckFormatForLoader({
+      check_format: draft.check_format,
+      answer_format: draft.answer_format,
+      kim_number: kimNum,
+      subject,
+      exam,
+    });
   // Балл (порядок — ревью ChatGPT-5.6 P1): явный override тутора → авто по
   // ТЕКУЩЕМУ № КИМ → извлечённый AI (последний фолбэк). Авто-балл ДОЛЖЕН
   // побеждать draft.primary_score, иначе после смены КИМ сохранялся старый балл
   // (визуально 3, в БД 1). AI-балл уже сидируется в override → нетронутые задачи
   // берут его через manualScore; draft.primary_score нужен лишь не-физике без карты.
+  // Олимпиада: балл = сложность (зеркало CreateTaskModal), manual побеждает.
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
-  const primaryScore =
-    manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
+  const primaryScore = isOlympiad
+    ? manualScore ?? difficultyNum
+    : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   return {
-    folder_id: folderId,
+    folder_id: ov.folderId || batchFolderId,
     text: draft.text,
     ...(answer ? { answer } : {}),
     ...(draft.solution?.trim() ? { solution: draft.solution } : {}),
@@ -124,10 +153,12 @@ function draftToCreateInput(
     ...(kimNum !== null && !Number.isNaN(kimNum) ? { kim_number: kimNum } : {}),
     ...(exam ? { exam } : {}),
     ...(primaryScore !== null && !Number.isNaN(primaryScore) ? { primary_score: primaryScore } : {}),
+    ...(difficultyNum !== null && !Number.isNaN(difficultyNum) ? { difficulty: difficultyNum } : {}),
     ...(draft.rubric_text?.trim() ? { rubric_text: draft.rubric_text } : {}),
     ...(ov.topicId ? { topic_id: ov.topicId } : {}),
     ...(ov.subtopicId ? { subtopic_id: ov.subtopicId } : {}),
     ...(attachmentUrl ? { attachment_url: attachmentUrl } : {}),
+    ...(solutionAttachmentUrl ? { solution_attachment_url: solutionAttachmentUrl } : {}),
     // source_label: omit → insertTask defaults to 'my'.
     ...(sourceLabel ? { source_label: sourceLabel } : {}),
   };
@@ -159,6 +190,9 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
   // индексу, source_image_index → uploadedRefs по абсолютному индексу). removed[i]
   // прячет строку из вида и исключает из commit; undo = снять флаг.
   const [removed, setRemoved] = useState<boolean[]>([]);
+  // ВОЛНА 8: скриншоты решения по абсолютному индексу черновика (стабильность
+  // индексов держит soft-removed, как у crops[]).
+  const [solutionRefs, setSolutionRefs] = useState<string[][]>([]);
   const [uploadedRefs, setUploadedRefs] = useState<string[]>([]);
   /** W4: честность о полноте — «Найдено 68 из ~73» + недобранные страницы. */
   const [completeness, setCompleteness] = useState<ExtractCompleteness | null>(null);
@@ -192,12 +226,16 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
     () => topics.filter((t) => t.subject === subject),
     [topics, subject],
   );
-  // topicId → exam (для реконсиляции темы при смене экзамена, P1).
-  const topicExamById = useMemo(() => {
-    const m = new Map<string, ExamType | null>();
-    for (const t of topics) m.set(t.id, t.exam);
+  // topicId → {exam, kind} (реконсиляция темы при смене экзамена, P1; kind —
+  // ВОЛНА 8 для типа «Олимпиада»).
+  const topicMetaById = useMemo(() => {
+    const m = new Map<string, { exam: ExamType | null; kind: string }>();
+    for (const t of topics) m.set(t.id, { exam: t.exam, kind: t.kind });
     return m;
   }, [topics]);
+  // ВОЛНА 8: дерево личных папок — per-task селект «Папка» в ревью (только KB).
+  const { tree: folderTree } = useFolderTree({ enabled: !isExternal });
+  const flatFolders = useMemo(() => flattenTree(folderTree), [folderTree]);
 
   const setViewPersist = useCallback((next: ReviewView) => {
     setView(next);
@@ -242,7 +280,8 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       // InputStage) ПОБЕЖДАЕТ per-task подсказку AI — тутор задал тему, применяем
       // ко всем; переопределение по одной остаётся в ревью. Пусто (hw/mock / не
       // задано) → прежний AI-резолв (поведение байт-в-байт).
-      const batchExam: ExamType | null = defaultClassification.exam || null;
+      // ВОЛНА 8: olympiad/other в batch-типе → для резолва тем/балла это NULL-exam.
+      const batchExam: ExamType | null = overrideExamToDb(defaultClassification.exam);
       // Явная batch-тема несёт СВОЙ exam — он побеждает AI d.exam (для поля exam И
       // для скоупа резолва), иначе Тип=«Не указан» + тема ОГЭ + AI-ЕГЭ = тихий
       // mismatch topic_id↔exam (ревью 5.6 P1). `topics` — уже dep этого useCallback.
@@ -256,6 +295,11 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           subtopicId: defaultClassification.subtopicId || null,
           sourceLabel: d.source_label.trim(),
           exam: defaultClassification.exam || batchTopicExam || d.exam || '',
+          // ВОЛНА 8: сложность (олимпиады), формат проверки '' = авто, папка
+          // per-task null = папка пачки.
+          difficulty: '',
+          checkFormat: '' as const,
+          folderId: null,
           kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
           // Provenance КИМ (техдолг 5.6): маркер файла ('Тип N'/вариант) vs
           // догадка AI — чип в таблице ревью; ручная правка выставит 'manual'.
@@ -282,6 +326,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         ),
       );
       setRowStatus(newDrafts.map(() => 'idle'));
+      setSolutionRefs(newDrafts.map(() => []));
       // Default-deselect drafts that look like duplicates (edge fingerprint_match).
       // Внешние назначения: дубли ВЫБРАНЫ — «уже есть в Базе» не мешает добавить
       // в ДЗ/пробник (для ДЗ авто-зеркало прилинкует существующую по fingerprint).
@@ -332,10 +377,10 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
   const updateOverride = useCallback(
     (index: number, patch: Partial<ReviewOverrides>) => {
       setOverrides((prev) =>
-        prev.map((o, i) => (i === index ? applyOverridePatch(o, patch, topicExamById) : o)),
+        prev.map((o, i) => (i === index ? applyOverridePatch(o, patch, topicMetaById) : o)),
       );
     },
-    [topicExamById],
+    [topicMetaById],
   );
 
   const updateCrop = useCallback((index: number, crop: CropState | null) => {
@@ -344,6 +389,12 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
     if (crop?.status === 'edited') trackKbAiLoaderEvent('kb_ai_crop_action', { action: 'edited' });
     else if (crop?.status === 'full') trackKbAiLoaderEvent('kb_ai_crop_action', { action: 'full' });
     else if (crop === null) trackKbAiLoaderEvent('kb_ai_crop_action', { action: 'removed' });
+  }, []);
+
+  // ВОЛНА 8: скриншоты решения (upload/paste в DraftCard, состояние в Flow —
+  // переживает сворачивание expand-row).
+  const updateSolutionRefs = useCallback((index: number, refs: string[]) => {
+    setSolutionRefs((prev) => prev.map((r, i) => (i === index ? refs : r)));
   }, []);
 
   const toggleSelect = useCallback((index: number) => {
@@ -409,12 +460,12 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       setOverrides((prev) =>
         prev.map((ov, i) =>
           selected[i] && !removed[i] && rowStatus[i] !== 'saved'
-            ? applyOverridePatch(ov, patch, topicExamById)
+            ? applyOverridePatch(ov, patch, topicMetaById)
             : ov,
         ),
       );
     },
-    [selected, removed, rowStatus, topicExamById],
+    [selected, removed, rowStatus, topicMetaById],
   );
   const selectAll = useCallback(
     () => setSelected((prev) => prev.map((_, i) => rowStatus[i] !== 'saved' && !removed[i])),
@@ -525,6 +576,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
             draft,
             override: overrides[index],
             attachmentRef: overrideRef !== undefined ? overrideRef : draft.attachment_ref,
+            solutionRefs: solutionRefs[index] ?? [],
           };
         });
         // Orphan-cleanup: залитые исходники, не ставшие финальным attachment ни
@@ -558,6 +610,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           overrides[index],
           subject,
           attachmentOverrideByIndex.get(index),
+          solutionRefs[index] ?? [],
         ),
       }));
 
@@ -615,6 +668,11 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         const parts = [`Добавлено ${saved}`];
         if (skippedDup > 0) parts.push(`${skippedDup} дубл. пропущено`);
         if (cropFailedCount > 0) parts.push(`${cropFailedCount} без рисунка (сбой обрезки)`);
+        // ВОЛНА 8: per-task папки — честно сказать, что часть уехала не сюда.
+        const customFolderCount = chosen.filter(
+          ({ index }) => okKeys.has(index) && overrides[index].folderId,
+        ).length;
+        if (customFolderCount > 0) parts.push(`${customFolderCount} — в свои папки`);
         toast.success(parts.join(' · '));
         navigate(folderId ? `/tutor/knowledge/folder/${folderId}` : '/tutor/knowledge?tab=mybase');
       } else {
@@ -635,6 +693,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
     subject,
     isSaving,
     uploadedRefs,
+    solutionRefs,
     createTasksBulk,
     navigate,
     destination,
@@ -660,6 +719,9 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         refining={refiningIndex === index}
         hideSelect={hideSelect}
         showTaxonomy={!isExternal}
+        solutionRefs={solutionRefs[index] ?? []}
+        onSolutionRefsChange={updateSolutionRefs}
+        folders={isExternal ? undefined : flatFolders}
         // Ревью P2: сохранённой строке (уже в БД) «Удалить» не показываем.
         onRemove={rowStatus[index] === 'saved' ? undefined : removeDraft}
       />
@@ -681,6 +743,9 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       rowStatus,
       removeDraft,
       isExternal,
+      solutionRefs,
+      updateSolutionRefs,
+      flatFolders,
     ],
   );
 
@@ -794,6 +859,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         onDeselectAll={deselectAll}
         onDeselectDups={deselectDups}
         showTaxonomy={!isExternal}
+        folders={isExternal ? undefined : flatFolders}
       />
 
       {view === 'table' ? (

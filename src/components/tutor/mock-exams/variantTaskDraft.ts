@@ -8,6 +8,7 @@ import { getExamProfile } from '@/lib/examProfiles';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 import { serializeAttachmentUrls } from '@/lib/attachmentRefs';
+import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { AiLoaderCommitItem } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { MockExamVariantTaskRow } from '@/hooks/useMockExamVariants';
 import type { HWDraftTask } from '@/types/kb';
@@ -160,14 +161,17 @@ export function aiExtractToVariantTaskDraft(
   const { draft, override: ov, attachmentRef } = item;
   const kimParsed = ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
   const kimNum = kimParsed !== null && !Number.isNaN(kimParsed) ? kimParsed : null;
-  const exam = ov.exam || null;
+  // ВОЛНА 8: olympiad/other в ревью → NULL-exam для чекеров/скоринга.
+  const exam = overrideExamToDb(ov.exam);
 
-  const checkFormat = resolveCheckFormatFromKb({
-    check_format: draft.check_format,
-    answer_format: draft.answer_format,
-    kim_number: kimNum,
-    subject,
-  });
+  const checkFormat =
+    ov.checkFormat ||
+    resolveCheckFormatFromKb({
+      check_format: draft.check_format,
+      answer_format: draft.answer_format,
+      kim_number: kimNum,
+      subject,
+    });
   const part = inferVariantTaskPart(subject, kimNum, checkFormat, exam);
 
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
@@ -186,9 +190,11 @@ export function aiExtractToVariantTaskDraft(
     taskText: draft.text,
     taskImageUrl: attachmentRef ? serializeAttachmentUrls([attachmentRef]) : null,
     correctAnswer: draft.answer?.trim() ?? '',
-    checkMode: part === 1 ? inferPart1CheckMode(subject, ov.exam, kimNum) : 'strict',
+    checkMode: part === 1 ? inferPart1CheckMode(subject, exam ?? '', kimNum) : 'strict',
     solutionText: draft.solution ?? '',
-    solutionImageUrls: null,
+    // ВОЛНА 8: скриншоты решения из ревью загрузчика.
+    solutionImageUrls:
+      item.solutionRefs.length > 0 ? serializeAttachmentUrls(item.solutionRefs) : null,
     topic: draft.topic_suggestion.trim(),
   };
 }

@@ -25,8 +25,9 @@ import {
 import { useTutorProfile } from '@/hooks/useTutorProfile';
 import { cn } from '@/lib/utils';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
-import type { BatchClassification, ExtractCompleteness } from '@/components/kb/AiTaskLoader/reviewTypes';
-import type { CatalogFilter, KBFolderTreeNode } from '@/types/kb';
+import { flattenTree } from '@/components/kb/AiTaskLoader/reviewTypes';
+import type { BatchClassification, ExtractCompleteness, ReviewExam } from '@/components/kb/AiTaskLoader/reviewTypes';
+import type { CatalogFilter } from '@/types/kb';
 
 /** Max screenshots per session (mirror edge MAX_IMAGES). */
 const MAX_LOADER_IMAGES = 10;
@@ -58,21 +59,6 @@ const CHUNK_TEXT_CAP = 59_000;
 /** Общий класс select'ов каскада «тема по умолчанию» (16px + touch — rule 80/90). */
 const CASCADE_SELECT_CLASS =
   'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]';
-
-/** Flatten folder tree into { id, name, depth } for <select> options (mirror CreateTaskModal). */
-function flattenTree(
-  nodes: KBFolderTreeNode[],
-  depth = 0,
-): { id: string; name: string; depth: number }[] {
-  const result: { id: string; name: string; depth: number }[] = [];
-  for (const node of nodes) {
-    result.push({ id: node.id, name: node.name, depth });
-    if (node.children.length > 0) {
-      result.push(...flattenTree(node.children, depth + 1));
-    }
-  }
-  return result;
-}
 
 interface InputStageProps {
   initialFolderId: string;
@@ -136,7 +122,7 @@ export function InputStage({
   // ревью). Только KB-назначение (fixedSubject === undefined).
   // Ф3 (2026-07-23): init «Типа» — из экзамен-фокуса предмета (prefill-only;
   // непригодный фокус school/olympiad → last-used предмета → '').
-  const [defaultExam, setDefaultExam] = useState<'' | 'ege' | 'oge'>(() => {
+  const [defaultExam, setDefaultExam] = useState<ReviewExam>(() => {
     if (fixedSubject !== undefined) return '';
     const initialSubject = resolveTutorDefaultSubject(
       tutorProfile?.subjects,
@@ -146,7 +132,14 @@ export function InputStage({
   });
   const [defaultTopicId, setDefaultTopicId] = useState('');
   const [defaultSubtopicId, setDefaultSubtopicId] = useState('');
-  const defaultTopicFilter: CatalogFilter | undefined = defaultExam || undefined;
+  // ВОЛНА 8: Олимпиада фильтрует темы kind='olympiad' (CatalogFilter уже умеет);
+  // «Другое» (школьный, IELTS…) — каталожных тем не имеет → без фильтра (все).
+  const defaultTopicFilter: CatalogFilter | undefined =
+    defaultExam === 'olympiad'
+      ? 'olympiad'
+      : defaultExam === 'ege' || defaultExam === 'oge'
+        ? defaultExam
+        : undefined;
   const { topics: defaultTopics = [], loading: defaultTopicsLoading } = useTopics(
     defaultTopicFilter,
     subject,
@@ -759,7 +752,7 @@ export function InputStage({
                 value={defaultExam}
                 onChange={(e) => {
                   examTouchedRef.current = true;
-                  setDefaultExam(e.target.value as '' | 'ege' | 'oge');
+                  setDefaultExam(e.target.value as ReviewExam);
                   setDefaultTopicId('');
                   setDefaultSubtopicId('');
                 }}
@@ -769,6 +762,8 @@ export function InputStage({
                 <option value="">Не указан</option>
                 <option value="ege">ЕГЭ</option>
                 <option value="oge">ОГЭ</option>
+                <option value="olympiad">Олимпиада</option>
+                <option value="other">Другое (школьный, IELTS…)</option>
               </select>
             </div>
             <div>
@@ -786,7 +781,7 @@ export function InputStage({
                 <option value="">Не выбрана</option>
                 {defaultTopics.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name}{!defaultExam && t.exam ? ` · ${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'}` : ''}
+                    {t.name}{(!defaultExam || defaultExam === 'other') && t.exam ? ` · ${t.exam === 'ege' ? 'ЕГЭ' : 'ОГЭ'}` : ''}
                   </option>
                 ))}
               </select>

@@ -1,6 +1,7 @@
 import { serializeAttachmentUrls } from '@/lib/attachmentRefs';
-import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
+import { resolveCheckFormatForLoader } from '@/lib/checkFormatHelpers';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
+import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { AiLoaderCommitItem } from '@/components/kb/AiTaskLoader/reviewTypes';
 import { generateUUID, type DraftTask } from './types';
 
@@ -24,12 +25,19 @@ import { generateUUID, type DraftTask } from './types';
 export function aiExtractToDraftTask(item: AiLoaderCommitItem, subject: string): DraftTask {
   const { draft, override: ov, attachmentRef } = item;
 
-  const kimParsed = ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
+  // ВОЛНА 8: olympiad/other → exam NULL (БД/скоринг); олимпиада без КИМ,
+  // балл = сложность (зеркало draftToCreateInput).
+  const isOlympiad = ov.exam === 'olympiad';
+  const kimParsed =
+    !isOlympiad && ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
   const kimNum = kimParsed !== null && !Number.isNaN(kimParsed) ? kimParsed : null;
-  const exam = ov.exam || null;
+  const exam = overrideExamToDb(ov.exam);
+  const difficultyNum =
+    isOlympiad && ov.difficulty.trim() ? parseInt(ov.difficulty.trim(), 10) : null;
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
-  const resolvedScore =
-    manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
+  const resolvedScore = isOlympiad
+    ? manualScore ?? difficultyNum
+    : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   const maxScore =
     resolvedScore !== null && !Number.isNaN(resolvedScore) && resolvedScore > 0
       ? resolvedScore
@@ -49,18 +57,24 @@ export function aiExtractToDraftTask(item: AiLoaderCommitItem, subject: string):
     rubric_text: draft.rubric_text ?? '',
     rubric_image_paths: null,
     solution_text: draft.solution ?? '',
-    solution_image_paths: null,
+    // ВОЛНА 8: скриншоты решения из ревью (kb-attachments — уже в HOMEWORK_AI_BUCKETS).
+    solution_image_paths:
+      item.solutionRefs.length > 0 ? serializeAttachmentUrls(item.solutionRefs) : null,
     max_score: maxScore,
     uploading: false,
-    check_format: resolveCheckFormatFromKb({
-      check_format: draft.check_format,
-      answer_format: draft.answer_format,
-      kim_number: kimNum,
-      subject,
-    }),
+    // ВОЛНА 8: явный выбор тутора в ревью → subject/exam-aware авто по КИМ.
+    check_format:
+      ov.checkFormat ||
+      resolveCheckFormatForLoader({
+        check_format: draft.check_format,
+        answer_format: draft.answer_format,
+        kim_number: kimNum,
+        subject,
+        exam,
+      }),
     kim_number: kimNum, // единственное каскад-поле в снимке → ФИПИ/flowchart-грейдинг
-    exam: ov.exam,
-    difficulty: null,
+    exam: ov.exam === 'other' ? '' : ov.exam,
+    difficulty: difficultyNum,
     topic_id: ov.topicId ?? null,
     subtopic_id: ov.subtopicId ?? null,
     source_label: ov.sourceLabel.trim() || null,

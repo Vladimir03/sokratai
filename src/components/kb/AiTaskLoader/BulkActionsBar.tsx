@@ -29,6 +29,8 @@ interface BulkActionsBarProps {
   onDeselectDups: () => void;
   /** hw-режим загрузчика: скрыть Тему/Подтему/Источник (default true — KB как раньше). */
   showTaxonomy?: boolean;
+  /** ВОЛНА 8: личные папки — bulk «Папка» (undefined = скрыт, hw/mock). */
+  folders?: { id: string; name: string; depth: number }[];
 }
 
 export function BulkActionsBar({
@@ -42,6 +44,7 @@ export function BulkActionsBar({
   onDeselectAll,
   onDeselectDups,
   showTaxonomy = true,
+  folders,
 }: BulkActionsBarProps) {
   const [topicId, setTopicId] = useState(KEEP);
   const [subtopicId, setSubtopicId] = useState(KEEP);
@@ -50,16 +53,25 @@ export function BulkActionsBar({
   // Bulk-КИМ (техдолг 5.6): один № на все выбранные (тематические подборки
   // «все задачи — КИМ 17»). Пусто = не менять.
   const [kimNumber, setKimNumber] = useState('');
+  // ВОЛНА 8: bulk формат проверки и папка.
+  const [checkFormat, setCheckFormat] = useState(KEEP);
+  const [folderId, setFolderId] = useState(KEEP);
   const { subtopics } = useSubtopics(topicId !== KEEP && topicId !== '' ? topicId : undefined);
   const { sources = [] } = useKbSources();
 
-  // Темы ЕГЭ/ОГЭ дублируются по именам — при выбранном в баре экзамене скоупим.
+  // Темы ЕГЭ/ОГЭ дублируются по именам — при выбранном в баре экзамене скоупим;
+  // «Олимпиада» — только олимпиадные темы (ВОЛНА 8).
   const topicOptions =
-    exam === 'ege' || exam === 'oge' ? topics.filter((t) => t.exam === exam) : topics;
+    exam === 'olympiad'
+      ? topics.filter((t) => t.kind === 'olympiad')
+      : exam === 'ege' || exam === 'oge'
+        ? topics.filter((t) => t.exam === exam)
+        : topics;
 
   const hasPatch =
     topicId !== KEEP || subtopicId !== KEEP || exam !== KEEP ||
-    sourceLabel.trim() !== '' || kimNumber.trim() !== '';
+    sourceLabel.trim() !== '' || kimNumber.trim() !== '' ||
+    checkFormat !== KEEP || folderId !== KEEP;
 
   const handleApply = () => {
     if (!hasPatch || selectedCount === 0) return;
@@ -79,6 +91,8 @@ export function BulkActionsBar({
       patch.primaryScore = '';
       patch.kimSource = 'manual';
     }
+    if (checkFormat !== KEEP) patch.checkFormat = checkFormat as ReviewOverrides['checkFormat'];
+    if (folderId !== KEEP) patch.folderId = folderId || null;
     onApply(patch);
   };
 
@@ -160,10 +174,25 @@ export function BulkActionsBar({
         className={SELECT_CLASS}
         aria-label="Экзамен для выбранных"
       >
-        <option value={KEEP}>Экзамен: не менять</option>
-        <option value="">Экзамен: убрать</option>
+        <option value={KEEP}>Тип: не менять</option>
+        <option value="">Тип: убрать</option>
         <option value="ege">ЕГЭ</option>
         <option value="oge">ОГЭ</option>
+        <option value="olympiad">Олимпиада</option>
+        <option value="other">Другое</option>
+      </select>
+
+      <select
+        value={checkFormat}
+        disabled={disabled}
+        onChange={(e) => setCheckFormat(e.target.value)}
+        className={SELECT_CLASS}
+        aria-label="Формат проверки для выбранных"
+      >
+        <option value={KEEP}>Формат: не менять</option>
+        <option value="">Формат: авто по КИМ</option>
+        <option value="short_answer">Краткий ответ</option>
+        <option value="detailed_solution">Развёрнутое решение</option>
       </select>
 
       <input
@@ -195,6 +224,24 @@ export function BulkActionsBar({
             ))}
           </datalist>
         </>
+      ) : null}
+
+      {folders && folders.length > 0 ? (
+        <select
+          value={folderId}
+          disabled={disabled}
+          onChange={(e) => setFolderId(e.target.value)}
+          className={cn(SELECT_CLASS, 'max-w-56')}
+          aria-label="Папка для выбранных"
+        >
+          <option value={KEEP}>Папка: не менять</option>
+          <option value="">Папка пачки</option>
+          {folders.map((f) => (
+            <option key={f.id} value={f.id}>
+              {'　'.repeat(f.depth)}{f.depth > 0 ? '└ ' : ''}{f.name}
+            </option>
+          ))}
+        </select>
       ) : null}
 
       <button
