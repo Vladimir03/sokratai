@@ -159,10 +159,18 @@ export function aiExtractToVariantTaskDraft(
   subject: string,
 ): VariantTaskDraft {
   const { draft, override: ov, attachmentRef } = item;
-  const kimParsed = ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
+  // ВОЛНА 8 (ревью P1-3): у олимпиадной задачи № КИМ НЕТ — гейт обязателен и
+  // здесь, как в KB/hw-мапперах. Без него скрытый в UI КИМ (напр. 21 от
+  // распознавания физики) уезжал в вариант: `inferVariantTaskPart` для физики
+  // трактует пустой exam как ЕГЭ → задача падала в Часть 2 с баллом ФИПИ.
+  const isOlympiad = ov.exam === 'olympiad';
+  const kimParsed =
+    !isOlympiad && ov.kimNumber.trim() ? parseInt(ov.kimNumber.trim(), 10) : null;
   const kimNum = kimParsed !== null && !Number.isNaN(kimParsed) ? kimParsed : null;
-  // ВОЛНА 8: olympiad/other в ревью → NULL-exam для чекеров/скоринга.
+  // olympiad/other в ревью → NULL-exam для чекеров/скоринга.
   const exam = overrideExamToDb(ov.exam);
+  const difficultyNum =
+    isOlympiad && ov.difficulty.trim() ? parseInt(ov.difficulty.trim(), 10) : null;
 
   const checkFormat =
     ov.checkFormat ||
@@ -175,8 +183,10 @@ export function aiExtractToVariantTaskDraft(
   const part = inferVariantTaskPart(subject, kimNum, checkFormat, exam);
 
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
-  const resolvedScore =
-    manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
+  // Олимпиада: балл = сложность (инвариант ручной формы, ревью P1-2/P1-3).
+  const resolvedScore = isOlympiad
+    ? difficultyNum
+    : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   const maxScore =
     resolvedScore !== null && !Number.isNaN(resolvedScore) && resolvedScore > 0
       ? resolvedScore

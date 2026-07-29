@@ -664,16 +664,17 @@ function normalizeImageBbox(value: unknown): ImageBbox | null {
   const h = (ymax - ymin) / 1000;
   if (w < MIN_BBOX_SIDE || h < MIN_BBOX_SIDE) return null;
   // Паддинг после всех проверок — только расширяет, невалидную рамку не спасает.
+  // Ревью 5.6 P2: края считаем НЕЗАВИСИМО (left/right, top/bottom). Наивное
+  // `w + pad*2` с clamp по ширине переносило обрезанный у границы паддинг на
+  // противоположную сторону (x=0, w=0.10 → w=0.15 вместо 0.125) и на плотной
+  // странице тянуло в рамку соседнее условие.
   const padX = Math.max(BBOX_PAD_MIN_FRACTION, w * BBOX_PAD_SIDE_RATIO);
   const padY = Math.max(BBOX_PAD_MIN_FRACTION, h * BBOX_PAD_SIDE_RATIO);
-  const px = Math.max(0, x - padX);
-  const py = Math.max(0, y - padY);
-  return {
-    x: px,
-    y: py,
-    w: Math.min(1 - px, w + padX * 2),
-    h: Math.min(1 - py, h + padY * 2),
-  };
+  const left = Math.max(0, x - padX);
+  const right = Math.min(1, x + w + padX);
+  const top = Math.max(0, y - padY);
+  const bottom = Math.min(1, y + h + padY);
+  return { x: left, y: top, w: right - left, h: bottom - top };
 }
 
 function normalizeTask(raw: unknown, imageRefs: string[]): ExtractedTask | null {

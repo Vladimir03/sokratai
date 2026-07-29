@@ -14,6 +14,7 @@ import type {
   BatchClassification,
   CropState,
   ExtractCompleteness,
+  ReviewExam,
   ReviewOverrides,
   RowStatus,
 } from '@/components/kb/AiTaskLoader/reviewTypes';
@@ -43,6 +44,15 @@ import { cn } from '@/lib/utils';
  */
 
 /**
+ * Дефолт сложности олимпиадной задачи (середина шкалы 1–5). Нужен, потому что
+ * «Олимпиада» в БД выражается ТОЛЬКО через `difficulty NOT NULL` при `exam NULL`
+ * — пустая сложность молча превращала бы тип в «не указан» (ревью P1-2).
+ * Ручная форма вместо дефолта блокирует сохранение, но в bulk-загрузчике блок
+ * всей пачки из-за одной строки — плохой обмен; репетитор правит значение.
+ */
+const DEFAULT_OLYMPIAD_DIFFICULTY = '3';
+
+/**
  * Применить патч к override с реконсиляцией при СМЕНЕ ЭКЗАМЕНА (ревью
  * ChatGPT-5.6 P1): ЕГЭ/ОГЭ-темы дублируются по именам, поэтому при exam-change
  * (а) сбрасываем балл (пере-выведется по авто-КИМ нового экзамена, если тутор
@@ -57,6 +67,20 @@ function applyOverridePatch(
   const next = { ...o, ...patch };
   if (patch.exam !== undefined) {
     if (patch.primaryScore === undefined) next.primaryScore = '';
+    // ВОЛНА 8 (ревью P1-2): каскад «КИМ ↔ сложность» — зеркало
+    // CreateTaskModal.handleTaskTypeChange (`olympiad` → КИМ='', иначе
+    // difficulty=''). Без него олимпиадная задача тащила скрытый КИМ, а
+    // ЕГЭ-задача — протухшую сложность. Дефолт сложности гарантирует, что тип
+    // «Олимпиада» сохранится (в БД он = difficulty NOT NULL при exam NULL).
+    if (next.exam === 'olympiad') {
+      if (patch.kimNumber === undefined) next.kimNumber = '';
+      if (patch.kimSource === undefined) next.kimSource = null;
+      if (patch.difficulty === undefined && !next.difficulty.trim()) {
+        next.difficulty = DEFAULT_OLYMPIAD_DIFFICULTY;
+      }
+    } else if (patch.difficulty === undefined) {
+      next.difficulty = '';
+    }
     const meta = next.topicId ? topicMetaById.get(next.topicId) : undefined;
     if (meta) {
       // ВОЛНА 8 (kind-aware): «Олимпиада» держит ТОЛЬКО олимпиадные темы;
@@ -138,10 +162,13 @@ function draftToCreateInput(
   // побеждать draft.primary_score, иначе после смены КИМ сохранялся старый балл
   // (визуально 3, в БД 1). AI-балл уже сидируется в override → нетронутые задачи
   // берут его через manualScore; draft.primary_score нужен лишь не-физике без карты.
-  // Олимпиада: балл = сложность (зеркало CreateTaskModal), manual побеждает.
+  // ВОЛНА 8 (ревью P1-2): у олимпиады балл = сложность БЕЗУСЛОВНО — инвариант
+  // `difficulty === primary_score` ручной формы (CreateTaskModal: `scoreNum =
+  // difficultyNum`, поле балла там вообще заменено подсказкой). Ручной override
+  // при олимпиаде игнорируем, поэтому карточка его и не показывает.
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
   const primaryScore = isOlympiad
-    ? manualScore ?? difficultyNum
+    ? difficultyNum
     : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   return {
     folder_id: ov.folderId || batchFolderId,
@@ -262,13 +289,26 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       // (несколько одноимённых, exam не различает) → null (ревью P1).
       // hw-режим: таксономия скрыта из UI, но пре-резолв ОСТАВЛЕН — топик/подтема
       // уезжают в зеркало «Из ДЗ» (База наполняется классифицированной).
-      const resolveTopicId = (suggestion: string, exam: ExamType | null): string | null => {
+      // ВОЛНА 8 (ревью P1-1): резолв ЗНАЕТ про тип. Для «Олимпиады» матчим
+      // ТОЛЬКО `kind='olympiad'` — иначе AI-подсказка приклеивала ЕГЭ-тему к
+      // задаче с типом «Олимпиада» (exam уезжал NULL, тема — ЕГЭ = тот же тихий
+      // mismatch, что ловило ревью 5.6 P1, плюс kind-фильтр селекта прятал
+      // выбранную тему: визуально «Не выбрана», в БД — ЕГЭ-тема).
+      const resolveTopicId = (
+        suggestion: string,
+        exam: ExamType | null,
+        reviewExam: ReviewExam,
+      ): string | null => {
         const s = suggestion.trim().toLowerCase();
         if (!s) return null;
         const named = topics.filter(
           (t) => t.subject === chosenSubject && t.name.trim().toLowerCase() === s,
         );
         if (named.length === 0) return null;
+        if (reviewExam === 'olympiad') {
+          const olympiads = named.filter((t) => t.kind === 'olympiad');
+          return olympiads.length === 1 ? olympiads[0].id : null;
+        }
         if (exam) {
           const byExam = named.filter((t) => t.exam === exam);
           if (byExam.length === 1) return byExam[0].id;
@@ -280,36 +320,56 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       // InputStage) ПОБЕЖДАЕТ per-task подсказку AI — тутор задал тему, применяем
       // ко всем; переопределение по одной остаётся в ревью. Пусто (hw/mock / не
       // задано) → прежний AI-резолв (поведение байт-в-байт).
-      // ВОЛНА 8: olympiad/other в batch-типе → для резолва тем/балла это NULL-exam.
-      const batchExam: ExamType | null = overrideExamToDb(defaultClassification.exam);
-      // Явная batch-тема несёт СВОЙ exam — он побеждает AI d.exam (для поля exam И
-      // для скоупа резолва), иначе Тип=«Не указан» + тема ОГЭ + AI-ЕГЭ = тихий
-      // mismatch topic_id↔exam (ревью 5.6 P1). `topics` — уже dep этого useCallback.
-      const batchTopicExam: ExamType | null = defaultClassification.topicId
-        ? topics.find((t) => t.id === defaultClassification.topicId)?.exam ?? null
-        : null;
+      // Явная batch-тема несёт СВОЙ контекст — он побеждает AI d.exam (для поля
+      // exam И для скоупа резолва), иначе Тип=«Не указан» + тема ОГЭ + AI-ЕГЭ =
+      // тихий mismatch topic_id↔exam (ревью 5.6 P1). `topics` — уже dep этого
+      // useCallback. ВОЛНА 8: тема kind='olympiad' задаёт тип «Олимпиада».
+      const batchTopic = defaultClassification.topicId
+        ? topics.find((t) => t.id === defaultClassification.topicId)
+        : undefined;
+      const batchTopicReviewExam: ReviewExam = batchTopic
+        ? batchTopic.kind === 'olympiad'
+          ? 'olympiad'
+          : batchTopic.exam ?? ''
+        : '';
       const initialOverrides: ReviewOverrides[] = newDrafts.map((d) => {
-        const effExam: ExamType | null = batchExam ?? batchTopicExam ?? d.exam;
+        // ВОЛНА 8 (ревью P1-1): эффективный тип считаем в доменe ReviewExam —
+        // раньше olympiad/other конвертились в NULL-exam ДО фолбэка, и fallback
+        // доезжал до AI-d.exam, приклеивая ЕГЭ-тему к олимпиадной задаче.
+        const effReviewExam: ReviewExam =
+          defaultClassification.exam || batchTopicReviewExam || d.exam || '';
+        const isOlympiad = effReviewExam === 'olympiad';
+        // В ExamType конвертируем только для скоринга/резолва (БД-домен).
+        const effExam: ExamType | null = overrideExamToDb(effReviewExam);
         return {
-          topicId: defaultClassification.topicId || resolveTopicId(d.topic_suggestion, effExam),
+          topicId:
+            defaultClassification.topicId ||
+            resolveTopicId(d.topic_suggestion, effExam, effReviewExam),
           subtopicId: defaultClassification.subtopicId || null,
           sourceLabel: d.source_label.trim(),
-          exam: defaultClassification.exam || batchTopicExam || d.exam || '',
-          // ВОЛНА 8: сложность (олимпиады), формат проверки '' = авто, папка
-          // per-task null = папка пачки.
-          difficulty: '',
+          exam: effReviewExam,
+          // ВОЛНА 8: у олимпиады вместо № КИМ — сложность (= балл, зеркало
+          // CreateTaskModal); дефолт середины шкалы, чтобы тип НЕ терялся молча
+          // (difficulty NULL + exam NULL = «не указан», ревью P1-2).
+          difficulty: isOlympiad ? DEFAULT_OLYMPIAD_DIFFICULTY : '',
           checkFormat: '' as const,
           folderId: null,
-          kimNumber: d.kim_number !== null ? String(d.kim_number) : '',
+          kimNumber: isOlympiad ? '' : d.kim_number !== null ? String(d.kim_number) : '',
           // Provenance КИМ (техдолг 5.6): маркер файла ('Тип N'/вариант) vs
           // догадка AI — чип в таблице ревью; ручная правка выставит 'manual'.
           kimSource:
-            d.kim_number === null ? null : d.kim_source_client === 'marker' ? 'marker' : 'ai',
+            isOlympiad || d.kim_number === null
+              ? null
+              : d.kim_source_client === 'marker'
+                ? 'marker'
+                : 'ai',
           // Балл: если по (предмет, экзамен, КИМ) есть авто-балл ФИПИ — поле сидируем
           // ПУСТЫМ (placeholder покажет авто, commit применит карту). Сид из AI-догадки
           // неотличим от ручного ввода и побеждал карту (репорт Милады: КИМ 3 → «2»
           // вместо 1 по ФИПИ). Смена КИМ в ревью и так сбрасывает балл в ''.
+          // Олимпиада: балл всегда = сложность → ручной сид не нужен.
           primaryScore:
+            isOlympiad ||
             getKimPrimaryScoreForSubject(chosenSubject, effExam, d.kim_number) !== null
               ? ''
               : d.primary_score !== null
@@ -393,9 +453,16 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
 
   // ВОЛНА 8: скриншоты решения (upload/paste в DraftCard, состояние в Flow —
   // переживает сворачивание expand-row).
-  const updateSolutionRefs = useCallback((index: number, refs: string[]) => {
-    setSolutionRefs((prev) => prev.map((r, i) => (i === index ? refs : r)));
-  }, []);
+  // Ревью P1-4: API ФУНКЦИОНАЛЬНЫЙ (updater), не «сет массива». Две быстрые
+  // вставки Ctrl+V запускают параллельные upload'ы, каждый со своим снимком
+  // refs — при set-API последний перезаписывал результат первого, и файл
+  // оставался в storage, но терялся у задачи. Кап применяется внутри updater'а.
+  const updateSolutionRefs = useCallback(
+    (index: number, updater: (prev: string[]) => string[]) => {
+      setSolutionRefs((prev) => prev.map((r, i) => (i === index ? updater(r) : r)));
+    },
+    [],
+  );
 
   const toggleSelect = useCallback((index: number) => {
     setSelected((prev) => prev.map((s, i) => (i === index ? !s : s)));

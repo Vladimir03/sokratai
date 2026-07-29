@@ -181,13 +181,16 @@ const DraftRow = memo(function DraftRow({
             </span>
           ) : null}
         </td>
-        {/* Балл */}
+        {/* Балл. Олимпиада: балл = сложность (инвариант ручной формы) — поле
+            read-only, значение правится в карточке (ревью P1-2: иначе ввод
+            здесь молча игнорировался бы commit'ом). */}
         <td className="px-1.5 py-2">
           <input
             type="text"
             inputMode="numeric"
-            value={override.primaryScore}
-            disabled={disabled}
+            value={isOlympiad ? override.difficulty : override.primaryScore}
+            disabled={disabled || isOlympiad}
+            title={isOlympiad ? 'У олимпиадной задачи балл = сложность (правится в карточке)' : undefined}
             onChange={(e) =>
               onChangeOverride(index, { primaryScore: e.target.value.replace(/\D/g, '') })
             }

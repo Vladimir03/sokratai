@@ -35,8 +35,9 @@ export function aiExtractToDraftTask(item: AiLoaderCommitItem, subject: string):
   const difficultyNum =
     isOlympiad && ov.difficulty.trim() ? parseInt(ov.difficulty.trim(), 10) : null;
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
+  // Олимпиада: балл = сложность БЕЗУСЛОВНО (инвариант ручной формы, ревью P1-2).
   const resolvedScore = isOlympiad
-    ? manualScore ?? difficultyNum
+    ? difficultyNum
     : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   const maxScore =
     resolvedScore !== null && !Number.isNaN(resolvedScore) && resolvedScore > 0

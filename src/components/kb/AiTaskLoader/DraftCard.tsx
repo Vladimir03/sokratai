@@ -56,9 +56,13 @@ interface DraftCardProps {
    * Балл остаются: едут в снимок и авто-балл ФИПИ).
    */
   showTaxonomy?: boolean;
-  /** ВОЛНА 8: скриншоты решения (refs kb-attachments; состояние живёт в Flow). */
+  /**
+   * ВОЛНА 8: скриншоты решения (refs kb-attachments; состояние живёт в Flow).
+   * Сеттер ФУНКЦИОНАЛЬНЫЙ (ревью P1-4) — параллельные вставки Ctrl+V не должны
+   * перезаписывать друг друга снимками устаревшего массива.
+   */
   solutionRefs?: string[];
-  onSolutionRefsChange?: (index: number, refs: string[]) => void;
+  onSolutionRefsChange?: (index: number, updater: (prev: string[]) => string[]) => void;
   /** ВОЛНА 8: личные папки для per-task селекта «Папка» (undefined = скрыт, hw/mock). */
   folders?: { id: string; name: string; depth: number }[];
 }
@@ -86,6 +90,9 @@ const LEGEND_CLASS = 'mb-1 block text-xs font-semibold text-slate-500';
 
 /** Рамка по умолчанию для ручного кропа (AI bbox не дал). */
 const DEFAULT_MANUAL_BBOX: ImageBbox = { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+
+/** Кап фото решения — зеркало MAX_TASK_IMAGES ручных форм (attachmentRefs.ts). */
+const MAX_SOLUTION_IMAGES = 5;
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (
@@ -268,35 +275,46 @@ function DraftCardComponent({
 
   // ── ВОЛНА 8: скриншоты решения (upload/paste; компрессия обязательна, rule 40) ──
   const canAddSolutionImages =
-    onSolutionRefsChange !== undefined && (solutionRefs?.length ?? 0) < 5;
+    onSolutionRefsChange !== undefined && (solutionRefs?.length ?? 0) < MAX_SOLUTION_IMAGES;
 
+  /**
+   * Ревью P1-4: КАЖДЫЙ успешный файл коммитится СВОИМ функциональным апдейтом
+   * сразу — поэтому (а) параллельные вставки не перезаписывают друг друга,
+   * (б) сбой на 2-м файле не выбрасывает уже загруженный 1-й. Кап проверяется
+   * внутри updater'а (единственное место, где виден актуальный массив).
+   */
   const uploadSolutionFiles = async (files: File[]) => {
     if (!onSolutionRefsChange) return;
-    const current = solutionRefs ?? [];
-    const room = 5 - current.length;
-    if (room <= 0) {
-      toast.error('Максимум 5 фото решения');
+    if ((solutionRefs?.length ?? 0) >= MAX_SOLUTION_IMAGES) {
+      toast.error(`Максимум ${MAX_SOLUTION_IMAGES} фото решения`);
       return;
     }
-    const batch = files.slice(0, room);
     setUploadingSolution(true);
+    let capReached = false;
     try {
-      const newRefs: string[] = [];
-      for (const raw of batch) {
+      for (const raw of files) {
         const validationError = validateImageFile(raw);
         if (validationError) {
           toast.error(validationError);
           continue;
         }
-        const compressed = await compressForUpload(raw);
-        const res = await uploadKBTaskImage(compressed);
-        newRefs.push(res.storageRef);
+        try {
+          const compressed = await compressForUpload(raw);
+          const res = await uploadKBTaskImage(compressed);
+          onSolutionRefsChange(index, (prev) => {
+            if (prev.length >= MAX_SOLUTION_IMAGES) {
+              capReached = true;
+              return prev;
+            }
+            return [...prev, res.storageRef];
+          });
+        } catch {
+          toast.error('Не удалось загрузить фото решения');
+        }
       }
-      if (newRefs.length > 0) onSolutionRefsChange(index, [...current, ...newRefs]);
-    } catch {
-      toast.error('Не удалось загрузить фото решения');
     } finally {
       setUploadingSolution(false);
+      if (capReached) toast.error(`Максимум ${MAX_SOLUTION_IMAGES} фото решения`);
     }
   };
 
@@ -479,9 +497,7 @@ function DraftCardComponent({
               <button
                 type="button"
                 disabled={disabled || uploadingSolution}
-                onClick={() =>
-                  onSolutionRefsChange(index, (solutionRefs ?? []).filter((r) => r !== ref))
-                }
+                onClick={() => onSolutionRefsChange(index, (prev) => prev.filter((r) => r !== ref))}
                 aria-label="Убрать фото решения"
                 className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-white shadow-sm transition-colors hover:bg-red-600 [touch-action:manipulation]"
               >
@@ -594,20 +610,32 @@ function DraftCardComponent({
                 />
               </div>
             )}
-            <div>
-              <label className={LEGEND_CLASS}>Балл</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={override.primaryScore}
-                onChange={(e) =>
-                  onOverrideChange(index, { primaryScore: e.target.value.replace(/\D/g, '') })
-                }
-                disabled={disabled}
-                placeholder={autoScore != null ? `авто: ${autoScore}` : '—'}
-                className={INPUT_CLASS}
-              />
-            </div>
+            {/* Балл: у олимпиады он РАВЕН сложности (инвариант ручной формы —
+                TaskClassificationFields там тоже заменяет поле подсказкой);
+                ручной ввод скрыт, иначе difficulty и primary_score расходились
+                (ревью P1-2). */}
+            {isOlympiad ? (
+              <div className="flex items-end">
+                <p className="pb-2 text-[11px] text-slate-500">
+                  Балл = сложность{override.difficulty.trim() ? ` (${override.difficulty})` : ''}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className={LEGEND_CLASS}>Балл</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={override.primaryScore}
+                  onChange={(e) =>
+                    onOverrideChange(index, { primaryScore: e.target.value.replace(/\D/g, '') })
+                  }
+                  disabled={disabled}
+                  placeholder={autoScore != null ? `авто: ${autoScore}` : '—'}
+                  className={INPUT_CLASS}
+                />
+              </div>
+            )}
             <div>
               <label className={LEGEND_CLASS}>Формат проверки</label>
               <select
