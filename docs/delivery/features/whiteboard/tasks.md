@@ -119,8 +119,17 @@
 - [x] Сервер: миграция `20260730120000_whiteboard_collab.sql` (zone_tutor_student_id, board_share_links + board_guests deny-all, board_page_revs + publication, `is_board_participant` с тройным REVOKE, participant-политики); `whiteboard-api` (+rev-bump fault-tolerant, `POST /boards/:id/zones` идемпотентная раздача рулонов fail-closed по составу, share create/revoke, zone в patch); новые edge `whiteboard-student-api` (запись своей зоны + лист в свой рулон, base_rev/409 c серверными elements) и `whiteboard-public` (meta/join/state/signals/save, throttle, кап 30 гостей, bearer'ы не логируются). `config.toml` ×2.
 - [x] UI: «Раздать зоны» в хедере доски занятия; имена зон подтягиваются по RLS репетитора.
 - [x] Ревью-промпт этапов 1–2 с целями по полевым метрикам /admin — `review-prompt-phase-p0.md`.
-- [ ] ДЕПЛОЙ: миграция СТРОГО до edge (Lovable), probe OPTIONS ×3; фронт — deploy-sokratai.
-- [ ] Этап 3: вход ученика/гостя + живой синк → Этап 4: follow/bring.
+- [x] ДЕПЛОЙ Этапа 2: миграция применена, probe OPTIONS ×3 → 204 (30.07).
+
+### Этап 3 ✅ код готов (2026-07-30) — вход ученика/гостя + живой синк
+- [x] **Reconcile** (`reconcile.ts`, 6 тестов): LWW по (version, versionNonce), при равных версиях детерминированный тай-брейк МЕНЬШИМ nonce (Excalidraw-модель — обе стороны сходятся к одному результату), щит активного редактирования. Известное ограничение v1: без tombstones удалённый одной стороной элемент может «воскреснуть» при конфликте — принято планом.
+- [x] **Синк**: `boardRealtime.subscribeBoardRevs` (канон rule 100 — уникальный суффикс топика, gap-fill на SUBSCRIBED после обрыва, merge-не-invalidate). Репетитор и ученик — Realtime; гость — поллинг `/signals` 2.5 с (15 с при скрытой вкладке). 409-путь: reconcile → немедленный повтор с новым base_rev; второй конфликт подряд → очередь с backoff.
+- [x] **base_rev у ВСЕХ писателей**: репетиторский `handleSavePage` тоже проверяет rev при записи elements (репетитор конкурирует с учеником в его зоне) и возвращает rev; клиенты ведут rev per-frame.
+- [x] **Ученик**: роут `/student/board/:boardId`; чтение PostgREST под RLS; «моя зона»/подписи зон/signed URL картинок — edge `GET /boards/:id/me` (у ученика НЕТ RLS на tutor_students и storage-прав на board-images). ⚠️ Доревизией пойман anti-leak: /me замкнут на ПОЛНУЮ проверку участия (`isParticipantStudent` — зеркало is_board_participant), иначе любой ученик любого репетитора получал бы имена зон и подписанные URL чужой доски по board_id.
+- [x] **Гость**: роут `/b/:slug` без AuthGuard (join-экран «я — Маша» / свободное имя = зритель), guest_token в localStorage per slug; `image_urls` в state-ответе (rewriteToProxy — rule 96). Общий вью `SharedBoardView` (транспорт-инъекция: ученик/гость), компактный тулбар, запись только в свою зону, «+ Лист» в свой рулон.
+- [x] **«Пригласить»**: кнопка в хедере доски → ссылка + «Копировать» + «Отправить ученикам в чат» (существующий write-path `ensureChatConversation`+`sendChatMessageApi`; пуш штатным каскадом) + «Закрыть доступ» (отзыв: все гости отваливаются на следующем запросе). Известное ограничение v1: 5-мин троттлинг уведомлений чата НЕ обходится (правка чат-edge — чужой канон); если переписка шла только что, пуш схлопнется — ученик и так в чате.
+- [x] E2E-смок: `/b/<фейковый slug>` на dev — join-экран отрисован, прод-edge ответил русской фразой (цепочка фронт→функция подтверждена вживую).
+- [ ] ДЕПЛОЙ Этапа 3: редеплой ВСЕХ ТРЁХ функций (whiteboard-api: base_rev+rev; student-api: /me+anti-leak; public: image_urls) — миграция НЕ нужна; deploy-sokratai для фронта. Затем Этап 4: follow/bring.
 
 ## Фаза 2 — то, ради чего выберут именно вас
 

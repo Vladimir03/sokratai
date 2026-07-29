@@ -46,6 +46,8 @@ const HomeworkResult = lazy(() => import("./pages/student/HomeworkResult"));
 const StudentMockExams = lazy(() => import("./pages/student/StudentMockExams"));
 const StudentMockExam = lazy(() => import("./pages/student/StudentMockExam"));
 const StudentMockExamResult = lazy(() => import("./pages/student/StudentMockExamResult"));
+const StudentBoard = lazy(() => import("./pages/student/StudentBoard"));
+const GuestBoard = lazy(() => import("./pages/GuestBoard"));
 const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
 const PublicMockInvite = lazy(() => import("./pages/PublicMockInvite"));
 const PublicMockResult = lazy(() => import("./pages/PublicMockResult"));
@@ -323,6 +325,14 @@ const App = () => (
               }
             />
             <Route
+              path="/student/board/:boardId"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <StudentBoard />
+                </Suspense>
+              }
+            />
+            <Route
               path="/student/schedule/:lessonId"
               element={
                 <Suspense fallback={<PageLoader />}>
@@ -557,6 +567,16 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <StudentClaimPage />
+                </Suspense>
+              }
+            />
+            {/* Гостевой вход на доску по ссылке (B4): без AuthGuard намеренно —
+                авторизация внутри по guest_token (whiteboard-public). */}
+            <Route
+              path="/b/:slug"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <GuestBoard />
                 </Suspense>
               }
             />

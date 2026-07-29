@@ -3,6 +3,9 @@
 // оно идёт напрямую PostgREST под RLS-политиками is_board_participant.
 //
 // Роуты (verify_jwt=true):
+//   GET  /boards/:id/me    — { my_tutor_student_id, zone_names } (у ученика нет
+//                            RLS-чтения tutor_students — свою зону и подписи
+//                            зон отдаёт сервер)
 //   POST /pages/:id        { elements, base_rev } — сохранить СВОЮ зону
 //   POST /boards/:id/pages { }                    — добавить лист в СВОЙ рулон
 //
@@ -12,6 +15,7 @@
 // серверными elements (клиент делает LWW-reconcile по version/versionNonce).
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
@@ -28,6 +32,46 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_ELEMENTS_PER_PAGE = 20000;
 const MAX_PAGE_PAYLOAD_BYTES = 4 * 1024 * 1024;
 const MAX_ROLL_PAGES = 20;
+// 4 часа: подпись обязана пережить урок 90 мин с запасом (клиент не рефрешит).
+const IMAGE_URL_TTL_SEC = 4 * 3600;
+const BOARD_IMAGE_BUCKET = "board-images";
+
+/**
+ * Signed URL картинок доски для участника. У ученика/гостя НЕТ storage-прав на
+ * `board-images` (политики только на tutor-путь) — подписывает сервер, host
+ * реврайтится на RU-safe api.sokratai.ru (rule 96: rewriteToProxy для signed
+ * URL, уходящих в браузер).
+ */
+async function signBoardImages(
+  db: SupabaseClient,
+  boardId: string,
+): Promise<Record<string, string>> {
+  const { data: pages } = await db
+    .from("board_pages")
+    .select("elements")
+    .eq("board_id", boardId);
+  const prefix = `storage://${BOARD_IMAGE_BUCKET}/`;
+  const paths = new Set<string>();
+  for (const p of pages ?? []) {
+    const elements = Array.isArray(p.elements) ? (p.elements as { type?: string; ref?: string }[]) : [];
+    for (const el of elements) {
+      if (el?.type === "image" && typeof el.ref === "string" && el.ref.startsWith(prefix)) {
+        paths.add(el.ref.slice(prefix.length));
+      }
+    }
+  }
+  if (paths.size === 0) return {};
+  const list = Array.from(paths);
+  const { data: signed } = await db.storage
+    .from(BOARD_IMAGE_BUCKET)
+    .createSignedUrls(list, IMAGE_URL_TTL_SEC);
+  const out: Record<string, string> = {};
+  for (let i = 0; i < (signed?.length ?? 0); i++) {
+    const item = signed![i];
+    if (item.signedUrl) out[`${prefix}${list[i]}`] = rewriteToProxy(item.signedUrl);
+  }
+  return out;
+}
 
 const PAGE_SELECT =
   "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, created_at, updated_at";
@@ -39,7 +83,7 @@ function getCorsHeaders(req: Request): Record<string, string> {
     "Access-Control-Allow-Origin": FALLBACK_ORIGINS.includes(origin) || isLovable ? origin : FALLBACK_ORIGINS[0],
     "Access-Control-Allow-Headers":
       "authorization, x-client-info, apikey, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Vary": "Origin",
   };
 }
@@ -67,6 +111,56 @@ async function authenticate(req: Request): Promise<string | null> {
   if (!resp.ok) return null;
   const user = await resp.json();
   return user?.id ?? null;
+}
+
+/**
+ * Участие ученика в ДОСКЕ (зеркало is_board_participant; RPC не годится —
+ * под service_role auth.uid() пуст). Живое членство, rule 100.
+ */
+async function isParticipantStudent(
+  db: SupabaseClient,
+  userId: string,
+  board: { id: string; student_id: string | null; lesson_id: string | null },
+): Promise<boolean> {
+  if (board.student_id) {
+    const { data } = await db
+      .from("tutor_students")
+      .select("id")
+      .eq("id", board.student_id)
+      .eq("student_id", userId)
+      .is("archived_at", null)
+      .maybeSingle();
+    if (data) return true;
+  }
+  if (board.lesson_id) {
+    const { data: lesson } = await db
+      .from("tutor_lessons")
+      .select("group_source_tutor_group_id, tutor_student_id")
+      .eq("id", board.lesson_id)
+      .maybeSingle();
+    if (lesson?.tutor_student_id) {
+      const { data } = await db
+        .from("tutor_students")
+        .select("id")
+        .eq("id", lesson.tutor_student_id)
+        .eq("student_id", userId)
+        .is("archived_at", null)
+        .maybeSingle();
+      if (data) return true;
+    }
+    if (lesson?.group_source_tutor_group_id) {
+      const { data: member } = await db
+        .from("tutor_group_memberships")
+        .select("tutor_student_id, tutor_students!inner(student_id, archived_at)")
+        .eq("tutor_group_id", lesson.group_source_tutor_group_id)
+        .eq("is_active", true)
+        .eq("tutor_students.student_id", userId)
+        .is("tutor_students.archived_at", null)
+        .limit(1);
+      if (member && member.length > 0) return true;
+    }
+  }
+  return false;
 }
 
 /** auth.uid → tutor_students.id для репетитора этой доски (живой резолв, rule 100). */
@@ -113,6 +207,58 @@ Deno.serve(async (req) => {
     const segments = (idx >= 0 ? url.pathname.slice(idx + "whiteboard-student-api".length) : "")
       .split("/")
       .filter(Boolean);
+
+    // GET /boards/:id/me — моя зона + подписи зон (под service_role, участие проверяется)
+    if (
+      req.method === "GET" && segments[0] === "boards" && segments.length === 3 &&
+      segments[2] === "me"
+    ) {
+      const boardId = segments[1];
+      if (!UUID_RE.test(boardId)) return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор доски.");
+      const { data: board } = await db
+        .from("boards")
+        .select("id, tutor_id, student_id, lesson_id")
+        .eq("id", boardId)
+        .maybeSingle();
+      if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+      // Anti-leak: имена зон и подписанные URL — ТОЛЬКО участнику доски (404,
+      // не 403 — не раскрываем существование доски чужим).
+      const participant = await isParticipantStudent(db, userId, {
+        id: board.id as string,
+        student_id: (board.student_id as string | null) ?? null,
+        lesson_id: (board.lesson_id as string | null) ?? null,
+      });
+      if (!participant) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+      const myStudentId = await resolveMyZoneStudentId(db, userId, board.tutor_id as string);
+      // Подписи зон: имена учеников по зонам листов этой доски. Anti-leak:
+      // только display_name, и только для зон, уже размещённых на доске.
+      const { data: zonePages } = await db
+        .from("board_pages")
+        .select("zone_tutor_student_id")
+        .eq("board_id", boardId)
+        .not("zone_tutor_student_id", "is", null);
+      const zoneIds = Array.from(
+        new Set((zonePages ?? []).map((p) => p.zone_tutor_student_id as string)),
+      );
+      const zoneNames: Record<string, string> = {};
+      if (zoneIds.length > 0) {
+        const { data: students } = await db
+          .from("tutor_students")
+          .select("id, display_name")
+          .in("id", zoneIds);
+        for (const s of students ?? []) {
+          zoneNames[s.id as string] = (s.display_name as string | null) ?? "Ученик";
+        }
+      }
+      // Участник (даже зритель без зоны) получает подписанные URL картинок —
+      // без них задачи-подложки на чужих листах были бы серыми рамками.
+      const imageUrls = await signBoardImages(db, boardId);
+      return jsonOk(cors, {
+        my_tutor_student_id: myStudentId,
+        zone_names: zoneNames,
+        image_urls: imageUrls,
+      });
+    }
 
     // POST /pages/:id — сохранить свою зону
     if (req.method === "POST" && segments[0] === "pages" && segments.length === 2) {

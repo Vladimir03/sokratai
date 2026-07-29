@@ -61,7 +61,7 @@ async function bumpPageRev(
   pageId: string,
   boardId: string,
   updatedBy: string,
-): Promise<void> {
+): Promise<number> {
   try {
     const { data } = await db
       .from("board_page_revs")
@@ -69,20 +69,25 @@ async function bumpPageRev(
       .eq("page_id", pageId)
       .maybeSingle();
     if (data) {
+      const next = (data.rev as number) + 1;
       await db
         .from("board_page_revs")
-        .update({ rev: (data.rev as number) + 1, updated_by: updatedBy, updated_at: new Date().toISOString() })
+        .update({ rev: next, updated_by: updatedBy, updated_at: new Date().toISOString() })
         .eq("page_id", pageId);
-    } else {
-      await db
-        .from("board_page_revs")
-        .insert({ page_id: pageId, board_id: boardId, updated_by: updatedBy });
+      return next;
     }
+    await db
+      .from("board_page_revs")
+      .insert({ page_id: pageId, board_id: boardId, updated_by: updatedBy });
+    return 1;
   } catch (e) {
     console.error("whiteboard_api_rev_bump_failed", {
       page_id: pageId,
       message: e instanceof Error ? e.message.slice(0, 120) : "unknown",
     });
+    // Fault-tolerant: сбой сигнала не валит сохранение; 0 = «rev неизвестен»,
+    // клиент подтянет актуальный из ближайшего события/снапшота.
+    return 0;
   }
 }
 
@@ -751,6 +756,34 @@ async function handleSavePage(
     return jsonError(cors, 400, "VALIDATION", "Нечего сохранять.");
   }
 
+  // Оптимистическая блокировка (Этап 3): с появлением совместной работы
+  // репетитор может конкурировать с учеником В ЕГО ЗОНЕ — молча затирать
+  // более свежий rev нельзя. base_rev опционален (старые клиенты и патчи
+  // без elements сохраняют прежнее поведение).
+  const { data: revRow } = await db
+    .from("board_page_revs")
+    .select("rev")
+    .eq("page_id", pageId)
+    .maybeSingle();
+  const currentRev = Number(revRow?.rev ?? 1);
+  const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+  if (baseRev !== null && "elements" in patch && baseRev !== currentRev) {
+    const { data: freshPage } = await db
+      .from("board_pages")
+      .select("elements")
+      .eq("id", pageId)
+      .maybeSingle();
+    return new Response(
+      JSON.stringify({
+        error: "Лист изменил другой участник.",
+        code: "REV_CONFLICT",
+        rev: currentRev,
+        elements: freshPage?.elements ?? [],
+      }),
+      { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
+    );
+  }
+
   const { data, error } = await db
     .from("board_pages")
     .update(patch)
@@ -764,9 +797,9 @@ async function handleSavePage(
 
   // Доска «поднимается» в списке недавних — это и есть смысл её updated_at.
   await db.from("boards").update({ updated_at: new Date().toISOString() }).eq("id", page.board_id);
-  await bumpPageRev(db, pageId, page.board_id as string, "tutor");
+  const rev = await bumpPageRev(db, pageId, page.board_id as string, "tutor");
 
-  return jsonOk(cors, { page: data });
+  return jsonOk(cors, { page: data, rev });
 }
 
 async function handleDeletePage(

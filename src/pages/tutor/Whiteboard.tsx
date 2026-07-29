@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, Download, Loader2, Paperclip, Users } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Copy, Download, Loader2, Paperclip, Send, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -74,6 +74,10 @@ import {
 } from '@/lib/whiteboard/boardImages';
 import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQueue';
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
+import { reconcileElements } from '@/lib/whiteboard/reconcile';
+import { subscribeBoardRevs } from '@/lib/whiteboard/boardRealtime';
+import { ensureShareLink, revokeShareLink } from '@/lib/whiteboardApi';
+import { ensureChatConversation, sendChatMessageApi } from '@/lib/tutorStudentChatApi';
 import { usePasteImages } from '@/hooks/usePasteImages';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
 import { deleteMaterial, uploadLessonPdf } from '@/lib/lessonMaterialsApi';
@@ -106,6 +110,8 @@ interface FrameState {
   placement: FramePlacement;
   /** Зона ученика (рулон); null — лист репетитора. */
   zoneTutorStudentId: string | null;
+  /** Текущий rev листа (base_rev для сохранений; Этап 3). 0 — неизвестен. */
+  rev: number;
 }
 
 interface TextDraft {
@@ -116,7 +122,7 @@ interface TextDraft {
   value: string;
 }
 
-function rowToFrameState(row: BoardPageRow, index: number): FrameState {
+function rowToFrameState(row: BoardPageRow, index: number, rev = 0): FrameState {
   const elements = parseElements(row.elements);
   primeSeqCounter(elements);
   const appState = (row.app_state ?? {}) as Record<string, unknown>;
@@ -130,6 +136,7 @@ function rowToFrameState(row: BoardPageRow, index: number): FrameState {
     cell,
     placement: cellToPlacement(cell),
     zoneTutorStudentId: row.zone_tutor_student_id ?? null,
+    rev,
   };
 }
 
@@ -191,18 +198,42 @@ export default function Whiteboard() {
     textDraftRef.current = textDraft;
   }, [textDraft]);
 
+  /** Точечный патч кадра БЕЗ пометки dirty (rev/merge от сервера). */
+  const patchFrameSilently = useCallback((frameId: string, patch: Partial<FrameState>) => {
+    framesRef.current = framesRef.current.map((f) => (f.id === frameId ? { ...f, ...patch } : f));
+    setFrames(framesRef.current);
+  }, []);
+
   const autosaveRef = useRef<AutosaveQueue | null>(null);
   if (autosaveRef.current === null) {
     autosaveRef.current = new AutosaveQueue({
       savePage: async (pageId: string) => {
-        const frame = framesRef.current.find((f) => f.id === pageId);
-        if (!frame) return;
-        await saveBoardPage(frame.id, {
-          elements: frame.elements,
-          background: frame.background,
-          grid_mm: frame.gridMm,
-          app_state: { orientation: frame.orientation, frame: frame.cell },
-        });
+        // 409-конфликт (Этап 3): репетитор мог столкнуться с учеником в его
+        // зоне → reconcile по version/versionNonce и немедленный повтор.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const frame = framesRef.current.find((f) => f.id === pageId);
+          if (!frame) return;
+          const outcome = await saveBoardPage(frame.id, {
+            elements: frame.elements,
+            background: frame.background,
+            grid_mm: frame.gridMm,
+            app_state: { orientation: frame.orientation, frame: frame.cell },
+            base_rev: frame.rev,
+          });
+          if (!outcome.conflict) {
+            if (typeof outcome.rev === 'number' && outcome.rev > 0) {
+              patchFrameSilently(pageId, { rev: outcome.rev });
+            }
+            return;
+          }
+          const remote = Array.isArray(outcome.conflict.elements)
+            ? (outcome.conflict.elements as BoardElement[])
+            : [];
+          const { merged, divergesFromRemote } = reconcileElements(frame.elements, remote);
+          patchFrameSilently(pageId, { elements: merged, rev: outcome.conflict.rev });
+          if (!divergesFromRemote) return;
+        }
+        throw new Error('REV_CONFLICT_RETRY');
       },
       onStatus: setSaveStatus,
     });
@@ -270,9 +301,23 @@ export default function Whiteboard() {
         if (cancelled) return;
         setBoard(data.board);
         savedTitleRef.current = data.board.title ?? '';
-        const next = data.pages.map(rowToFrameState);
+        const next = data.pages.map((row, i) => rowToFrameState(row, i));
         applyFrames(next);
         setActiveFrameId(next[0]?.id ?? null);
+        // Revs — base_rev для сохранений (Этап 3). Догружаем после кадров:
+        // сейв с rev=0 в худшем случае получит один 409 и выровняется сам.
+        void supabase
+          .from('board_page_revs')
+          .select('page_id, rev')
+          .eq('board_id', data.board.id)
+          .then(({ data: revs }) => {
+            if (cancelled || !revs) return;
+            framesRef.current = framesRef.current.map((f) => {
+              const row = revs.find((r) => r.page_id === f.id);
+              return row ? { ...f, rev: Number(row.rev) || 0 } : f;
+            });
+            setFrames(framesRef.current);
+          });
         if (next.length > 0) {
           // Открытие: один лист — вписать его; несколько — показать всю доску
           // (репетитор группы сразу видит все зоны, кейс Елены).
@@ -304,6 +349,64 @@ export default function Whiteboard() {
     },
     [autosave],
   );
+
+  // ─── Живой синк (Этап 3): ученики пишут в зоны — репетитор видит ~1–2 с ─────
+
+  const boardIdForSync = board?.id ?? null;
+
+  useEffect(() => {
+    if (!boardIdForSync) return;
+
+    const refetchAndMerge = async (pageId: string, knownRev: number) => {
+      const current = framesRef.current.find((f) => f.id === pageId);
+      if (current && current.rev >= knownRev && knownRev > 0) return; // наш же сейв
+      const [{ data: row }, { data: revRow }] = await Promise.all([
+        supabase
+          .from('board_pages')
+          .select('id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id')
+          .eq('id', pageId)
+          .maybeSingle(),
+        supabase.from('board_page_revs').select('rev').eq('page_id', pageId).maybeSingle(),
+      ]);
+      if (!row) return;
+      const freshRev = Number(revRow?.rev) || knownRev;
+      const parsed = rowToFrameState(row as BoardPageRow, framesRef.current.length, freshRev);
+      const existing = framesRef.current.find((f) => f.id === pageId);
+      if (!existing) {
+        // Ученик добавил лист в свой рулон.
+        applyFrames([...framesRef.current, parsed]);
+        return;
+      }
+      // Merge, не replace: локальная незасейвленная грязь репетитора переживает
+      // чужие правки (rule 100-паттерн; reconcile по version/versionNonce).
+      const { merged } = reconcileElements(existing.elements, parsed.elements);
+      patchFrameSilently(pageId, {
+        elements: merged,
+        rev: freshRev,
+        zoneTutorStudentId: parsed.zoneTutorStudentId,
+        background: parsed.background,
+        gridMm: parsed.gridMm,
+        orientation: parsed.orientation,
+        cell: parsed.cell,
+        placement: parsed.placement,
+      });
+    };
+
+    const resync = async () => {
+      const { data: revs } = await supabase
+        .from('board_page_revs')
+        .select('page_id, rev')
+        .eq('board_id', boardIdForSync);
+      for (const r of revs ?? []) {
+        void refetchAndMerge(r.page_id as string, Number(r.rev) || 0);
+      }
+    };
+
+    return subscribeBoardRevs(boardIdForSync, {
+      onRev: (event) => void refetchAndMerge(event.page_id, event.rev),
+      onReconnect: () => void resync(),
+    });
+  }, [boardIdForSync, applyFrames, patchFrameSilently]);
 
   useEffect(() => {
     if (saveStatus === 'saved') return;
@@ -700,7 +803,8 @@ export default function Whiteboard() {
           await saveBoardPage(created.id, { zone_tutor_student_id: zoneTutorStudentId });
         }
         const newFrame: FrameState = {
-          ...rowToFrameState(created, framesRef.current.length),
+          // rev: создание бампит сигнал до 1, zone-patch — до 2 (протокол edge).
+          ...rowToFrameState(created, framesRef.current.length, zoneTutorStudentId ? 2 : 1),
           cell,
           placement: cellToPlacement(cell),
           zoneTutorStudentId,
@@ -739,7 +843,7 @@ export default function Whiteboard() {
         return;
       }
       const startIndex = framesRef.current.length;
-      const added = pages.map((row, i) => rowToFrameState(row, startIndex + i));
+      const added = pages.map((row, i) => rowToFrameState(row, startIndex + i, 1));
       applyFrames([...framesRef.current, ...added]);
       fitFrames(framesRef.current, viewport);
       toast.success(`Создано зон: ${pages.length}`);
@@ -749,6 +853,98 @@ export default function Whiteboard() {
       setPageBusy(false);
     }
   }, [board, pageBusy, applyFrames, fitFrames, viewport]);
+
+  // ─── «Пригласить на доску» (Этап 3, B4) ─────────────────────────────────────
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteSending, setInviteSending] = useState(false);
+
+  const handleInviteOpen = useCallback(async () => {
+    if (!board || inviteBusy) return;
+    setInviteBusy(true);
+    setInviteOpen(true);
+    try {
+      const slug = await ensureShareLink(board.id);
+      setInviteLink(`${window.location.origin}/b/${slug}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось создать ссылку');
+      setInviteOpen(false);
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [board, inviteBusy]);
+
+  const handleInviteCopy = useCallback(async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      toast.success('Ссылка скопирована');
+    } catch {
+      toast.message(inviteLink); // Safari без прав на clipboard — покажем текстом
+    }
+  }, [inviteLink]);
+
+  /**
+   * Отправка ссылки ученикам зон в личные чаты (существующий write-path чата —
+   * rule 100; пуш поедет штатным каскадом push→telegram→email). Известное
+   * ограничение v1: 5-мин троттлинг уведомлений чата НЕ обходится — если
+   * переписка шла только что, пуш молча схлопнется (ученик и так в чате).
+   */
+  const handleInviteSendToChats = useCallback(async () => {
+    if (!inviteLink || inviteSending) return;
+    const zoneIds = Array.from(
+      new Set(
+        framesRef.current
+          .map((f) => f.zoneTutorStudentId)
+          .filter((v): v is string => !!v),
+      ),
+    );
+    if (zoneIds.length === 0) {
+      toast.message('Сначала раздайте зоны — отправлю ссылку каждому ученику занятия.');
+      return;
+    }
+    setInviteSending(true);
+    let sent = 0;
+    try {
+      for (const tutorStudentId of zoneIds) {
+        try {
+          const { conversation_id } = await ensureChatConversation(tutorStudentId);
+          await sendChatMessageApi(conversation_id, {
+            content: `Присоединяйся к доске занятия: ${inviteLink}`,
+            // НЕ crypto.randomUUID (rule 80, Safari < 15.4).
+            client_msg_id: `board-invite-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+          });
+          sent += 1;
+        } catch {
+          // одного не нашли/чат недоступен — шлём остальным
+        }
+      }
+      if (sent > 0) toast.success(`Отправлено в чаты: ${sent}`);
+      else toast.error('Не удалось отправить ни одному ученику — скопируйте ссылку вручную.');
+    } finally {
+      setInviteSending(false);
+    }
+  }, [inviteLink, inviteSending]);
+
+  const handleInviteRevoke = useCallback(async () => {
+    if (!board || inviteBusy) return;
+    if (!window.confirm('Закрыть доступ по ссылке? Все гости отключатся, ссылка перестанет работать.')) {
+      return;
+    }
+    setInviteBusy(true);
+    try {
+      await revokeShareLink(board.id);
+      setInviteLink(null);
+      setInviteOpen(false);
+      toast.success('Доступ по ссылке закрыт');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось отозвать ссылку');
+    } finally {
+      setInviteBusy(false);
+    }
+  }, [board, inviteBusy]);
 
   /** Импорт PDF: страница → лист-подложка в общей полосе (воркфлоу Елены). */
   const importPdf = useCallback(
@@ -782,7 +978,7 @@ export default function Whiteboard() {
           const h = Math.min(size.height, roundMm(w * aspect));
           const image = createImage(0, 0, w, h, uploaded.ref);
           const newFrame: FrameState = {
-            ...rowToFrameState(created, framesRef.current.length),
+            ...rowToFrameState(created, framesRef.current.length, 1),
             cell,
             placement: cellToPlacement(cell),
             elements: [image],
@@ -1212,6 +1408,17 @@ export default function Whiteboard() {
           </Button>
         )}
 
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleInviteOpen()}
+          disabled={inviteBusy}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <UserPlus className="mr-1.5 h-4 w-4" />
+          <span className="hidden sm:inline">Пригласить</span>
+        </Button>
+
         {board.lesson_id && (
           <Button
             size="sm"
@@ -1369,6 +1576,66 @@ export default function Whiteboard() {
             <span className="text-slate-700">
               {exitPhase === 'saving' ? 'Сохраняем доску…' : 'Прикрепляем конспект к занятию…'}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Приглашение на доску (B4): ссылка-bearer. Отзыв = все гости отваливаются
+          на следующем запросе (см. tasks.md — «зачем отзыв»). */}
+      {inviteOpen && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/30 p-4"
+          onClick={() => setInviteOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-slate-900">Пригласить на доску</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Ученик откроет доску по ссылке — без регистрации. Писать сможет только в своей зоне.
+            </p>
+            {inviteBusy || !inviteLink ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+              </div>
+            ) : (
+              <>
+                <div className="mt-4 flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={inviteLink}
+                    onFocus={(e) => e.currentTarget.select()}
+                    className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 text-base text-slate-700"
+                  />
+                  <Button variant="outline" onClick={() => void handleInviteCopy()} style={{ touchAction: 'manipulation' }}>
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <Button
+                    onClick={() => void handleInviteSendToChats()}
+                    disabled={inviteSending}
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    {inviteSending ? (
+                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="mr-1.5 h-4 w-4" />
+                    )}
+                    Отправить ученикам в чат
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => void handleInviteRevoke()}
+                    style={{ touchAction: 'manipulation' }}
+                  >
+                    Закрыть доступ
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

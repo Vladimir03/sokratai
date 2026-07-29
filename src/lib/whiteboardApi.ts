@@ -140,7 +140,23 @@ export async function createBoardPage(
   return res.page;
 }
 
-/** POST /pages/:id — автосохранение сцены и разлиновки. */
+export interface SavePageConflict {
+  rev: number;
+  elements: unknown;
+}
+
+export interface SavePageOutcome {
+  page?: BoardPageRow;
+  rev?: number;
+  conflict?: SavePageConflict;
+}
+
+/**
+ * POST /pages/:id — автосохранение сцены и разлиновки. С Этапа 3 несёт
+ * base_rev: репетитор может конкурировать с учеником В ЕГО ЗОНЕ, и 409
+ * REV_CONFLICT возвращает серверные elements для reconcile (не исключение —
+ * это ШТАТНЫЙ путь совместной работы).
+ */
 export async function saveBoardPage(
   pageId: string,
   patch: {
@@ -149,13 +165,38 @@ export async function saveBoardPage(
     background?: BoardBackground;
     grid_mm?: BoardGridMm;
     zone_tutor_student_id?: string | null;
+    base_rev?: number;
   },
-): Promise<BoardPageRow> {
-  const res = await invokeWhiteboard<{ page: BoardPageRow }>(
-    `/pages/${encodeURIComponent(pageId)}`,
+): Promise<SavePageOutcome> {
+  const { data, error } = await supabase.functions.invoke(
+    `${FN}/pages/${encodeURIComponent(pageId)}`,
     { method: 'POST', body: patch },
   );
-  return res.page;
+  if (error) {
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      try {
+        const parsed = (await ctx.json()) as {
+          code?: string;
+          error?: string;
+          rev?: number;
+          elements?: unknown;
+        };
+        if (parsed.code === 'REV_CONFLICT' && typeof parsed.rev === 'number') {
+          return { conflict: { rev: parsed.rev, elements: parsed.elements ?? [] } };
+        }
+        throw new WhiteboardApiError(
+          parsed.error ?? 'Не удалось сохранить лист. Попробуйте ещё раз.',
+          parsed.code ?? null,
+        );
+      } catch (err) {
+        if (err instanceof WhiteboardApiError) throw err;
+      }
+    }
+    throw new WhiteboardApiError('Не удалось сохранить лист. Попробуйте ещё раз.');
+  }
+  const res = data as { page: BoardPageRow; rev?: number };
+  return { page: res.page, rev: res.rev };
 }
 
 /** DELETE /pages/:id — единственную страницу удалить нельзя (409 LAST_PAGE). */

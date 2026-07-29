@@ -14,6 +14,7 @@
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { throttleCheck } from "../_shared/throttle.ts";
+import { rewriteToProxy } from "../_shared/proxy-url.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -27,6 +28,36 @@ const MAX_NAME_LEN = 60;
 
 const PAGE_WHITELIST =
   "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, updated_at";
+const IMAGE_URL_TTL_SEC = 4 * 3600;
+const BOARD_IMAGE_BUCKET = "board-images";
+
+/** Signed URL картинок листов (у гостя нет storage-прав; host → RU-safe, rule 96). */
+async function signBoardImages(
+  db: SupabaseClient,
+  pages: { elements?: unknown }[],
+): Promise<Record<string, string>> {
+  const prefix = `storage://${BOARD_IMAGE_BUCKET}/`;
+  const paths = new Set<string>();
+  for (const p of pages) {
+    const elements = Array.isArray(p.elements) ? (p.elements as { type?: string; ref?: string }[]) : [];
+    for (const el of elements) {
+      if (el?.type === "image" && typeof el.ref === "string" && el.ref.startsWith(prefix)) {
+        paths.add(el.ref.slice(prefix.length));
+      }
+    }
+  }
+  if (paths.size === 0) return {};
+  const list = Array.from(paths);
+  const { data: signed } = await db.storage
+    .from(BOARD_IMAGE_BUCKET)
+    .createSignedUrls(list, IMAGE_URL_TTL_SEC);
+  const out: Record<string, string> = {};
+  for (let i = 0; i < (signed?.length ?? 0); i++) {
+    const item = signed![i];
+    if (item.signedUrl) out[`${prefix}${list[i]}`] = rewriteToProxy(item.signedUrl);
+  }
+  return out;
+}
 
 const CORS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -247,11 +278,14 @@ Deno.serve(async (req) => {
         .select("page_id, rev, updated_by, updated_at")
         .eq("board_id", guest.board_id);
       await db.from("board_guests").update({ last_seen_at: new Date().toISOString() }).eq("id", guest.id);
+      // Подписанные URL картинок: у гостя нет storage-прав, подписывает сервер.
+      const imageUrls = await signBoardImages(db, pages ?? []);
       return jsonOk({
         board: { id: board?.id, title: (board?.title as string | null) ?? null },
         my_tutor_student_id: guest.tutor_student_id,
         pages: pages ?? [],
         revs: revs ?? [],
+        image_urls: imageUrls,
       });
     }
 
