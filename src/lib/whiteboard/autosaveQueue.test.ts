@@ -110,6 +110,38 @@ describe('AutosaveQueue', () => {
     expect(statuses[statuses.length - 1]).toBe('error');
   });
 
+  it('страница, изменённая во время СВОЕГО же сохранения, сохраняется повторно', async () => {
+    // Сценарий P0 из ревью р.4: ответ по v1 не должен «съесть» правку v2.
+    const gates = [deferred<void>(), deferred<void>()];
+    let call = 0;
+    const savePage = vi.fn().mockImplementation(() => gates[call++].promise);
+    const q = new AutosaveQueue({ savePage, onStatus: (s) => statuses.push(s) });
+
+    q.markDirty('a');
+    const flush = q.flush();
+    // Правка ТОЙ ЖЕ страницы, пока её сейв в полёте.
+    q.markDirty('a');
+    gates[0].resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    gates[1].resolve();
+
+    await expect(flush).resolves.toBe(true);
+    // Второй проход обязан перечитать и сохранить страницу заново.
+    expect(savePage.mock.calls.map((c) => c[0])).toEqual(['a', 'a']);
+    expect(statuses[statuses.length - 1]).toBe('saved');
+  });
+
+  it('forget последней проблемной страницы возвращает статус к saved', async () => {
+    const savePage = vi.fn().mockRejectedValue(new Error('x'));
+    const q = new AutosaveQueue({ savePage, onStatus: (s) => statuses.push(s), retryMs: 60000 });
+    q.markDirty('a');
+    await q.flush();
+    expect(statuses[statuses.length - 1]).toBe('error');
+
+    q.forget('a');
+    expect(statuses[statuses.length - 1]).toBe('saved');
+  });
+
   it('flush без грязных страниц — мгновенный true', async () => {
     const savePage = vi.fn();
     const q = new AutosaveQueue({ savePage, onStatus: () => undefined });

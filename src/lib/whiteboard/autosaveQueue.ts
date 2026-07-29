@@ -64,6 +64,11 @@ export class AutosaveQueue {
   /** Снять страницу с учёта (например, после её удаления). */
   forget(pageId: string): void {
     this.dirty.delete(pageId);
+    // Ошибка могла относиться к забытой странице: если очередь опустела и
+    // ничего не в полёте — статус обязан вернуться к правде (ревью 5.6, р.4).
+    if (this.dirty.size === 0 && !this.flushPromise && this.status === 'error') {
+      this.setStatus('saved');
+    }
   }
 
   /**

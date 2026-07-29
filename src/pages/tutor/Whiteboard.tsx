@@ -120,11 +120,17 @@ export default function Whiteboard() {
   const [zoom, setZoom] = useState<BoardZoom>('fit');
   const [historyTick, setHistoryTick] = useState(0);
 
+  // ⚠️ Зеркало страниц — СИНХРОННОЕ: applyPages обновляет ref в том же тике,
+  // что и setState. Прежний вариант (sync в passive-эффекте) оставлял окно,
+  // в котором ответ автосейва мог перечитать УСТАРЕВШУЮ сцену и честно
+  // объявить «Сохранено» без последнего штриха (ревью р.4, P0). Рендер
+  // по-прежнему читает state; ref — источник правды для сети и жестов.
   const pagesRef = useRef<PageState[]>([]);
   const textDraftRef = useRef<TextDraft | null>(null);
   const savedTitleRef = useRef<string>('');
   const exportedSignatureRef = useRef<string | null>(null);
   const historyRef = useRef(new SceneHistory());
+  const attachPromiseRef = useRef<Promise<boolean> | null>(null);
 
   // Очередь автосейва создаётся один раз; savePage читает СВЕЖУЮ страницу через
   // pagesRef (зеркало синхронизируется после коммита, см. эффект ниже).
@@ -146,10 +152,12 @@ export default function Whiteboard() {
   }
   const autosave = autosaveRef.current;
 
-  // Зеркала — ПОСЛЕ коммита, не в теле рендера (concurrent-безопасность).
-  useEffect(() => {
-    pagesRef.current = pages;
-  }, [pages]);
+  /** Единственная точка записи страниц: ref и state меняются вместе. */
+  const applyPages = useCallback((next: PageState[]) => {
+    pagesRef.current = next;
+    setPages(next);
+  }, []);
+
   useEffect(() => {
     textDraftRef.current = textDraft;
   }, [textDraft]);
@@ -179,7 +187,7 @@ export default function Whiteboard() {
         setBoard(data.board);
         savedTitleRef.current = data.board.title ?? '';
         const next = data.pages.map(rowToPageState);
-        setPages(next.length > 0 ? next : []);
+        applyPages(next.length > 0 ? next : []);
         setActiveIndex(0);
         if (params.lessonId) {
           navigate(`/tutor/board/${data.board.id}`, { replace: true });
@@ -196,7 +204,7 @@ export default function Whiteboard() {
     return () => {
       cancelled = true;
     };
-  }, [params.boardId, params.lessonId, navigate]);
+  }, [params.boardId, params.lessonId, navigate, applyPages]);
 
   // Уход со страницы — best-effort дожим очереди (+ beforeunload ниже).
   useEffect(
@@ -221,25 +229,23 @@ export default function Whiteboard() {
 
   const updateActiveElements = useCallback(
     (updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
-      const page = pagesRef.current[activeIndex];
+      const current = pagesRef.current;
+      const page = current[activeIndex];
       if (!page) return;
+      const nextElements = updater(page.elements);
+      if (nextElements === page.elements) return;
       if (recordHistory) {
         historyRef.current.push(page.id, page.elements);
         setHistoryTick((t) => t + 1);
       }
+      const copy = current.slice();
+      copy[activeIndex] = { ...page, elements: nextElements };
+      // Порядок важен: сначала синхронное зеркало (applyPages), потом markDirty —
+      // очередь автосейва при любом раскладе читает уже новую сцену.
+      applyPages(copy);
       autosave.markDirty(page.id);
-      setPages((prev) => {
-        const idx = prev.findIndex((p) => p.id === page.id);
-        if (idx < 0) return prev;
-        const current = prev[idx];
-        const nextElements = updater(current.elements);
-        if (nextElements === current.elements) return prev;
-        const copy = prev.slice();
-        copy[idx] = { ...current, elements: nextElements };
-        return copy;
-      });
     },
-    [activeIndex, autosave],
+    [activeIndex, autosave, applyPages],
   );
 
   const handleCommitElement = useCallback(
@@ -280,10 +286,10 @@ export default function Whiteboard() {
           : history.redo(page.id, page.elements);
       if (!restored) return;
       setHistoryTick((t) => t + 1);
+      applyPages(pagesRef.current.map((p) => (p.id === page.id ? { ...p, elements: restored } : p)));
       autosave.markDirty(page.id);
-      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, elements: restored } : p)));
     },
-    [activeIndex, autosave],
+    [activeIndex, autosave, applyPages],
   );
 
   const handleUndo = useCallback(() => applyHistory('undo'), [applyHistory]);
@@ -321,10 +327,10 @@ export default function Whiteboard() {
     (patch: Partial<Pick<PageState, 'background' | 'gridMm' | 'orientation'>>) => {
       const page = pagesRef.current[activeIndex];
       if (!page) return;
+      applyPages(pagesRef.current.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
       autosave.markDirty(page.id);
-      setPages((prev) => prev.map((p) => (p.id === page.id ? { ...p, ...patch } : p)));
     },
-    [activeIndex, autosave],
+    [activeIndex, autosave, applyPages],
   );
 
   const handleOrientationChange = useCallback(
@@ -368,16 +374,17 @@ export default function Whiteboard() {
         // app_state и создаётся дефолтной — досылаем её первым же автосейвом).
         orientation: activePage?.orientation ?? 'portrait',
       };
+      const nextPages = [...pagesRef.current, newPage];
+      applyPages(nextPages);
       if (newPage.orientation !== 'portrait') autosave.markDirty(newPage.id);
-      setPages((prev) => [...prev, newPage]);
-      setActiveIndex(pagesRef.current.length);
+      setActiveIndex(nextPages.length - 1);
       setSelectedIds([]);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось добавить страницу');
     } finally {
       setPageBusy(false);
     }
-  }, [board, pageBusy, autosave, activePage]);
+  }, [board, pageBusy, autosave, activePage, applyPages]);
 
   const handleDeletePage = useCallback(
     async (index: number) => {
@@ -394,8 +401,9 @@ export default function Whiteboard() {
         await deleteBoardPage(page.id);
         historyRef.current.forget(page.id);
         autosave.forget(page.id);
-        setPages((prev) => prev.filter((_, i) => i !== index));
-        setActiveIndex((prev) => Math.max(0, Math.min(prev, pagesRef.current.length - 2)));
+        const nextPages = pagesRef.current.filter((_, i) => i !== index);
+        applyPages(nextPages);
+        setActiveIndex((prev) => Math.max(0, Math.min(prev, nextPages.length - 1)));
         setSelectedIds([]);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Не удалось удалить страницу');
@@ -403,7 +411,7 @@ export default function Whiteboard() {
         setPageBusy(false);
       }
     },
-    [pageBusy, autosave],
+    [pageBusy, autosave, applyPages],
   );
 
   const handleSelectPage = useCallback((index: number) => {
@@ -496,28 +504,40 @@ export default function Whiteboard() {
     }
   }, [exportProgress, autosave, buildPdfBlob, board]);
 
-  const attachPdfToLesson = useCallback(async (): Promise<boolean> => {
-    const currentBoard = board;
-    if (!currentBoard?.lesson_id) return false;
-    const signature = computeSignature();
-    if (signature === exportedSignatureRef.current && currentBoard.export_material_id) {
+  /**
+   * SINGLE-FLIGHT (ревью р.4, P1): ручная кнопка и авто-прикрепление при выходе
+   * могли пойти параллельно и загрузить два PDF. Повторный вызов получает тот
+   * же promise; после завершения слот освобождается.
+   */
+  const attachPdfToLesson = useCallback((): Promise<boolean> => {
+    if (attachPromiseRef.current) return attachPromiseRef.current;
+    const run = (async (): Promise<boolean> => {
+      const currentBoard = board;
+      if (!currentBoard?.lesson_id) return false;
+      const signature = computeSignature();
+      if (signature === exportedSignatureRef.current && currentBoard.export_material_id) {
+        return true;
+      }
+
+      const blob = await buildPdfBlob();
+      const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
+      const fileName = boardPdfFileName(currentBoard.title, new Date());
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+      const material = await uploadLessonPdf(file, currentBoard.lesson_id, fileName);
+
+      const previousId = currentBoard.export_material_id;
+      const updated = await updateBoard(currentBoard.id, { export_material_id: material.id });
+      setBoard(updated);
+      exportedSignatureRef.current = signature;
+      if (previousId) {
+        await deleteMaterial(previousId).catch(() => undefined);
+      }
       return true;
-    }
-
-    const blob = await buildPdfBlob();
-    const { boardPdfFileName } = await import('@/lib/whiteboard/exportPdf');
-    const fileName = boardPdfFileName(currentBoard.title, new Date());
-    const file = new File([blob], fileName, { type: 'application/pdf' });
-    const material = await uploadLessonPdf(file, currentBoard.lesson_id, fileName);
-
-    const previousId = currentBoard.export_material_id;
-    const updated = await updateBoard(currentBoard.id, { export_material_id: material.id });
-    setBoard(updated);
-    exportedSignatureRef.current = signature;
-    if (previousId) {
-      await deleteMaterial(previousId).catch(() => undefined);
-    }
-    return true;
+    })().finally(() => {
+      attachPromiseRef.current = null;
+    });
+    attachPromiseRef.current = run;
+    return run;
   }, [board, computeSignature, buildPdfBlob]);
 
   const handleAttachClick = useCallback(async () => {
@@ -556,10 +576,13 @@ export default function Whiteboard() {
           await attachPdfToLesson();
           toast.success('Конспект прикреплён к занятию');
         } catch (err) {
-          toast.error(
-            `Конспект не прикрепился: ${err instanceof Error ? err.message : 'ошибка'}. ` +
-              'Доска сохранена — можно прикрепить позже кнопкой на доске.',
+          // НЕ закрываем редактор молча (ревью р.4, P0): главный Job — PDF в
+          // занятии, и уход при его провале должен быть осознанным выбором.
+          const leaveWithoutPdf = window.confirm(
+            `Конспект не прикрепился к занятию: ${err instanceof Error ? err.message : 'ошибка сети'}.\n\n` +
+              'Доска сохранена. Выйти БЕЗ PDF в занятии? «Отмена» — остаться и повторить.',
           );
+          if (!leaveWithoutPdf) return;
         }
       }
       navigate('/tutor/board');
@@ -567,6 +590,52 @@ export default function Whiteboard() {
       setExitPhase(null);
     }
   }, [exitPhase, autosave, board, computeSignature, attachPdfToLesson, navigate]);
+
+  // ─── Back-гард ──────────────────────────────────────────────────────────────
+  //
+  // Браузерный Back / свайп назад — SPA-навигация: beforeunload НЕ срабатывает,
+  // и unmount уносил несохранённое и обходил авто-прикрепление (ревью р.4, P0).
+  // BrowserRouter без data-роутера не даёт useBlocker, поэтому классический
+  // трап: сторожевая запись в history; popstate при «есть что терять» возвращает
+  // запись и проводит уход через штатный handleExit. Когда терять нечего —
+  // отпускаем назад без вмешательства.
+
+  const saveStatusRef = useRef(saveStatus);
+  useEffect(() => {
+    saveStatusRef.current = saveStatus;
+  }, [saveStatus]);
+  const boardStateRef = useRef<Board | null>(null);
+  useEffect(() => {
+    boardStateRef.current = board;
+  }, [board]);
+
+  useEffect(() => {
+    // Сторожевая запись — один раз на маунт (в эффекте слушателя её пересоздание
+    // плодило бы записи при каждой смене deps).
+    window.history.pushState({ __boardGuard: true }, '');
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const b = boardStateRef.current;
+      const attachPending =
+        !!b?.lesson_id &&
+        pagesRef.current.some((p) => p.elements.length > 0) &&
+        computeSignature() !== exportedSignatureRef.current;
+      const needsGuard = saveStatusRef.current !== 'saved' || attachPending;
+      if (!needsGuard) {
+        // Сторожевая запись уже поглощена этим popstate — уходим ещё на шаг,
+        // на настоящую предыдущую страницу.
+        window.history.back();
+        return;
+      }
+      // Возвращаем сторожа и проводим уход по-человечески: flush → attach → навигация.
+      window.history.pushState({ __boardGuard: true }, '');
+      void handleExit();
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [computeSignature, handleExit]);
 
   // ─── Название ───────────────────────────────────────────────────────────────
 
@@ -654,7 +723,9 @@ export default function Whiteboard() {
           variant="ghost"
           size="sm"
           onClick={() => void handleExit()}
-          disabled={exitPhase !== null}
+          // attaching тоже блокирует: параллельные «Прикрепить» и «Доски»
+          // загружали два PDF (ревью р.4, P1; плюс single-flight в attachPdfToLesson).
+          disabled={exitPhase !== null || attaching}
           style={{ touchAction: 'manipulation' }}
         >
           <ArrowLeft className="mr-1.5 h-4 w-4" />
@@ -784,6 +855,13 @@ export default function Whiteboard() {
               onSelectionChange={setSelectedIds}
               onMoveSelection={handleMoveSelection}
               onRequestText={handleRequestText}
+              onPan={(dx, dy) => {
+                const el = viewportRef.current;
+                if (el) {
+                  el.scrollLeft += dx;
+                  el.scrollTop += dy;
+                }
+              }}
             />
           )}
 

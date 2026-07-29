@@ -20,22 +20,24 @@ import {
   elementToSvg,
 } from '@/lib/whiteboard/svg';
 
-// Холст доски (задачи W1.0.2–W1.0.4; hot-path пересобран по ревью 5.6).
+// Холст доски (задачи W1.0.2–W1.0.4; hot-path пересобран по ревью 5.6, р.2–4).
 //
-// Рендер — SVG с viewBox в МИЛЛИМЕТРАХ: геометрия одна и та же на экране и в PDF.
-//
-// Три перф-инварианта (ревью 5.6, не ломать):
+// Перф-инварианты (не ломать):
 // 1. Живой ввод накапливается в ref и попадает в React-state МАКСИМУМ раз за
-//    кадр (rAF). Прямой setState на каждый pointermove давал квадратичную
-//    работу по длине штриха.
-// 2. Перетаскивание выделения — CSS/SVG transform поверх статичных элементов;
-//    новые объекты создаются ОДИН раз, на pointerup. Map по всем элементам на
-//    каждое движение — то, из-за чего курсор отставал от стилуса.
-// 3. Коммиты элементов происходят вне setState-updater'ов (finishDrag читает
-//    ref'ы) — updater обязан быть чистым, в StrictMode он исполняется дважды.
+//    кадр (rAF).
+// 2. Перетаскивание выделения — SVG transform поверх статичных слоёв; коммит
+//    ОДИН, на pointerup.
+// 3. Статичная сцена — отдельный memo-слой (SceneLayer): при рисовании и
+//    перетаскивании reconcile сотен <g> не происходит вовсе (ревью р.4, P1).
+// 4. Ластик копит попадания в ref, скрывает их per-frame и коммитит ОДНИМ
+//    вызовом на pointerup — один шаг undo на жест и ноль перерендеров
+//    родителя во время жеста (ревью р.4, P1).
+// 5. Коммиты — вне setState-updater'ов (finishDrag читает ref'ы).
 //
-// Multi-pointer: drag привязан к pointerId. Ладонь или второй палец во время
-// письма пером не обрывают и не перехватывают штрих.
+// Указатели: жест привязан к pointerId (ладонь не обрывает штрих). Второй
+// ПАЛЕЦ во время рисования пальцем переключает жест в панорамирование
+// (незавершённый штрих отбрасывается) — иначе увеличенный лист на планшете
+// невозможно прокрутить (ревью р.4, P1).
 
 export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line';
 
@@ -52,14 +54,18 @@ interface BoardCanvasProps {
   selectedIds: string[];
   readOnly?: boolean;
   onCommitElement: (element: BoardElement) => void;
+  /** Итог жеста ластика, ОДИН вызов на жест. */
   onEraseElements: (ids: string[]) => void;
   onSelectionChange: (ids: string[]) => void;
   /** Итог перетаскивания, ОДИН вызов на жест (для истории undo). */
   onMoveSelection: (dx: number, dy: number) => void;
   onRequestText: (x: number, y: number) => void;
+  /** Прокрутить контейнер листа на (dx, dy) px — двухпальцевое панорамирование. */
+  onPan?: (dx: number, dy: number) => void;
 }
 
 const ERASER_TOLERANCE_MM = 1.5;
+const EMPTY_HIDDEN: ReadonlySet<string> = new Set<string>();
 
 /** Один элемент. memo по id+version — версия меняется при любой правке (model.ts). */
 const ElementNode = memo(
@@ -89,12 +95,46 @@ const ElementNode = memo(
 );
 ElementNode.displayName = 'ElementNode';
 
+/**
+ * Статичный слой сцены. Пока рисуется штрих или тащится выделение, пропсы
+ * слоя не меняются — reconcile сотен групп не происходит (ревью р.4, P1).
+ */
+const SceneLayer = memo(
+  ({
+    elements,
+    hiddenIds,
+    options,
+  }: {
+    elements: BoardElement[];
+    hiddenIds: ReadonlySet<string>;
+    options: StrokeRenderOptions;
+  }) => (
+    <>
+      {elements.map((element) =>
+        hiddenIds.has(element.id) ? null : (
+          <g key={element.id}>
+            <ElementNode element={element} options={options} />
+          </g>
+        ),
+      )}
+    </>
+  ),
+  (prev, next) =>
+    prev.elements === next.elements &&
+    prev.hiddenIds === next.hiddenIds &&
+    prev.options === next.options,
+);
+SceneLayer.displayName = 'SceneLayer';
+
 interface DragState {
-  kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase';
+  kind: 'stroke' | 'shape' | 'marquee' | 'move' | 'erase' | 'pan';
   /** Жест принадлежит одному указателю; чужие события игнорируются. */
   pointerId: number;
+  pointerType: string;
   startX: number;
   startY: number;
+  /** Для pan — оба пальца. */
+  panIds?: [number, number];
 }
 
 interface LiveShape {
@@ -121,13 +161,15 @@ export function BoardCanvas({
   onSelectionChange,
   onMoveSelection,
   onRequestText,
+  onPan,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const erasedRef = useRef<Set<string>>(new Set());
-  // Rect кэшируется на pointerdown: getBoundingClientRect на каждом pointermove —
-  // принудительный layout в самом горячем месте (ревью 5.6).
   const rectRef = useRef<DOMRect | null>(null);
+  /** Живые позиции касаний (для панорамирования двумя пальцами). */
+  const touchPosRef = useRef(new Map<number, { x: number; y: number }>());
+  const panLastRef = useRef<{ x: number; y: number } | null>(null);
 
   // Источники правды живого ввода — ref'ы; состояние ниже только для рендера
   // и обновляется не чаще раза за кадр.
@@ -141,6 +183,7 @@ export function BoardCanvas({
   const [liveShape, setLiveShape] = useState<LiveShape | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(EMPTY_HIDDEN);
 
   const backgroundNodes = useMemo(
     () => backgroundToSvg(background, gridMm, pageSize),
@@ -148,6 +191,20 @@ export function BoardCanvas({
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  // Раздельные слои: transform перетаскивания живёт на обёртке выделенного
+  // слоя, статичный слой во время жеста не трогается вовсе.
+  const { selectedElements, unselectedElements } = useMemo(() => {
+    if (selectedSet.size === 0) {
+      return { selectedElements: [] as BoardElement[], unselectedElements: elements };
+    }
+    const selected: BoardElement[] = [];
+    const unselected: BoardElement[] = [];
+    for (let i = 0; i < elements.length; i++) {
+      (selectedSet.has(elements[i].id) ? selected : unselected).push(elements[i]);
+    }
+    return { selectedElements: selected, unselectedElements: unselected };
+  }, [elements, selectedSet]);
 
   const scheduleFrame = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -157,6 +214,7 @@ export function BoardCanvas({
       setLiveShape(liveShapeRef.current ? { ...liveShapeRef.current } : null);
       setMarquee(marqueeRef.current ? { ...marqueeRef.current } : null);
       setMoveOffset({ ...moveOffsetRef.current });
+      setHiddenIds(erasedRef.current.size > 0 ? new Set(erasedRef.current) : EMPTY_HIDDEN);
     });
   }, []);
 
@@ -167,10 +225,25 @@ export function BoardCanvas({
     [],
   );
 
-  /** Координаты указателя → миллиметры страницы (по кэшированному rect). */
+  // Скролл контейнера ВО ВРЕМЯ жеста делает кэшированный rect неверным — линия
+  // уезжала бы от стилуса (ревью р.4, P1). Любой скролл инвалидирует кэш;
+  // toMm перечитает и снова закэширует.
+  useEffect(() => {
+    const invalidate = () => {
+      rectRef.current = null;
+    };
+    window.addEventListener('scroll', invalidate, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', invalidate, true);
+  }, []);
+
+  /** Координаты указателя → миллиметры страницы (rect кэшируется лениво). */
   const toMm = useCallback(
     (clientX: number, clientY: number) => {
-      const rect = rectRef.current ?? svgRef.current?.getBoundingClientRect() ?? null;
+      let rect = rectRef.current;
+      if (!rect) {
+        rect = svgRef.current?.getBoundingClientRect() ?? null;
+        rectRef.current = rect;
+      }
       if (!rect || rect.width === 0 || rect.height === 0) return { x: 0, y: 0 };
       return {
         x: ((clientX - rect.left) / rect.width) * pageSize.width,
@@ -182,18 +255,20 @@ export function BoardCanvas({
 
   const eraseAt = useCallback(
     (x: number, y: number) => {
-      const hits: string[] = [];
+      // Только пометка в ref + кадр: НИКАКИХ коммитов наверх во время жеста —
+      // иначе каждый задетый штрих перерендеривал родителя и миниатюру.
+      let changed = false;
       for (let i = elements.length - 1; i >= 0; i--) {
         const el = elements[i];
         if (erasedRef.current.has(el.id)) continue;
         if (hitTest(el, x, y, ERASER_TOLERANCE_MM)) {
           erasedRef.current.add(el.id);
-          hits.push(el.id);
+          changed = true;
         }
       }
-      if (hits.length > 0) onEraseElements(hits);
+      if (changed) scheduleFrame();
     },
-    [elements, onEraseElements],
+    [elements, scheduleFrame],
   );
 
   const resetLiveState = useCallback(() => {
@@ -201,6 +276,8 @@ export function BoardCanvas({
     liveShapeRef.current = null;
     marqueeRef.current = null;
     moveOffsetRef.current = { dx: 0, dy: 0 };
+    erasedRef.current = new Set();
+    panLastRef.current = null;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -209,15 +286,21 @@ export function BoardCanvas({
     setLiveShape(null);
     setMarquee(null);
     setMoveOffset({ dx: 0, dy: 0 });
+    setHiddenIds(EMPTY_HIDDEN);
   }, []);
 
   const finishDrag = useCallback(
     (event?: PointerEvent | React.PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      // Завершает жест только ТОТ указатель, что его начал: отпущенная ладонь
-      // не должна обрывать штрих пера (ревью 5.6, P1).
-      if (event && event.pointerId !== drag.pointerId) return;
+      // Завершает жест только участвующий в нём указатель.
+      if (event) {
+        const belongs =
+          drag.kind === 'pan'
+            ? drag.panIds?.includes(event.pointerId) ?? false
+            : event.pointerId === drag.pointerId;
+        if (!belongs) return;
+      }
       dragRef.current = null;
       rectRef.current = null;
 
@@ -252,12 +335,46 @@ export function BoardCanvas({
         const { dx, dy } = moveOffsetRef.current;
         if (dx !== 0 || dy !== 0) onMoveSelection(roundMm(dx), roundMm(dy));
       } else if (drag.kind === 'erase') {
-        erasedRef.current = new Set();
+        // ОДИН коммит на весь жест: один шаг undo, одна пометка автосейва.
+        if (erasedRef.current.size > 0) onEraseElements(Array.from(erasedRef.current));
       }
 
       resetLiveState();
     },
-    [color, size, elements, onCommitElement, onSelectionChange, onMoveSelection, resetLiveState],
+    [color, size, elements, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, resetLiveState],
+  );
+
+  /** Второй палец во время touch-жеста → панорамирование (штрих отбрасывается). */
+  const convertToPan = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      // Накопленные ластиком удаления коммитим — они уже показаны пользователю.
+      if (drag.kind === 'erase' && erasedRef.current.size > 0) {
+        onEraseElements(Array.from(erasedRef.current));
+      }
+      const first = touchPosRef.current.get(drag.pointerId);
+      const second = { x: event.clientX, y: event.clientY };
+      dragRef.current = {
+        kind: 'pan',
+        pointerId: -1,
+        pointerType: 'touch',
+        startX: 0,
+        startY: 0,
+        panIds: [drag.pointerId, event.pointerId],
+      };
+      panLastRef.current = first
+        ? { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
+        : second;
+      // Незавершённый штрих/фигуру отбрасываем: намерение было «прокрутить».
+      livePointsRef.current = null;
+      liveShapeRef.current = null;
+      marqueeRef.current = null;
+      moveOffsetRef.current = { dx: 0, dy: 0 };
+      erasedRef.current = new Set();
+      scheduleFrame();
+    },
+    [onEraseElements, scheduleFrame],
   );
 
   const handlePointerDown = useCallback(
@@ -265,10 +382,25 @@ export function BoardCanvas({
       if (readOnly) return;
       // Только основная кнопка / касание: правый клик не должен рисовать.
       if (event.button !== 0) return;
-      // Жест уже идёт → второй указатель (ладонь, второй палец) игнорируется.
-      if (dragRef.current) return;
-      // Не-primary касание (мультитач) не начинает новый жест.
-      if (event.pointerType === 'touch' && !event.isPrimary) return;
+
+      if (event.pointerType === 'touch') {
+        touchPosRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+
+      const drag = dragRef.current;
+      if (drag) {
+        // Второй ПАЛЕЦ поверх пальцевого жеста = панорамирование. Всё прочее
+        // (ладонь при пере, третий палец) — игнорируется.
+        if (
+          onPan &&
+          event.pointerType === 'touch' &&
+          drag.pointerType === 'touch' &&
+          drag.kind !== 'pan'
+        ) {
+          convertToPan(event);
+        }
+        return;
+      }
 
       // ⚠️ КРИТИЧНО для инструмента «Текст»: default-действие mousedown уводит
       // фокус на body, и только что открытый textarea мгновенно ловил blur и
@@ -291,6 +423,7 @@ export function BoardCanvas({
       const { x, y } = clampToPage(raw.x, raw.y, pageSize);
       event.currentTarget.setPointerCapture(event.pointerId);
       const pointerId = event.pointerId;
+      const pointerType = event.pointerType;
 
       if (tool === 'text') {
         rectRef.current = null;
@@ -301,8 +434,8 @@ export function BoardCanvas({
       if (tool === 'pen') {
         // Настоящее давление есть только у стилуса; мышь и палец всегда шлют 0.5,
         // и доверять их «нажиму» — значит получить случайные утолщения.
-        const pressure = event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        dragRef.current = { kind: 'stroke', pointerId, startX: x, startY: y };
+        const pressure = pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
+        dragRef.current = { kind: 'stroke', pointerId, pointerType, startX: x, startY: y };
         livePointsRef.current = [roundMm(x), roundMm(y), pressure];
         scheduleFrame();
         return;
@@ -310,13 +443,13 @@ export function BoardCanvas({
 
       if (tool === 'eraser') {
         erasedRef.current = new Set();
-        dragRef.current = { kind: 'erase', pointerId, startX: x, startY: y };
+        dragRef.current = { kind: 'erase', pointerId, pointerType, startX: x, startY: y };
         eraseAt(x, y);
         return;
       }
 
       if (tool === 'rect' || tool === 'ellipse' || tool === 'line') {
-        dragRef.current = { kind: 'shape', pointerId, startX: x, startY: y };
+        dragRef.current = { kind: 'shape', pointerId, pointerType, startX: x, startY: y };
         liveShapeRef.current = { kind: tool as ShapeKind, x: roundMm(x), y: roundMm(y), w: 0, h: 0 };
         scheduleFrame();
         return;
@@ -332,22 +465,42 @@ export function BoardCanvas({
       }
       if (hitId) {
         if (!selectedSet.has(hitId)) onSelectionChange([hitId]);
-        dragRef.current = { kind: 'move', pointerId, startX: x, startY: y };
+        dragRef.current = { kind: 'move', pointerId, pointerType, startX: x, startY: y };
         moveOffsetRef.current = { dx: 0, dy: 0 };
       } else {
         onSelectionChange([]);
-        dragRef.current = { kind: 'marquee', pointerId, startX: x, startY: y };
+        dragRef.current = { kind: 'marquee', pointerId, pointerType, startX: x, startY: y };
         marqueeRef.current = { x, y, w: 0, h: 0 };
         scheduleFrame();
       }
     },
-    [readOnly, toMm, tool, pageSize, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
+    [readOnly, toMm, tool, pageSize, onPan, convertToPan, onRequestText, eraseAt, elements, selectedSet, onSelectionChange, scheduleFrame],
   );
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
       const drag = dragRef.current;
       if (!drag || readOnly) return;
+
+      if (event.pointerType === 'touch' && touchPosRef.current.has(event.pointerId)) {
+        touchPosRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      }
+
+      if (drag.kind === 'pan') {
+        if (!drag.panIds?.includes(event.pointerId)) return;
+        const [a, b] = drag.panIds;
+        const pa = touchPosRef.current.get(a);
+        const pb = touchPosRef.current.get(b);
+        if (!pa || !pb || !panLastRef.current) return;
+        const centroid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+        const dx = centroid.x - panLastRef.current.x;
+        const dy = centroid.y - panLastRef.current.y;
+        panLastRef.current = centroid;
+        // Контент следует за пальцами: скролл в противоход.
+        onPan?.(-dx, -dy);
+        return;
+      }
+
       if (event.pointerId !== drag.pointerId) return;
       const raw = toMm(event.clientX, event.clientY);
       const { x, y } = clampToPage(raw.x, raw.y, pageSize);
@@ -372,13 +525,16 @@ export function BoardCanvas({
 
       scheduleFrame();
     },
-    [readOnly, toMm, pageSize, eraseAt, scheduleFrame],
+    [readOnly, toMm, pageSize, eraseAt, scheduleFrame, onPan],
   );
 
   // Указатель может уйти с элемента или быть отменён системой (жест, звонок) —
   // без завершения drag остался бы «прилипший» штрих.
   useEffect(() => {
-    const handleUp = (event: PointerEvent) => finishDrag(event);
+    const handleUp = (event: PointerEvent) => {
+      touchPosRef.current.delete(event.pointerId);
+      finishDrag(event);
+    };
     window.addEventListener('pointerup', handleUp);
     window.addEventListener('pointercancel', handleUp);
     return () => {
@@ -388,7 +544,7 @@ export function BoardCanvas({
   }, [finishDrag]);
 
   // Живой штрих — ephemeral-объект БЕЗ модельных фабрик: createStroke двигает
-  // глобальные id/seq-счётчики, а useMemo может исполняться повторно (ревью 5.6, P2).
+  // глобальные id/seq-счётчики, а useMemo может исполняться повторно.
   const liveStroke: BoardElement | null = useMemo(
     () =>
       livePoints && livePoints.length >= 3
@@ -428,14 +584,13 @@ export function BoardCanvas({
   );
 
   const selectionBox = useMemo(() => {
-    if (selectedIds.length === 0) return null;
+    if (selectedElements.length === 0) return null;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (let i = 0; i < elements.length; i++) {
-      if (!selectedSet.has(elements[i].id)) continue;
-      const b = elementBoundsCached(elements[i]);
+    for (let i = 0; i < selectedElements.length; i++) {
+      const b = elementBoundsCached(selectedElements[i]);
       if (b.minX < minX) minX = b.minX;
       if (b.minY < minY) minY = b.minY;
       if (b.maxX > maxX) maxX = b.maxX;
@@ -443,7 +598,7 @@ export function BoardCanvas({
     }
     if (minX === Infinity) return null;
     return { x: minX - 1, y: minY - 1, w: maxX - minX + 2, h: maxY - minY + 2 };
-  }, [selectedIds, elements, selectedSet]);
+  }, [selectedElements]);
 
   const isMoving = moveOffset.dx !== 0 || moveOffset.dy !== 0;
   const moveTransform = isMoving ? `translate(${moveOffset.dx} ${moveOffset.dy})` : undefined;
@@ -454,9 +609,9 @@ export function BoardCanvas({
       viewBox={`0 0 ${pageSize.width} ${pageSize.height}`}
       className="h-full w-full bg-white"
       role="img"
-      aria-label="Холст доски. Рисование мышью, пальцем или стилусом."
+      aria-label="Холст доски. Рисование мышью, пальцем или стилусом; двумя пальцами — прокрутка."
       // touch-none: без него iOS перехватывает жест и вместо линии скроллит
-      // страницу (rule 80). Курсор — подсказка активного инструмента.
+      // страницу (rule 80). Прокрутка увеличенного листа — двумя пальцами (onPan).
       style={{
         touchAction: 'none',
         cursor: readOnly ? 'default' : tool === 'select' ? 'default' : 'crosshair',
@@ -469,20 +624,13 @@ export function BoardCanvas({
         <path key={`bg-${i}`} {...(node.attrs as Record<string, string | number>)} />
       ))}
 
-      {/* Перетаскивание — transform на группе выделенных: элементы не пересоздаются
-          до pointerup, статичная часть страницы вообще не перерисовывается. */}
-      {elements.map((element) => {
-        const isSelected = selectedSet.has(element.id);
-        return (
-          <g
-            key={element.id}
-            opacity={isSelected ? 0.7 : 1}
-            transform={isSelected ? moveTransform : undefined}
-          >
-            <ElementNode element={element} options={strokeOptions} />
-          </g>
-        );
-      })}
+      <SceneLayer elements={unselectedElements} hiddenIds={hiddenIds} options={strokeOptions} />
+
+      {selectedElements.length > 0 && (
+        <g opacity={0.7} transform={moveTransform}>
+          <SceneLayer elements={selectedElements} hiddenIds={hiddenIds} options={strokeOptions} />
+        </g>
+      )}
 
       {liveStroke && <ElementNode element={liveStroke} options={strokeOptions} />}
       {liveShapeElement && <ElementNode element={liveShapeElement} options={strokeOptions} />}
