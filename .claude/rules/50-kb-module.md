@@ -45,6 +45,10 @@ Destructive-операции модератора (удаление тем/ра�
 
 Задача попадает в ДЗ двумя путями: «+ из БЗ» в конструкторе (path A, через edge) и «В ДЗ» с карточки KB (path B, прямой INSERT в `HWDrawer`). Новое поле-носитель → в **оба**: `KBTask` → `kbTaskToDraftTask` → `DraftTask`, и `HWDraftTask` → `hwDraftStore.addTask` → `HWDrawer`. Плюс `copyTaskToFolder` (base→base копия обязана быть lossless) и `handleSaveTasksToKB` (save-back из ДЗ).
 
+## Тип задачи в AI-загрузчике — `ReviewExam`, а не `ExamType`
+
+`ReviewOverrides.exam` = `'' | ege | oge | olympiad | other` (БД-enum `exam_type` расширять НЕЛЬЗЯ — готча `ALTER TYPE`; `olympiad`/`other` живут как **`exam NULL`**). Любой новый читатель `ov.exam` — маппер, скоринг, чекер, insert — ОБЯЗАН пройти **`overrideExamToDb`** (`AiTaskLoader/reviewTypes.ts`), а фолбэки/сравнения типа считать в домене `ReviewExam` **до** конверсии: `overrideExamToDb('olympiad') = null`, поэтому цепочка `a ?? b ?? d.exam` доезжает до AI-догадки и приклеивает ЕГЭ-тему к олимпиадной задаче (в БД `exam NULL` + ЕГЭ-тема, а kind-фильтр селекта её прячет — в UI «Не выбрана»). Гейт `!isOlympiad` для № КИМ нужен в **КАЖДОМ** маппере (KB/hw/mock) — иначе скрытый КИМ уводит олимпиадную задачу в Часть 2 варианта. Олимпиада: **`difficulty === primary_score` безусловно** (зеркало `CreateTaskModal`), пустая сложность = молчаливая потеря типа. Глубина — skill `kb-module` (ВОЛНА 8).
+
 ## Прочее
 
 - `MathText`/KaTeX **не импортировать** в `src/components/ui/*` (performance.md). В KB — только через `MathText` (lazy KaTeX); `hasMath=false` → plain text, нулевой overhead.
