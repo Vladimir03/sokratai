@@ -62,6 +62,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
+import {
+  PhotoViewer,
+  SafeImage,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { MockExamGradingProgressBanner } from '@/components/tutor/mock-exams/MockExamGradingProgressBanner';
 import { Part1TaskDrillDownDialog } from '@/components/tutor/mock-exams/Part1TaskDrillDownDialog';
@@ -324,6 +330,26 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
   const blankPhotoUrl = attempt.blank_photo_url ?? null;
   const fallbackPhotoUrl = attempt.part1_blank_photo_url ?? null;
 
+  // Оба фото Части 1 живут в одном просмотрщике — репетитор листает между
+  // бланком и «доп. фото» стрелками, не закрывая экран.
+  const part1Photos = useMemo<PhotoViewerItem[]>(() => {
+    const list: PhotoViewerItem[] = [];
+    if (blankPhotoUrl) {
+      list.push({ url: blankPhotoUrl, caption: 'ФИПИ-бланк (Часть 1)', alt: 'ФИПИ бланк' });
+    }
+    if (fallbackPhotoUrl) {
+      list.push({
+        url: fallbackPhotoUrl,
+        caption: 'Доп. фото Часть 1 (не на бланке)',
+        alt: 'Фото ответов Часть 1',
+      });
+    }
+    return list;
+  }, [blankPhotoUrl, fallbackPhotoUrl]);
+
+  const part1Viewer = usePhotoViewer();
+  const openPart1Photo = part1Viewer.open;
+
   // Map existing earned_score by kim_number (from auto-loaded part1_answers).
   const existingScores = useMemo(() => {
     const m = new Map<number, number | null>();
@@ -581,36 +607,45 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
           </p>
         </div>
 
-        {isOcrMode && (blankPhotoUrl || fallbackPhotoUrl) && (
+        {/* Сканы бланков — самое «зумозависимое» место продукта: рукописные
+            клетки ФИПИ в 420 px нечитаемы. До 2026-07-31 единственным способом
+            рассмотреть их было открыть сырую вкладку браузера. */}
+        {isOcrMode && part1Photos.length > 0 && (
           <div className="grid gap-3 sm:grid-cols-2">
-            {blankPhotoUrl && (
-              <a href={blankPhotoUrl} target="_blank" rel="noreferrer" className="block">
+            {part1Photos.map((photo, index) => (
+              <div key={photo.url}>
                 <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  ФИПИ-бланк (Часть 1)
+                  {photo.caption}
                 </div>
-                <img
-                  src={blankPhotoUrl}
-                  alt="ФИПИ бланк"
-                  loading="lazy"
-                  className="w-full rounded-md border border-slate-300 bg-white object-contain max-h-[420px]"
-                />
-              </a>
-            )}
-            {fallbackPhotoUrl && (
-              <a href={fallbackPhotoUrl} target="_blank" rel="noreferrer" className="block">
-                <div className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
-                  Доп. фото Часть 1 (не на бланке)
-                </div>
-                <img
-                  src={fallbackPhotoUrl}
-                  alt="Фото ответов Часть 1"
-                  loading="lazy"
-                  className="w-full rounded-md border border-slate-300 bg-white object-contain max-h-[420px]"
-                />
-              </a>
-            )}
+                <button
+                  type="button"
+                  onClick={() => openPart1Photo(index)}
+                  aria-label={`Открыть «${photo.caption}» во весь экран`}
+                  style={{ touchAction: 'manipulation' }}
+                  className="block w-full rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                >
+                  <SafeImage
+                    src={photo.url}
+                    alt={photo.caption}
+                    className="w-full rounded-md border border-slate-300 bg-white object-contain max-h-[420px]"
+                    interactive={false}
+                  />
+                </button>
+              </div>
+            ))}
           </div>
         )}
+
+        <PhotoViewer
+          items={part1Photos}
+          openIndex={part1Viewer.openIndex}
+          onClose={part1Viewer.close}
+          onNavigate={part1Viewer.navigate}
+          surface="mock_exam_review"
+          canRotate
+          ariaTitle="Фото Части 1"
+          ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+        />
 
         {/* Phase 6 + TASK-16-R2 fix #4 (2026-05-16): canonical `{cells, __meta}`.
             Frontend branches на __meta.status:
@@ -1201,6 +1236,37 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
 
+  // Два независимых просмотрщика: работа ученика и эталон — разные вещи, и
+  // листать между ними стрелками было бы дезориентирующе.
+  const studentPhotoViewer = usePhotoViewer();
+  const referencePhotoViewer = usePhotoViewer();
+  const openStudentPhoto = studentPhotoViewer.open;
+  const openReferencePhoto = referencePhotoViewer.open;
+
+  const studentPhotoItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      solution.photo_url
+        ? [
+            {
+              url: solution.photo_url,
+              caption: `Решение ученика · задача №${solution.kim_number}`,
+              alt: `Фото решения задачи №${solution.kim_number}`,
+            },
+          ]
+        : [],
+    [solution.kim_number, solution.photo_url],
+  );
+
+  const referencePhotoItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      (solution.solution_image_urls ?? []).map((url, idx) => ({
+        url,
+        caption: `Эталон решения №${solution.kim_number} · фото ${idx + 1}`,
+        alt: `Эталон решения №${solution.kim_number} — фото ${idx + 1}`,
+      })),
+    [solution.kim_number, solution.solution_image_urls],
+  );
+
   const isApproved =
     solution.status === 'tutor_approved' || solution.status === 'tutor_modified';
   // 2026-06-02 (item 4): Часть 2 «Изменить балл» доступно ПОСЛЕ подтверждения
@@ -1400,20 +1466,21 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
                 <p className="text-xs uppercase tracking-wide text-slate-500 mb-1.5">
                   Решение ученика (фото)
                 </p>
-                <a
-                  href={solution.photo_url}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className="block max-w-md rounded-md border border-slate-200 overflow-hidden hover:border-slate-300 transition-colors"
-                  title="Открыть фото в новой вкладке"
+                <button
+                  type="button"
+                  onClick={() => openStudentPhoto(0)}
+                  aria-label={`Открыть фото решения задачи №${solution.kim_number} во весь экран`}
+                  title="Открыть на весь экран — можно повернуть и увеличить"
+                  style={{ touchAction: 'manipulation' }}
+                  className="block w-full max-w-md rounded-md border border-slate-200 overflow-hidden transition-colors hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                 >
-                  <img
+                  <SafeImage
                     src={solution.photo_url}
                     alt={`Фото решения задачи №${solution.kim_number}`}
-                    loading="lazy"
                     className="w-full h-auto object-contain bg-slate-50"
+                    interactive={false}
                   />
-                </a>
+                </button>
               </div>
             );
           }
@@ -1486,14 +1553,21 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
               {(solution.solution_image_urls?.length ?? 0) > 0 && (
                 <div className="space-y-2">
                   {(solution.solution_image_urls ?? []).map((url, idx) => (
-                    <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
-                      <img
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => openReferencePhoto(idx)}
+                      aria-label={`Открыть фото эталона ${idx + 1} во весь экран`}
+                      style={{ touchAction: 'manipulation' }}
+                      className="block w-full rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    >
+                      <SafeImage
                         src={url}
                         alt={`Эталон решения №${solution.kim_number} — фото ${idx + 1}`}
-                        loading="lazy"
                         className="max-h-96 w-full rounded-md border border-slate-200 bg-white object-contain dark:border-slate-700"
+                        interactive={false}
                       />
-                    </a>
+                    </button>
                   ))}
                 </div>
               )}
@@ -1649,6 +1723,27 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
         onSubmit={handleEditSubmit}
         isSubmitting={approveMutation.isPending}
       />
+
+      <PhotoViewer
+        items={studentPhotoItems}
+        openIndex={studentPhotoViewer.openIndex}
+        onClose={studentPhotoViewer.close}
+        onNavigate={studentPhotoViewer.navigate}
+        surface="mock_exam_review"
+        canRotate
+        ariaTitle="Решение ученика"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
+      <PhotoViewer
+        items={referencePhotoItems}
+        openIndex={referencePhotoViewer.openIndex}
+        onClose={referencePhotoViewer.close}
+        onNavigate={referencePhotoViewer.navigate}
+        surface="mock_exam_review"
+        canRotate
+        ariaTitle="Эталон решения"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
     </div>
   );
 }
@@ -1699,6 +1794,20 @@ function BulkPhotosAssignmentGallery({
     initialAssignments,
   );
   const [dirty, setDirty] = useState(false);
+
+  // Пачка фото листается в просмотрщике целиком: репетитор ищет, где решение
+  // нужной задачи, и стрелки тут быстрее, чем возврат к сетке.
+  const bulkViewer = usePhotoViewer();
+  const openBulkPhoto = bulkViewer.open;
+  const bulkPhotoItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      photoUrls.map((url, idx) => ({
+        url,
+        caption: `Часть 2 · фото ${idx + 1}`,
+        alt: `Часть 2 — фото ${idx + 1}`,
+      })),
+    [photoUrls],
+  );
 
   // Re-sync если AI assignment пришёл server-side update (после regrade).
   useEffect(() => {
@@ -1860,23 +1969,25 @@ function BulkPhotosAssignmentGallery({
               const isNone = currentSet.size === 0;
               return (
                 <div key={url + idx} className="flex flex-col gap-2">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-white transition-shadow hover:shadow-md"
-                    aria-label={`Открыть фото ${idx + 1} в новой вкладке`}
+                  <button
+                    type="button"
+                    onClick={() => openBulkPhoto(idx)}
+                    style={{ touchAction: 'manipulation' }}
+                    className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-white transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                    aria-label={`Открыть фото ${idx + 1} во весь экран`}
                   >
-                    <img
+                    {/* object-contain, а не cover: квадратный кроп срезал края
+                        схем и графиков — репетитор не видел часть решения. */}
+                    <SafeImage
                       src={url}
                       alt={`Часть 2 — фото ${idx + 1}`}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
+                      className="h-full w-full object-contain"
+                      interactive={false}
                     />
                     <span className="absolute bottom-1 right-1 rounded bg-black/55 px-1.5 py-0.5 text-xs font-semibold text-white">
                       #{idx + 1}
                     </span>
-                  </a>
+                  </button>
                   <div
                     className="flex flex-wrap gap-1.5"
                     role="group"
@@ -1926,6 +2037,17 @@ function BulkPhotosAssignmentGallery({
           </div>
         </CardContent>
       </Card>
+
+      <PhotoViewer
+        items={bulkPhotoItems}
+        openIndex={bulkViewer.openIndex}
+        onClose={bulkViewer.close}
+        onNavigate={bulkViewer.navigate}
+        surface="mock_exam_review"
+        canRotate
+        ariaTitle="Фото Части 2 от ученика"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
     </section>
   );
 }

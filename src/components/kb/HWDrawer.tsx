@@ -10,6 +10,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { MathText } from '@/components/kb/ui/MathText';
+import { SafeImage } from '@/components/common/photo-viewer';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { cn } from '@/lib/utils';
 import {
@@ -131,10 +132,12 @@ const DraftTaskRow = memo(function DraftTaskRow({
               {firstRef ? (
                 <div className="relative mt-2">
                   {firstUrl ? (
-                    <img
+                    // SafeImage, а не сырой <img>: корзина ДЗ — тоже место, где
+                    // встречается .heic из Банка (rule 40 image-fallback).
+                    <SafeImage
                       src={firstUrl}
                       alt="Вложение к задаче"
-                      loading="lazy"
+                      interactive={false}
                       className="w-full max-h-48 rounded-xl border border-gray-200 bg-gray-50 object-contain"
                     />
                   ) : isLoading ? (

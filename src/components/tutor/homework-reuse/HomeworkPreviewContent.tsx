@@ -103,6 +103,7 @@ const PreviewTaskCard = memo(function PreviewTaskCard({
         <div className="preview-task-images mt-3">
           <PhotoGallery
             images={task.task_image_urls}
+            surface="homework_preview"
             dialogTitle={`Задача №${task.order_num}`}
             dialogDescription="Изображение условия задачи"
             imageAltPrefix={`Задача ${task.order_num}, фото`}
@@ -140,6 +141,7 @@ const PreviewTaskCard = memo(function PreviewTaskCard({
             <div className="preview-task-images mt-3">
               <PhotoGallery
                 images={task.solution_image_urls ?? []}
+                surface="homework_preview"
                 dialogTitle={`Задача №${task.order_num} — решение`}
                 dialogDescription="Изображение эталонного решения"
                 imageAltPrefix={`Задача ${task.order_num}, фото решения`}

@@ -275,9 +275,12 @@ function TaskImagePreview({ assignmentId, taskId, taskImageUrl }: { assignmentId
   return (
     <PhotoGallery
       images={resolvedUrls}
+      imageRefs={refs}
       dialogTitle="Фото задачи"
       dialogDescription="Изображение условия задачи"
       imageAltPrefix="Фото задачи"
+      surface="homework_task"
+      canRotate
     />
   );
 }
@@ -324,9 +327,12 @@ function RubricImagePreview({
   return (
     <PhotoGallery
       images={resolvedUrls}
+      imageRefs={refs}
       dialogTitle="Фото критериев проверки"
       dialogDescription="Изображения рубрики для проверки задачи"
       imageAltPrefix="Фото критериев"
+      surface="homework_task"
+      canRotate
       singleThumbnailClassName="h-24 w-auto max-w-[220px] rounded-sm object-contain"
       multiThumbnailClassName="h-24 w-[120px] rounded-md border border-slate-200 bg-white object-contain"
     />

@@ -34,6 +34,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import {
+  PhotoViewer,
+  SafeImage,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
 
 // MathText lazy — ~400KB KaTeX (rule 90-design-system.md)
 const MathText = lazy(() =>
@@ -86,6 +92,21 @@ export function Part1TaskDrillDownDialog({
   const [commentText, setCommentText] = useState<string>(() => currentComment ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const taskImageViewer = usePhotoViewer();
+  const taskImageItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      taskImageUrl
+        ? [
+            {
+              url: taskImageUrl,
+              caption: `Условие задачи №${kimNumber}`,
+              alt: `Задача KIM ${kimNumber}`,
+            },
+          ]
+        : [],
+    [kimNumber, taskImageUrl],
+  );
 
   // Sync from outside when KIM changes (different cell opened).
   useEffect(() => {
@@ -294,20 +315,32 @@ export function Part1TaskDrillDownDialog({
                   </Suspense>
                 )}
                 {taskImageUrl && (
-                  <a
-                    href={taskImageUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block"
-                    aria-label="Открыть картинку задачи в новой вкладке"
-                  >
-                    <img
-                      src={taskImageUrl}
-                      alt={`Задача KIM ${kimNumber}`}
-                      loading="lazy"
-                      className="max-h-[400px] w-auto rounded-md border border-slate-200 dark:border-slate-700"
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => taskImageViewer.open(0)}
+                      className="block rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      style={{ touchAction: 'manipulation' }}
+                      aria-label="Открыть картинку задачи во весь экран"
+                    >
+                      <SafeImage
+                        src={taskImageUrl}
+                        alt={`Задача KIM ${kimNumber}`}
+                        className="max-h-[400px] w-auto rounded-md border border-slate-200 dark:border-slate-700"
+                        interactive={false}
+                      />
+                    </button>
+                    <PhotoViewer
+                      items={taskImageItems}
+                      openIndex={taskImageViewer.openIndex}
+                      onClose={taskImageViewer.close}
+                      onNavigate={taskImageViewer.navigate}
+                      surface="mock_exam_review"
+                      canRotate
+                      ariaTitle={`Задача KIM ${kimNumber}`}
+                      ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
                     />
-                  </a>
+                  </>
                 )}
                 {!taskText && !taskImageUrl && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">

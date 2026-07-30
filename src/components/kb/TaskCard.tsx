@@ -5,6 +5,13 @@ import { CopyTaskButton } from '@/components/kb/ui/CopyTaskButton';
 import { MathText } from '@/components/kb/ui/MathText';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { useKBImagesSignedUrls } from '@/hooks/useKBImagesSignedUrls';
+import { usePhotoOrientations } from '@/hooks/usePhotoOrientation';
+import {
+  PhotoThumbButton,
+  PhotoViewer,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
 import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { parseAttachmentUrls } from '@/lib/kbApi';
 import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
@@ -132,11 +139,6 @@ export const TaskCard = memo(function TaskCard({
   const { urls: allUrlMap, isLoading: imageLoading } = useKBImagesSignedUrls(attachmentRefs, {
     enabled: isExpanded && attachmentRefs.length > 1,
   });
-  const imageUrls = useMemo(
-    () => attachmentRefs.map((ref) => allUrlMap[ref]).filter((u): u is string => Boolean(u)),
-    [attachmentRefs, allUrlMap],
-  );
-
   // Resolve solution images
   const solutionRefs = useMemo(
     () => parseAttachmentUrls(task.solution_attachment_url),
@@ -146,9 +148,54 @@ export const TaskCard = memo(function TaskCard({
     solutionRefs,
     { enabled: isExpanded && solutionRefs.length > 0 },
   );
-  const solutionImageUrls = useMemo(
-    () => solutionRefs.map((ref) => solutionUrlMap[ref]).filter((u): u is string => Boolean(u)),
+  // ─── Просмотр фото (план 1-ancient-quokka) ────────────────────────────────
+  //
+  // ⚠️ Неразрешённые ссылки отфильтрованы, поэтому индекс миниатюры НЕ совпал
+  // бы с индексом в `attachmentRefs`. Пары ref↔url собираем явно — иначе
+  // поворот применялся бы к чужому фото, а клик открывал бы соседнее.
+  const conditionPairs = useMemo(
+    () =>
+      attachmentRefs
+        .map((ref) => ({ ref, url: allUrlMap[ref] ?? (ref === heroRef ? heroUrl : null) }))
+        .filter((pair): pair is { ref: string; url: string } => Boolean(pair.url)),
+    [attachmentRefs, allUrlMap, heroRef, heroUrl],
+  );
+  const solutionPairs = useMemo(
+    () =>
+      solutionRefs
+        .map((ref) => ({ ref, url: solutionUrlMap[ref] ?? null }))
+        .filter((pair): pair is { ref: string; url: string } => Boolean(pair.url)),
     [solutionRefs, solutionUrlMap],
+  );
+
+  const conditionViewer = usePhotoViewer();
+  const solutionViewer = usePhotoViewer();
+  const openConditionPhoto = conditionViewer.open;
+  const openSolutionPhoto = solutionViewer.open;
+
+  const { orientations: conditionOrientations } = usePhotoOrientations(attachmentRefs);
+  const { orientations: solutionOrientations } = usePhotoOrientations(solutionRefs);
+
+  const conditionItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      conditionPairs.map((pair, index) => ({
+        url: pair.url,
+        ref: pair.ref,
+        caption:
+          conditionPairs.length > 1 ? `Фото условия · ${index + 1}` : 'Фото условия',
+        alt: `Фото условия ${index + 1}`,
+      })),
+    [conditionPairs],
+  );
+  const solutionItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      solutionPairs.map((pair, index) => ({
+        url: pair.url,
+        ref: pair.ref,
+        caption: solutionPairs.length > 1 ? `Фото решения · ${index + 1}` : 'Фото решения',
+        alt: `Решение фото ${index + 1}`,
+      })),
+    [solutionPairs],
   );
 
   // Структурная тестовая задача (options_json). Карточка Базы — поверхность
@@ -274,21 +321,19 @@ export const TaskCard = memo(function TaskCard({
               <div className="h-48 w-full animate-pulse rounded-xl bg-socrat-surface md:h-64" />
             ) : heroUrl ? (
               <div className="flex flex-col gap-2">
-                <a
-                  href={heroUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="block"
-                >
-                  <img
+                {/* stopPropagation: клик по карточке разворачивает её, и без
+                    этого открытие фото сворачивало бы карточку под ним. */}
+                <div onClick={(e) => e.stopPropagation()}>
+                  <PhotoThumbButton
                     src={heroUrl}
                     alt="Фото условия"
-                    loading="lazy"
-                    decoding="async"
+                    index={0}
+                    onOpen={openConditionPhoto}
+                    degrees={conditionOrientations[attachmentRefs[0]] ?? 0}
                     className="max-h-48 w-full rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-90 md:max-h-64"
+                    wrapperClassName="block w-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
                   />
-                </a>
+                </div>
                 {!isExpanded && attachmentRefs.length > 1 ? (
                   <span className="inline-flex w-fit items-center gap-1 rounded-md bg-socrat-surface px-2 py-1 text-[11px] font-medium text-slate-500">
                     <Image className="h-3.5 w-3.5 text-slate-400" />
@@ -340,18 +385,19 @@ export const TaskCard = memo(function TaskCard({
                   />
                 ))}
               </div>
-            ) : imageUrls.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {imageUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                    <img
-                      src={url}
-                      alt={`Фото ${i + 1}`}
-                      loading="lazy"
-                      decoding="async"
-                      className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
-                    />
-                  </a>
+            ) : conditionPairs.length > 0 ? (
+              <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                {conditionPairs.map((pair, i) => (
+                  <PhotoThumbButton
+                    key={pair.ref}
+                    src={pair.url}
+                    alt={`Фото ${i + 1}`}
+                    index={i}
+                    onOpen={openConditionPhoto}
+                    degrees={conditionOrientations[pair.ref] ?? 0}
+                    className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
+                    wrapperClassName="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+                  />
                 ))}
               </div>
             ) : (
@@ -404,18 +450,19 @@ export const TaskCard = memo(function TaskCard({
                       />
                     ))}
                   </div>
-                ) : solutionImageUrls.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {solutionImageUrls.map((url, i) => (
-                      <a key={i} href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                        <img
-                          src={url}
-                          alt={`Решение фото ${i + 1}`}
-                          loading="lazy"
-                          decoding="async"
-                          className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
-                        />
-                      </a>
+                ) : solutionPairs.length > 0 ? (
+                  <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+                    {solutionPairs.map((pair, i) => (
+                      <PhotoThumbButton
+                        key={pair.ref}
+                        src={pair.url}
+                        alt={`Решение фото ${i + 1}`}
+                        index={i}
+                        onOpen={openSolutionPhoto}
+                        degrees={solutionOrientations[pair.ref] ?? 0}
+                        className="max-h-48 rounded-xl border border-socrat-border object-contain transition-opacity hover:opacity-80"
+                        wrapperClassName="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+                      />
                     ))}
                   </div>
                 ) : (
@@ -429,6 +476,27 @@ export const TaskCard = memo(function TaskCard({
           </div>
         ) : null}
       </div>
+
+      <PhotoViewer
+        items={conditionItems}
+        openIndex={conditionViewer.openIndex}
+        onClose={conditionViewer.close}
+        onNavigate={conditionViewer.navigate}
+        surface="kb_task"
+        canRotate
+        ariaTitle="Фото условия"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
+      <PhotoViewer
+        items={solutionItems}
+        openIndex={solutionViewer.openIndex}
+        onClose={solutionViewer.close}
+        onNavigate={solutionViewer.navigate}
+        surface="kb_task"
+        canRotate
+        ariaTitle="Фото решения"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
 
       {/* Zone 3: Actions — stopPropagation */}
       <div className="flex items-center gap-2 px-4 pb-4 pt-1 md:px-5" onClick={(event) => event.stopPropagation()}>

@@ -93,6 +93,8 @@ export interface ChatBubbleProps {
   author?: ChatPartnerIdentity | null;
   /** Группа: показывать имя автора над чужим человеческим сообщением. */
   showAuthor?: boolean;
+  /** Кнопки поворота фото — только на репетиторской стороне чата. */
+  canRotatePhotos?: boolean;
 }
 
 /**
@@ -109,6 +111,7 @@ export const ChatBubble = memo(function ChatBubble({
   onRetry,
   author = null,
   showAuthor = false,
+  canRotatePhotos = false,
 }: ChatBubbleProps) {
   const isAssistant = message.sender_role === 'assistant';
   const time = format(parseISO(message.created_at), 'HH:mm');
@@ -159,7 +162,10 @@ export const ChatBubble = memo(function ChatBubble({
           </p>
         )}
 
-        <ChatImageAttachments attachmentUrl={message.attachment_url} />
+        <ChatImageAttachments
+          attachmentUrl={message.attachment_url}
+          canRotate={canRotatePhotos}
+        />
 
         {message.content.trim().length > 0 &&
           (isAssistant ? (

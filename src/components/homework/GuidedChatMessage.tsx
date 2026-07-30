@@ -329,6 +329,7 @@ const GuidedChatMessage = memo(({
           <ThreadAttachments
             attachmentValue={message.image_url}
             resolveSignedUrl={resolveImageRef}
+            canRotate={isTutorPerspective}
           />
         )}
       </div>
@@ -433,6 +434,7 @@ const GuidedChatMessage = memo(({
           <ThreadAttachments
             attachmentValue={message.image_url}
             resolveSignedUrl={resolveImageRef}
+            canRotate={isTutorPerspective}
           />
         )}
       </div>
@@ -517,6 +519,7 @@ const GuidedChatMessage = memo(({
                 <ThreadAttachments
                   attachmentValue={message.image_url}
                   resolveSignedUrl={resolveImageRef}
+                  canRotate={isTutorPerspective}
                 />
               )}
               {isStreaming && (
@@ -603,6 +606,7 @@ const GuidedChatMessage = memo(({
             <ThreadAttachments
               attachmentValue={message.image_url}
               resolveSignedUrl={resolveImageRef}
+              canRotate={isTutorPerspective}
             />
           )}
           {isStreaming && (

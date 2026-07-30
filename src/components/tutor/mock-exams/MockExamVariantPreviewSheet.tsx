@@ -44,6 +44,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/lib/supabaseClient';
 import { cn } from '@/lib/utils';
+import {
+  PhotoViewer,
+  SafeImage,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
 
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
@@ -253,6 +259,35 @@ interface PreviewTaskCardProps {
 
 function PreviewTaskCard({ task, imageUrls, solutionImageUrls }: PreviewTaskCardProps) {
   const isPart1 = task.part === 1;
+
+  // Условие и эталон — разные просмотрщики: листать стрелками между схемой
+  // задачи и эталонным решением было бы дезориентирующе.
+  const conditionViewer = usePhotoViewer();
+  const solutionViewer = usePhotoViewer();
+
+  const conditionItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      imageUrls.map((url, idx) => ({
+        url,
+        caption:
+          task.kim_number === 20
+            ? `Схема ${idx + 1} · задание №${task.kim_number}`
+            : `Иллюстрация к заданию №${task.kim_number}`,
+        alt: `Иллюстрация к заданию ${task.kim_number}`,
+      })),
+    [imageUrls, task.kim_number],
+  );
+
+  const solutionItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      solutionImageUrls.map((url, idx) => ({
+        url,
+        caption: `Эталон решения №${task.kim_number} · фото ${idx + 1}`,
+        alt: `Эталон решения №${task.kim_number} — фото ${idx + 1}`,
+      })),
+    [solutionImageUrls, task.kim_number],
+  );
+
   return (
     <Card animate={false} className="border-slate-200">
       <CardContent className="p-4">
@@ -294,19 +329,20 @@ function PreviewTaskCard({ task, imageUrls, solutionImageUrls }: PreviewTaskCard
                 task.kim_number === 20 ? `Схема ${idx + 1}` : null;
               return (
                 <figure key={`${task.id}-${idx}`} className="m-0">
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block overflow-hidden rounded-md border border-slate-200 bg-slate-50"
+                  <button
+                    type="button"
+                    onClick={() => conditionViewer.open(idx)}
+                    style={{ touchAction: 'manipulation' }}
+                    aria-label={`Открыть ${caption ?? `иллюстрацию к заданию ${task.kim_number}`} во весь экран`}
+                    className="block w-full overflow-hidden rounded-md border border-slate-200 bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    <img
+                    <SafeImage
                       src={url}
                       alt={caption ?? `Иллюстрация к заданию ${task.kim_number}`}
                       className="max-h-72 w-full object-contain"
-                      loading="lazy"
+                      interactive={false}
                     />
-                  </a>
+                  </button>
                   {caption && (
                     <figcaption className="mt-1 text-center text-sm font-medium text-slate-700">
                       {caption}
@@ -334,25 +370,47 @@ function PreviewTaskCard({ task, imageUrls, solutionImageUrls }: PreviewTaskCard
             {solutionImageUrls.length > 0 ? (
               <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {solutionImageUrls.map((url, idx) => (
-                  <a
+                  <button
                     key={`${task.id}-sol-${idx}`}
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block overflow-hidden rounded-md border border-amber-200 bg-white"
+                    type="button"
+                    onClick={() => solutionViewer.open(idx)}
+                    style={{ touchAction: 'manipulation' }}
+                    aria-label={`Открыть фото эталона ${idx + 1} во весь экран`}
+                    className="block w-full overflow-hidden rounded-md border border-amber-200 bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                   >
-                    <img
+                    <SafeImage
                       src={url}
                       alt={`Эталон решения №${task.kim_number} — фото ${idx + 1}`}
                       className="aspect-[3/4] w-full object-cover"
-                      loading="lazy"
+                      interactive={false}
                     />
-                  </a>
+                  </button>
                 ))}
               </div>
             ) : null}
           </Collapsible>
         ) : null}
+
+        <PhotoViewer
+          items={conditionItems}
+          openIndex={conditionViewer.openIndex}
+          onClose={conditionViewer.close}
+          onNavigate={conditionViewer.navigate}
+          surface="mock_exam_variant"
+          canRotate
+          ariaTitle={`Иллюстрации задания №${task.kim_number}`}
+          ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+        />
+        <PhotoViewer
+          items={solutionItems}
+          openIndex={solutionViewer.openIndex}
+          onClose={solutionViewer.close}
+          onNavigate={solutionViewer.navigate}
+          surface="mock_exam_variant"
+          canRotate
+          ariaTitle={`Эталон решения №${task.kim_number}`}
+          ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+        />
       </CardContent>
     </Card>
   );

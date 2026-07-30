@@ -586,6 +586,7 @@ export function ConversationView({
                   partner={partner}
                   status={statusFor(m)}
                   onRetry={handleRetry}
+                  canRotatePhotos={perspective === 'tutor'}
                   showAuthor={isGroup}
                   author={
                     isGroup && m.author_user_id

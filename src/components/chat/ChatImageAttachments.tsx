@@ -1,18 +1,35 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ImageOff } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import {
+  PhotoThumbButton,
+  PhotoViewer,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
+import { usePhotoOrientations } from '@/hooks/usePhotoOrientation';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { resolveChatAttachmentUrl } from '@/lib/tutorStudentChatApi';
 
 /**
  * Фото сообщения: storage:// refs → signed URL (клиентский supabase → RU-safe
- * api.sokratai.ru), миниатюры + fullscreen-лайтбокс. Битый ref → placeholder,
- * никогда raw <img> с storage:// (rule 40 image-fallback).
+ * api.sokratai.ru), миниатюры + полноэкранный просмотр. Битый ref →
+ * placeholder, никогда raw <img> с storage:// (rule 40 image-fallback).
+ *
+ * С 2026-07-31 просмотр — канонический `PhotoViewer` (план 1-ancient-quokka).
+ * Свой лайтбокс показывал ровно одну картинку без стрелок, счётчика и зума:
+ * из чата, куда ученик присылает фото тетради, его было не рассмотреть.
  */
-export function ChatImageAttachments({ attachmentUrl }: { attachmentUrl: string | null }) {
+export function ChatImageAttachments({
+  attachmentUrl,
+  canRotate = false,
+}: {
+  attachmentUrl: string | null;
+  /** Кнопки поворота — только в репетиторском чате. */
+  canRotate?: boolean;
+}) {
   const refs = parseAttachmentUrls(attachmentUrl);
   const [urls, setUrls] = useState<Record<string, string | null>>({});
-  const [zoomUrl, setZoomUrl] = useState<string | null>(null);
+  const { openIndex, open, close, navigate } = usePhotoViewer();
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +50,28 @@ export function ChatImageAttachments({ attachmentUrl }: { attachmentUrl: string 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachmentUrl]);
 
+  // Индексы просмотрщика считаем по РАЗРЕШЁННЫМ фото: нерезолвнутый ref
+  // рисуется плейсхолдером и в просмотр не попадает, иначе клик по второму
+  // фото открывал бы первое.
+  const readyRefs = useMemo(
+    () => refs.filter((ref) => Boolean(urls[ref])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [attachmentUrl, urls],
+  );
+
+  const { orientations } = usePhotoOrientations(readyRefs);
+
+  const items = useMemo<PhotoViewerItem[]>(
+    () =>
+      readyRefs.map((ref, index) => ({
+        url: urls[ref] as string,
+        ref: ref.startsWith('storage://') ? ref : null,
+        caption: readyRefs.length > 1 ? `Фото из чата · ${index + 1}` : 'Фото из чата',
+        alt: 'Фото из чата',
+      })),
+    [readyRefs, urls],
+  );
+
   if (refs.length === 0) return null;
 
   return (
@@ -51,40 +90,33 @@ export function ChatImageAttachments({ attachmentUrl }: { attachmentUrl: string 
             );
           }
           if (!url) {
-            return (
-              <div key={ref} className="h-24 w-40 animate-pulse rounded-lg bg-slate-100" />
-            );
+            return <div key={ref} className="h-24 w-40 animate-pulse rounded-lg bg-slate-100" />;
           }
           return (
-            <button
+            <PhotoThumbButton
               key={ref}
-              type="button"
-              onClick={() => setZoomUrl(url)}
-              className="block overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-accent"
-              style={{ touchAction: 'manipulation' }}
-              aria-label="Открыть фото"
-            >
-              <img
-                src={url}
-                alt="Фото из чата"
-                loading="lazy"
-                className="max-h-64 w-full max-w-[280px] object-cover"
-              />
-            </button>
+              src={url}
+              alt="Фото из чата"
+              index={readyRefs.indexOf(ref)}
+              onOpen={open}
+              degrees={orientations[ref] ?? 0}
+              className="max-h-64 w-full max-w-[280px] object-cover"
+              wrapperClassName="block overflow-hidden rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            />
           );
         })}
       </div>
-      <Dialog open={zoomUrl !== null} onOpenChange={(open) => !open && setZoomUrl(null)}>
-        <DialogContent className="max-w-4xl border-none bg-transparent p-0 shadow-none">
-          {zoomUrl ? (
-            <img
-              src={zoomUrl}
-              alt="Фото из чата"
-              className="max-h-[85vh] w-full rounded-lg object-contain"
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
+
+      <PhotoViewer
+        items={items}
+        openIndex={openIndex}
+        onClose={close}
+        onNavigate={navigate}
+        surface="tutor_student_chat"
+        canRotate={canRotate}
+        ariaTitle="Фото из чата"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
     </>
   );
 }

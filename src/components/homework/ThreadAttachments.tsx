@@ -1,8 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Download, FileText, ImageIcon } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FileText, ImageIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useHeicImage } from '@/hooks/useHeicImage';
-import { isHeicLikeUrl } from '@/lib/heicDecode';
+import {
+  PhotoThumbButton,
+  PhotoViewer,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from '@/components/common/photo-viewer';
+import { usePhotoOrientations } from '@/hooks/usePhotoOrientation';
 import {
   getThreadAttachmentKind,
   getThreadAttachmentLabel,
@@ -10,86 +15,23 @@ import {
 } from '@/lib/homeworkThreadAttachments';
 
 /**
- * Phase 7 (2026-05-16): graceful fallback для image load failures.
- * 2026-07-30 (баг Ирины Бочаровой): legacy .heic теперь НЕ сразу «скачать» —
- * onError → `useHeicImage` (lazy wasm-декод) → рендерим конвертированный JPEG.
- * Янтарная карточка «скачать» осталась последним рубежом (декод не удался).
- */
-/**
- * Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P1 #2 + #4):
- * ImageWithFallback **сам owned outer wrapper** — раньше outer `<a>` оборачивал
- * inner `<a>` (failed state) → invalid nested interactive markup, click мог
- * уйти в outer вместо download. Теперь:
- *   - success → outer `<a href target="_blank">` оборачивает `<img loading="lazy">` (open
- *     image in new tab on click — expected UX).
- *   - failed → standalone `<a href download>` без `target="_blank"` (HTML5
- *     `download` attribute IGNORED для cross-origin URL когда `target` есть;
- *     same-tab navigation увеличивает шанс что download attribute сработает,
- *     либо хотя бы откроет файл в том же tab а не как orphan tab).
+ * Вложения сообщения треда ДЗ: фото решения ученика, PDF, прочие файлы.
  *
- * Один interactive element на failed render — никакого nested anchor.
+ * ⚠️ Это главный экран проверки: именно здесь репетитор смотрит рукописное
+ * решение. До 2026-07-31 фото открывалось СЫРОЙ ВКЛАДКОЙ БРАУЗЕРА — ни зума,
+ * ни поворота, ни возврата назад. Отсюда джоб Ульяны U22 «его нельзя
+ * развернуть, приходится копировать» и её ручной путь «вырезать → развернуть →
+ * вынести на доску → отправить».
+ *
+ * Теперь клик открывает канонический `PhotoViewer`. Поворот сохраняется по
+ * storage-ref, поэтому ученик и AI-проверка видят фото так же, как репетитор.
  */
-function ImageWithFallback({
-  src,
-  alt,
-  className,
-  label,
-  wrapperClassName,
-}: {
-  src: string;
-  alt: string;
-  className: string;
-  label: string;
-  /** className для outer `<a>` wrapper в success state. */
-  wrapperClassName: string;
-}) {
-  const { effectiveSrc, state, onImgError } = useHeicImage(src);
-
-  const isHeicLike = isHeicLikeUrl(src);
-
-  if (state === 'converting') {
-    // Конвертируем HEIC в фоне (wasm) — размер как у будущей миниатюры.
-    return <Skeleton className={`${className} min-w-20`} />;
-  }
-
-  if (state === 'failed') {
-    return (
-      <a
-        href={src}
-        download={label}
-        rel="noreferrer"
-        className="inline-flex min-h-20 items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100 max-w-[260px]"
-        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не удалось открыть даже конвертацией. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
-      >
-        <Download className="h-5 w-5 shrink-0" />
-        <div className="min-w-0">
-          <p className="truncate text-xs font-medium">{label}</p>
-          <p className="text-[11px] opacity-80">
-            {isHeicLike ? 'HEIC — скачать' : 'Не открывается — скачать'}
-          </p>
-        </div>
-      </a>
-    );
-  }
-
-  return (
-    // href — всегда ОРИГИНАЛЬНЫЙ signed URL (скачивание/новая вкладка бьют в
-    // storage), даже когда <img> показывает конвертированный objectURL.
-    <a
-      href={src}
-      target="_blank"
-      rel="noreferrer"
-      className={wrapperClassName}
-    >
-      <img
-        src={effectiveSrc}
-        alt={alt}
-        className={className}
-        loading="lazy"
-        onError={onImgError}
-      />
-    </a>
-  );
+interface ThreadAttachmentsProps {
+  attachmentValue: string;
+  resolveSignedUrl: (ref: string) => Promise<string | null>;
+  compact?: boolean;
+  /** Кнопки поворота — только на репетиторской стороне треда. */
+  canRotate?: boolean;
 }
 
 interface ResolvedAttachment {
@@ -99,16 +41,11 @@ interface ResolvedAttachment {
   url: string | null;
 }
 
-interface ThreadAttachmentsProps {
-  attachmentValue: string;
-  resolveSignedUrl: (ref: string) => Promise<string | null>;
-  compact?: boolean;
-}
-
 export function ThreadAttachments({
   attachmentValue,
   resolveSignedUrl,
   compact = false,
+  canRotate = false,
 }: ThreadAttachmentsProps) {
   const refs = useMemo(
     () => parseThreadAttachmentRefs(attachmentValue),
@@ -116,6 +53,7 @@ export function ThreadAttachments({
   );
   const [items, setItems] = useState<ResolvedAttachment[]>([]);
   const [loading, setLoading] = useState(false);
+  const { openIndex, open, close, navigate } = usePhotoViewer();
 
   useEffect(() => {
     if (refs.length === 0) {
@@ -146,6 +84,33 @@ export function ThreadAttachments({
     };
   }, [refs, resolveSignedUrl]);
 
+  // Только картинки попадают в просмотрщик; PDF и прочие файлы остаются
+  // ссылками. Индексы просмотрщика считаем по ЭТОМУ списку, а не по items —
+  // иначе клик по второму фото открывал бы первое, если между ними лежит PDF.
+  const photos = useMemo(
+    () => items.filter((item) => item.kind === 'image' && item.url),
+    [items],
+  );
+
+  const photoRefs = useMemo(() => photos.map((photo) => photo.ref), [photos]);
+  const { orientations } = usePhotoOrientations(photoRefs);
+
+  const viewerItems = useMemo<PhotoViewerItem[]>(
+    () =>
+      photos.map((photo) => ({
+        url: photo.url as string,
+        ref: photo.ref,
+        caption: photo.label,
+        alt: photo.label,
+      })),
+    [photos],
+  );
+
+  const indexOfPhoto = useCallback(
+    (ref: string) => photos.findIndex((photo) => photo.ref === ref),
+    [photos],
+  );
+
   if (refs.length === 0) return null;
 
   if (loading) {
@@ -166,62 +131,74 @@ export function ThreadAttachments({
     : 'h-24 w-auto max-w-[200px] rounded-sm object-cover';
 
   return (
-    <div className="mt-2 flex flex-wrap gap-2">
-      {items.map((item) => {
-        if (item.kind === 'image' && item.url) {
-          // Phase 7 round 2 (2026-05-20): ImageWithFallback **сам владеет**
-          // outer `<a>` wrapper'ом (см. component JSDoc). Раньше outer `<a>`
-          // оборачивал inner `<a>` в failed state → nested interactive
-          // markup invalid. Теперь один single interactive element.
-          return (
-            <ImageWithFallback
-              key={item.ref}
-              src={item.url}
-              alt={item.label}
-              label={item.label}
-              className={imageClassName}
-              wrapperClassName="inline-block rounded-md border bg-background p-0.5 hover:opacity-90 transition-opacity"
-            />
-          );
-        }
+    <>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.map((item) => {
+          if (item.kind === 'image' && item.url) {
+            const photoIndex = indexOfPhoto(item.ref);
+            return (
+              <PhotoThumbButton
+                key={item.ref}
+                src={item.url}
+                alt={item.label}
+                index={photoIndex < 0 ? 0 : photoIndex}
+                onOpen={open}
+                className={imageClassName}
+                degrees={orientations[item.ref] ?? 0}
+                wrapperClassName="inline-block rounded-md border bg-background p-0.5 transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20"
+              />
+            );
+          }
 
-        if (item.url) {
+          if (item.url) {
+            return (
+              <a
+                key={item.ref}
+                href={item.url}
+                target="_blank"
+                rel="noreferrer"
+                className={`inline-flex min-h-20 items-center gap-3 rounded-md border bg-background px-3 py-2 hover:bg-muted/40 ${
+                  compact ? 'max-w-[220px]' : 'max-w-[260px]'
+                }`}
+              >
+                <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium">{item.label}</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {item.kind === 'pdf' ? 'PDF' : 'Файл'}
+                  </p>
+                </div>
+              </a>
+            );
+          }
+
           return (
-            <a
+            <div
               key={item.ref}
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              className={`inline-flex min-h-20 items-center gap-3 rounded-md border bg-background px-3 py-2 hover:bg-muted/40 ${
+              className={`inline-flex min-h-20 items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 ${
                 compact ? 'max-w-[220px]' : 'max-w-[260px]'
               }`}
             >
-              <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <ImageIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
               <div className="min-w-0">
                 <p className="truncate text-xs font-medium">{item.label}</p>
-                <p className="text-[11px] text-muted-foreground">
-                  {item.kind === 'pdf' ? 'PDF' : 'Файл'}
-                </p>
+                <p className="text-[11px] text-muted-foreground">Вложение недоступно</p>
               </div>
-            </a>
-          );
-        }
-
-        return (
-          <div
-            key={item.ref}
-            className={`inline-flex min-h-20 items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 ${
-              compact ? 'max-w-[220px]' : 'max-w-[260px]'
-            }`}
-          >
-            <ImageIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
-            <div className="min-w-0">
-              <p className="truncate text-xs font-medium">{item.label}</p>
-              <p className="text-[11px] text-muted-foreground">Вложение недоступно</p>
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+
+      <PhotoViewer
+        items={viewerItems}
+        openIndex={openIndex}
+        onClose={close}
+        onNavigate={navigate}
+        surface="homework_thread"
+        canRotate={canRotate}
+        ariaTitle="Фото из переписки по задаче"
+        ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+      />
+    </>
   );
 }

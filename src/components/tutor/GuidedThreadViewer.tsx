@@ -139,6 +139,9 @@ function TaskContextGallery({
   return (
     <PhotoGallery
       images={resolvedUrls}
+      imageRefs={refs}
+      surface="homework_thread"
+      canRotate
       dialogTitle="Фото задачи"
       dialogDescription="Изображения условия задачи"
       imageAltPrefix="Фото условия задачи"

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { MathText } from '@/components/kb/ui/MathText';
+import { SafeImage } from '@/components/common/photo-viewer';
 import { SourceBadge } from '@/components/kb/ui/SourceBadge';
 import { SubtopicFilterChips } from '@/components/kb/ui/SubtopicFilterChips';
 import { CatalogTaskGroups } from '@/components/kb/CatalogTaskGroups';
@@ -171,11 +172,14 @@ const PickerTaskCard = memo(function PickerTaskCard({
       )}
 
       {/* Full-width image below text */}
+      {/* Просмотрщик тут НЕ вешаем: строка — это выбор задачи, и клик по фото
+          конфликтовал бы с основным действием. Но SafeImage нужен — иначе
+          .heic ученика остаётся битой картинкой (rule 40, баг Ирины). */}
       {thumbUrl ? (
-        <img
+        <SafeImage
           src={thumbUrl}
           alt="Вложение к задаче"
-          loading="lazy"
+          interactive={false}
           className={cn(
             'w-full rounded-xl border border-gray-200 bg-gray-50 object-contain',
             isImageOnly ? 'max-h-64' : 'max-h-48',
