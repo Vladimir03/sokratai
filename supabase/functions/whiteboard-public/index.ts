@@ -343,7 +343,19 @@ Deno.serve(async (req) => {
         .eq("board_id", guest.board_id);
       if (since) query = query.gt("updated_at", since);
       const { data: revs } = await query;
-      return jsonOk({ revs: revs ?? [], now: new Date().toISOString() });
+      // bring (Этап 4): у гостя нет Realtime — «Привести всех» доезжает отсюда.
+      // Отдаём ВСЕГДА (не фильтруя по since): клиент дедупит по seq и сам
+      // игнорирует сигнал старше 2 минут.
+      const { data: boardRow } = await db
+        .from("boards")
+        .select("live_bring")
+        .eq("id", guest.board_id)
+        .maybeSingle();
+      return jsonOk({
+        revs: revs ?? [],
+        bring: boardRow?.live_bring ?? null,
+        now: new Date().toISOString(),
+      });
     }
 
     // POST /share/:slug/pages/:pageId

@@ -11,6 +11,7 @@ import {
   saveStudentPage,
 } from '@/lib/whiteboardStudentApi';
 import { subscribeBoardRevs } from '@/lib/whiteboard/boardRealtime';
+import { connectBoardLive } from '@/lib/whiteboard/boardLive';
 
 // Доска глазами ученика с аккаунтом (Этап 3, B4): чтение PostgREST под RLS,
 // запись через whiteboard-student-api (только своя зона), синк — Realtime по
@@ -41,6 +42,9 @@ export default function StudentBoard() {
           onReconnect: handlers.onResync,
         });
       },
+      // Этап 4: live-канал (bring/курсоры/«репетитор смотрит») — у ученика
+      // есть JWT, broadcast доступен; me собирает SharedBoardView после load.
+      connectLive: (me, handlers) => connectBoardLive(boardId, me, handlers),
       addMyPage: () => addStudentRollPage(boardId),
       refreshImageUrls: async () => (await invokeStudentMe(boardId)).imageUrls,
     };

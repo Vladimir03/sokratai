@@ -110,6 +110,18 @@ interface BoardCanvasProps {
   /** Ячейки-плюсы для добавления листов (сетка Chattern). */
   ghostCells?: GhostCell[];
   onGhostClick?: (ghost: GhostCell) => void;
+  /** Чужие указки (Этап 4, live-канал) — мировые мм, цвет = хэш участника. */
+  remoteCursors?: RemoteCursor[];
+  /** Своя указка для live-канала (сырые мировые мм; троттлинг у вызывающего). */
+  onCursorMove?: (x: number, y: number) => void;
+}
+
+export interface RemoteCursor {
+  key: string;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
 }
 
 const ERASER_TOLERANCE_MM = 1.5;
@@ -313,6 +325,8 @@ export function BoardCanvas({
   onRequestText,
   ghostCells,
   onGhostClick,
+  remoteCursors,
+  onCursorMove,
 }: BoardCanvasProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -816,6 +830,11 @@ export function BoardCanvas({
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<SVGSVGElement>) => {
+      // Указка для live-канала (Этап 4): шлём и без жеста — троттлинг выше.
+      if (onCursorMove) {
+        const w = toWorld(event.clientX, event.clientY);
+        onCursorMove(w.x, w.y);
+      }
       const drag = dragRef.current;
       if (!drag) return;
 
@@ -918,7 +937,7 @@ export function BoardCanvas({
 
       scheduleFrame();
     },
-    [toWorld, frameById, eraseAtLocal, scheduleFrame, onCameraChange],
+    [toWorld, frameById, eraseAtLocal, scheduleFrame, onCameraChange, onCursorMove],
   );
 
   useEffect(() => {
@@ -1121,6 +1140,30 @@ export function BoardCanvas({
           >
             {frame.title}
           </text>
+        );
+      })}
+
+      {/* Чужие указки (Этап 4): screen-space размер, имя рядом (Figma-паттерн). */}
+      {(remoteCursors ?? []).map((c) => {
+        const r = 5 / camera.zoom;
+        const nameMm = Math.max(3, 11 / camera.zoom);
+        return (
+          <g key={`cursor-${c.key}`} pointerEvents="none">
+            <circle cx={c.x} cy={c.y} r={r} fill={c.color} stroke="#FFFFFF" strokeWidth={r * 0.3} />
+            <text
+              x={c.x + r * 1.8}
+              y={c.y + nameMm * 0.35}
+              fill={c.color}
+              fontSize={nameMm}
+              fontWeight={600}
+              fontFamily="'Golos Text', system-ui, sans-serif"
+              paintOrder="stroke"
+              stroke="#FFFFFF"
+              strokeWidth={nameMm * 0.18}
+            >
+              {c.name}
+            </text>
+          </g>
         );
       })}
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Eraser, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, Check, Eraser, Eye, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import {
@@ -7,10 +7,20 @@ import {
   type BoardSelection,
   type BoardTool,
   type FrameView,
+  type RemoteCursor,
 } from '@/components/whiteboard/BoardCanvas';
+import {
+  shouldApplyBring,
+  stablePeerColor,
+  FOLLOW_STALE_MS,
+  type BoardLiveControls,
+  type BoardLiveHandlers,
+  type LivePeer,
+} from '@/lib/whiteboard/boardLive';
 import { parseFrameRow, type SharedFrame } from '@/lib/whiteboard/frameRows';
 import type { SaveResult } from '@/lib/whiteboardStudentApi';
 import {
+  type BoardBounds,
   type BoardElement,
   type CameraState,
   BOARD_COLORS,
@@ -18,6 +28,7 @@ import {
   DEFAULT_TEXT_SIZE_MM,
   PEN_SIZES_MM,
   cameraToFitBounds,
+  cameraWorldWindow,
   createText,
   frameWorldBounds,
   pageSizeMm,
@@ -52,7 +63,15 @@ export interface SharedBoardTransport {
   start(handlers: {
     onRemote: (pageId: string, rev: number) => void;
     onResync: () => void;
+    /** «Привести всех» из поллинга (гость; Этап 4). Дедуп по seq — у вызывающего. */
+    onBring?: (bring: { seq: number; bounds: BoardBounds; at?: string | null }) => void;
   }): () => void;
+  /**
+   * Live-канал (Этап 4): курсоры/viewport/bring/follow по broadcast. Есть
+   * только у ученика с аккаунтом — гостю без JWT недоступен (его bring идёт
+   * через onBring поллинга, follow до гостя — v2).
+   */
+  connectLive?(me: LivePeer, handlers: BoardLiveHandlers): BoardLiveControls;
   /** Добавить лист в свой рулон (нет у зрителя). */
   addMyPage?(): Promise<SharedFrame>;
   /** Догруз signed URL для картинок, появившихся после загрузки. */
@@ -309,14 +328,100 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
     };
   }, [applyFrames, fitMyZone]);
 
+  // ─── Live (Этап 4): bring/курсоры/«репетитор смотрит» ──────────────────────
+
+  const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor & { at: number }>>({});
+  const [followedBy, setFollowedBy] = useState<string | null>(null);
+  const followedAtRef = useRef(0);
+  const liveRef = useRef<BoardLiveControls | null>(null);
+  const lastBringSeqRef = useRef(0);
+  const myLiveKeyRef = useRef<string | null>(null);
+  const zoneNamesRef = useRef(zoneNames);
+  zoneNamesRef.current = zoneNames;
+  const viewportStateRef = useRef(viewport);
+  viewportStateRef.current = viewport;
+
+  /** «Привести всех»: broadcast (ученик) и поллинг (гость) сходятся сюда. */
+  const applyBring = useCallback(
+    (bring: { seq: number; bounds: BoardBounds; at?: string | null }) => {
+      if (!shouldApplyBring(bring, lastBringSeqRef.current, Date.now())) return;
+      lastBringSeqRef.current = bring.seq;
+      setCamera(cameraToFitBounds(bring.bounds, viewportStateRef.current));
+      toast.message('Репетитор показывает свой экран');
+    },
+    [],
+  );
+
   useEffect(() => {
     if (loading || loadError) return;
     const stop = transportRef.current.start({
       onRemote: (pageId, rev) => void handleRemoteRev(pageId, rev),
       onResync: () => void resync(),
+      onBring: applyBring,
     });
     return stop;
-  }, [loading, loadError, handleRemoteRev, resync]);
+  }, [loading, loadError, handleRemoteRev, resync, applyBring]);
+
+  useEffect(() => {
+    if (loading || loadError) return;
+    const connect = transportRef.current.connectLive;
+    if (!connect) return; // гость: без JWT нет broadcast — bring идёт поллингом
+    // НЕ crypto.randomUUID — Safari < 15.4 (rule 80).
+    const key = myZoneId
+      ? `student:${myZoneId}`
+      : `viewer:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    myLiveKeyRef.current = key;
+    const name = (myZoneId ? zoneNamesRef.current[myZoneId] : null) ?? 'Ученик';
+    const handlers: BoardLiveHandlers = {
+      onBring: applyBring,
+      onCursor: (e) => {
+        setRemoteCursors((prev) => ({
+          ...prev,
+          [e.key]: { key: e.key, name: e.name, color: stablePeerColor(e.key), x: e.x, y: e.y, at: Date.now() },
+        }));
+      },
+      onFollow: (e) => {
+        if (e.targetKey !== myLiveKeyRef.current) return;
+        if (e.on) {
+          followedAtRef.current = Date.now();
+          setFollowedBy(e.byName || 'Репетитор');
+        } else {
+          setFollowedBy(null);
+        }
+      },
+    };
+    const controls = connect({ key, name, role: 'student' } satisfies LivePeer, handlers);
+    liveRef.current = controls;
+    return () => {
+      liveRef.current = null;
+      controls.leave();
+    };
+  }, [loading, loadError, myZoneId, applyBring]);
+
+  // Курсор без событий 6 с — убираем; бейдж «смотрит» гаснет без пинга follow.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setRemoteCursors((prev) => {
+        const alive = Object.values(prev).filter((c) => now - c.at < 6000);
+        return alive.length === Object.keys(prev).length
+          ? prev
+          : Object.fromEntries(alive.map((c) => [c.key, c]));
+      });
+      setFollowedBy((prev) => (prev && now - followedAtRef.current > FOLLOW_STALE_MS ? null : prev));
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Свой viewport — для follow репетитора (троттл и «только при peers» в lib).
+  useEffect(() => {
+    liveRef.current?.sendViewport(cameraWorldWindow(camera, viewport));
+  }, [camera, viewport]);
+
+  const cursorList = useMemo(() => Object.values(remoteCursors), [remoteCursors]);
+  const handleCursorMove = useCallback((x: number, y: number) => {
+    liveRef.current?.sendCursor(x, y);
+  }, []);
 
   // ─── Правки своей зоны ──────────────────────────────────────────────────────
 
@@ -695,7 +800,16 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
           onMoveSelection={handleMoveSelection}
           onTransformElement={() => undefined /* картинки участник не трансформирует (v1) */}
           onRequestText={handleRequestText}
+          remoteCursors={cursorList}
+          onCursorMove={handleCursorMove}
         />
+
+        {followedBy && (
+          <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-slate-900/85 px-4 py-1.5 text-sm text-white shadow-md">
+            <Eye className="h-3.5 w-3.5" />
+            {followedBy} смотрит ваш лист
+          </div>
+        )}
 
         {textDraft && textDraftPx && (
           <textarea

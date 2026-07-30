@@ -107,6 +107,9 @@ export default function GuestBoard() {
           try {
             const res = await getGuestSignals(slug, guestToken, sinceRef.current);
             if (stopped) return;
+            // «Привести всех» (Этап 4): у гостя нет Realtime — bring доезжает
+            // отсюда (≤2.5 с). Дедуп по seq и свежесть — в applyBring выше.
+            if (res.bring) handlers.onBring?.(res.bring);
             if (res.revs.length > 0) {
               sinceRef.current = res.revs.reduce(
                 (max, r) => (r.updated_at > max ? r.updated_at : max),

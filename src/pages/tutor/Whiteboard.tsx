@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { AlertTriangle, ArrowLeft, Check, Copy, Download, Loader2, Paperclip, Send, UserPlus, Users } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Copy, Download, Eye, Loader2, Magnet, Paperclip, Send, UserPlus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -9,7 +9,15 @@ import {
   type BoardTool,
   type FrameView,
   type GhostCell,
+  type RemoteCursor,
 } from '@/components/whiteboard/BoardCanvas';
+import {
+  connectBoardLive,
+  stablePeerColor,
+  FOLLOW_PING_MS,
+  type BoardLiveControls,
+  type LivePeer,
+} from '@/lib/whiteboard/boardLive';
 import { BoardToolbar } from '@/components/whiteboard/BoardToolbar';
 import { PagesPanel } from '@/components/whiteboard/PagesPanel';
 import { supabase } from '@/lib/supabaseClient';
@@ -39,6 +47,7 @@ import {
   PAGE_WIDTH_MM,
   bumpVersion,
   cameraToFitBounds,
+  cameraWorldWindow,
   cellOccupied,
   cellSpan,
   cellToPlacement,
@@ -78,7 +87,7 @@ import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQue
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 import { reconcileElements } from '@/lib/whiteboard/reconcile';
 import { subscribeBoardRevs } from '@/lib/whiteboard/boardRealtime';
-import { ensureShareLink, revokeShareLink } from '@/lib/whiteboardApi';
+import { ensureShareLink, revokeShareLink, sendBoardBring } from '@/lib/whiteboardApi';
 import { ensureChatConversation, sendChatMessageApi } from '@/lib/tutorStudentChatApi';
 import { usePasteImages } from '@/hooks/usePasteImages';
 import { useDragDropFiles } from '@/hooks/useDragDropFiles';
@@ -432,6 +441,128 @@ export default function Whiteboard() {
       onReconnect: () => void resync(),
     });
   }, [boardIdForSync, applyFrames, patchFrameSilently]);
+
+  // ─── Live-канал (Этап 4, B1): участники, курсоры, follow, bring ─────────────
+
+  const [livePeers, setLivePeers] = useState<LivePeer[]>([]);
+  const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor & { at: number }>>({});
+  const [followKey, setFollowKey] = useState<string | null>(null);
+  const [followName, setFollowName] = useState('');
+  const liveRef = useRef<BoardLiveControls | null>(null);
+  const followKeyRef = useRef<string | null>(null);
+  const peerViewportsRef = useRef(new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>());
+  const viewportStateRef = useRef(viewport);
+  viewportStateRef.current = viewport;
+
+  const stopFollow = useCallback((notifyPeer = true) => {
+    const key = followKeyRef.current;
+    if (!key) return;
+    followKeyRef.current = null;
+    setFollowKey(null);
+    if (notifyPeer) liveRef.current?.sendFollow(key, false);
+  }, []);
+
+  const startFollow = useCallback((peer: LivePeer) => {
+    followKeyRef.current = peer.key;
+    setFollowKey(peer.key);
+    setFollowName(peer.name);
+    liveRef.current?.sendFollow(peer.key, true);
+    const known = peerViewportsRef.current.get(peer.key);
+    if (known) setCamera(cameraToFitBounds(known, viewportStateRef.current));
+  }, []);
+
+  useEffect(() => {
+    if (!boardIdForSync) return;
+    const controls = connectBoardLive(
+      boardIdForSync,
+      { key: 'tutor', name: 'Репетитор', role: 'tutor' },
+      {
+        onPeers: (peers) => {
+          setLivePeers(peers);
+          // Ученик закрыл вкладку — не «замораживаем» камеру на его последнем виде.
+          if (followKeyRef.current && !peers.some((p) => p.key === followKeyRef.current)) {
+            stopFollow(false);
+          }
+        },
+        onViewport: (e) => {
+          peerViewportsRef.current.set(e.key, e.bounds);
+          if (followKeyRef.current === e.key) {
+            // fit-contain: показываем ВСЁ окно ученика, его зум буквально не копируем.
+            setCamera(cameraToFitBounds(e.bounds, viewportStateRef.current));
+          }
+        },
+        onCursor: (e) => {
+          setRemoteCursors((prev) => ({
+            ...prev,
+            [e.key]: { key: e.key, name: e.name, color: stablePeerColor(e.key), x: e.x, y: e.y, at: Date.now() },
+          }));
+        },
+      },
+    );
+    liveRef.current = controls;
+    return () => {
+      liveRef.current = null;
+      controls.leave();
+    };
+  }, [boardIdForSync, stopFollow]);
+
+  // Курсор без событий 6 с — участник ушёл с холста; убираем, не копим навечно.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRemoteCursors((prev) => {
+        const now = Date.now();
+        const alive = Object.values(prev).filter((c) => now - c.at < 6000);
+        return alive.length === Object.keys(prev).length
+          ? prev
+          : Object.fromEntries(alive.map((c) => [c.key, c]));
+      });
+    }, 3000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Свой viewport — слушателям (троттл 500 мс и «только при peers>0» внутри lib).
+  useEffect(() => {
+    liveRef.current?.sendViewport(cameraWorldWindow(camera, viewport));
+  }, [camera, viewport]);
+
+  // Пинг follow каждые 10 с: у ученика бейдж «репетитор смотрит» гаснет сам
+  // по таймауту — обрыв WS не оставляет его гореть вечно.
+  useEffect(() => {
+    if (!followKey) return;
+    const timer = setInterval(() => liveRef.current?.sendFollow(followKey, true), FOLLOW_PING_MS);
+    return () => clearInterval(timer);
+  }, [followKey]);
+
+  /** Собственный жест камеры выходит из follow (план: авто-выход по own-pan). */
+  const handleCameraChange = useCallback(
+    (cam: CameraState) => {
+      if (followKeyRef.current) stopFollow();
+      setCamera(cam);
+    },
+    [stopFollow],
+  );
+
+  const [bringBusy, setBringBusy] = useState(false);
+  const handleBringAll = useCallback(async () => {
+    if (!board || bringBusy) return;
+    setBringBusy(true);
+    try {
+      const bounds = cameraWorldWindow(cameraRef.current, viewportStateRef.current);
+      // Ученикам — мгновенно broadcast'ом; гостям — персист (поллинг ≤2.5 с).
+      liveRef.current?.sendBring(bounds);
+      await sendBoardBring(board.id, bounds);
+      toast.success('Участники переведены к вашему виду');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось позвать участников');
+    } finally {
+      setBringBusy(false);
+    }
+  }, [board, bringBusy]);
+
+  const cursorList = useMemo(() => Object.values(remoteCursors), [remoteCursors]);
+  const handleCursorMove = useCallback((x: number, y: number) => {
+    liveRef.current?.sendCursor(x, y);
+  }, []);
 
   useEffect(() => {
     if (saveStatus === 'saved') return;
@@ -1462,6 +1593,24 @@ export default function Whiteboard() {
           </Button>
         )}
 
+        {livePeers.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleBringAll()}
+            disabled={bringBusy}
+            title="Перевести всех участников к вашему виду"
+            style={{ touchAction: 'manipulation' }}
+          >
+            {bringBusy ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <Magnet className="mr-1.5 h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Ко мне</span>
+          </Button>
+        )}
+
         <Button
           variant="outline"
           size="sm"
@@ -1508,12 +1657,24 @@ export default function Whiteboard() {
         onImportPdf={() => pdfInputRef.current?.click()}
         camera={{
           zoomPercent: Math.round((camera.zoom / HUNDRED_PERCENT_ZOOM) * 100),
-          onZoomIn: () =>
-            setCamera((c) => zoomCameraAt(c, 1.25, { x: c.cx, y: c.cy })),
-          onZoomOut: () =>
-            setCamera((c) => zoomCameraAt(c, 0.8, { x: c.cx, y: c.cy })),
-          onFitFrame: () => activeFrame && fitSingleFrame(activeFrame, viewport),
-          onFitAll: () => fitFrames(framesRef.current, viewport),
+          // Кнопки камеры = свой жест → выход из follow (как own-pan).
+          onZoomIn: () => {
+            stopFollow();
+            setCamera((c) => zoomCameraAt(c, 1.25, { x: c.cx, y: c.cy }));
+          },
+          onZoomOut: () => {
+            stopFollow();
+            setCamera((c) => zoomCameraAt(c, 0.8, { x: c.cx, y: c.cy }));
+          },
+          onFitFrame: () => {
+            if (!activeFrame) return;
+            stopFollow();
+            fitSingleFrame(activeFrame, viewport);
+          },
+          onFitAll: () => {
+            stopFollow();
+            fitFrames(framesRef.current, viewport);
+          },
         }}
         canUndo={historyState.canUndo}
         canRedo={historyState.canRedo}
@@ -1546,12 +1707,40 @@ export default function Whiteboard() {
         }}
       />
 
+      {/* Участники live-канала: чип = follow-переключатель («Следовать»). */}
+      {livePeers.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-1.5">
+          <span className="shrink-0 text-xs text-slate-400">На доске:</span>
+          {livePeers.map((peer) => (
+            <button
+              key={peer.key}
+              type="button"
+              onClick={() => (followKey === peer.key ? stopFollow() : startFollow(peer))}
+              title={followKey === peer.key ? 'Перестать следовать' : `Следовать за: ${peer.name}`}
+              style={{ touchAction: 'manipulation' }}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-sm transition-colors ${
+                followKey === peer.key
+                  ? 'border-accent bg-accent/10 text-accent'
+                  : 'border-slate-200 text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: stablePeerColor(peer.key) }}
+              />
+              {peer.name}
+              {followKey === peer.key && <Eye className="h-3.5 w-3.5" />}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div ref={viewportRef} className="relative min-h-0 flex-1" {...dragHandlers}>
         <BoardCanvas
           frames={frameViews}
           camera={camera}
           viewport={viewport}
-          onCameraChange={setCamera}
+          onCameraChange={handleCameraChange}
           tool={tool}
           color={color}
           size={size}
@@ -1566,7 +1755,15 @@ export default function Whiteboard() {
           onRequestText={handleRequestText}
           ghostCells={ghostCells}
           onGhostClick={handleGhostClick}
+          remoteCursors={cursorList}
+          onCursorMove={handleCursorMove}
         />
+
+        {followKey && (
+          <div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2 rounded-full bg-slate-900/85 px-4 py-1.5 text-sm text-white shadow-md">
+            Следуете за: {followName} · двиньте холст, чтобы выйти
+          </div>
+        )}
 
         {textDraft && textDraftPx && (
           <textarea

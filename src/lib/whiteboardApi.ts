@@ -226,6 +226,18 @@ export async function distributeZones(boardId: string): Promise<BoardPageRow[]> 
   return res.pages ?? [];
 }
 
+/** POST /boards/:id/bring — персист «Привести всех» для гостей (поллинг /signals);
+ * ученикам сигнал уходит broadcast'ом (boardLive) — это только гостевое плечо. */
+export async function sendBoardBring(
+  boardId: string,
+  bounds: { minX: number; minY: number; maxX: number; maxY: number },
+): Promise<void> {
+  await invokeWhiteboard<{ ok: true }>(`/boards/${encodeURIComponent(boardId)}/bring`, {
+    method: 'POST',
+    body: { bounds },
+  });
+}
+
 /** POST /boards/:id/share — создать/получить гостевую ссылку (slug — bearer, не логировать). */
 export async function ensureShareLink(boardId: string): Promise<string> {
   const res = await invokeWhiteboard<{ slug: string }>(

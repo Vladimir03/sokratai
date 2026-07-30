@@ -673,6 +673,46 @@ async function handleShareLink(
   return jsonOk(cors, { slug: createdLink.slug }, 201);
 }
 
+/**
+ * POST /boards/:id/bring — «Привести всех к моему виду» (Этап 4, B1).
+ * Ученикам сигнал уходит broadcast'ом с клиента; здесь ПЕРСИСТ для гостей:
+ * у них нет JWT → нет Realtime, bring доезжает поллингом /signals
+ * (whiteboard-public читает boards.live_bring). Клиенты дедупят по seq и
+ * игнорируют старше 2 минут — поэтому перезапись одной колонки достаточна.
+ */
+async function handleBring(
+  db: SupabaseClient,
+  tutorPkId: string,
+  boardId: string,
+  req: Request,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const board = await loadOwnedBoard(db, boardId, tutorPkId);
+  if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+
+  const body = await parseJsonBody(req) ?? {};
+  const b = body.bounds as { minX?: unknown; minY?: unknown; maxX?: unknown; maxY?: unknown } | undefined;
+  const nums = [b?.minX, b?.minY, b?.maxX, b?.maxY];
+  if (
+    !b || nums.some((n) => typeof n !== "number" || !Number.isFinite(n)) ||
+    (b.maxX as number) <= (b.minX as number) || (b.maxY as number) <= (b.minY as number)
+  ) {
+    return jsonError(cors, 400, "VALIDATION", "Некорректная область для показа.");
+  }
+
+  const bring = {
+    seq: Date.now(),
+    bounds: { minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY },
+    at: new Date().toISOString(),
+  };
+  const { error } = await db.from("boards").update({ live_bring: bring }).eq("id", boardId);
+  if (error) {
+    console.error("whiteboard_api_bring_failed", { code: error.code });
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось позвать участников.");
+  }
+  return jsonOk(cors, { ok: true, seq: bring.seq });
+}
+
 async function handleSavePage(
   db: SupabaseClient,
   tutorPkId: string,
@@ -921,6 +961,9 @@ Deno.serve(async (req) => {
       }
       if (segments.length === 3 && boardId && segments[2] === "pages" && method === "POST") {
         return handleCreatePage(db, tutorPkId, boardId, req, cors);
+      }
+      if (segments.length === 3 && boardId && segments[2] === "bring" && method === "POST") {
+        return handleBring(db, tutorPkId, boardId, req, cors);
       }
       if (segments.length === 3 && boardId && segments[2] === "zones" && method === "POST") {
         return handleDistributeZones(db, tutorPkId, boardId, cors);

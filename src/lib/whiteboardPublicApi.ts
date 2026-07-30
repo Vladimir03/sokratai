@@ -167,11 +167,17 @@ export interface GuestSignal {
   updated_at: string;
 }
 
+export interface GuestBring {
+  seq: number;
+  bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  at?: string | null;
+}
+
 export async function getGuestSignals(
   slug: string,
   guestToken: string,
   since: string | null,
-): Promise<{ revs: GuestSignal[]; now: string }> {
+): Promise<{ revs: GuestSignal[]; bring: GuestBring | null; now: string }> {
   const qs = since ? `?${new URLSearchParams({ since }).toString()}` : '';
   const res = await guestFetch(`/share/${encodeURIComponent(slug)}/signals${qs}`, {
     method: 'GET',
@@ -180,6 +186,7 @@ export async function getGuestSignals(
   if (res.status !== 200) throwGuestError(res, 'Потеряна связь с доской.');
   return {
     revs: (res.body.revs as GuestSignal[] | undefined) ?? [],
+    bring: (res.body.bring as GuestBring | null | undefined) ?? null,
     now: (res.body.now as string | undefined) ?? new Date().toISOString(),
   };
 }
