@@ -163,6 +163,7 @@ export function transform(harvest, owner) {
   const rows = [];
   const skipped = [];
   const collisions = [];
+  const skippedQuestions = [];
   for (const test of harvest) {
     if (test.error) { skipped.push({ uid: test.uid, why: test.error }); continue; }
     if (EXCLUDE_UIDS.has(test.uid)) {
@@ -214,11 +215,47 @@ export function transform(harvest, owner) {
     const vf = addFolder(variantPath, variantName, taskPath);
     vf.uid = test.uid;
 
+    // Отдельный невалидный вопрос НЕ должен блокировать весь тест: иначе одна
+    // задача без ключа ответа хоронит остальные девять. Но и молча терять
+    // нельзя — каждый пропуск попадает в отчёт поимённо (тест + номер + причина).
     test.questions.forEach((q, i) => {
-      rows.push(toRow(q, { ...meta, owner: owner.id, uid: test.uid, variantFolderId: vf.id }, i));
+      try {
+        rows.push(toRow(q, { ...meta, owner: owner.id, uid: test.uid, variantFolderId: vf.id }, i));
+      } catch (e) {
+        skippedQuestions.push({
+          uid: test.uid, title: test.title, вопрос: i + 1, тип: q.type,
+          причина: String(e && e.message || e).replace(/^.*?: /, ''),
+        });
+      }
     });
   }
-  return { folders: [...folders.values()], rows, skipped, collisions };
+  // sort_order — по СМЫСЛУ, а не по порядку появления: репетитор ищет папку
+  // глазами («задание 13»), и алфавит/порядок вставки ставили «Задание 11»
+  // после «Задание 9», а «Вариант 10» — перед «Вариант 2».
+  // Разделы: 9 класс раньше 11. Задания: по номеру КИМ. Варианты: по номеру.
+  const num = (name, re) => {
+    const m = name.match(re);
+    return m ? Number(m[1]) : 9999;
+  };
+  const list = [...folders.values()];
+  const byParent = new Map();
+  for (const f of list) {
+    const key = f.parent_id ?? "__root__";
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(f);
+  }
+  for (const siblings of byParent.values()) {
+    siblings
+      .sort((a, b) =>
+        (a.name.startsWith("ОГЭ") ? 0 : a.name.startsWith("ЕГЭ") ? 1 : 2) -
+          (b.name.startsWith("ОГЭ") ? 0 : b.name.startsWith("ЕГЭ") ? 1 : 2) ||
+        num(a.name, /Задание\s+(\d+)/) - num(b.name, /Задание\s+(\d+)/) ||
+        num(a.name, /Вариант\s+(\d+)/) - num(b.name, /Вариант\s+(\d+)/) ||
+        a.name.localeCompare(b.name, "ru"))
+      .forEach((f, i) => { f.sort_order = i + 1; });
+  }
+
+  return { folders: list, rows, skipped, collisions, skippedQuestions };
 }
 
 // --- SQL -------------------------------------------------------------------
@@ -281,6 +318,7 @@ if (process.argv[1]?.endsWith("transform.mjs")) {
       owner: owner.label, folders: result.folders.length, tasks: result.rows.length,
       structural: choice, textual: result.rows.length - choice, skipped: result.skipped,
       collisions: result.collisions,
+      skippedQuestions: result.skippedQuestions,
     });
   }
 
