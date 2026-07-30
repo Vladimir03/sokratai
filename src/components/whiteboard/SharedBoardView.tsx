@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Hand, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Hand, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, User, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -24,6 +24,7 @@ import {
   type BoardBounds,
   type BoardElement,
   type CameraState,
+  type ImageElement,
   BOARD_COLORS,
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
@@ -92,6 +93,11 @@ interface SharedBoardViewProps {
    * при сбое сети пользователь остаётся на доске с ретраем.
    */
   onExit?: () => void;
+  /**
+   * Гость: «Сменить имя» (перевход на «я — Маша»). Тот же flush-гард, что и
+   * onExit (ревью Этапа 5, P1: мгновенный сброс токена терял pending-сейв).
+   */
+  onChangeIdentity?: () => void;
 }
 
 interface TextDraft {
@@ -112,7 +118,7 @@ const SHARED_TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'pan', label: 'Рука — двигать холст', icon: Hand },
 ];
 
-export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardViewProps) {
+export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentity }: SharedBoardViewProps) {
   const [frames, setFrames] = useState<SharedFrame[]>([]);
   const [boardTitle, setBoardTitle] = useState<string | null>(null);
   const [myZoneId, setMyZoneId] = useState<string | null>(null);
@@ -484,20 +490,24 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
   // ─── Гардовый выход (ревью P0: SPA-Back мимо beforeunload) ──────────────────
 
   const [exiting, setExiting] = useState(false);
-  const handleGuardedExit = useCallback(async () => {
-    if (exiting || !onExit) return;
-    setExiting(true);
-    try {
-      const ok = await autosave.flush();
-      if (!ok) {
-        toast.error('Не удалось сохранить — проверьте сеть. Изменения не потеряны, попробуйте ещё раз.');
-        return;
+  /** Любое покидание доски (Назад, «Сменить имя») — только после успешного flush. */
+  const runGuarded = useCallback(
+    async (action: () => void) => {
+      if (exiting) return;
+      setExiting(true);
+      try {
+        const ok = await autosave.flush();
+        if (!ok) {
+          toast.error('Не удалось сохранить — проверьте сеть. Изменения не потеряны, попробуйте ещё раз.');
+          return;
+        }
+        action();
+      } finally {
+        setExiting(false);
       }
-      onExit();
-    } finally {
-      setExiting(false);
-    }
-  }, [exiting, onExit, autosave]);
+    },
+    [exiting, autosave],
+  );
 
   // ─── Правки своей зоны ──────────────────────────────────────────────────────
 
@@ -530,6 +540,18 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
       if (ids.length === 0) return;
       const removal = new Set(ids);
       updateFrameElements(frameId, (elements) => elements.filter((el) => !removal.has(el.id)));
+    },
+    [updateFrameElements],
+  );
+
+  /** Resize/rotate одиночной картинки (ревью Этапа 5, P1): ручки картинки у
+   * участника БЫЛИ активны, но коммит шёл в no-op — после pointerup картинка
+   * откатывалась. Гард «своя зона» уже внутри updateFrameElements. */
+  const handleTransformElement = useCallback(
+    (frameId: string, id: string, patch: Partial<ImageElement>) => {
+      updateFrameElements(frameId, (elements) =>
+        elements.map((el) => (el.id === id ? bumpVersion(el as ImageElement, patch) : el)),
+      );
     },
     [updateFrameElements],
   );
@@ -727,7 +749,7 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
             variant="ghost"
             size="sm"
             disabled={exiting}
-            onClick={() => void handleGuardedExit()}
+            onClick={() => void runGuarded(onExit)}
             style={{ touchAction: 'manipulation' }}
           >
             {exiting ? (
@@ -736,6 +758,23 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
               <ArrowLeft className="mr-1.5 h-4 w-4" />
             )}
             Назад
+          </Button>
+        )}
+        {onChangeIdentity && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={exiting}
+            onClick={() => void runGuarded(onChangeIdentity)}
+            title="Вернуться к выбору: если репетитор выдал вам листы, выберите себя из списка"
+            style={{ touchAction: 'manipulation' }}
+          >
+            {exiting ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <User className="mr-1.5 h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Сменить имя</span>
           </Button>
         )}
         {headerLeft}
@@ -917,7 +956,7 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
           onCommitElement={handleCommitElement}
           onEraseElements={handleEraseElements}
           onMoveSelection={handleMoveSelection}
-          onTransformElement={() => undefined /* картинки участник не трансформирует (v1) */}
+          onTransformElement={handleTransformElement}
           onScaleSelection={handleScaleSelection}
           onRequestText={handleRequestText}
           remoteCursors={cursorList}

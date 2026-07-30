@@ -633,7 +633,15 @@ export default function Whiteboard() {
       if (cancelled || document.visibilityState === 'hidden') return;
       try {
         const list = await listBoardGuests(boardIdForSync);
-        if (!cancelled) setGuests(list);
+        if (cancelled) return;
+        // Сигнатурное сравнение (ревью Этапа 5, P2): last_seen_at меняется
+        // каждым поллом, а UI его не показывает — свежий массив каждые 10 с
+        // ре-рендерил всю страницу вместе с немемоизированным BoardCanvas.
+        setGuests((prev) => {
+          const sig = (arr: BoardGuestRow[]) =>
+            arr.map((g) => `${g.id}|${g.display_name}|${g.tutor_student_id ?? ''}`).join(';');
+          return sig(prev) === sig(list) ? prev : list;
+        });
       } catch {
         // следующий тик повторит
       }

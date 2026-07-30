@@ -543,16 +543,19 @@ async function handleDistributeZones(
   if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
 
   // Этап 5 (кейс Елены): явный список учеников из пикера — доска БЕЗ занятия
-  // тоже раздаёт зоны. Список валидируется по принадлежности репетитору.
+  // тоже раздаёт зоны. Валидация СЫРОГО массива fail-closed (ревью Этапа 5,
+  // P2: мусор молча отфильтровывался, а дубль UUID создавал две зоны).
   const body = await parseJsonBody(req) ?? {};
   let memberIds: string[] = [];
-  if (Array.isArray(body.student_ids) && body.student_ids.length > 0) {
-    const requested = body.student_ids.filter(
-      (id): id is string => typeof id === "string" && UUID_RE.test(id),
-    );
-    if (requested.length === 0 || requested.length > 30) {
+  if ("student_ids" in body) {
+    const raw = body.student_ids;
+    if (
+      !Array.isArray(raw) || raw.length === 0 || raw.length > 30 ||
+      !raw.every((id) => typeof id === "string" && UUID_RE.test(id))
+    ) {
       return jsonError(cors, 400, "VALIDATION", "Некорректный список учеников.");
     }
+    const requested = Array.from(new Set(raw as string[]));
     const { data: owned, error: ownedError } = await db
       .from("tutor_students")
       .select("id")
@@ -628,6 +631,7 @@ async function handleDistributeZones(
   const created: unknown[] = [];
   for (const tutorStudentId of memberIds) {
     if (alreadyZoned.has(tutorStudentId)) continue; // идемпотентность повторной раздачи
+    alreadyZoned.add(tutorStudentId); // защита и от дублей внутри одного запроса
     const col = takeCol();
     const { data: page, error } = await db
       .from("board_pages")
