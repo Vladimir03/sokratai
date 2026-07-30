@@ -48,6 +48,8 @@ export interface FollowEvent {
   byName: string;
 }
 
+export type BoardLiveStatus = 'connecting' | 'connected' | 'error';
+
 export interface BoardLiveHandlers {
   onViewport?: (event: ViewportEvent) => void;
   onCursor?: (event: CursorEvent) => void;
@@ -55,6 +57,9 @@ export interface BoardLiveHandlers {
   onFollow?: (event: FollowEvent) => void;
   /** Список ДРУГИХ участников канала (без себя), при каждом изменении presence. */
   onPeers?: (peers: LivePeer[]) => void;
+  /** Статус private-канала — для панели участников (диагностика: устойчивый
+   * 'error' = Realtime Authorization недоступна, live тихо деградирует). */
+  onStatus?: (status: BoardLiveStatus) => void;
 }
 
 export interface BoardLiveControls {
@@ -249,15 +254,22 @@ export function connectBoardLive(
       // контент продолжает ехать по board_page_revs / поллингу
     }
     if (disposed) return;
+    handlers.onStatus?.('connecting');
     channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED' && !disposed) {
+      if (disposed) return;
+      if (status === 'SUBSCRIBED') {
         subscribed = true;
+        handlers.onStatus?.('connected');
         // re-track на КАЖДЫЙ SUBSCRIBED: после обрыва (RU DPI рвёт WS)
         // presence на сервере протухает — заявляем себя заново.
         void channel.track({ name: me.name, role: me.role });
       }
       if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         subscribed = false;
+        handlers.onStatus?.('error');
+        // Для отладки прода: устойчивая ошибка = private-канал не пускает
+        // (Realtime Authorization / политика) — контент при этом едет по revs.
+        console.warn('board_live_channel_status', { status });
       }
     });
   })();

@@ -536,14 +536,39 @@ async function handleDistributeZones(
   db: SupabaseClient,
   tutorPkId: string,
   boardId: string,
+  req: Request,
   cors: Record<string, string>,
 ): Promise<Response> {
   const board = await loadOwnedBoard(db, boardId, tutorPkId);
   if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
 
-  // Состав: группа занятия (живое членство) либо индивидуальный ученик доски.
+  // Этап 5 (кейс Елены): явный список учеников из пикера — доска БЕЗ занятия
+  // тоже раздаёт зоны. Список валидируется по принадлежности репетитору.
+  const body = await parseJsonBody(req) ?? {};
   let memberIds: string[] = [];
-  if (board.lesson_id) {
+  if (Array.isArray(body.student_ids) && body.student_ids.length > 0) {
+    const requested = body.student_ids.filter(
+      (id): id is string => typeof id === "string" && UUID_RE.test(id),
+    );
+    if (requested.length === 0 || requested.length > 30) {
+      return jsonError(cors, 400, "VALIDATION", "Некорректный список учеников.");
+    }
+    const { data: owned, error: ownedError } = await db
+      .from("tutor_students")
+      .select("id")
+      .in("id", requested)
+      .eq("tutor_id", tutorPkId)
+      .is("archived_at", null);
+    if (ownedError) {
+      return jsonError(cors, 503, "RECIPIENTS_LOOKUP_FAILED", "Не удалось проверить учеников. Попробуйте ещё раз.");
+    }
+    const ownedIds = new Set((owned ?? []).map((s) => s.id as string));
+    if (requested.some((id) => !ownedIds.has(id))) {
+      // Fail-closed: чужой/архивный id в списке — отклоняем весь запрос.
+      return jsonError(cors, 404, "NOT_FOUND", "Ученик не найден.");
+    }
+    memberIds = requested;
+  } else if (board.lesson_id) {
     const { data: lesson } = await db
       .from("tutor_lessons")
       .select("id, group_source_tutor_group_id, tutor_student_id")
@@ -570,7 +595,7 @@ async function handleDistributeZones(
     memberIds = [board.student_id as string];
   }
   if (memberIds.length === 0) {
-    return jsonError(cors, 409, "NO_STUDENTS", "У занятия нет учеников — раздавать зоны некому.");
+    return jsonError(cors, 409, "NO_STUDENTS", "Выберите учеников — раздавать зоны некому.");
   }
 
   const { data: existingPages, error: pagesError } = await db
@@ -626,6 +651,35 @@ async function handleDistributeZones(
 
   console.log("whiteboard_api_zones_distributed", { board_id: boardId, created: created.length });
   return jsonOk(cors, { pages: created }, created.length > 0 ? 201 : 200);
+}
+
+/**
+ * GET /boards/:id/guests — активные гости для панели участников (Этап 5,
+ * «не увидели друг друга»: гости не входят в live-presence — у них нет JWT,
+ * репетитор их не видел ВООБЩЕ). Активность — по last_seen_at (поллинг гостя
+ * обновляет его каждые 2.5/15 с); порог 40 с покрывает скрытую вкладку.
+ */
+async function handleListGuests(
+  db: SupabaseClient,
+  tutorPkId: string,
+  boardId: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const board = await loadOwnedBoard(db, boardId, tutorPkId);
+  if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
+  const since = new Date(Date.now() - 40_000).toISOString();
+  const { data, error } = await db
+    .from("board_guests")
+    .select("id, display_name, tutor_student_id, last_seen_at")
+    .eq("board_id", boardId)
+    .is("revoked_at", null)
+    .gte("last_seen_at", since)
+    .order("last_seen_at", { ascending: false })
+    .limit(30);
+  if (error) {
+    return jsonError(cors, 500, "DB_ERROR", "Не удалось получить список гостей.");
+  }
+  return jsonOk(cors, { guests: data ?? [] });
 }
 
 // ─── Гостевая ссылка (Этап 2, B4): create-or-get / revoke ─────────────────────
@@ -974,8 +1028,11 @@ Deno.serve(async (req) => {
       if (segments.length === 3 && boardId && segments[2] === "bring" && method === "POST") {
         return handleBring(db, tutorPkId, boardId, req, cors);
       }
+      if (segments.length === 3 && boardId && segments[2] === "guests" && method === "GET") {
+        return handleListGuests(db, tutorPkId, boardId, cors);
+      }
       if (segments.length === 3 && boardId && segments[2] === "zones" && method === "POST") {
-        return handleDistributeZones(db, tutorPkId, boardId, cors);
+        return handleDistributeZones(db, tutorPkId, boardId, req, cors);
       }
       if (
         segments.length === 3 && boardId && segments[2] === "share" &&

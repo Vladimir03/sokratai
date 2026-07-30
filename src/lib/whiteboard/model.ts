@@ -782,6 +782,64 @@ export function translateElement(el: BoardElement, dx: number, dy: number): Boar
   } as Partial<ShapeElement | TextElement | ImageElement>);
 }
 
+/** Кламп фактора масштабирования выделения (Этап 5, запрос Елены/Вадима). */
+export const SCALE_FACTOR_MIN = 0.05;
+export const SCALE_FACTOR_MAX = 20;
+/** Толщина пера/фигур при масштабировании не уходит в невидимое/абсурдное. */
+const SCALED_SIZE_MIN_MM = 0.2;
+const SCALED_SIZE_MAX_MM = 10;
+/** Текст мельче 2 мм нечитаем — не даём «схлопнуть» его масштабом. */
+const SCALED_TEXT_MIN_MM = 2;
+
+/**
+ * Пропорциональный масштаб элемента вокруг точки (originX, originY), мм.
+ * Возвращает новый объект через bumpVersion — LWW-синк (version/versionNonce)
+ * обязан увидеть правку, иначе reconcile отдаст элемент удалённой стороне.
+ */
+export function scaleElement(
+  el: BoardElement,
+  factor: number,
+  originX: number,
+  originY: number,
+): BoardElement {
+  const k = Math.min(SCALE_FACTOR_MAX, Math.max(SCALE_FACTOR_MIN, factor));
+  if (el.type === 'stroke') {
+    const points = new Array<number>(el.points.length);
+    for (let i = 0; i + 2 < el.points.length; i += 3) {
+      points[i] = roundMm((el.points[i] - originX) * k + originX);
+      points[i + 1] = roundMm((el.points[i + 1] - originY) * k + originY);
+      points[i + 2] = el.points[i + 2];
+    }
+    return bumpVersion(el, {
+      points,
+      size: Math.min(SCALED_SIZE_MAX_MM, Math.max(SCALED_SIZE_MIN_MM, el.size * k)),
+    } as Partial<StrokeElement>);
+  }
+  if (el.type === 'shape') {
+    return bumpVersion(el, {
+      x: roundMm((el.x - originX) * k + originX),
+      y: roundMm((el.y - originY) * k + originY),
+      w: roundMm(el.w * k),
+      h: roundMm(el.h * k),
+      size: Math.min(SCALED_SIZE_MAX_MM, Math.max(SCALED_SIZE_MIN_MM, el.size * k)),
+    } as Partial<ShapeElement>);
+  }
+  if (el.type === 'text') {
+    return bumpVersion(el, {
+      x: roundMm((el.x - originX) * k + originX),
+      y: roundMm((el.y - originY) * k + originY),
+      size: Math.max(SCALED_TEXT_MIN_MM, el.size * k),
+    } as Partial<TextElement>);
+  }
+  // image: rotation сохраняется, масштабируется рамка.
+  return bumpVersion(el, {
+    x: roundMm((el.x - originX) * k + originX),
+    y: roundMm((el.y - originY) * k + originY),
+    w: roundMm(el.w * k),
+    h: roundMm(el.h * k),
+  } as Partial<ImageElement>);
+}
+
 // ─── Сериализация ─────────────────────────────────────────────────────────────
 
 /**

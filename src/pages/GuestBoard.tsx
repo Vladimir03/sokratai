@@ -213,5 +213,29 @@ export default function GuestBoard() {
 
   // key: смена slug/токена пересоздаёт вью (старый снимок и поллинг не
   // переживают новый URL — ревью P2).
-  return transport ? <SharedBoardView key={`${slug}:${guestToken}`} transport={transport} /> : null;
+  return transport ? (
+    <SharedBoardView
+      key={`${slug}:${guestToken}`}
+      transport={transport}
+      headerLeft={
+        // Этап 5 (провал теста Елены): вошедший ЗРИТЕЛЕМ до раздачи зон был
+        // заперт без права писать. Перевход возвращает на экран «я — Маша»
+        // со СВЕЖИМ списком (зоны могли раздать уже после его входа).
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            clearGuestToken(slug);
+            setMeta(null);
+            setGuestToken(null);
+          }}
+          title="Вернуться к выбору: если репетитор выдал вам зону, выберите себя из списка"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <User className="mr-1.5 h-4 w-4" />
+          <span className="hidden sm:inline">Сменить имя</span>
+        </Button>
+      }
+    />
+  ) : null;
 }

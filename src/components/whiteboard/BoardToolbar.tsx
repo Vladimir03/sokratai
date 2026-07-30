@@ -6,6 +6,7 @@ import {
   ImagePlus,
   LayoutGrid,
   Maximize,
+  Hand,
   Minus,
   MousePointer2,
   PenLine,
@@ -64,6 +65,16 @@ interface BoardToolbarProps {
   onPickImage: () => void;
   /** Импорт PDF: страницы становятся листами-подложками (воркфлоу Елены). */
   onImportPdf: () => void;
+  /**
+   * Владелец АКТИВНОГО листа (Этап 5, ментальная модель Елены «Лист 1 — Маше»):
+   * назначение зоны существующему листу, а не только «Раздать зоны» новыми.
+   * undefined — селектор скрыт (у ученика/гостя его нет).
+   */
+  sheetOwner?: {
+    value: string | null;
+    options: { id: string; name: string }[];
+    onChange: (tutorStudentId: string | null) => void;
+  };
   camera: CameraControls;
   canUndo: boolean;
   canRedo: boolean;
@@ -80,6 +91,8 @@ const TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'rect', label: 'Прямоугольник', icon: Square },
   { id: 'ellipse', label: 'Эллипс', icon: Circle },
   { id: 'select', label: 'Выделение', icon: MousePointer2 },
+  // «Ладошка» (Этап 5, запрос Ульяны): пан из любой точки, в т.ч. с листа.
+  { id: 'pan', label: 'Рука — двигать холст', icon: Hand },
 ];
 
 const SIZE_LABELS = ['Тонко', 'Обычно', 'Толсто'];
@@ -144,6 +157,7 @@ export const BoardToolbar = memo(function BoardToolbar({
   onOrientationChange,
   onPickImage,
   onImportPdf,
+  sheetOwner,
   camera,
   canUndo,
   canRedo,
@@ -250,6 +264,23 @@ export const BoardToolbar = memo(function BoardToolbar({
             </option>
           ))}
         </select>
+        {sheetOwner && (
+          <select
+            aria-label="Чей это лист"
+            title="Отдать лист ученику: он сможет писать на нём со своего устройства"
+            value={sheetOwner.value ?? ''}
+            disabled={disabled}
+            onChange={(e) => sheetOwner.onChange(e.target.value || null)}
+            className="h-10 max-w-44 rounded-md border border-slate-200 bg-white px-2 text-base text-slate-700"
+          >
+            <option value="">Общий лист</option>
+            {sheetOwner.options.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="flex items-center gap-1">

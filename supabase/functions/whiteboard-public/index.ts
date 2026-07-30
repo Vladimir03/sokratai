@@ -180,7 +180,16 @@ async function listCandidates(
       ids.push(lesson.tutor_student_id as string);
     }
   }
-  if (ids.length === 0 && board.student_id) ids.push(board.student_id as string);
+  if (board.student_id) ids.push(board.student_id as string);
+  // Владельцы зон (Этап 5): зоны раздаются пикером и на досках БЕЗ занятия —
+  // без этой ветки кандидаты были пусты, все входили зрителями и НИКТО не мог
+  // писать (провал теста Елены 30.07).
+  const { data: zonePages } = await db
+    .from("board_pages")
+    .select("zone_tutor_student_id")
+    .eq("board_id", boardId)
+    .not("zone_tutor_student_id", "is", null);
+  for (const p of zonePages ?? []) ids.push(p.zone_tutor_student_id as string);
   if (ids.length === 0) return [];
   // ⚠️ Колонка имени — display_name (колонки `name` в tutor_students НЕТ;
   // тот же промах уже чинился на фронте — селект с несуществующей колонкой
@@ -357,6 +366,11 @@ Deno.serve(async (req) => {
         .eq("board_id", guest.board_id);
       if (since) query = query.gt("updated_at", since);
       const { data: revs } = await query;
+      // Пульс присутствия (Этап 5): панель репетитора видит гостей по
+      // last_seen_at — /state дёргается только при изменениях, поэтому
+      // «тихий» гость обновляет метку отсюда (каждые 2.5/15 с).
+      // await обязателен: PostgREST-builder ленив и без await не исполнится.
+      await db.from("board_guests").update({ last_seen_at: new Date().toISOString() }).eq("id", guest.id);
       // bring (Этап 4): у гостя нет Realtime — «Привести всех» доезжает отсюда.
       // Отдаём ВСЕГДА (не фильтруя по since): клиент дедупит по seq и сам
       // игнорирует сигнал старше 2 минут.

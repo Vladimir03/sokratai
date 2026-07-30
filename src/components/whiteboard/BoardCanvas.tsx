@@ -10,6 +10,8 @@ import {
   type PageSizeMm,
   type ResizeCorner,
   type ShapeKind,
+  SCALE_FACTOR_MAX,
+  SCALE_FACTOR_MIN,
   boundsIntersect,
   cameraWorldWindow,
   createShape,
@@ -54,7 +56,7 @@ import {
 // 4. Ластик копит попадания и коммитит одним вызовом на pointerup.
 // 5. Коммиты — вне setState-updater'ов; жест привязан к pointerId.
 
-export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line';
+export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line' | 'pan';
 
 export interface FrameView {
   id: string;
@@ -106,6 +108,8 @@ interface BoardCanvasProps {
   onEraseElements: (frameId: string, ids: string[]) => void;
   onMoveSelection: (frameId: string, dx: number, dy: number) => void;
   onTransformElement: (frameId: string, id: string, patch: Partial<ImageElement>) => void;
+  /** Масштаб выделения за угол (Этап 5): пропорционально вокруг origin (локальные мм). */
+  onScaleSelection?: (frameId: string, factor: number, originX: number, originY: number) => void;
   onRequestText: (frameId: string, x: number, y: number) => void;
   /** Ячейки-плюсы для добавления листов (сетка Chattern). */
   ghostCells?: GhostCell[];
@@ -274,7 +278,8 @@ interface DragState {
     | 'pan-canvas'
     | 'pinch'
     | 'resize'
-    | 'rotate';
+    | 'rotate'
+    | 'scale';
   pointerId: number;
   pointerType: string;
   /** Рамка жеста (для pan/pinch — не задана). */
@@ -285,6 +290,18 @@ interface DragState {
   panIds?: [number, number];
   targetId?: string;
   corner?: ResizeCorner;
+  /** Масштаб выделения (kind='scale'): неподвижный угол и стартовое плечо. */
+  scaleOrigin?: { x: number; y: number };
+  scaleStartDist?: number;
+  /** Нижний кламп фактора: bbox выделения не схлопывается мельче ~2 мм. */
+  scaleMinFactor?: number;
+}
+
+/** Черновик масштабирования выделения (превью через SVG-transform, без пересчёта). */
+interface ScaleDraft {
+  k: number;
+  ox: number;
+  oy: number;
 }
 
 interface LiveShape {
@@ -322,6 +339,7 @@ export function BoardCanvas({
   onEraseElements,
   onMoveSelection,
   onTransformElement,
+  onScaleSelection,
   onRequestText,
   ghostCells,
   onGhostClick,
@@ -346,6 +364,7 @@ export function BoardCanvas({
   const marqueeRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
   const moveOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const transformDraftRef = useRef<TransformDraft | null>(null);
+  const scaleDraftRef = useRef<ScaleDraft | null>(null);
   const rafRef = useRef<number | null>(null);
 
   const [livePoints, setLivePoints] = useState<number[] | null>(null);
@@ -354,6 +373,7 @@ export function BoardCanvas({
   const [moveOffset, setMoveOffset] = useState<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(EMPTY_HIDDEN);
   const [transformDraft, setTransformDraft] = useState<TransformDraft | null>(null);
+  const [scaleDraft, setScaleDraft] = useState<ScaleDraft | null>(null);
   /** Рамка активного жеста — стейт (а не чтение dragRef в memo: ref без ре-рендера). */
   const [gestureFrameId, setGestureFrameId] = useState<string | null>(null);
 
@@ -468,6 +488,7 @@ export function BoardCanvas({
       setMoveOffset({ ...moveOffsetRef.current });
       setHiddenIds(erasedRef.current.size > 0 ? new Set(erasedRef.current) : EMPTY_HIDDEN);
       setTransformDraft(transformDraftRef.current ? { ...transformDraftRef.current } : null);
+      setScaleDraft(scaleDraftRef.current ? { ...scaleDraftRef.current } : null);
       setGestureFrameId(dragRef.current?.frameId ?? null);
     });
   }, []);
@@ -488,6 +509,7 @@ export function BoardCanvas({
     panLastRef.current = null;
     pendingGhostRef.current = null;
     transformDraftRef.current = null;
+    scaleDraftRef.current = null;
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -498,6 +520,7 @@ export function BoardCanvas({
     setMoveOffset({ dx: 0, dy: 0 });
     setHiddenIds(EMPTY_HIDDEN);
     setTransformDraft(null);
+    setScaleDraft(null);
     setGestureFrameId(null);
   }, []);
 
@@ -601,11 +624,60 @@ export function BoardCanvas({
             rotation: draft.rotation,
           });
         }
+      } else if (drag.kind === 'scale' && frameId) {
+        const draft = scaleDraftRef.current;
+        if (draft && Math.abs(draft.k - 1) > 0.005 && onScaleSelection) {
+          onScaleSelection(frameId, draft.k, draft.ox, draft.oy);
+        }
       }
 
       resetLiveState();
     },
-    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, onGhostClick, resetLiveState],
+    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, onScaleSelection, onGhostClick, resetLiveState],
+  );
+
+  // ─── Масштаб выделения за угол (Этап 5, Елена/Вадим) ────────────────────────
+
+  const startScaleSelection = useCallback(
+    (
+      event: React.PointerEvent,
+      frameId: string,
+      box: { x: number; y: number; w: number; h: number },
+      corner: ResizeCorner,
+    ) => {
+      if (readOnly || dragRef.current) return;
+      event.stopPropagation();
+      event.preventDefault();
+      rectRef.current = svgRef.current?.getBoundingClientRect() ?? null;
+      (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+      const frame = frameById.get(frameId);
+      if (!frame) return;
+      // Origin — ПРОТИВОПОЛОЖНЫЙ угол рамки выделения (неподвижная точка).
+      const origin = {
+        x: corner === 'nw' || corner === 'sw' ? box.x + box.w : box.x,
+        y: corner === 'nw' || corner === 'ne' ? box.y + box.h : box.y,
+      };
+      const world = toWorld(event.clientX, event.clientY);
+      const lx = world.x - frame.placement.x;
+      const ly = world.y - frame.placement.y;
+      const startDist = Math.hypot(lx - origin.x, ly - origin.y);
+      if (startDist < 0.5) return; // вырожденное плечо — фактор не посчитать
+      dragRef.current = {
+        kind: 'scale',
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        frameId,
+        startX: lx,
+        startY: ly,
+        scaleOrigin: origin,
+        scaleStartDist: startDist,
+        // bbox не схлопывается мельче ~2 мм по меньшей стороне.
+        scaleMinFactor: Math.max(SCALE_FACTOR_MIN, 2 / Math.max(2, Math.min(box.w, box.h))),
+      };
+      scaleDraftRef.current = { k: 1, ox: origin.x, oy: origin.y };
+      scheduleFrame();
+    },
+    [readOnly, frameById, toWorld, scheduleFrame],
   );
 
   // ─── Трансформация картинок (ручки) ────────────────────────────────────────
@@ -720,6 +792,20 @@ export function BoardCanvas({
       event.currentTarget.setPointerCapture(event.pointerId);
       const pointerId = event.pointerId;
       const pointerType = event.pointerType;
+
+      // «Рука» (Этап 5, запрос Ульяны): всегда пан — не рисует, не создаёт
+      // листы, не трогает выделение. Ветка ДО ghost-ячеек намеренно.
+      if (tool === 'pan') {
+        dragRef.current = {
+          kind: 'pan-canvas',
+          pointerId,
+          pointerType,
+          startX: event.clientX,
+          startY: event.clientY,
+        };
+        panLastRef.current = { x: event.clientX, y: event.clientY, dist: 0 };
+        return;
+      }
 
       // «Призрачная» ячейка: создание — НА POINTERUP с tap-slop (ревью P1:
       // немедленный create на pointerdown превращал попытку начать пан с
@@ -886,6 +972,20 @@ export function BoardCanvas({
       const world = toWorld(event.clientX, event.clientY);
       const frame = drag.frameId ? frameById.get(drag.frameId) : null;
 
+      if (drag.kind === 'scale') {
+        if (!frame || !drag.scaleOrigin || !drag.scaleStartDist) return;
+        const lx = world.x - frame.placement.x;
+        const ly = world.y - frame.placement.y;
+        const dist = Math.hypot(lx - drag.scaleOrigin.x, ly - drag.scaleOrigin.y);
+        const k = Math.min(
+          SCALE_FACTOR_MAX,
+          Math.max(drag.scaleMinFactor ?? SCALE_FACTOR_MIN, dist / drag.scaleStartDist),
+        );
+        scaleDraftRef.current = { k, ox: drag.scaleOrigin.x, oy: drag.scaleOrigin.y };
+        scheduleFrame();
+        return;
+      }
+
       if (drag.kind === 'resize' || drag.kind === 'rotate') {
         const draft = transformDraftRef.current;
         const original = frame?.elements.find((e) => e.id === drag.targetId);
@@ -1027,20 +1127,22 @@ export function BoardCanvas({
   const hiddenForRender = useMemo(() => {
     const extra = new Set<string>();
     if (transformDraft) extra.add(transformDraft.id);
-    if (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0)) {
+    if (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0 || scaleDraft !== null)) {
       for (const id of selection.ids) extra.add(id);
     }
     if (extra.size === 0) return hiddenIds;
     const combined = new Set(hiddenIds);
     extra.forEach((id) => combined.add(id));
     return combined;
-  }, [hiddenIds, transformDraft, selection, moveOffset]);
+  }, [hiddenIds, transformDraft, selection, moveOffset, scaleDraft]);
 
   // Рамка, которой адресован hidden-набор: жест всегда один и внутри одной
   // рамки, остальным отдаётся стабильный EMPTY_HIDDEN → их memo живёт.
   const hiddenScopeFrameId =
     transformDraft?.frameId ??
-    (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0) ? selection.frameId : null) ??
+    (selection && (moveOffset.dx !== 0 || moveOffset.dy !== 0 || scaleDraft !== null)
+      ? selection.frameId
+      : null) ??
     (hiddenIds.size > 0 ? gestureFrameId : null);
 
   // LOD-порог — БАКЕТ, не сырой zoom: сырой менялся каждый кадр pinch-зума и
@@ -1108,7 +1210,7 @@ export function BoardCanvas({
         touchAction: 'none',
         background: '#EEF2F7',
         cursor:
-          tool === 'select' ? 'default' : readOnly ? 'grab' : 'crosshair',
+          tool === 'pan' ? 'grab' : tool === 'select' ? 'default' : readOnly ? 'grab' : 'crosshair',
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -1222,10 +1324,16 @@ export function BoardCanvas({
             </g>
           ))}
 
-      {/* Выделенные элементы поверх, с move-transform (в координатах их рамки). */}
+      {/* Выделенные элементы поверх, с move/scale-transform (превью масштаба —
+          чистый SVG-transform, элементы НЕ пересчитываются до pointerup). */}
       {selectionFrame && selectedElements.length > 0 && (
         <g
-          transform={`translate(${selectionFrame.placement.x + moveOffset.dx} ${selectionFrame.placement.y + moveOffset.dy})`}
+          transform={
+            `translate(${selectionFrame.placement.x + moveOffset.dx} ${selectionFrame.placement.y + moveOffset.dy})` +
+            (scaleDraft
+              ? ` translate(${scaleDraft.ox} ${scaleDraft.oy}) scale(${scaleDraft.k}) translate(${-scaleDraft.ox} ${-scaleDraft.oy})`
+              : '')
+          }
         >
           {selectedElements.map((el) => (
             <g key={el.id}>
@@ -1263,8 +1371,9 @@ export function BoardCanvas({
       )}
 
       {/* Выделение — КОНТУР, не затемнение: opacity 0.7 читалась как «штрих
-          стал полупрозрачным» (B14, репорт Елены). */}
-      {selectionBox && selectionFrame && (
+          стал полупрозрачным» (B14, репорт Елены). Во время масштабирования
+          рамка скрыта — превью содержимого достаточно. */}
+      {selectionBox && selectionFrame && !scaleDraft && (
         <rect
           x={selectionFrame.placement.x + selectionBox.x + moveOffset.dx}
           y={selectionFrame.placement.y + selectionBox.y + moveOffset.dy}
@@ -1277,6 +1386,50 @@ export function BoardCanvas({
           pointerEvents="none"
         />
       )}
+
+      {/* Угловые ручки масштабирования выделения (Этап 5, Елена/Вадим):
+          пропорционально вокруг противоположного угла. У одиночной картинки —
+          её собственные ручки с поворотом (блок ниже), не дублируем. */}
+      {tool === 'select' && selectionBox && selectionFrame && !singleSelectedImage &&
+        !isMoving && !scaleDraft && !readOnly && (() => {
+        const fx = selectionFrame.placement.x;
+        const fy = selectionFrame.placement.y;
+        const b = selectionBox;
+        const corners: { corner: ResizeCorner; x: number; y: number; cursor: string }[] = [
+          { corner: 'nw', x: b.x, y: b.y, cursor: 'nwse-resize' },
+          { corner: 'ne', x: b.x + b.w, y: b.y, cursor: 'nesw-resize' },
+          { corner: 'se', x: b.x + b.w, y: b.y + b.h, cursor: 'nwse-resize' },
+          { corner: 'sw', x: b.x, y: b.y + b.h, cursor: 'nesw-resize' },
+        ];
+        return (
+          <g transform={`translate(${fx} ${fy})`}>
+            {corners.map((c) => (
+              <g key={c.corner}>
+                <circle
+                  cx={c.x}
+                  cy={c.y}
+                  r={4}
+                  fill="transparent"
+                  style={{ cursor: c.cursor }}
+                  onPointerDown={(e) =>
+                    startScaleSelection(e, selectionFrame.id, b, c.corner)
+                  }
+                />
+                <rect
+                  x={c.x - 1.1}
+                  y={c.y - 1.1}
+                  width={2.2}
+                  height={2.2}
+                  fill="#FFFFFF"
+                  stroke="#1B6B4A"
+                  strokeWidth={0.35}
+                  pointerEvents="none"
+                />
+              </g>
+            ))}
+          </g>
+        );
+      })()}
 
       {singleSelectedImage && selectionFrame && !isMoving && (() => {
         const g =

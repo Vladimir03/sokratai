@@ -18,6 +18,7 @@ import {
   resizeRectFromCorner,
   rotatePoint,
   rotationFromPointer,
+  scaleElement,
   translateElement,
 } from './model';
 import { backgroundToSvg, elementToSvg, pageToSvgString } from './svg';
@@ -257,5 +258,47 @@ describe('картинки (Фаза 2а)', () => {
     expect(parsed).toHaveLength(1);
     expect(parsed[0].type).toBe('image');
     expect((parsed[0] as { rotation: number }).rotation).toBe(90);
+  });
+});
+
+describe('масштабирование выделения (Этап 5)', () => {
+  it('штрих: точки масштабируются вокруг origin, bbox уменьшается вдвое', () => {
+    const stroke = createStroke(STRAIGHT_LINE, '#000', 1);
+    const scaled = scaleElement(stroke, 0.5, 0, 0) as StrokeElement;
+    expect(scaled.points[3]).toBeCloseTo(5, 1); // x второй точки: 10 → 5
+    expect(scaled.points[6]).toBeCloseTo(10, 1); // x третьей: 20 → 10
+    expect(scaled.points[2]).toBe(0.5); // pressure не трогаем
+    const b = elementBounds(scaled);
+    expect(b.maxX - b.minX).toBeLessThan(15);
+  });
+
+  it('фигура и картинка: рамка масштабируется, поворот картинки сохраняется', () => {
+    const shape = scaleElement(createShape('rect', 10, 10, 20, 10, '#000', 1), 2, 10, 10);
+    expect(shape).toMatchObject({ x: 10, y: 10, w: 40, h: 20 });
+    const img = { ...createImage(10, 10, 30, 20, 'storage://board-images/t/a.jpg'), rotation: 45 };
+    const scaledImg = scaleElement(img, 2, 0, 0);
+    expect(scaledImg).toMatchObject({ x: 20, y: 20, w: 60, h: 40, rotation: 45 });
+  });
+
+  it('текст не схлопывается мельче 2 мм, толщина пера клампится', () => {
+    const text = scaleElement(createText(5, 5, 'привет', '#000', 6), 0.05, 0, 0);
+    expect((text as { size: number }).size).toBeGreaterThanOrEqual(2);
+    const stroke = scaleElement(createStroke(STRAIGHT_LINE, '#000', 0.4), 0.05, 0, 0);
+    expect((stroke as StrokeElement).size).toBeGreaterThanOrEqual(0.2);
+  });
+
+  it('бампит version (LWW-синк обязан увидеть правку)', () => {
+    const stroke = createStroke(STRAIGHT_LINE, '#000', 1);
+    const scaled = scaleElement(stroke, 1.5, 0, 0);
+    expect(scaled.version).toBe(stroke.version + 1);
+    expect(scaled.id).toBe(stroke.id);
+  });
+
+  it('запредельный фактор клампится, k≈1 не разрушает геометрию', () => {
+    const shape = createShape('rect', 0, 0, 10, 10, '#000', 1);
+    const huge = scaleElement(shape, 1000, 0, 0);
+    expect((huge as { w: number }).w).toBeLessThanOrEqual(10 * 20);
+    const same = scaleElement(shape, 1, 0, 0);
+    expect(same).toMatchObject({ x: 0, y: 0, w: 10, h: 10 });
   });
 });

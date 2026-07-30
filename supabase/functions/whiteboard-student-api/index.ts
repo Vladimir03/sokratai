@@ -190,6 +190,17 @@ async function isParticipantStudent(
       if (member && member.length > 0) return true;
     }
   }
+  // Владелец зоны на доске (Этап 5, зеркало is_board_participant v2): зоны
+  // раздаются пикером и на досках без занятия.
+  const { data: zone } = await db
+    .from("board_pages")
+    .select("id, tutor_students!inner(student_id, archived_at)")
+    .eq("board_id", board.id)
+    .not("zone_tutor_student_id", "is", null)
+    .eq("tutor_students.student_id", userId)
+    .is("tutor_students.archived_at", null)
+    .limit(1);
+  if (zone && zone.length > 0) return true;
   return false;
 }
 

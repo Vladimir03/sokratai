@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Hand, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -28,11 +28,13 @@ import {
   DEFAULT_PEN_SIZE_MM,
   DEFAULT_TEXT_SIZE_MM,
   PEN_SIZES_MM,
+  bumpVersion,
   cameraToFitBounds,
   cameraWorldWindow,
   createText,
   frameWorldBounds,
   pageSizeMm,
+  scaleElement,
   translateElement,
   worldToViewportPx,
   zoomCameraAt,
@@ -107,6 +109,7 @@ const SHARED_TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'eraser', label: 'Ластик', icon: Eraser },
   { id: 'text', label: 'Текст', icon: Type },
   { id: 'select', label: 'Выделение', icon: MousePointer2 },
+  { id: 'pan', label: 'Рука — двигать холст', icon: Hand },
 ];
 
 export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardViewProps) {
@@ -531,6 +534,33 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
     [updateFrameElements],
   );
 
+  const handleScaleSelection = useCallback(
+    (frameId: string, factor: number, originX: number, originY: number) => {
+      if (!selection || selection.frameId !== frameId) return;
+      const scaling = new Set(selection.ids);
+      updateFrameElements(frameId, (elements) =>
+        elements.map((el) => (scaling.has(el.id) ? scaleElement(el, factor, originX, originY) : el)),
+      );
+    },
+    [selection, updateFrameElements],
+  );
+
+  /** Клик по цвету при активном выделении = перекраска выделенного (Этап 5). */
+  const handleColorChange = useCallback(
+    (next: string) => {
+      setColor(next);
+      const sel = selectionRef.current;
+      if (!sel || sel.ids.length === 0) return;
+      const ids = new Set(sel.ids);
+      updateFrameElements(sel.frameId, (elements) =>
+        elements.map((el) =>
+          ids.has(el.id) && el.type !== 'image' ? bumpVersion(el, { color: next }) : el,
+        ),
+      );
+    },
+    [updateFrameElements],
+  );
+
   const handleMoveSelection = useCallback(
     (frameId: string, dx: number, dy: number) => {
       if ((dx === 0 && dy === 0) || !selection || selection.frameId !== frameId) return;
@@ -771,7 +801,7 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
                   type="button"
                   aria-label="Цвет"
                   aria-pressed={color === c}
-                  onClick={() => setColor(c)}
+                  onClick={() => handleColorChange(c)}
                   style={{ touchAction: 'manipulation' }}
                   className="flex h-11 w-8 items-center justify-center rounded-md"
                 >
@@ -836,7 +866,7 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
           </>
         ) : (
           <span className="text-sm text-slate-500">
-            Вы смотрите доску. Писать можно будет, когда репетитор выдаст вам зону.
+            Вы смотрите доску. Если репетитор выдал вам листы — нажмите «Сменить имя» и выберите себя из списка.
           </span>
         )}
 
@@ -888,6 +918,7 @@ export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardVi
           onEraseElements={handleEraseElements}
           onMoveSelection={handleMoveSelection}
           onTransformElement={() => undefined /* картинки участник не трансформирует (v1) */}
+          onScaleSelection={handleScaleSelection}
           onRequestText={handleRequestText}
           remoteCursors={cursorList}
           onCursorMove={handleCursorMove}

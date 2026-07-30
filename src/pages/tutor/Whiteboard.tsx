@@ -30,9 +30,12 @@ import {
   distributeZones,
   getBoard,
   getOrCreateLessonBoard,
+  listBoardGuests,
   saveBoardPage,
   updateBoard,
+  type BoardGuestRow,
 } from '@/lib/whiteboardApi';
+import { getTutorStudents } from '@/lib/tutors';
 import {
   type BoardElement,
   type BoardGridMm,
@@ -66,6 +69,7 @@ import {
   parseElements,
   primeSeqCounter,
   roundMm,
+  scaleElement,
   translateElement,
   worldToViewportPx,
   zoomCameraAt,
@@ -531,6 +535,7 @@ export default function Whiteboard() {
             [e.key]: { key: e.key, name: e.name, color: stablePeerColor(e.key), x: e.x, y: e.y, at: Date.now() },
           }));
         },
+        onStatus: setLiveStatus,
       },
     );
     liveRef.current = controls;
@@ -598,6 +603,84 @@ export default function Whiteboard() {
     liveRef.current?.sendCursor(x, y);
   }, []);
 
+  // ─── Участники (Этап 5): ученики, ГОСТИ, статус live-канала ─────────────────
+  //
+  // «Не увидели друг друга» (Елена/Егор 30.07): ученики заходят гостями по
+  // /b/-ссылке, а гости не входят в live-presence (нет JWT) — репетитор их не
+  // видел ВООБЩЕ. Гости подтягиваются поллингом last_seen_at раз в 10 с.
+
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [guests, setGuests] = useState<BoardGuestRow[]>([]);
+  const [students, setStudents] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getTutorStudents()
+      .then((list) => {
+        if (cancelled) return;
+        setStudents(list.map((s) => ({ id: s.id, name: s.display_name || 'Ученик' })));
+      })
+      .catch(() => undefined); // без списка просто нет пикера зон/владельца листа
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!boardIdForSync) return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || document.visibilityState === 'hidden') return;
+      try {
+        const list = await listBoardGuests(boardIdForSync);
+        if (!cancelled) setGuests(list);
+      } catch {
+        // следующий тик повторит
+      }
+    };
+    void tick();
+    const timer = setInterval(() => void tick(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [boardIdForSync]);
+
+  // ─── «Чей лист» (Этап 5, модель Елены): зона НА СУЩЕСТВУЮЩЕМ листе ──────────
+
+  const [ownerBusy, setOwnerBusy] = useState(false);
+  const handleAssignSheetOwner = useCallback(
+    async (tutorStudentId: string | null) => {
+      const frame = activeFrame;
+      if (!frame || ownerBusy) return;
+      setOwnerBusy(true);
+      try {
+        const outcome = await saveBoardPage(frame.id, { zone_tutor_student_id: tutorStudentId });
+        patchFrameSilently(frame.id, {
+          zoneTutorStudentId: tutorStudentId,
+          ...(typeof outcome.rev === 'number' && outcome.rev > 0 ? { rev: outcome.rev } : {}),
+        });
+        if (tutorStudentId) {
+          const s = students.find((x) => x.id === tutorStudentId);
+          if (s) setZoneNames((prev) => ({ ...prev, [tutorStudentId]: s.name }));
+          toast.success(`Лист отдан: ${s?.name ?? 'ученик'} может писать на нём`);
+        } else {
+          toast.success('Лист снова общий');
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Не удалось назначить лист');
+      } finally {
+        setOwnerBusy(false);
+      }
+    },
+    [activeFrame, ownerBusy, students, patchFrameSilently],
+  );
+
+  // ─── Пикер учеников для «Раздать зоны» на доске без занятия (Этап 5) ────────
+
+  const [zonesPickerOpen, setZonesPickerOpen] = useState(false);
+  const [zonesSelected, setZonesSelected] = useState<ReadonlySet<string>>(new Set());
+
   useEffect(() => {
     if (saveStatus === 'saved') return;
     const handler = (event: BeforeUnloadEvent) => {
@@ -662,6 +745,34 @@ export default function Whiteboard() {
     (frameId: string, id: string, patch: Partial<ImageElement>) => {
       updateFrameElements(frameId, (elements) =>
         elements.map((el) => (el.id === id ? bumpVersion(el as ImageElement, patch) : el)),
+      );
+    },
+    [updateFrameElements],
+  );
+
+  /** Масштаб выделения за угол (Этап 5, Елена/Вадим). */
+  const handleScaleSelection = useCallback(
+    (frameId: string, factor: number, originX: number, originY: number) => {
+      if (!selection || selection.frameId !== frameId) return;
+      const scaling = new Set(selection.ids);
+      updateFrameElements(frameId, (elements) =>
+        elements.map((el) => (scaling.has(el.id) ? scaleElement(el, factor, originX, originY) : el)),
+      );
+    },
+    [selection, updateFrameElements],
+  );
+
+  /** Клик по цвету при активном выделении = перекраска выделенного (Этап 5, Вадим). */
+  const handleColorChange = useCallback(
+    (next: string) => {
+      setColor(next);
+      const sel = selectionRef.current;
+      if (!sel || sel.ids.length === 0) return;
+      const ids = new Set(sel.ids);
+      updateFrameElements(sel.frameId, (elements) =>
+        elements.map((el) =>
+          ids.has(el.id) && el.type !== 'image' ? bumpVersion(el, { color: next }) : el,
+        ),
       );
     },
     [updateFrameElements],
@@ -1061,26 +1172,40 @@ export default function Whiteboard() {
     await createFrameAt(nextCellInStrip(cellsInfo), null);
   }, [createFrameAt]);
 
-  const handleDistributeZones = useCallback(async () => {
-    if (!board || pageBusy) return;
-    setPageBusy(true);
-    try {
-      const pages = await distributeZones(board.id);
-      if (pages.length === 0) {
-        toast.message('Зоны уже розданы всем ученикам занятия.');
-        return;
+  const runDistributeZones = useCallback(
+    async (studentIds?: string[]) => {
+      if (!board || pageBusy) return;
+      setPageBusy(true);
+      try {
+        const pages = await distributeZones(board.id, studentIds);
+        if (pages.length === 0) {
+          toast.message('Зоны уже розданы этим ученикам.');
+          return;
+        }
+        const startIndex = framesRef.current.length;
+        const added = pages.map((row, i) => rowToFrameState(row, startIndex + i, 1));
+        applyFrames([...framesRef.current, ...added]);
+        fitFrames(framesRef.current, viewport);
+        toast.success(`Создано зон: ${pages.length}. Ученики пишут каждый на своих листах.`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Не удалось раздать зоны');
+      } finally {
+        setPageBusy(false);
       }
-      const startIndex = framesRef.current.length;
-      const added = pages.map((row, i) => rowToFrameState(row, startIndex + i, 1));
-      applyFrames([...framesRef.current, ...added]);
-      fitFrames(framesRef.current, viewport);
-      toast.success(`Создано зон: ${pages.length}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось раздать зоны');
-    } finally {
-      setPageBusy(false);
+    },
+    [board, pageBusy, applyFrames, fitFrames, viewport],
+  );
+
+  /** Кнопка «Раздать зоны»: доска занятия — авто по группе; иначе — пикер (Этап 5). */
+  const handleDistributeZones = useCallback(async () => {
+    if (!board) return;
+    if (board.lesson_id) {
+      await runDistributeZones();
+      return;
     }
-  }, [board, pageBusy, applyFrames, fitFrames, viewport]);
+    setZonesSelected(new Set());
+    setZonesPickerOpen(true);
+  }, [board, runDistributeZones]);
 
   // ─── «Пригласить на доску» (Этап 3, B4) ─────────────────────────────────────
 
@@ -1640,19 +1765,20 @@ export default function Whiteboard() {
             : 'PDF'}
         </Button>
 
-        {board.lesson_id && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void handleDistributeZones()}
-            disabled={pageBusy || exitPhase !== null}
-            style={{ touchAction: 'manipulation' }}
-          >
-            <Users className="mr-1.5 h-4 w-4" />
-            <span className="hidden sm:inline">Раздать зоны</span>
-            <span className="sm:hidden">Зоны</span>
-          </Button>
-        )}
+        {/* Этап 5: видна ВСЕГДА — на доске без занятия открывает пикер учеников
+            (тест Елены провалился ровно на «не нашла, как выдать зону»). */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleDistributeZones()}
+          disabled={pageBusy || exitPhase !== null}
+          title="У каждого выбранного ученика появится свой столбец листов — он пишет только в нём"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Users className="mr-1.5 h-4 w-4" />
+          <span className="hidden sm:inline">Раздать зоны</span>
+          <span className="sm:hidden">Зоны</span>
+        </Button>
 
         {/* Всегда видима (ревью P1): гости НЕ входят в live-presence, а
             persisted-bring сделан именно для них — гейт по livePeers прятал
@@ -1706,7 +1832,7 @@ export default function Whiteboard() {
         tool={tool}
         onToolChange={setTool}
         color={color}
-        onColorChange={setColor}
+        onColorChange={handleColorChange}
         size={size}
         onSizeChange={setSize}
         background={activeFrame?.background ?? 'grid'}
@@ -1717,6 +1843,15 @@ export default function Whiteboard() {
         onOrientationChange={handleOrientationChange}
         onPickImage={() => fileInputRef.current?.click()}
         onImportPdf={() => pdfInputRef.current?.click()}
+        sheetOwner={
+          activeFrame && students.length > 0
+            ? {
+                value: activeFrame.zoneTutorStudentId,
+                options: students,
+                onChange: (id) => void handleAssignSheetOwner(id),
+              }
+            : undefined
+        }
         camera={{
           zoomPercent: Math.round((camera.zoom / HUNDRED_PERCENT_ZOOM) * 100),
           // Кнопки камеры = свой жест → выход из follow (как own-pan).
@@ -1769,33 +1904,69 @@ export default function Whiteboard() {
         }}
       />
 
-      {/* Участники live-канала: чип = follow-переключатель («Следовать»). */}
-      {livePeers.length > 0 && (
-        <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-1.5">
-          <span className="shrink-0 text-xs text-slate-400">На доске:</span>
-          {livePeers.map((peer) => (
+      {/* Панель участников (Этап 5): видна ВСЕГДА — «Следовать» и состав доски
+          дискаверабельны и на пустой доске. Ученики с аккаунтом — из presence
+          (клик = follow); ГОСТИ — из поллинга last_seen_at (follow недоступен:
+          у гостя нет live-канала, v1). */}
+      <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-1.5">
+        <span className="shrink-0 text-xs text-slate-400">На доске:</span>
+        {livePeers.map((peer) => (
+          <button
+            key={peer.key}
+            type="button"
+            onClick={() => (followKey === peer.key ? stopFollow() : startFollow(peer))}
+            title={followKey === peer.key ? 'Перестать следовать' : `Следовать за: ${peer.name}`}
+            style={{ touchAction: 'manipulation' }}
+            className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-sm transition-colors ${
+              followKey === peer.key
+                ? 'border-accent bg-accent/10 text-accent'
+                : 'border-slate-200 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: stablePeerColor(peer.key) }}
+            />
+            {peer.name}
+            {followKey === peer.key && <Eye className="h-3.5 w-3.5" />}
+          </button>
+        ))}
+        {guests.map((g) => (
+          <span
+            key={g.id}
+            title="Вошёл по ссылке-приглашению. «Следовать» доступно только ученикам с аккаунтом."
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-slate-300 px-2.5 py-0.5 text-sm text-slate-600"
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: stablePeerColor(`guest:${g.tutor_student_id ?? g.id}`) }}
+            />
+            {g.display_name}
+          </span>
+        ))}
+        {livePeers.length === 0 && guests.length === 0 && (
+          <>
+            <span className="shrink-0 text-sm text-slate-500">пока никого</span>
             <button
-              key={peer.key}
               type="button"
-              onClick={() => (followKey === peer.key ? stopFollow() : startFollow(peer))}
-              title={followKey === peer.key ? 'Перестать следовать' : `Следовать за: ${peer.name}`}
+              onClick={() => void handleInviteOpen()}
               style={{ touchAction: 'manipulation' }}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-sm transition-colors ${
-                followKey === peer.key
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-slate-200 text-slate-600 hover:border-slate-300'
-              }`}
+              className="shrink-0 text-sm font-medium text-accent hover:underline"
             >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: stablePeerColor(peer.key) }}
-              />
-              {peer.name}
-              {followKey === peer.key && <Eye className="h-3.5 w-3.5" />}
+              Пригласить учеников
             </button>
-          ))}
-        </div>
-      )}
+          </>
+        )}
+        {liveStatus === 'error' && (
+          <span
+            title="Живые обновления (курсоры, «Следовать») сейчас не работают — содержимое листов всё равно синхронизируется."
+            className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-amber-600"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            без живых обновлений
+          </span>
+        )}
+      </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1" {...dragHandlers}>
         <BoardCanvas
@@ -1814,6 +1985,7 @@ export default function Whiteboard() {
           onEraseElements={handleEraseElements}
           onMoveSelection={handleMoveSelection}
           onTransformElement={handleTransformElement}
+          onScaleSelection={handleScaleSelection}
           onRequestText={handleRequestText}
           ghostCells={ghostCells}
           onGhostClick={handleGhostClick}
@@ -1949,6 +2121,79 @@ export default function Whiteboard() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Пикер учеников для «Раздать зоны» на доске без занятия (Этап 5,
+          провал теста Елены: «не нашла, как выдать зону»). */}
+      {zonesPickerOpen && (
+        <div
+          className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/30 p-4"
+          onClick={() => setZonesPickerOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-slate-900">Раздать зоны</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              У каждого выбранного ученика появится свой столбец листов — он сможет писать только в нём, а вы видите всех сразу.
+            </p>
+            {students.length === 0 ? (
+              <p className="mt-4 text-sm text-slate-600">
+                Сначала добавьте учеников в разделе «Ученики».
+              </p>
+            ) : (
+              <ul className="mt-4 max-h-64 space-y-1 overflow-y-auto">
+                {students.map((s) => {
+                  const checked = zonesSelected.has(s.id);
+                  return (
+                    <li key={s.id}>
+                      <label
+                        style={{ touchAction: 'manipulation' }}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-base text-slate-800 transition-colors hover:border-accent/60"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setZonesSelected((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(s.id)) next.delete(s.id);
+                              else next.add(s.id);
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 accent-[#1B6B4A]"
+                        />
+                        {s.name}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setZonesPickerOpen(false)} style={{ touchAction: 'manipulation' }}>
+                Отмена
+              </Button>
+              <Button
+                disabled={zonesSelected.size === 0 || pageBusy}
+                onClick={() => {
+                  setZonesPickerOpen(false);
+                  void runDistributeZones(Array.from(zonesSelected));
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                {pageBusy ? (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                ) : (
+                  <Users className="mr-1.5 h-4 w-4" />
+                )}
+                Раздать зоны{zonesSelected.size > 0 ? ` (${zonesSelected.size})` : ''}
+              </Button>
+            </div>
           </div>
         </div>
       )}

@@ -217,13 +217,30 @@ export async function getOrCreateLessonBoard(lessonId: string): Promise<BoardWit
   );
 }
 
-/** POST /boards/:id/zones — раздать рулоны-зоны по группе занятия (идемпотентно). */
-export async function distributeZones(boardId: string): Promise<BoardPageRow[]> {
+/** POST /boards/:id/zones — раздать рулоны-зоны (идемпотентно). Без studentIds —
+ * по группе занятия; с ними — явный список из пикера (доска без занятия, Этап 5). */
+export async function distributeZones(boardId: string, studentIds?: string[]): Promise<BoardPageRow[]> {
   const res = await invokeWhiteboard<{ pages: BoardPageRow[] }>(
     `/boards/${encodeURIComponent(boardId)}/zones`,
-    { method: 'POST', body: {} },
+    { method: 'POST', body: studentIds && studentIds.length > 0 ? { student_ids: studentIds } : {} },
   );
   return res.pages ?? [];
+}
+
+export interface BoardGuestRow {
+  id: string;
+  display_name: string;
+  tutor_student_id: string | null;
+  last_seen_at: string;
+}
+
+/** GET /boards/:id/guests — активные гости для панели участников (Этап 5). */
+export async function listBoardGuests(boardId: string): Promise<BoardGuestRow[]> {
+  const res = await invokeWhiteboard<{ guests: BoardGuestRow[] }>(
+    `/boards/${encodeURIComponent(boardId)}/guests`,
+    { method: 'GET' },
+  );
+  return res.guests ?? [];
 }
 
 /** POST /boards/:id/bring — персист «Привести всех» для гостей (поллинг /signals);
