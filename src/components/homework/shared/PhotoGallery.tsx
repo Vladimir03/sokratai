@@ -20,7 +20,7 @@ import {
   usePhotoViewer,
 } from '@/components/common/photo-viewer';
 import { type PhotoSurface } from '@/lib/photoViewerTelemetry';
-import { storageRefFromUrl } from '@/lib/photoOrientation';
+import { resolveRefsForUrls } from '@/lib/photoOrientation';
 import { usePhotoOrientations } from '@/hooks/usePhotoOrientation';
 
 export interface PhotoGalleryProps {
@@ -55,23 +55,23 @@ export const PhotoGallery = memo(function PhotoGallery({
 }: PhotoGalleryProps) {
   const { openIndex, open, close, navigate } = usePhotoViewer();
 
+  // Позиционное сопоставление ref↔url безопасно только при совпадении длин —
+  // разбор и причина в `resolveRefsForUrls`.
+  const resolvedRefs = useMemo(() => resolveRefsForUrls(images, imageRefs), [imageRefs, images]);
+
   const items = useMemo<PhotoViewerItem[]>(
     () =>
       images.map((url, index) => ({
         url,
-        ref: imageRefs?.[index] ?? null,
+        ref: resolvedRefs[index],
         caption: images.length > 1 ? `${dialogTitle} · ${index + 1}` : dialogTitle,
         alt: `${imageAltPrefix} ${index + 1}`,
       })),
-    [dialogTitle, imageAltPrefix, imageRefs, images],
+    [dialogTitle, imageAltPrefix, images, resolvedRefs],
   );
 
   // Миниатюры наследуют поворот: иначе репетитор решит, что он не сохранился.
-  // Ключ тот же, что у просмотрщика, — явный ref или восстановленный из ссылки.
-  const refsForThumbs = useMemo(
-    () => images.map((url, index) => imageRefs?.[index] ?? storageRefFromUrl(url)),
-    [imageRefs, images],
-  );
+  const refsForThumbs = resolvedRefs;
   const { orientations } = usePhotoOrientations(refsForThumbs);
 
   if (images.length === 0) return null;
@@ -90,7 +90,10 @@ export const PhotoGallery = memo(function PhotoGallery({
   );
 
   if (images.length === 1) {
-    const ref = imageRefs?.[0];
+    // Тот же ключ, по которому запрошены углы (`refsForThumbs`), а НЕ сырой
+    // `imageRefs`: иначе там, где ref восстановлен из ссылки, миниатюра
+    // осталась бы неповёрнутой — и в печатное превью уехало бы боком.
+    const ref = refsForThumbs[0];
     return (
       <>
         <div className="group relative mt-2 inline-block rounded-md border bg-background p-1 transition-opacity hover:opacity-90">
@@ -120,7 +123,7 @@ export const PhotoGallery = memo(function PhotoGallery({
     <>
       <div className="mt-2 flex gap-2 overflow-x-auto pb-1 touch-pan-x">
         {images.map((url, index) => {
-          const ref = imageRefs?.[index];
+          const ref = refsForThumbs[index];
           return (
             <PhotoThumbButton
               key={`${url}-${index}`}

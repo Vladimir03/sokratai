@@ -4,6 +4,9 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStudentTaskImagesSignedUrls } from '@/hooks/useStudentHomework';
 import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { type PhotoDegrees, storageRefFromUrl } from '@/lib/photoOrientation';
+import { usePhotoOrientations } from '@/hooks/usePhotoOrientation';
+import { useQuarterTurnFit } from '@/components/common/photo-viewer';
 import { ConnectionTroubleNotice } from '@/components/common/ConnectionTroubleNotice';
 import {
   CONNECTION_TROUBLE_DELAY_MS,
@@ -59,6 +62,44 @@ interface TaskImagesGalleryProps {
  * (`useStudentTaskImagesSignedUrls` → `getStudentTaskImagesSignedUrlsViaBackend`,
  * which mirrors Phase 3.1 401 refresh+retry pattern).
  */
+/**
+ * Картинка, показанная под сохранённым углом.
+ *
+ * ⚠️ Ученик УЧАСТВУЕТ в повороте — читать угол могут все (решение владельца:
+ * «повернул репетитор — ученик видит так же»). Без этого репетитор развернул
+ * боковое условие, а школьник на iPhone продолжал бы смотреть его боком, и
+ * смысл сохранения угла пропадал.
+ *
+ * Повернуть отсюда нельзя: запись гейтится `is_tutor` внутри RPC.
+ */
+function OrientedImage({
+  src,
+  alt,
+  degrees,
+  className,
+  onError,
+}: {
+  src: string;
+  alt: string;
+  degrees: PhotoDegrees;
+  className: string;
+  onError: () => void;
+}) {
+  const { boxRef, transform } = useQuarterTurnFit<HTMLSpanElement>(degrees);
+  return (
+    <span ref={boxRef} className="block h-full w-full">
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        onError={onError}
+        className={className}
+        style={transform ? { transform, transition: 'transform 150ms ease-out' } : undefined}
+      />
+    </span>
+  );
+}
+
 export function TaskImagesGallery({
   assignmentId,
   taskId,
@@ -86,6 +127,20 @@ export function TaskImagesGallery({
     if (signedUrls.length > 0) return signedUrls;
     return refs.filter((ref) => /^(https?:\/\/|data:)/i.test(ref));
   }, [refs, signedUrls]);
+
+  // ⚠️ Ref восстанавливаем ИЗ подписанной ссылки, а не берём `refs[index]`:
+  // бэкенд выкидывает неподписавшиеся файлы, и позиционно массивы не совпадают
+  // (тот же разбор — в `PhotoGallery`).
+  const refByUrl = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const url of resolvedUrls) {
+      const ref = storageRefFromUrl(url);
+      if (ref) map[url] = ref;
+    }
+    return map;
+  }, [resolvedUrls]);
+
+  const { orientations } = usePhotoOrientations(Object.values(refByUrl));
 
   const handleImageError = useCallback(
     (url: string) => {
@@ -227,10 +282,10 @@ export function TaskImagesGallery({
               aria-label={`Открыть фото ${index + 1} из ${resolvedUrls.length}`}
               className="relative shrink-0 w-24 h-24 md:w-full md:h-auto md:shrink rounded-lg overflow-hidden border border-socrat-border-light bg-socrat-surface md:bg-white hover:border-socrat-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-socrat-primary/30 touch-manipulation transition-colors group"
             >
-              <img
+              <OrientedImage
                 src={url}
                 alt={`Фото условия ${index + 1}`}
-                loading="lazy"
+                degrees={orientations[refByUrl[url] ?? ''] ?? 0}
                 onError={() => handleImageError(url)}
                 className="w-full h-full object-cover md:object-contain md:h-auto md:w-full md:max-h-[60vh]"
               />
@@ -339,9 +394,10 @@ export function TaskImagesGallery({
                     </button>
                   </div>
                 ) : (
-                  <img loading="lazy"
+                  <OrientedImage
                     src={resolvedUrls[openIndex]}
                     alt={`Фото условия ${openIndex + 1}`}
+                    degrees={orientations[refByUrl[resolvedUrls[openIndex]] ?? ''] ?? 0}
                     onError={() => handleImageError(resolvedUrls[openIndex])}
                     className="block mx-auto max-h-[80dvh] max-w-full w-auto h-auto object-contain"
                   />

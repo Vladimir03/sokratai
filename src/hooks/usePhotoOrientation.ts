@@ -10,7 +10,7 @@
  * (перезапись стоила бы 1,5–7 с ожидания на каждое фото и потери качества).
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -33,8 +33,14 @@ function orientationQueryKey(refs: string[]): [string, string] {
   return [PHOTO_ORIENTATION_KEY_ROOT, refs.slice().sort().join('|')];
 }
 
-/** Снимок всех затронутых кэшей — контекст отката для `onError`. */
-type CacheSnapshot = Array<[readonly unknown[], OrientationMap | undefined]>;
+interface RotateVars {
+  ref: string;
+  degrees: PhotoDegrees;
+  /** Порядковый номер правки — по нему решаем, не устарел ли ответ/откат. */
+  seq: number;
+  /** Угол до правки: к нему возвращаемся, если сохранение не удалось. */
+  previous: PhotoDegrees;
+}
 
 export interface UsePhotoOrientationsResult {
   /** Отсутствие ключа = 0°. */
@@ -75,19 +81,19 @@ export function usePhotoOrientations(
 
   const orientations = useMemo(() => data ?? {}, [data]);
 
-  const mutation = useMutation({
-    mutationFn: ({ ref, degrees }: { ref: string; degrees: PhotoDegrees }) =>
-      savePhotoOrientation(ref, degrees),
+  /**
+   * Последний СИНХРОННО применённый угол по ref и порядковый номер правки.
+   *
+   * ⚠️ Кэш React Query для этого не годится: оптимистичная запись из `onMutate`
+   * происходит ПОСЛЕ `await cancelQueries`, поэтому два быстрых нажатия успели
+   * бы прочитать одно и то же значение и оба отправили бы 90° вместо 90°→180°.
+   * Ref обновляется в самом обработчике клика, до любого await.
+   */
+  const pendingRef = useRef(new Map<string, { degrees: PhotoDegrees; seq: number }>());
+  const seqRef = useRef(0);
 
-    // Оптимистично пишем во все наборы с этим префиксом и возвращаем снимок:
-    // именно этот проход синхронизирует миниатюру в ленте с открытым просмотром.
-    onMutate: async ({ ref, degrees }): Promise<CacheSnapshot> => {
-      await queryClient.cancelQueries({ queryKey: [PHOTO_ORIENTATION_KEY_ROOT] });
-
-      const snapshot = queryClient.getQueriesData<OrientationMap>({
-        queryKey: [PHOTO_ORIENTATION_KEY_ROOT],
-      }) as CacheSnapshot;
-
+  const patchCaches = useCallback(
+    (ref: string, degrees: PhotoDegrees) => {
       queryClient.setQueriesData<OrientationMap>(
         { queryKey: [PHOTO_ORIENTATION_KEY_ROOT] },
         (current) => {
@@ -98,17 +104,28 @@ export function usePhotoOrientations(
           return next;
         },
       );
+    },
+    [queryClient],
+  );
 
-      return snapshot;
+  const mutation = useMutation({
+    mutationFn: ({ ref, degrees }: RotateVars) => savePhotoOrientation(ref, degrees),
+
+    onSuccess: (saved, { ref, seq }) => {
+      // Ответ более старой мутации не должен перетирать более новый поворот.
+      if (pendingRef.current.get(ref)?.seq !== seq) return;
+      patchCaches(ref, saved);
     },
 
-    onError: (error: unknown, _vars, context) => {
-      // Тихий откат. Показывать повёрнутым то, что на сервере осталось прежним,
-      // хуже, чем не повернуть вовсе: репетитор был бы уверен, что ученик
-      // видит фото так же, как он.
-      for (const [key, value] of context ?? []) {
-        queryClient.setQueryData(key, value);
+    onError: (error: unknown, { ref, seq, previous }) => {
+      // Откатываем ТОЛЬКО если с тех пор не было нового поворота этого фото:
+      // иначе провал первой мутации отменил бы успешную вторую.
+      if (pendingRef.current.get(ref)?.seq === seq) {
+        pendingRef.current.set(ref, { degrees: previous, seq });
+        patchCaches(ref, previous);
       }
+      // Показывать повёрнутым то, что на сервере не сохранилось, хуже, чем не
+      // повернуть вовсе: репетитор был бы уверен, что ученик видит так же.
       const message =
         error instanceof Error ? error.message : 'Не удалось сохранить поворот фото.';
       toast.error(message);
@@ -120,13 +137,20 @@ export function usePhotoOrientations(
   const rotate = useCallback(
     (ref: string, delta: number) => {
       if (!ref) return;
-      // Читаем текущий угол из кэша, а не из замыкания: два быстрых клика
-      // подряд не должны схлопнуться в один поворот.
+
+      // Всё до `mutate` — СИНХРОННО, поэтому серия быстрых кликов складывается
+      // (0 → 90 → 180), а не схлопывается.
       const cached = queryClient.getQueryData<OrientationMap>(queryKey);
-      const current = cached?.[ref] ?? 0;
-      mutate({ ref, degrees: rotateDegrees(current, delta) });
+      const previous = pendingRef.current.get(ref)?.degrees ?? cached?.[ref] ?? 0;
+      const next = rotateDegrees(previous, delta);
+      const seq = ++seqRef.current;
+
+      pendingRef.current.set(ref, { degrees: next, seq });
+      patchCaches(ref, next);
+
+      mutate({ ref, degrees: next, seq, previous });
     },
-    [mutate, queryClient, queryKey],
+    [mutate, patchCaches, queryClient, queryKey],
   );
 
   return { orientations, rotate, isSaving: mutation.isPending };

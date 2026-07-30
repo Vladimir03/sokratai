@@ -41,6 +41,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { OrientedPhoto } from '@/components/common/photo-viewer';
 import { useStudentMockExamResult } from '@/hooks/useStudentMockExamResult';
 import { StudentMockExamApiError } from '@/lib/studentMockExamApi';
 import { primaryToSecondary, getEgePhysicsBenchmarks } from '@/lib/mockExamScaleEge2025';
@@ -413,11 +414,12 @@ function Part2BulkPhotosGallery({
                 rel="noreferrer"
                 className="relative block aspect-square overflow-hidden rounded-md border border-slate-200 bg-white touch-manipulation"
               >
-                <img
+                <OrientedPhoto
                   src={url}
                   alt={`Фото решения ${idx + 1}`}
-                  loading="lazy"
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain"
+                  wrapperClassName="block h-full w-full"
+                  interactive={false}
                 />
                 <span className="absolute bottom-1 right-1 rounded bg-black/50 px-1.5 py-0.5 text-xs font-semibold text-white">
                   {idx + 1}
@@ -460,11 +462,11 @@ function Part2ReferenceSolution({
         <div className="mt-2 space-y-2">
           {images.map((url, idx) => (
             <a key={url} href={url} target="_blank" rel="noreferrer" className="block">
-              <img
+              <OrientedPhoto
                 src={url}
                 alt={`Эталон решения №${kimNumber} — фото ${idx + 1}`}
-                loading="lazy"
                 className="max-h-96 w-full rounded-md border border-slate-200 bg-white object-contain"
+                interactive={false}
               />
             </a>
           ))}
@@ -518,11 +520,11 @@ function Part2PreliminaryCard({
         )}
 
         {solution.task_image_url && (
-          <img
+          <OrientedPhoto
             src={solution.task_image_url}
             alt={`Условие задания №${solution.kim_number}`}
-            loading="lazy"
-            className="mt-3 max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+            className="max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+            wrapperClassName="mt-3 block"
           />
         )}
 
@@ -531,10 +533,9 @@ function Part2PreliminaryCard({
             <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">
               Твоё решение
             </p>
-            <img
+            <OrientedPhoto
               src={solution.photo_url}
               alt={`Твоё решение задания №${solution.kim_number}`}
-              loading="lazy"
               className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
             />
           </div>
@@ -630,11 +631,11 @@ function Part2SolutionCard({
         )}
 
         {solution.task_image_url && (
-          <img
+          <OrientedPhoto
             src={solution.task_image_url}
             alt={`Условие задания №${solution.kim_number}`}
-            loading="lazy"
-            className="mt-3 max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+            className="max-h-72 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
+            wrapperClassName="mt-3 block"
           />
         )}
 
@@ -643,10 +644,9 @@ function Part2SolutionCard({
             <p className="mb-1 text-xs uppercase tracking-wide text-slate-500">
               Твоё решение
             </p>
-            <img
+            <OrientedPhoto
               src={solution.photo_url}
               alt={`Твоё решение задания №${solution.kim_number}`}
-              loading="lazy"
               className="max-h-80 w-full rounded-md border border-slate-200 bg-slate-50 object-contain"
             />
           </div>

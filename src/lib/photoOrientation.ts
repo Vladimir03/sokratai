@@ -90,31 +90,114 @@ export function storageRefFromUrl(url: string | null | undefined): string | null
 }
 
 /**
+ * Сопоставляет каждому URL его storage-ref.
+ *
+ * ⚠️ Позиционный массив `refs` принимается ТОЛЬКО при совпадении длин.
+ * Бэкенд подписывает ссылки через `createSignedStorageUrls`, а тот ВЫКИДЫВАЕТ
+ * неподписавшиеся (файл удалён из хранилища): массив URL становится короче
+ * массива ref'ов и позиционно с ним не совпадает. Сопоставив их по индексу, мы
+ * записали бы поворот второго фото в ref первого — репетитор крутит B, боком
+ * остаётся B, а неожиданно поворачивается A.
+ *
+ * Если длины разошлись, ref восстанавливается из самой подписанной ссылки:
+ * там он лежит по построению, и перепутать его невозможно.
+ */
+export function resolveRefsForUrls(
+  urls: string[],
+  refs?: string[] | null,
+): Array<string | null> {
+  const aligned = refs && refs.length === urls.length ? refs : null;
+  return urls.map((url, index) => aligned?.[index] ?? storageRefFromUrl(url));
+}
+
+// ─── Пакетирование запросов ──────────────────────────────────────────────────
+//
+// ⚠️ Каждая карточка Банка/лента ДЗ спрашивает углы для СВОЕГО набора ref'ов, и
+// на теме из 200 карточек это были бы сотни отдельных RPC, стартующих
+// одновременно. Под РФ-DPI они конкурируют с загрузкой самих signed URL, и
+// часть картинок деградирует по сети из-за нашего же фонового трафика.
+//
+// Поэтому вызовы, случившиеся в одном тике, склеиваются в один запрос.
+// Окно — микрозадача (не таймер): к моменту, когда React закончил коммит,
+// все монтирующиеся карточки уже встали в очередь, а лишней задержки нет.
+
+interface PendingBatch {
+  refs: Set<string>;
+  promise: Promise<OrientationMap>;
+  resolve: (value: OrientationMap) => void;
+}
+
+let pendingBatch: PendingBatch | null = null;
+
+async function runBatch(batch: PendingBatch): Promise<void> {
+  const all = Array.from(batch.refs);
+  const map: OrientationMap = {};
+
+  // Кап пачки — серверный (`p_refs[1:200]`); при большем наборе режем сами,
+  // иначе хвост списка молча остался бы без углов.
+  for (let i = 0; i < all.length; i += MAX_ORIENTATION_REFS) {
+    const chunk = all.slice(i, i + MAX_ORIENTATION_REFS);
+    const { data, error } = await supabase.rpc('photo_orientations_get' as never, {
+      p_refs: chunk,
+    } as never);
+
+    if (error) {
+      // Fail-open: поворот — украшение поверх фото, и его недоступность не
+      // должна прятать саму картинку.
+      console.info('photo_orientations_get failed', error.message);
+      continue;
+    }
+
+    const rows = (data ?? []) as unknown as Array<{ ref: string; degrees: number }>;
+    for (const row of rows) {
+      if (!row?.ref) continue;
+      const normalized = normalizeDegrees(row.degrees);
+      if (normalized !== 0) map[row.ref] = normalized;
+    }
+  }
+
+  batch.resolve(map);
+}
+
+function enqueue(refs: string[]): Promise<OrientationMap> {
+  if (!pendingBatch) {
+    let resolve!: (value: OrientationMap) => void;
+    const promise = new Promise<OrientationMap>((res) => {
+      resolve = res;
+    });
+    const batch: PendingBatch = { refs: new Set(), promise, resolve };
+    pendingBatch = batch;
+    // Закрываем окно в микрозадаче и СРАЗУ отцепляем батч, чтобы вызовы
+    // следующего тика начали новый, а не досыпали в уже улетевший.
+    void Promise.resolve().then(() => {
+      pendingBatch = null;
+      void runBatch(batch);
+    });
+  }
+
+  for (const ref of refs) pendingBatch.refs.add(ref);
+  return pendingBatch.promise;
+}
+
+/**
  * Углы для набора ref'ов. Пустой массив → пустая карта без сетевого вызова.
- * Ошибка НЕ бросается: поворот — украшение поверх фото, и его недоступность
- * не должна прятать саму картинку (fail-open, но только на чтении).
+ * Возвращается подмножество ровно по запрошенным ref'ам, даже если пачка
+ * ушла общая с соседними компонентами.
  */
 export async function fetchPhotoOrientations(refs: string[]): Promise<OrientationMap> {
-  const unique = Array.from(new Set(refs.filter((ref) => typeof ref === 'string' && ref.length > 0)));
+  const unique = Array.from(
+    new Set(refs.filter((ref) => typeof ref === 'string' && ref.length > 0)),
+  );
   if (unique.length === 0) return {};
 
-  const { data, error } = await supabase.rpc('photo_orientations_get' as never, {
-    p_refs: unique.slice(0, MAX_ORIENTATION_REFS),
-  } as never);
+  const shared = await enqueue(unique);
 
-  if (error) {
-    console.info('photo_orientations_get failed', error.message);
-    return {};
+  const mine: OrientationMap = {};
+  for (const ref of unique) {
+    const degrees = shared[ref];
+    if (degrees !== undefined) mine[ref] = degrees;
   }
-
-  const rows = (data ?? []) as unknown as Array<{ ref: string; degrees: number }>;
-  const map: OrientationMap = {};
-  for (const row of rows) {
-    if (!row?.ref) continue;
-    const normalized = normalizeDegrees(row.degrees);
-    if (normalized !== 0) map[row.ref] = normalized;
-  }
-  return map;
+  return mine;
 }
 
 /**

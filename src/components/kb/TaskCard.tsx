@@ -173,8 +173,15 @@ export const TaskCard = memo(function TaskCard({
   const openConditionPhoto = conditionViewer.open;
   const openSolutionPhoto = solutionViewer.open;
 
-  const { orientations: conditionOrientations } = usePhotoOrientations(attachmentRefs);
-  const { orientations: solutionOrientations } = usePhotoOrientations(solutionRefs);
+  // В свёрнутой карточке видна одна hero-картинка — незачем спрашивать углы
+  // для остальных, а решение вообще не отрисовано. На теме из 200 карточек
+  // это разница в сотни ref'ов в общей пачке (сами запросы склеивает
+  // `fetchPhotoOrientations`).
+  const orientationRefs = isExpanded ? attachmentRefs : heroRefs;
+  const { orientations: conditionOrientations } = usePhotoOrientations(orientationRefs);
+  const { orientations: solutionOrientations } = usePhotoOrientations(solutionRefs, {
+    enabled: isExpanded,
+  });
 
   const conditionItems = useMemo<PhotoViewerItem[]>(
     () =>

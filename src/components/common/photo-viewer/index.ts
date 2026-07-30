@@ -7,3 +7,5 @@ export { PhotoViewer, type PhotoViewerItem, type PhotoViewerProps } from './Phot
 export { SafeImage, type SafeImageProps } from './SafeImage';
 export { usePhotoViewer, type UsePhotoViewerResult } from './usePhotoViewer';
 export { PhotoThumbButton, type PhotoThumbButtonProps } from './PhotoThumbButton';
+export { useQuarterTurnFit } from './useQuarterTurnFit';
+export { OrientedPhoto, type OrientedPhotoProps } from './OrientedPhoto';

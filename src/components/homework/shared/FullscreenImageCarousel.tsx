@@ -15,6 +15,7 @@ import {
   type PhotoViewerItem,
 } from '@/components/common/photo-viewer';
 import { type PhotoSurface } from '@/lib/photoViewerTelemetry';
+import { resolveRefsForUrls } from '@/lib/photoOrientation';
 
 export interface FullscreenImageCarouselProps {
   images: string[];
@@ -40,16 +41,17 @@ export const FullscreenImageCarousel = memo(function FullscreenImageCarousel({
   surface = 'homework_constructor',
   canRotate = false,
 }: FullscreenImageCarouselProps) {
-  const items = useMemo<PhotoViewerItem[]>(
-    () =>
-      images.map((url, index) => ({
-        url,
-        ref: imageRefs?.[index] ?? null,
-        caption: images.length > 1 ? `${ariaTitle} · ${index + 1}` : ariaTitle,
-        alt: `${ariaTitle} ${index + 1}`,
-      })),
-    [ariaTitle, imageRefs, images],
-  );
+  const items = useMemo<PhotoViewerItem[]>(() => {
+    // Позиционное сопоставление ref↔url безопасно только при совпадении длин —
+    // разбор в `resolveRefsForUrls`.
+    const refs = resolveRefsForUrls(images, imageRefs);
+    return images.map((url, index) => ({
+      url,
+      ref: refs[index],
+      caption: images.length > 1 ? `${ariaTitle} · ${index + 1}` : ariaTitle,
+      alt: `${ariaTitle} ${index + 1}`,
+    }));
+  }, [ariaTitle, imageRefs, images]);
 
   return (
     <PhotoViewer

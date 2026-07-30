@@ -9,9 +9,10 @@
  * лентах, и без этого попытка пролистать ленту открывала бы фото.
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { type PhotoDegrees, isQuarterTurn } from '@/lib/photoOrientation';
+import { memo, useCallback, useRef } from 'react';
+import { type PhotoDegrees } from '@/lib/photoOrientation';
 import { SafeImage } from './SafeImage';
+import { useQuarterTurnFit } from './useQuarterTurnFit';
 
 const TAP_SLOP_PX = 12;
 
@@ -38,35 +39,7 @@ export const PhotoThumbButton = memo(function PhotoThumbButton({
 }: PhotoThumbButtonProps) {
   const touchStartXRef = useRef<number | null>(null);
   const ignoreClickRef = useRef(false);
-  const boxRef = useRef<HTMLSpanElement>(null);
-  const [quarterScale, setQuarterScale] = useState(1);
-
-  const quarter = isQuarterTurn(degrees);
-
-  // Повёрнутая на четверть картинка вылезает за свою коробку — ужимаем ровно
-  // настолько, чтобы вписаться обратно. Наблюдатель заводим ТОЛЬКО для
-  // четвертей: миниатюр на экране бывает много, а обычный случай — 0/180.
-  useEffect(() => {
-    if (!quarter) {
-      setQuarterScale(1);
-      return undefined;
-    }
-    const node = boxRef.current;
-    if (!node) return undefined;
-
-    const measure = () => {
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const next = Math.min(rect.width / rect.height, rect.height / rect.width);
-      setQuarterScale((prev) => (Math.abs(prev - next) < 0.01 ? prev : next));
-    };
-
-    measure();
-    if (typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [quarter]);
+  const { boxRef, transform } = useQuarterTurnFit<HTMLSpanElement>(degrees);
 
   const handleTouchStart = useCallback((event: React.TouchEvent<HTMLButtonElement>) => {
     touchStartXRef.current = event.touches[0]?.clientX ?? null;
@@ -113,14 +86,7 @@ export const PhotoThumbButton = memo(function PhotoThumbButton({
           alt={alt}
           className={className}
           interactive={false}
-          style={
-            degrees === 0
-              ? undefined
-              : {
-                  transform: `rotate(${degrees}deg) scale(${quarterScale})`,
-                  transition: 'transform 150ms ease-out',
-                }
-          }
+          style={transform ? { transform, transition: 'transform 150ms ease-out' } : undefined}
         />
       </span>
     </button>

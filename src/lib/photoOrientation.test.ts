@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isQuarterTurn,
   normalizeDegrees,
+  resolveRefsForUrls,
   rotateDegrees,
   storageRefFromUrl,
 } from './photoOrientation';
@@ -94,12 +95,56 @@ describe('storageRefFromUrl', () => {
     expect(storageRefFromUrl('storage://bucket/path.jpg')).toBe('storage://bucket/path.jpg');
   });
 
-  it('чужие ссылки не притворяются ref — иначе поворот лёг бы на случайный ключ', () => {
+  it('чужие ссылки не притворяются ref — иначе поворот лёг бы на случайный ключ (внутри resolveRefsForUrls тоже)', () => {
     expect(storageRefFromUrl('https://example.com/photo.jpg')).toBeNull();
     expect(storageRefFromUrl('blob:https://sokratai.ru/8f0c')).toBeNull();
     expect(storageRefFromUrl('data:image/png;base64,AAA')).toBeNull();
     expect(storageRefFromUrl('')).toBeNull();
     expect(storageRefFromUrl(null)).toBeNull();
     expect(storageRefFromUrl(undefined)).toBeNull();
+  });
+});
+
+/**
+ * Регрессия из ревью волны 1: бэкенд подписывает ссылки через
+ * `createSignedStorageUrls`, а тот ВЫКИДЫВАЕТ неподписавшиеся файлы. Массив
+ * URL становится короче массива ref'ов, и позиционное сопоставление начинает
+ * врать: репетитор поворачивает B, а угол записывается в ref A.
+ */
+describe('resolveRefsForUrls', () => {
+  const A = 'storage://homework-images/a.jpg';
+  const B = 'storage://homework-images/b.jpg';
+  const C = 'storage://homework-images/c.jpg';
+  const signed = (name: string) =>
+    `https://api.sokratai.ru/storage/v1/object/sign/homework-images/${name}?token=eyJ`;
+
+  it('при совпадении длин уважает позиционные ref', () => {
+    expect(resolveRefsForUrls([signed('a.jpg'), signed('b.jpg')], [A, B])).toEqual([A, B]);
+  });
+
+  it('ПЕРВЫЙ файл удалён из хранилища — оставшийся URL не получает чужой ref', () => {
+    // refs = [A, B], но подписался только B.
+    const result = resolveRefsForUrls([signed('b.jpg')], [A, B]);
+    expect(result).toEqual([B]);
+    expect(result[0]).not.toBe(A);
+  });
+
+  it('СРЕДНИЙ файл удалён — хвост не съезжает на позицию выше', () => {
+    const result = resolveRefsForUrls([signed('a.jpg'), signed('c.jpg')], [A, B, C]);
+    expect(result).toEqual([A, C]);
+    expect(result[1]).not.toBe(B);
+  });
+
+  it('без позиционных ref восстанавливает их из ссылок', () => {
+    expect(resolveRefsForUrls([signed('a.jpg')], null)).toEqual([A]);
+    expect(resolveRefsForUrls([signed('a.jpg')])).toEqual([A]);
+  });
+
+  it('не-storage ссылка даёт null, а не случайный ключ', () => {
+    expect(resolveRefsForUrls(['https://example.com/x.jpg', signed('b.jpg')])).toEqual([null, B]);
+  });
+
+  it('пустой список — пустой результат', () => {
+    expect(resolveRefsForUrls([], [A, B])).toEqual([]);
   });
 });

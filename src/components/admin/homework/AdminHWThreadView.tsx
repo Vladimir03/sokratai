@@ -34,6 +34,12 @@ import {
   Filter,
 } from "lucide-react";
 import { preprocessLatex } from "@/components/kb/ui/preprocessLatex";
+import {
+  PhotoThumbButton,
+  PhotoViewer,
+  type PhotoViewerItem,
+  usePhotoViewer,
+} from "@/components/common/photo-viewer";
 
 // Lazy KaTeX CSS + ReactMarkdown — bundle-friendly.
 const ReactMarkdown = lazy(() => import("react-markdown"));
@@ -135,62 +141,56 @@ function CopyIdChip({ label, value }: { label: string; value: string | null | un
   );
 }
 
-interface FullScreenImageProps {
-  src: string;
-  alt: string;
-  onClose: () => void;
-}
-
-function FullScreenImage({ src, alt, onClose }: FullScreenImageProps) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 cursor-zoom-out"
-      onClick={onClose}
-    >
-      <img loading="lazy"
-        src={src}
-        alt={alt}
-        className="max-w-full max-h-full object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>
-  );
-}
-
-/** Photo gallery — thumbnails + click-to-zoom. */
+/**
+ * Галерея треда в админке — миниатюры + общий просмотрщик.
+ *
+ * ⚠️ Раньше здесь был сырой `<img>` с локальным лайтбоксом, и `.heic` с iPhone
+ * ученика просто исчезал (обработчик ошибки лишь гасил картинку до 30%
+ * прозрачности). Именно в админку смотрят, когда разбирают обращение вроде
+ * бага Ирины, — и разобрать было нечего. Теперь HEIC конвертируется общим
+ * пайплайном (`SafeImage` внутри просмотрщика).
+ *
+ * Поворот выключен намеренно: администратор не обязан быть репетитором, а
+ * запись угла гейтится `is_tutor` внутри RPC — кнопка вела бы к отказу.
+ */
 function PhotoGallery({ urls }: { urls: string[] }) {
-  const [zoomed, setZoomed] = useState<string | null>(null);
+  const { openIndex, open, close, navigate } = usePhotoViewer();
+  const items = useMemo<PhotoViewerItem[]>(
+    () =>
+      urls.map((url, i) => ({
+        url,
+        caption: urls.length > 1 ? `Фото ${i + 1} из ${urls.length}` : 'Фото из треда',
+        alt: `Фото ${i + 1}`,
+      })),
+    [urls],
+  );
+
   if (urls.length === 0) return null;
+
   return (
     <div className="mb-2">
       <div className="flex flex-wrap gap-1.5">
         {urls.map((url, i) => (
-          <button
+          <PhotoThumbButton
             key={url + i}
-            type="button"
-            onClick={() => setZoomed(url)}
-            className="relative group rounded-md overflow-hidden border border-slate-200 hover:border-slate-400 transition-colors"
-          >
-            <img
-              src={url}
-              alt={`Фото ${i + 1}`}
-              className="max-w-[200px] max-h-[120px] object-cover"
-              loading="lazy"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.opacity = "0.3";
-              }}
-            />
-          </button>
+            src={url}
+            alt={`Фото ${i + 1}`}
+            index={i}
+            onOpen={open}
+            className="max-w-[200px] max-h-[120px] object-cover"
+            wrapperClassName="relative rounded-md overflow-hidden border border-slate-200 hover:border-slate-400 transition-colors"
+          />
         ))}
       </div>
-      {zoomed && <FullScreenImage src={zoomed} alt="Фото в полном размере" onClose={() => setZoomed(null)} />}
+      <PhotoViewer
+        items={items}
+        openIndex={openIndex}
+        onClose={close}
+        onNavigate={navigate}
+        surface="homework_thread"
+        ariaTitle="Фото из треда"
+        ariaDescription="Фото можно увеличить и рассмотреть целиком"
+      />
     </div>
   );
 }
