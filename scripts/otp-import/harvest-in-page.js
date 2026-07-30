@@ -41,15 +41,58 @@
       .join('\n').replace(/\n{3,}/g, '\n\n').trim();
   };
 
-  /** Три типа вопросов OTP, встреченные в базе Дианы. */
+  /**
+   * MATCH (соответствие). У OTP ДВЕ вёрстки этого типа: табличная
+   * (`table.matching-tbl` со строками) и drag-drop (`lst1 drop-list` /
+   * `lst2 drag-list` без таблиц). Общее у обеих: в левом списке у каждой
+   * позиции есть `<select>`, чьё ВЫБРАННОЕ значение и есть верный ответ,
+   * а в правом лежат варианты «ключ + текст».
+   *
+   * Ответ собирается как правые ключи по порядку левых позиций («19453768») —
+   * ровно формат чекеров пробников (`gradeOrdered`).
+   */
+  const LEFT_LABELS = ['А', 'Б', 'В', 'Г', 'Д', 'Е', 'Ж', 'З', 'И'];
+  const cleanInline = (el) => {
+    if (!el) return '';
+    const c = el.cloneNode(true);
+    c.querySelectorAll('select, option, input, button').forEach((e) => e.remove());
+    c.querySelectorAll('br').forEach((b) => b.replaceWith('\n'));
+    return (c.textContent || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+  };
+  const parseMatch = (host) => {
+    const lst1 = host.querySelector('div.lst1');
+    const lst2 = host.querySelector('div.lst2');
+    if (!lst1 || !lst2) return null;
+    const selects = Array.from(lst1.querySelectorAll('select'));
+    if (!selects.length) return null;
+    const left = selects.map((s, i) => {
+      const row = s.closest('tr') || s.closest('.item') || s.parentElement;
+      return { key: LEFT_LABELS[i] ?? String(i + 1), text: cleanInline(row) };
+    });
+    const answer = selects.map((s) => {
+      const opt = Array.from(s.options).find((o) => o.value === s.value);
+      return opt ? opt.text.trim() : '';
+    }).join('');
+    let rightNodes = Array.from(lst2.querySelectorAll('tr'));
+    if (!rightNodes.length) rightNodes = Array.from(lst2.children).filter((n) => cleanInline(n));
+    const right = rightNodes.map((n, i) => {
+      const t = cleanInline(n);
+      const m = t.match(/^(\d+)[).\s]\s*(.*)$/);
+      return m ? { key: m[1], text: m[2] } : { key: String(i + 1), text: t };
+    }).filter((r) => r.text);
+    return { left, right, answer };
+  };
+
+  /** Четыре типа вопросов OTP, встреченные в базе Дианы. */
   const parseDoc = (doc) => {
     const out = [];
     Array.from(doc.querySelectorAll('div.qcontainer')).forEach((b) => {
       const rb = b.querySelector('test-question-view-rbchk');   // выбор варианта(ов)
       const fib = b.querySelector('test-question-view-fib');    // вставка пропусков
       const txt = b.querySelector('test-question-view-txt');    // строковый ответ
+      const match = b.querySelector('test-question-view-match'); // соответствие
       const bare = clean(b);
-      if (!rb && !fib && !txt) {
+      if (!rb && !fib && !txt && !match) {
         // Отдельный блок «Комментарий:» относится к предыдущему вопросу.
         if (/^Комментарий:/.test(bare) && out.length) {
           out[out.length - 1].solution = bare.replace(/^Комментарий:\s*/, '').trim();
@@ -58,7 +101,7 @@
       }
       const qc = b.cloneNode(true);
       qc.querySelectorAll(
-        'test-question-view-rbchk, test-question-view-fib, test-question-view-txt, input, textarea, button, label',
+        'test-question-view-rbchk, test-question-view-fib, test-question-view-txt, test-question-view-match, input, textarea, button, label',
       ).forEach((e) => e.remove());
       const outerText = clean(qc)
         .replace(/^\d+\n\d+\s+из\s+\d+\n?/, '')
@@ -99,6 +142,19 @@
           text: [outerText, innerOf(fib)].filter(Boolean).join('\n\n'),
           blanks: vals,
           answer: vals[vals.length - 1] ?? '',
+          solution: null,
+        });
+      } else if (match) {
+        const parsed = parseMatch(match);
+        out.push({
+          type: 'match',
+          // ⚠️ Только outerText: сами списки уже уехали в left/right. Если
+          // добавить innerOf(match), условие продублирует их текстом вперемешку
+          // с номерами селектов («12попл...вушки»), и ученик увидит список дважды.
+          text: outerText,
+          left: parsed ? parsed.left : [],
+          right: parsed ? parsed.right : [],
+          answer: parsed ? parsed.answer : '',
           solution: null,
         });
       } else {

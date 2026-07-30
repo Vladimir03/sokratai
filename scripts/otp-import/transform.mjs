@@ -85,7 +85,14 @@ function normalizeOptions(raw) {
 // --- разбор названия теста OTP ---------------------------------------------
 // «15 задание ЕГЭ по РЯ. Н и НН в прилагательных. 1 вариант»
 export function parseTitle(title) {
-  const kim = Number((title.match(/^\s*(\d+)\s*задание/i) || [])[1]) || null;
+  // Диана называет тесты ДВУМЯ способами: «9 задание ЕГЭ по РЯ. …» и
+  // «ЕГЭ 9. …». Вторая форма роняла разбор целиком — тест уходил в «не
+  // распознан экзамен/номер», а папка оставалась пустой.
+  const kim = Number(
+    (title.match(/^\s*(\d+)\s*задание/i) || [])[1] ??
+    (title.match(/^\s*(?:ЕГЭ|ОГЭ)\s*(\d+)\s*[.:]/i) || [])[1] ??
+    (title.match(/задани[ея]\s*(\d+)/i) || [])[1],
+  ) || null;
   const exam = /ОГЭ/i.test(title) ? "oge" : /ЕГЭ/i.test(title) ? "ege" : null;
   const vm = title.match(/(\d+)\s*вариант/i);
   const variant = vm ? Number(vm[1]) : null;
@@ -97,6 +104,9 @@ export function parseTitle(title) {
     .replace(/\(([^)]*)\)\s*$/, "")
     .replace(/^\s*\d+\s*задание\s*/i, "")
     .replace(/(ЕГЭ|ОГЭ)(\s*по\s*РЯ)?\.?\s*/i, "")
+    // Форма «ЕГЭ 9. Тема»: после снятия «ЕГЭ» остаётся «9.», и имя папки
+    // выходило «Задание 9. 9. Тема». Снимаем ведущий номер задания.
+    .replace(/^\s*\d+\s*[.:]\s*/, "")
     .replace(/\d+\s*вариант/i, "")            // вариант может стоять не только в конце
     .replace(/^[.\s]+|[.\s]+$/g, "")) || null;
   return { kim, exam, variant, theme, note };
@@ -142,6 +152,27 @@ function toRow(q, meta, index) {
     }
     return { ...base, options_json: opts, answer: q.answer };
   }
+  if (q.type === "match") {
+    // Соответствие → options_json kind:'matching'. Ответ — правые ключи в
+    // порядке левого столбца («19453768»), ровно формат чекеров пробников.
+    // ⚠️ Кап 9×9 в нормализаторе стоит не зря (чекеры посимвольные), а Диана
+    // использует этот тип и как «распредели 20 слов по 3 группам» — такие
+    // отвергаются fail-closed и попадают в отчёт, а не режутся молча.
+    const opts = normalizeOptions({ kind: "matching", left: q.left, right: q.right });
+    if (!opts) {
+      throw new Error(
+        `matching отвергнут нормализатором (лево ${q.left?.length ?? 0}, право ${q.right?.length ?? 0}): ${meta.uid}#${index}`);
+    }
+    if (!/^[0-9]+$/.test(q.answer || "")) {
+      throw new Error(`битый ключ соответствия: ${meta.uid}#${index} → «${q.answer}»`);
+    }
+    if (q.answer.length !== opts.left.length) {
+      throw new Error(
+        `длина ответа ${q.answer.length} ≠ числу позиций слева ${opts.left.length}: ${meta.uid}#${index}`);
+    }
+    return { ...base, options_json: opts, answer: q.answer };
+  }
+
   const ans = (q.answer ?? "").trim();
   if (!ans) throw new Error(`пустой ответ: ${meta.uid}#${index}`);
   return { ...base, answer: ans };
