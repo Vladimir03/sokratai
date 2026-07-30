@@ -13,7 +13,7 @@ import {
   serializeThreadAttachmentRefs,
 } from '@/lib/homeworkThreadAttachments';
 import { extractApiErrorMessage } from '@/lib/apiErrorMessage';
-import { compressForUpload } from '@/lib/imageCompression';
+import { HeicDecodeError, compressForUpload } from '@/lib/imageCompression';
 
 const HOMEWORK_IMAGES_BUCKET = 'homework-images';
 const HOMEWORK_SUBMISSIONS_BUCKET = 'homework-submissions';
@@ -665,12 +665,11 @@ export async function uploadStudentThreadImage(
   }
 
   // Phase 7 (2026-05-16) — client-side compress перед upload (mirror
-  // mock-exams pattern). HEIC файлы с iPhone декодируются Safari нативно
-  // → конвертируются в JPEG. Desktop browsers без HEIC decoder получают
-  // graceful pass-through (original file), AI/tutor viewer handle через
-  // P1 fallback в `ThreadAttachments`. Защищает от:
-  //   1) tutor видит broken image при HEIC у не-Safari браузера
-  //   2) Lovable Gateway / Gemini не decode'ит HEIC → AI отвечает generic
+  // mock-exams pattern). HEIC конвертируется в JPEG всегда: native decode
+  // (Safari 17+) или wasm-фолбэк внутри compressForUpload (2026-07-30).
+  // Битый HEIC → fail-closed: сырой .heic НЕ загружаем — репетитор его не
+  // откроет, а AI проверил бы решение не видя фото (rule 40).
+  // Прочие сбои компрессии (JPEG/PNG) — raw-fallback как раньше.
   // Не-image files (PDF) автоматически pass-through (см. compressForUpload).
   let uploadFile: File;
   try {
@@ -679,6 +678,9 @@ export async function uploadStudentThreadImage(
       maxLongSide: 2048,
     });
   } catch (compressErr) {
+    if (compressErr instanceof HeicDecodeError) {
+      throw new StudentHomeworkApiError(compressErr.message);
+    }
     console.warn('[studentHomeworkApi] compression failed, uploading original', {
       fileName: file.name,
       fileSize: file.size,
@@ -696,7 +698,12 @@ export async function uploadStudentThreadImage(
   const ext = uploadFile.name.split('.').pop()?.toLowerCase() || 'jpg';
   const fileId = generateStorageObjectId();
   const objectPath = `${studentId}/${assignmentId}/threads/${taskOrder}/${fileId}.${ext}`;
-  const contentType = uploadFile.type || 'application/octet-stream';
+  // Остаточный сырой HEIC (raw-fallback не-HEIC ветки сюда не приводит, но
+  // страхуемся): корректный MIME вместо octet-stream, чтобы вьюер/AI могли
+  // его детектировать.
+  const contentType =
+    uploadFile.type ||
+    (/\.(heic|heif)$/i.test(uploadFile.name) ? 'image/heic' : 'application/octet-stream');
 
   const { error: primaryError } = await supabase.storage
     .from(HOMEWORK_SUBMISSIONS_BUCKET)

@@ -210,8 +210,12 @@ export default function Whiteboard() {
   const [camera, setCamera] = useState<CameraState>({ cx: 90, cy: 130, zoom: 1.5 });
   const [historyTick, setHistoryTick] = useState(0);
   const [imageUrls, setImageUrls] = useState<ImageUrlMap>({});
+  const imageUrlsRef = useRef(imageUrls);
+  imageUrlsRef.current = imageUrls;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const failedImageRefsRef = useRef<Set<string>>(new Set());
+  /** refs, чей signed URL уже резолвится — не запускать повторный резолв. */
+  const inFlightImageRefsRef = useRef<Set<string>>(new Set());
 
   const framesRef = useRef<FrameState[]>([]);
   const cameraRef = useRef(camera);
@@ -296,7 +300,13 @@ export default function Whiteboard() {
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
-      if (rect && rect.width > 0) setViewport({ w: rect.width, h: rect.height });
+      if (!rect || rect.width <= 0) return;
+      // Округление + value-equality bail-out: дробные contentRect под Windows
+      // display scaling и presence-флапы полосы участников иначе дёргают
+      // ре-рендер всего SVG на каждый чих (вклад в React #185, 2026-07-28).
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setViewport((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -507,7 +517,12 @@ export default function Whiteboard() {
           peerViewportsRef.current.set(e.key, e.bounds);
           if (followKeyRef.current === e.key) {
             // fit-contain: показываем ВСЁ окно ученика, его зум буквально не копируем.
-            setCamera(cameraToFitBounds(e.bounds, viewportStateRef.current));
+            // Value-equality bail-out: события идут ~2 Гц, и неподвижный ученик
+            // не должен ре-рендерить доску каждые 500 мс (гигиена React #185).
+            const next = cameraToFitBounds(e.bounds, viewportStateRef.current);
+            setCamera((prev) =>
+              prev.cx === next.cx && prev.cy === next.cy && prev.zoom === next.zoom ? prev : next,
+            );
           }
         },
         onCursor: (e) => {
@@ -831,6 +846,10 @@ export default function Whiteboard() {
 
   // ─── Картинки ───────────────────────────────────────────────────────────────
 
+  // `imageUrls` читается через ref, НЕ через deps: `frames` меняется на каждом
+  // штрихе, и пока батч signed-URL резолвится, эффект с депом `imageUrls`
+  // перезапускался и заново резолвил те же refs (шторм запросов, вклад в
+  // React #185 2026-07-28). In-flight refs дополнительно исключаются.
   useEffect(() => {
     const refs = new Set<string>();
     for (const frame of frames) {
@@ -839,9 +858,13 @@ export default function Whiteboard() {
       }
     }
     const missing = Array.from(refs).filter(
-      (ref) => !imageUrls[ref] && !failedImageRefsRef.current.has(ref),
+      (ref) =>
+        !imageUrlsRef.current[ref] &&
+        !failedImageRefsRef.current.has(ref) &&
+        !inFlightImageRefsRef.current.has(ref),
     );
     if (missing.length === 0) return;
+    for (const ref of missing) inFlightImageRefsRef.current.add(ref);
     let cancelled = false;
     void (async () => {
       const resolved: ImageUrlMap = {};
@@ -849,6 +872,7 @@ export default function Whiteboard() {
         const url = await resolveBoardImageUrl(missing[i]);
         if (url) resolved[missing[i]] = url;
         else failedImageRefsRef.current.add(missing[i]);
+        inFlightImageRefsRef.current.delete(missing[i]);
       }
       if (!cancelled && Object.keys(resolved).length > 0) {
         setImageUrls((prev) => ({ ...prev, ...resolved }));
@@ -857,7 +881,7 @@ export default function Whiteboard() {
     return () => {
       cancelled = true;
     };
-  }, [frames, imageUrls]);
+  }, [frames]);
 
   const insertImageFiles = useCallback(
     async (files: File[]) => {
@@ -919,14 +943,23 @@ export default function Whiteboard() {
   // ─── Зоны-рулоны и сетка (Этап 2) ──────────────────────────────────────────
 
   const [zoneNames, setZoneNames] = useState<Record<string, string>>({});
+  const zoneNamesRef = useRef(zoneNames);
+  zoneNamesRef.current = zoneNames;
+  /** id, которых запрос не вернул (удалённый ученик / RLS) — не переспрашивать. */
+  const unresolvedZoneIdsRef = useRef<Set<string>>(new Set());
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
 
   // Имена учеников для подписей зон (репетиторский RLS на tutor_students).
+  // ⚠️ React #185 (2026-07-28, прод): раньше `zoneNames` был в deps, а setState
+  // всегда создавал новый объект → если хоть один id не резолвился, эффект
+  // крутился бесконечно с Supabase-запросом на каждой итерации. Теперь:
+  // zoneNames читается через ref, нерезолвящиеся id запоминаются и не
+  // переспрашиваются, пустой результат не трогает state.
   useEffect(() => {
     const ids = Array.from(
       new Set(frames.map((f) => f.zoneTutorStudentId).filter((id): id is string => !!id)),
-    ).filter((id) => !zoneNames[id]);
+    ).filter((id) => !zoneNamesRef.current[id] && !unresolvedZoneIdsRef.current.has(id));
     if (ids.length === 0) return;
     let cancelled = false;
     void (async () => {
@@ -936,13 +969,22 @@ export default function Whiteboard() {
         .in('id', ids);
       if (cancelled || !data) return;
       const next: Record<string, string> = {};
-      for (const row of data) next[row.id] = row.display_name ?? 'Ученик';
-      setZoneNames((prev) => ({ ...prev, ...next }));
+      const returned = new Set<string>();
+      for (const row of data) {
+        returned.add(row.id);
+        next[row.id] = row.display_name ?? 'Ученик';
+      }
+      for (const id of ids) {
+        if (!returned.has(id)) unresolvedZoneIdsRef.current.add(id);
+      }
+      if (Object.keys(next).length > 0) {
+        setZoneNames((prev) => ({ ...prev, ...next }));
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [frames, zoneNames]);
+  }, [frames]);
 
   /** Плюсы сетки: один справа в полосе + внизу каждого рулона. */
   const ghostCells = useMemo<GhostCell[]>(() => {

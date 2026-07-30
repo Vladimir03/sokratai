@@ -21,8 +21,17 @@
  *
  * Returns `File` (not `Blob`) — preserves filename for FormData multipart.
  * Pass-through for non-image MIME (PDF etc.) and for already-small images.
- * HEIC/HEIF graceful fallback for desktop browsers (can't decode HEIC natively).
+ *
+ * HEIC/HEIF: native decode как fast-path (Safari 17+); если браузер не умеет —
+ * wasm-декод через `heicDecode.ts` (lazy-чанк). Сырой .heic БОЛЬШЕ НИКОГДА не
+ * возвращается: до 2026-07-30 здесь было 5 тихих `return file`, из-за которых
+ * репетитор на Windows видел «HEIC — скачать», а AI проверял решение вслепую
+ * (баг Ирины Бочаровой). Битый HEIC → throw `HeicDecodeError`.
  */
+
+import { HeicDecodeError, decodeHeicToJpegBlob, isHeicLikeFile } from './heicDecode';
+
+export { HeicDecodeError } from './heicDecode';
 
 const MAX_INPUT_MEGAPIXELS = 64;
 const MAX_INPUT_PIXELS = MAX_INPUT_MEGAPIXELS * 1_000_000;
@@ -43,8 +52,8 @@ export interface CompressOptions {
  *
  * - Non-image files (PDF, etc.) — pass through unchanged.
  * - Already-small images (`file.size <= maxBytes`) — pass through unchanged.
- * - HEIC/HEIF on desktop browsers (no native decode) — pass through unchanged;
- *   server accepts and tutor can review manually.
+ * - HEIC/HEIF — ВСЕГДА конвертируется в JPEG (native decode или wasm);
+ *   недекодируемый HEIC бросает `HeicDecodeError` (fail-closed).
  * - Decompression bomb (> 64 MP) — throws user-facing Russian error.
  */
 export async function compressForUpload(
@@ -57,46 +66,72 @@ export async function compressForUpload(
   // PDF / non-image — pass through. Compression only for raster images.
   // Defensive: check MIME AND filename — Safari/iOS sometimes leaves file.type
   // empty for HEIC, but extension is present.
-  const isHeicLike =
-    /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name);
+  const isHeicLike = isHeicLikeFile(file);
   if (!isHeicLike && !file.type.startsWith('image/')) {
     return file;
   }
 
-  // Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P0 #3):
-  // HEIC ALWAYS attempts re-encode → JPEG, ignoring size gate. Reasoning:
-  // iPhone HEIC files обычно 1-3 MB ≤ 4 MB cap, но в taком виде:
-  //   1) Tutor на Chrome/Firefox/Edge desktop видит broken image
-  //      (нет HEIC decoder в <img>).
-  //   2) Lovable Gateway / Gemini не поддерживают HEIC → AI не «видит» фото.
-  // Re-encode на iPhone Safari decode'ит HEIC натив но; на desktop с graceful
-  // pass-through (см. try/catch ниже).
-  //
-  // Для остальных форматов (JPEG/PNG/WebP) ранее уже-маленький файл = OK
-  // pass-through (avoid quality loss on cycles).
+  // Phase 7 round 2 (2026-05-20, review P0 #3): HEIC ALWAYS re-encodes to
+  // JPEG, ignoring the size gate — desktop tutors and the AI gateway cannot
+  // decode HEIC, so «already small» is irrelevant for it.
+  // Для остальных форматов (JPEG/PNG/WebP) уже-маленький файл = pass-through
+  // (avoid quality loss on cycles).
   if (!isHeicLike && file.size <= maxBytes) {
     return file;
   }
 
+  if (!isHeicLike) {
+    return compressViaCanvas(file, maxBytes, maxLongSide);
+  }
+
+  // --- HEIC ---
+  // Fast-path: браузер декодирует HEIC сам (Safari 17+) — обычный canvas-путь.
+  try {
+    return await compressViaCanvas(file, maxBytes, maxLongSide);
+  } catch (nativeErr) {
+    // Бомбу (>64 МП) не маскируем wasm-декодом — это осознанный reject.
+    if (nativeErr instanceof Error && /мегапиксел/i.test(nativeErr.message)) {
+      throw nativeErr;
+    }
+    console.warn('[imageCompression] HEIC native decode failed, falling back to wasm', {
+      fileName: file.name,
+      fileSize: file.size,
+    });
+  }
+
+  // Wasm-путь: heic-to (lazy-чанк). Сбой → HeicDecodeError наружу.
+  const jpegBlob = await decodeHeicToJpegBlob(file);
+  const jpegFile = new File([jpegBlob], jpegFileName(file.name), {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  });
+  if (jpegFile.size <= maxBytes) {
+    return jpegFile;
+  }
+  try {
+    return await compressViaCanvas(jpegFile, maxBytes, maxLongSide);
+  } catch (err) {
+    // Декод удался, но сжать/обработать не вышло (бомба, canvas-сбой) —
+    // это уже НЕ «битый HEIC», отдаём осмысленную ошибку как для JPEG.
+    throw err instanceof Error ? err : new HeicDecodeError();
+  }
+}
+
+/**
+ * Canvas-пайплайн: decode → pixel cap → resize → quality ladder.
+ * Бросает на любом сбое — HEIC-специфичных «тихих» веток здесь нет.
+ */
+async function compressViaCanvas(
+  file: File,
+  maxBytes: number,
+  maxLongSide: number,
+): Promise<File> {
   const sourceUrl = URL.createObjectURL(file);
   try {
-    let img: HTMLImageElement;
-    try {
-      img = await loadImage(sourceUrl);
-    } catch (decodeErr) {
-      if (isHeicLike) {
-        console.warn('[imageCompression] HEIC decode failed, passing through original', {
-          fileName: file.name,
-          fileSize: file.size,
-        });
-        return file;
-      }
-      throw decodeErr;
-    }
+    const img = await loadImage(sourceUrl);
     const naturalW = img.naturalWidth || img.width;
     const naturalH = img.naturalHeight || img.height;
     if (naturalW <= 0 || naturalH <= 0) {
-      if (isHeicLike) return file;
       throw new Error('Не удалось прочитать изображение. Попробуй другое.');
     }
     if (naturalW * naturalH > MAX_INPUT_PIXELS) {
@@ -116,14 +151,12 @@ export async function compressForUpload(
     canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-      if (isHeicLike) return file;
       throw new Error('Браузер не поддерживает обработку изображений.');
     }
 
     try {
       ctx.drawImage(img, 0, 0, naturalW, naturalH, 0, 0, targetW, targetH);
     } catch {
-      if (isHeicLike) return file;
       throw new Error('Не удалось обработать изображение. Попробуй другое.');
     }
 
@@ -136,23 +169,25 @@ export async function compressForUpload(
         continue;
       }
       if (blob && blob.size <= maxBytes) {
-        // Preserve original filename but force .jpg extension since we always
-        // re-encode as JPEG.
-        const baseName = file.name.replace(/\.[^.]+$/, '') || 'photo';
-        return new File([blob], `${baseName}.jpg`, {
+        return new File([blob], jpegFileName(file.name), {
           type: 'image/jpeg',
           lastModified: Date.now(),
         });
       }
     }
 
-    if (isHeicLike) return file;
     throw new Error(
       `Не удалось сжать фото до ${(maxBytes / 1024 / 1024).toFixed(0)} МБ. Попробуй другое изображение.`,
     );
   } finally {
     URL.revokeObjectURL(sourceUrl);
   }
+}
+
+/** Preserve original filename but force .jpg — we always re-encode as JPEG. */
+function jpegFileName(originalName: string): string {
+  const baseName = originalName.replace(/\.[^.]+$/, '') || 'photo';
+  return `${baseName}.jpg`;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

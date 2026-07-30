@@ -170,6 +170,7 @@ export function connectBoardLive(
   let disposed = false;
   let subscribed = false;
   let peers: LivePeer[] = [];
+  let peersSignature = '';
 
   // private (ревью этапов 3–4, P0): подписка/отправка проверяются политиками
   // realtime.messages (миграция 20260730160000) — чужак с anon-ключом и
@@ -197,6 +198,15 @@ export function connectBoardLive(
       }
     }
     peers = next;
+    // presence:sync фаерится и когда состав НЕ изменился (re-track после
+    // обрыва WS под RU DPI) — без сигнатуры каждый sync дёргал setState у
+    // трёх подписчиков и ре-рендерил доску (вклад в React #185 2026-07-28).
+    const signature = next
+      .map((p) => `${p.key}|${p.name}|${p.role}`)
+      .sort()
+      .join(';');
+    if (signature === peersSignature) return;
+    peersSignature = signature;
     handlers.onPeers?.(next);
   };
 

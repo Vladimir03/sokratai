@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { ChevronLeft, ChevronRight, Download, X, ZoomIn } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useHeicImage } from '@/hooks/useHeicImage';
+import { isHeicLikeUrl } from '@/lib/heicDecode';
 import {
   Dialog,
   DialogContent,
@@ -51,10 +53,22 @@ function SafeImage({
    */
   interactive?: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  const isHeicLike = /\.(heic|heif)(\?|$)/i.test(src);
+  // 2026-07-30 (баг Ирины Бочаровой): onError для .heic сначала пробует
+  // lazy wasm-конвертацию (useHeicImage); янтарная карточка — последний рубеж.
+  const { effectiveSrc, state, onImgError } = useHeicImage(src);
+  const isHeicLike = isHeicLikeUrl(src);
 
-  if (failed) {
+  if (state === 'converting') {
+    // span, не div — SafeImage живёт и внутри <button> (GalleryThumbnail).
+    return (
+      <span
+        className={`${className} inline-block animate-pulse rounded-md bg-muted`}
+        aria-label="Конвертируем фото…"
+      />
+    );
+  }
+
+  if (state === 'failed') {
     const fallbackContent = (
       <>
         <Download className="h-4 w-4 shrink-0" />
@@ -97,11 +111,11 @@ function SafeImage({
 
   return (
     <img
-      src={src}
+      src={effectiveSrc}
       alt={alt}
       loading="lazy"
       className={className}
-      onError={() => setFailed(true)}
+      onError={onImgError}
     />
   );
 }

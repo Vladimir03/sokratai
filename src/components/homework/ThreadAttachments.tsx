@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Download, FileText, ImageIcon } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useHeicImage } from '@/hooks/useHeicImage';
+import { isHeicLikeUrl } from '@/lib/heicDecode';
 import {
   getThreadAttachmentKind,
   getThreadAttachmentLabel,
@@ -9,13 +11,9 @@ import {
 
 /**
  * Phase 7 (2026-05-16): graceful fallback для image load failures.
- * Chrome/Firefox/Edge на desktop НЕ имеют HEIC decoder в <img loading="lazy"> tag —
- * только Safari macOS/iOS умеет. Без onError handler репетитор видит
- * broken image placeholder без объяснения. После Phase 7 client-side
- * compression (compressForUpload в studentHomeworkApi.ts) новые HEIC
- * upload'ы не появятся в Storage, но legacy HEIC файлы остаются.
- *
- * Fallback показывает icon + filename + кнопку «Скачать оригинал».
+ * 2026-07-30 (баг Ирины Бочаровой): legacy .heic теперь НЕ сразу «скачать» —
+ * onError → `useHeicImage` (lazy wasm-декод) → рендерим конвертированный JPEG.
+ * Янтарная карточка «скачать» осталась последним рубежом (декод не удался).
  */
 /**
  * Phase 7 round 2 (2026-05-20, ChatGPT-5.5 review P1 #2 + #4):
@@ -45,18 +43,23 @@ function ImageWithFallback({
   /** className для outer `<a>` wrapper в success state. */
   wrapperClassName: string;
 }) {
-  const [failed, setFailed] = useState(false);
+  const { effectiveSrc, state, onImgError } = useHeicImage(src);
 
-  const isHeicLike = /\.(heic|heif)(\?|$)/i.test(src);
+  const isHeicLike = isHeicLikeUrl(src);
 
-  if (failed) {
+  if (state === 'converting') {
+    // Конвертируем HEIC в фоне (wasm) — размер как у будущей миниатюры.
+    return <Skeleton className={`${className} min-w-20`} />;
+  }
+
+  if (state === 'failed') {
     return (
       <a
         href={src}
         download={label}
         rel="noreferrer"
         className="inline-flex min-h-20 items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-amber-900 hover:bg-amber-100 max-w-[260px]"
-        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не отображается в этом браузере. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
+        title={isHeicLike ? 'iPhone-фото в HEIC-формате — не удалось открыть даже конвертацией. Скачайте оригинал.' : 'Браузер не смог открыть файл. Скачайте оригинал.'}
       >
         <Download className="h-5 w-5 shrink-0" />
         <div className="min-w-0">
@@ -70,6 +73,8 @@ function ImageWithFallback({
   }
 
   return (
+    // href — всегда ОРИГИНАЛЬНЫЙ signed URL (скачивание/новая вкладка бьют в
+    // storage), даже когда <img> показывает конвертированный objectURL.
     <a
       href={src}
       target="_blank"
@@ -77,11 +82,11 @@ function ImageWithFallback({
       className={wrapperClassName}
     >
       <img
-        src={src}
+        src={effectiveSrc}
         alt={alt}
         className={className}
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={onImgError}
       />
     </a>
   );

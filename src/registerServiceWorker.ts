@@ -60,9 +60,12 @@ export const registerServiceWorker = async (): Promise<void> => {
       const registration = await navigator.serviceWorker.register('/service-worker.js');
       console.log('Service Worker: Registered successfully', registration.scope);
 
-      // Check for updates periodically (every 5 minutes)
+      // Check for updates periodically (every 5 minutes).
+      // .catch: сетевой блип при фетче скрипта — не инцидент (следующий
+      // интервал повторит), а без catch каждый блип шёл unhandledrejection'ом
+      // в /admin («Failed to update a ServiceWorker…», ~15 записей за 3 дня).
       setInterval(() => {
-        registration.update();
+        registration.update().catch(() => {});
       }, 5 * 60 * 1000);
 
       // Handle updates

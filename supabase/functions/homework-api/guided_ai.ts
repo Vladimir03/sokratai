@@ -253,6 +253,7 @@ export type GuidedCheckFailureReason =
   | "empty_model_response"
   | "image_fetch_failed"
   | "task_image_missing"
+  | "student_images_missing"
   | "unknown";
 
 interface GuidedConversationHistoryMessage {
@@ -1278,6 +1279,30 @@ async function inlinePromptImageUrl(imageUrl: string | null | undefined): Promis
     }
 
     const mime = response.headers.get("content-type") || "image/jpeg";
+
+    // Detect HEIC/HEIF via content-type or magic bytes (2026-07-30, баг Ирины
+    // Бочаровой): Gemini не декодирует HEIC — раньше байты уезжали в gateway
+    // как есть, и AI «проверял» решение НЕ видя фото. Legacy .heic в storage
+    // остаются (новые загрузки клиент конвертирует), поэтому skip обязателен.
+    // Magic bytes: ISO-BMFF `ftyp` в байтах 4-8 + brand heic/heix/hevc/mif1.
+    const isHeicMime = /image\/hei[cf]/i.test(mime);
+    let isHeicMagic = false;
+    if (!isHeicMime && buffer.byteLength >= 12) {
+      const head = new Uint8Array(buffer, 0, 12);
+      const ascii = String.fromCharCode(...head);
+      isHeicMagic =
+        ascii.slice(4, 8) === "ftyp" &&
+        /^(heic|heix|hevc|hevx|heim|heis|hevm|hevs|mif1|msf1)$/.test(ascii.slice(8, 12));
+    }
+    if (isHeicMime || isHeicMagic) {
+      console.warn("guided_ai_inline_image_skipped", {
+        reason: "unsupported_heic",
+        source: isHeicMime ? "content_type" : "magic_bytes",
+        mime,
+        preview: trimmed.slice(0, 120),
+      });
+      return null;
+    }
 
     // Detect SVG via content-type or magic bytes (catches SVGs served
     // without .svg extension or behind signed URLs with rewritten paths).
@@ -2765,6 +2790,31 @@ export async function evaluateStudentAnswer(
         ...buildCheckFallback("task_image_missing"),
         feedback:
           "Не удалось загрузить картинку с условием задачи. Это техническая проблема на нашей стороне — твой ответ сохранён, репетитор его увидит. Баллы не списаны.",
+      };
+    }
+
+    // Fail-closed по фото РЕШЕНИЯ ученика (2026-07-30, баг Ирины Бочаровой):
+    // ученик приложил фото, но ни одно не заинлайнилось (legacy .heic,
+    // протухший signed URL) — оценивать вслепую нельзя (rule 40): AI ставил
+    // балл, не видя решения, и никто этого не замечал. CHECK_FAILED оставляет
+    // задачу active и ответ в треде — репетитор проверит вручную (вьюер теперь
+    // конвертирует .heic сам). У структурных тестов балл посчитан кодом и от
+    // фото не зависит — их не трогаем.
+    const expectedStudentImageRefs = (params.studentImageUrls ?? []).filter(
+      (u) => typeof u === "string" && u.trim().length > 0,
+    ).length;
+    if (!structuredScore && expectedStudentImageRefs > 0 && studentImageUrls.length === 0) {
+      console.error(JSON.stringify({
+        event: "guided_check_student_images_missing",
+        subject: params.subject,
+        task_id: params.taskId ?? null,
+        assignment_id: params.assignmentId ?? null,
+        expected_images: expectedStudentImageRefs,
+      }));
+      return {
+        ...buildCheckFallback("student_images_missing"),
+        feedback:
+          "Не получилось открыть фото твоего решения для автопроверки. Ответ сохранён — репетитор посмотрит его сам. Можешь также отправить фото ещё раз (лучше в формате JPEG).",
       };
     }
 
