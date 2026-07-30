@@ -54,7 +54,7 @@ Wedge: «быстро собрать ДЗ и новую практику по т
 ## 4. Non-Goals (Out of Scope)
 
 - ❌ Drag & Drop зона (P1, отдельный спринт)
-- ❌ HEIC → JPG конвертация на клиенте (P1, отдельно)
+- ~~❌ HEIC → JPG конвертация на клиенте (P1, отдельно)~~ ✅ **СДЕЛАНО 2026-07-30** — `src/lib/heicDecode.ts` + `compressForUpload` (wasm-фолбэк) + `useHeicImage` для legacy файлов; см. skill `homework-system` → «HEIC-пайплайн фото»
 - ❌ Авто-сжатие изображений > 5 МБ (P1, отдельно)
 - ❌ OCR рукописного текста (future — AI сам анализирует изображение)
 - ❌ Рисование/аннотации поверх фото (future)
@@ -306,8 +306,8 @@ Student selects file
 ### P1 (Should Have)
 - [ ] Bottom sheet на мобильном (Камера / Галерея / Документ)
 - [ ] Drag & Drop на десктопе
-- [ ] HEIC → JPG конвертация на клиенте
-- [ ] Авто-сжатие > 5 МБ
+- [x] HEIC → JPG конвертация на клиенте — **2026-07-30**, `heicDecode.ts` + wasm-фолбэк в `compressForUpload` + `useHeicImage` для legacy
+- [x] Авто-сжатие > 5 МБ — `compressForUpload` (Phase 7, 2026-05-16)
 
 ### P2 (Nice to Have)
 - [ ] Progress bar загрузки (determinate %)
@@ -321,7 +321,7 @@ Student selects file
 | Риск | Mitigation |
 |------|------------|
 | Safari iOS zoom при font-size < 16px на input | Уже 16px в GuidedChatInput |
-| HEIC файлы с iPhone не поддерживаются Supabase Storage | P1: конвертация на клиенте. P0: файл загрузится как есть |
+| HEIC файлы с iPhone не поддерживаются Supabase Storage | ЗАКРЫТ 2026-07-30: конвертация на клиенте (`heicDecode.ts`), сырой HEIC больше не загружается (fail-closed) |
 | Большие файлы замедляют загрузку | Лимит 10 МБ + будущее сжатие |
 | storage:// ref leaked в AI prompt | Резолвить в signed URL на backend (существующий паттерн) |
 | Race condition: user sends while upload in progress | Disable send buttons during upload |

@@ -75,6 +75,8 @@ Check / hint / chat (`guided_ai.ts::buildCheckPrompt`, `buildHintPrompt`, `chat/
 
 **Компрессия обязательна на КАЖДОМ клиентском upload фото для AI** (`compressForUpload`, клиентский кап ≤ серверного `MAX_IMAGE_BYTES`). Если картинка обязательна, а не резолвится — **fail-closed**, не молчаливый плейсхолдер.
 
+**HEIC (2026-07-30, баг Ирины):** Gemini его не декодирует — `inlinePromptImageUrl` скипает HEIC (mime + magic bytes, лог `unsupported_heic`); фото решения ученика не заинлайнились → `student_images_missing` CHECK_FAILED, НЕ слепая оценка (структурные тесты не задеты — балл кодом). Клиент конвертирует HEIC→JPEG в `compressForUpload`, legacy `.heic` вьюеры конвертируют через `useHeicImage` (rule 80).
+
 Dual-format: `task_image_url` / `rubric_image_urls` / `solution_image_urls` = single `storage://` ИЛИ JSON-array → только через `parseAttachmentUrls` / `serializeAttachmentUrls`.
 
 ## Task identity

@@ -523,6 +523,16 @@ Spec: `docs/delivery/features/student-homework-problem-screen/spec.md` (Phase 1,
 
 Spec: `docs/delivery/features/homework-multi-photo/spec.md`.
 
+### HEIC-пайплайн фото (2026-07-30, баг Ирины Бочаровой)
+
+Айфоны снимают в HEIC; `<img>` декодирует его только Safari 17+ (baseline iOS 15 — нет). До фикса `compressForUpload` имел 5 тихих `return file` при неудаче нативного декода → сырой `.heic` в storage → репетитор на Windows видел «HEIC — скачать», а AI-грейдер оценивал решение НЕ видя фото. Три слоя фикса (main `a48a64e`):
+
+1. **Upload** — `src/lib/heicDecode.ts` (ЕДИНСТВЕННЫЙ модуль, знающий про `heic-to`): lazy `import('heic-to')` внутри `decodeHeicToJpegBlob`, семафор ≤2 параллельных wasm-декодов, `HeicDecodeError` с русским текстом. `compressForUpload`: native decode fast-path (Safari 17+, wasm-чанк не качается) → wasm-фолбэк → throw. Сырой HEIC не возвращается никогда; бомба >64 МП по-прежнему reject. `uploadStudentThreadImage` ловит `HeicDecodeError` → тост, файл не уходит (fail-closed); остальные сбои компрессии — raw-fallback как раньше.
+2. **Viewer (legacy .heic)** — `src/hooks/useHeicImage.ts`: onError + `isHeicLikeUrl` → fetch signed URL → декод → objectURL. Кэш module-level по pathname БЕЗ query (signed-токены ротируются), LRU 20 + revoke на вытеснении, промисы дедупят конкурентные декоды. Обвязаны `ThreadAttachments.ImageWithFallback` и `PhotoGallery.SafeImage` (у обоих сохранена своя интерактивная разметка — nested-interactive фиксы Phase 7 r2); янтарная карточка «скачать» — последний рубеж. `<a href>` всегда указывает на оригинальный signed URL, не objectURL.
+3. **AI (edge)** — `guided_ai.ts::inlinePromptImageUrl` скипает HEIC по content-type `image/hei[cf]` ИЛИ magic bytes (`ftyp` + brand heic/heix/hevc/mif1, байты 4–12), лог `guided_ai_inline_image_skipped reason=unsupported_heic`. В /check: фото решения приложены, но 0 заинлайнено → `student_images_missing` CHECK_FAILED («репетитор посмотрит сам»), НЕ слепая оценка. Гейт `!structuredScore` — у структурных тестов балл посчитан кодом и от фото не зависит.
+
+Инварианты: `heic-to` НЕ добавлять в vite `manualChunks` (katex-прецедент — eager-граф); тесты `heicDecode.test.ts` мокают `import('heic-to')` (wasm в CI не гоняется); новый вьюер фото учеников — только через `useHeicImage`.
+
 ### Формат проверки задач (`check_format`)
 
 Колонка `check_format` в `homework_tutor_tasks` определяет как AI проверяет ответ.

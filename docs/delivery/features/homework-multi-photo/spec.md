@@ -158,7 +158,7 @@
 
 **Out of scope (parking lot):**
 - Drag-to-reorder фото внутри задачи — линейный порядок добавления достаточен для P0.
-- Клиент-сайд HEIC → JPEG конвертация.
+- ~~Клиент-сайд HEIC → JPEG конвертация.~~ **СДЕЛАНО 2026-07-30** (баг Ирины Бочаровой): `src/lib/heicDecode.ts` (lazy wasm `heic-to`) + wasm-фолбэк в `compressForUpload` + вьюер-конвертация legacy `.heic` через `useHeicImage`. Детали — skill `homework-system` → «HEIC-пайплайн фото».
 - Клиент-сайд compression (Tinypng-like) — делаем, если 10МБ лимит окажется тесным.
 - PDF-страницы как условие задачи — остаётся через `homework_tutor_materials`.
 - Reorder/preview рубрики у ученика — рубрика показывается только после сдачи в отдельной итерации (R11 разбор).
@@ -394,7 +394,7 @@ npm run lint && npm run build && npm run smoke-check
 |---|---|---|
 | Репетитор ожидает «одна задача = одна картинка» и put'ит 5 фото в одну карточку, а не создаёт 5 задач | Средняя | Hint-text под галереей: «Для отдельных задач используйте кнопку ‘Добавить задачу’». Не блокирующий. |
 | Lovable AI gateway плохо работает с 5 images в одном turn (токены, latency) | Средняя | Замерить latency на тестовой задаче с 5 фото; если > 30 сек — срезать до 3 в AI-path (UI остаётся 5 для хранения, AI берёт `.slice(0, 3)`). Задокументировать в guided_ai.ts. |
-| HEIC с iPhone ломает rendering в Chrome/Firefox на репетитор-side | Средняя | Ранее принималось без конвертации — проверить актуальность в QA. Если ломается — добавить client-side HEIC → JPEG через heic2any (P1). |
+| HEIC с iPhone ломает rendering в Chrome/Firefox на репетитор-side | ~~Средняя~~ ЗАКРЫТ | **Реализовано 2026-07-30** (инцидент Ирины Бочаровой подтвердил риск): конвертация на клиенте (`heicDecode.ts`, lazy wasm `heic-to` — НЕ heic2any, тот заброшен) + вьюер-фолбэк `useHeicImage` для legacy файлов + skip HEIC в AI-path. |
 | JSON-array TEXT усложняет дебаг SQL-запросов | Низкая | Helper `parseAttachmentUrls` — один. Все SQL-запросы читают через API, не напрямую. В admin-интерфейсе раз в полгода — ок. |
 | Миграция «только новые» порождает ожидание, что можно будет dobавить фото к старой задаче → не сработает в UI | Низкая | Нет — UI `HWTaskCard.tsx` работает с dual-format на чтение И на запись. Старую задачу можно открыть и добавить фото → сериализуется в JSON-array → записывается. `HWTasksSection:28` parseAttachmentUrls уже это умеет. Так что ограничение «только новые» фактически не существует — это просто миграция-данных-не-нужна. |
 | N+1 signed URL запросов на student-side при галерее | Средняя | Новый batch endpoint `GET .../images`, один запрос на задачу. Query key `['student','homework','guided-task-images', assignmentId, taskId]`. |

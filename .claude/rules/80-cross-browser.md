@@ -25,6 +25,7 @@
 - **`crypto.randomUUID()`** — только HTTPS + Safari 15.4+. В dev-окружении может не работать
 - **`Date` парсинг** — Safari **строг** к формату. `new Date("2024-01-15 10:30:00")` **СЛОМАЕТСЯ**. Всегда используй ISO: `new Date("2024-01-15T10:30:00")` или `date-fns`
 - **`AbortSignal.timeout()`** — Safari < 16. Создавай `AbortController` с `setTimeout` вручную
+- **HEIC/HEIF в `<img>` декодирует ТОЛЬКО Safari 17+** (наш baseline iOS 15 — НЕ умеет; Windows/Android — никогда). Любой клиентский upload фото — через `compressForUpload` (native decode → wasm-фолбэк → `HeicDecodeError`, сырой HEIC не загружается никогда); любой рендер фото учеников — через `useHeicImage` (`src/hooks`) с фолбэком-конвертацией legacy `.heic`. Пакет `heic-to` (2.9 МБ wasm-чанк) импортировать ТОЛЬКО динамически внутри `src/lib/heicDecode.ts` и НЕ добавлять в `manualChunks` — статический импорт утащит его в eager-граф загрузки. (2026-07-30, баг Ирины Бочаровой: репетитор на Windows не видел решения, AI проверял вслепую)
 
 ### CSS
 - **`100vh`** на iOS — НЕ учитывает адресную строку Safari. Используй `100dvh` или `min-height: -webkit-fill-available`
