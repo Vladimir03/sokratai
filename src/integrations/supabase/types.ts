@@ -456,6 +456,7 @@ export type Database = {
           export_material_id: string | null
           id: string
           lesson_id: string | null
+          live_bring: Json | null
           student_id: string | null
           title: string | null
           tutor_id: string
@@ -466,6 +467,7 @@ export type Database = {
           export_material_id?: string | null
           id?: string
           lesson_id?: string | null
+          live_bring?: Json | null
           student_id?: string | null
           title?: string | null
           tutor_id: string
@@ -476,6 +478,7 @@ export type Database = {
           export_material_id?: string | null
           id?: string
           lesson_id?: string | null
+          live_bring?: Json | null
           student_id?: string | null
           title?: string | null
           tutor_id?: string
