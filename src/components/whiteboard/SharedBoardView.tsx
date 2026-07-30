@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Eraser, Eye, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   BoardCanvas,
@@ -62,7 +63,8 @@ export interface SharedBoardTransport {
   /** Подписка на чужие изменения (realtime или поллинг). Возвращает cleanup. */
   start(handlers: {
     onRemote: (pageId: string, rev: number) => void;
-    onResync: () => void;
+    /** Полный resync. Promise<false> = сбой — поллинг гостя НЕ двигает watermark. */
+    onResync: () => void | Promise<boolean | void>;
     /** «Привести всех» из поллинга (гость; Этап 4). Дедуп по seq — у вызывающего. */
     onBring?: (bring: { seq: number; bounds: BoardBounds; at?: string | null }) => void;
   }): () => void;
@@ -80,8 +82,14 @@ export interface SharedBoardTransport {
 
 interface SharedBoardViewProps {
   transport: SharedBoardTransport;
-  /** Шапка-слот (у ученика — «назад к занятию», у гостя — имя доски). */
+  /** Шапка-слот (у гостя — имя доски). */
   headerLeft?: React.ReactNode;
+  /**
+   * Гардовый выход (ревью P0: beforeunload не ловит SPA-Back): SharedBoardView
+   * сам рендерит «Назад», ЖДЁТ flush и зовёт onExit только при успехе;
+   * при сбое сети пользователь остаётся на доске с ретраем.
+   */
+  onExit?: () => void;
 }
 
 interface TextDraft {
@@ -101,7 +109,7 @@ const SHARED_TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'select', label: 'Выделение', icon: MousePointer2 },
 ];
 
-export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps) {
+export function SharedBoardView({ transport, headerLeft, onExit }: SharedBoardViewProps) {
   const [frames, setFrames] = useState<SharedFrame[]>([]);
   const [boardTitle, setBoardTitle] = useState<string | null>(null);
   const [myZoneId, setMyZoneId] = useState<string | null>(null);
@@ -138,28 +146,54 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
 
   // ─── Автосейв: 409 → reconcile → немедленный повтор ────────────────────────
 
+  const readOnlyNotifiedRef = useRef(false);
+  const selectionRef = useRef<BoardSelection | null>(null);
+  selectionRef.current = selection;
+
   const autosaveRef = useRef<AutosaveQueue | null>(null);
   if (autosaveRef.current === null) {
     autosaveRef.current = new AutosaveQueue({
       savePage: async (pageId: string) => {
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const frame = framesRef.current.find((f) => f.id === pageId);
-          if (!frame) return;
-          const result = await transportRef.current.savePage(pageId, frame.elements, frame.rev);
-          if ('rev' in result) {
-            applyFramePatch(pageId, { rev: result.rev || frame.rev + 1 });
+        try {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const frame = framesRef.current.find((f) => f.id === pageId);
+            if (!frame) return;
+            const result = await transportRef.current.savePage(pageId, frame.elements, frame.rev);
+            if ('rev' in result) {
+              applyFramePatch(pageId, { rev: result.rev || frame.rev + 1 });
+              return;
+            }
+            // Конфликт: сервер прислал свежие elements — сливаем и пробуем ещё раз.
+            // Щит: элементы активного выделения не отдаются remote-версии.
+            const protectedIds =
+              selectionRef.current && selectionRef.current.frameId === pageId
+                ? new Set(selectionRef.current.ids)
+                : undefined;
+            const { merged, divergesFromRemote } = reconcileElements(
+              frame.elements,
+              sanitizeRemote(result.conflict.elements),
+              protectedIds,
+            );
+            applyFramePatch(pageId, { elements: merged, rev: result.conflict.rev });
+            if (!divergesFromRemote) return; // сервер уже содержит всё наше
+          }
+          // Два конфликта подряд — необычно; отдаём очереди (retry с backoff).
+          throw new Error('REV_CONFLICT_RETRY');
+        } catch (err) {
+          // Права записи отозваны (убрали из группы посреди урока, ревью P1):
+          // ретраить 403 вечно бессмысленно — доска честно переходит в
+          // read-only, страница снимается с очереди.
+          const code = (err as { code?: string | null }).code;
+          if (code === 'NOT_A_PARTICIPANT' || code === 'FOREIGN_ZONE' || code === 'VIEWER_ONLY') {
+            setMyZoneId(null);
+            if (!readOnlyNotifiedRef.current) {
+              readOnlyNotifiedRef.current = true;
+              toast.error('Вы больше не участвуете в этом занятии — доска доступна только для чтения.');
+            }
             return;
           }
-          // Конфликт: сервер прислал свежие elements — сливаем и пробуем ещё раз.
-          const { merged, divergesFromRemote } = reconcileElements(
-            frame.elements,
-            sanitizeRemote(result.conflict.elements),
-          );
-          applyFramePatch(pageId, { elements: merged, rev: result.conflict.rev });
-          if (!divergesFromRemote) return; // сервер уже содержит всё наше
+          throw err;
         }
-        // Два конфликта подряд — необычно; отдаём очереди (retry с backoff).
-        throw new Error('REV_CONFLICT_RETRY');
       },
       onStatus: setSaveStatus,
     });
@@ -180,8 +214,10 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
 
   useEffect(
     () => () => {
-      void autosave.flush();
-      autosave.dispose();
+      // dispose ПОСЛЕ результата flush: немедленный dispose запрещал ретрай
+      // прощального сохранения (ревью P0). Основной путь выхода — гардовая
+      // кнопка «Назад» (ниже), это last-resort для размонтирования.
+      void autosave.flush().finally(() => autosave.dispose());
     },
     [autosave],
   );
@@ -241,6 +277,11 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
 
   // ─── Загрузка и подписка ────────────────────────────────────────────────────
 
+  // imageUrls — через ref: зависимость от стейта пересоздавала handleRemoteRev,
+  // а с ним И REALTIME-КАНАЛ на каждый догруз URL картинки (ревью P1).
+  const imageUrlsRef = useRef(imageUrls);
+  imageUrlsRef.current = imageUrls;
+
   const handleRemoteRev = useCallback(
     async (pageId: string, rev: number) => {
       const frame = framesRef.current.find((f) => f.id === pageId);
@@ -251,9 +292,15 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
       const existing = framesRef.current.find((f) => f.id === pageId);
       if (!existing) {
         applyFrames([...framesRef.current, parsed]);
-      } else {
+      } else if (existing.rev < fresh.rev) {
+        // Пост-await гард (ревью P0): пока ждали сеть, параллельный
+        // refetch/сейв мог уйти вперёд — устаревший снапшот не применяем.
         // Merge, не replace: локальная незасейвленная грязь не должна пропасть.
-        const { merged } = reconcileElements(existing.elements, parsed.elements);
+        const protectedIds =
+          selectionRef.current && selectionRef.current.frameId === pageId
+            ? new Set(selectionRef.current.ids)
+            : undefined;
+        const { merged } = reconcileElements(existing.elements, parsed.elements, protectedIds);
         applyFramePatch(pageId, {
           elements: merged,
           rev: fresh.rev,
@@ -267,22 +314,23 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
       }
       // Новая картинка от репетитора → догруз signed URL (не чаще раза в 20 с).
       const unknownImage = parsed.elements.some(
-        (el) => el.type === 'image' && !imageUrls[el.ref],
+        (el) => el.type === 'image' && !imageUrlsRef.current[el.ref],
       );
       if (unknownImage && transportRef.current.refreshImageUrls) {
         const now = Date.now();
         if (now - imageRefreshAtRef.current > 20_000) {
           imageRefreshAtRef.current = now;
-          void transportRef.current.refreshImageUrls().then((fresh) => {
-            setImageUrls((prev) => ({ ...prev, ...fresh }));
+          void transportRef.current.refreshImageUrls().then((freshUrls) => {
+            setImageUrls((prev) => ({ ...prev, ...freshUrls }));
           });
         }
       }
     },
-    [applyFrames, applyFramePatch, imageUrls],
+    [applyFrames, applyFramePatch],
   );
 
-  const resync = useCallback(async () => {
+  /** true — снапшот применён; false — сбой (гость НЕ двигает watermark, ревью P1). */
+  const resync = useCallback(async (): Promise<boolean> => {
     try {
       const state = await transportRef.current.load();
       // Reconcile по каждому листу: локальная грязь переживает переподключение.
@@ -290,15 +338,21 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
       const next = state.frames.map((remote) => {
         const local = current.find((f) => f.id === remote.id);
         if (!local) return remote;
-        const { merged } = reconcileElements(local.elements, remote.elements);
+        const protectedIds =
+          selectionRef.current && selectionRef.current.frameId === remote.id
+            ? new Set(selectionRef.current.ids)
+            : undefined;
+        const { merged } = reconcileElements(local.elements, remote.elements, protectedIds);
         return { ...remote, elements: merged };
       });
       applyFrames(next);
       setZoneNames(state.zoneNames);
       setImageUrls((prev) => ({ ...prev, ...state.imageUrls }));
       setMyZoneId(state.myZoneStudentId);
+      return true;
     } catch {
       // best-effort: следующий сигнал/поллинг повторит
+      return false;
     }
   }, [applyFrames]);
 
@@ -356,7 +410,8 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
     if (loading || loadError) return;
     const stop = transportRef.current.start({
       onRemote: (pageId, rev) => void handleRemoteRev(pageId, rev),
-      onResync: () => void resync(),
+      // Промис наружу: поллинг гостя двигает watermark только при успехе.
+      onResync: () => resync(),
       onBring: applyBring,
     });
     return stop;
@@ -422,6 +477,24 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
   const handleCursorMove = useCallback((x: number, y: number) => {
     liveRef.current?.sendCursor(x, y);
   }, []);
+
+  // ─── Гардовый выход (ревью P0: SPA-Back мимо beforeunload) ──────────────────
+
+  const [exiting, setExiting] = useState(false);
+  const handleGuardedExit = useCallback(async () => {
+    if (exiting || !onExit) return;
+    setExiting(true);
+    try {
+      const ok = await autosave.flush();
+      if (!ok) {
+        toast.error('Не удалось сохранить — проверьте сеть. Изменения не потеряны, попробуйте ещё раз.');
+        return;
+      }
+      onExit();
+    } finally {
+      setExiting(false);
+    }
+  }, [exiting, onExit, autosave]);
 
   // ─── Правки своей зоны ──────────────────────────────────────────────────────
 
@@ -619,6 +692,22 @@ export function SharedBoardView({ transport, headerLeft }: SharedBoardViewProps)
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
       <header className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 py-2">
+        {onExit && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={exiting}
+            onClick={() => void handleGuardedExit()}
+            style={{ touchAction: 'manipulation' }}
+          >
+            {exiting ? (
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+            ) : (
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
+            )}
+            Назад
+          </Button>
+        )}
         {headerLeft}
         <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-900">
           {boardTitle?.trim() || 'Доска'}

@@ -78,15 +78,17 @@ async function invokeStudentApi<T>(subpath: string, body: unknown): Promise<T | 
  * tutor_students и НЕТ storage-прав на board-images — только сервер).
  */
 export async function getStudentBoardState(boardId: string): Promise<StudentBoardState> {
-  const [{ data: board, error: boardError }, { data: pages, error: pagesError }, { data: revs }, me] =
+  // rev — встроенным селектом (единый снимок elements+rev, ревью P0).
+  const [{ data: board, error: boardError }, { data: pages, error: pagesError }, me] =
     await Promise.all([
       supabase.from('boards').select('id, title').eq('id', boardId).maybeSingle(),
       supabase
         .from('board_pages')
-        .select('id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id')
+        .select(
+          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+        )
         .eq('board_id', boardId)
         .order('page_index', { ascending: true }),
-      supabase.from('board_page_revs').select('page_id, rev').eq('board_id', boardId),
       invokeStudentMe(boardId),
     ]);
 
@@ -97,16 +99,18 @@ export async function getStudentBoardState(boardId: string): Promise<StudentBoar
     throw new StudentBoardError('Доска не найдена или у вас больше нет к ней доступа.', 'NOT_FOUND');
   }
 
-  const revByPage = new Map<string, number>();
-  for (const r of revs ?? []) revByPage.set(r.page_id as string, Number(r.rev) || 0);
-
   return {
     boardId,
     boardTitle: (board.title as string | null) ?? null,
     myZoneStudentId: me.myTutorStudentId,
     zoneNames: me.zoneNames,
     imageUrls: me.imageUrls,
-    frames: (pages ?? []).map((row, i) => parseFrameRow(row, i, revByPage.get(row.id as string) ?? 0)),
+    frames: (pages ?? []).map((row, i) => {
+      const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
+        .board_page_revs;
+      const revRow = Array.isArray(embedded) ? embedded[0] : embedded;
+      return parseFrameRow(row, i, Number(revRow?.rev) || 0);
+    }),
   };
 }
 
@@ -135,19 +139,25 @@ export async function invokeStudentMe(boardId: string): Promise<{
   };
 }
 
-/** Перечитать один лист (реакция на чужой rev-сигнал). */
+/**
+ * Перечитать один лист (реакция на чужой rev-сигнал). rev — ВСТРОЕННЫМ
+ * селектом, один DB-снимок (ревью этапов 3–4, P0): раздельные запросы давали
+ * пару «старые elements + новый rev», и следующий сейв затирал свежую сцену.
+ */
 export async function refetchStudentPage(
   pageId: string,
 ): Promise<{ row: Record<string, unknown>; rev: number } | null> {
-  const [{ data: row }, { data: revRow }] = await Promise.all([
-    supabase
-      .from('board_pages')
-      .select('id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id')
-      .eq('id', pageId)
-      .maybeSingle(),
-    supabase.from('board_page_revs').select('rev').eq('page_id', pageId).maybeSingle(),
-  ]);
+  const { data: row } = await supabase
+    .from('board_pages')
+    .select(
+      'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+    )
+    .eq('id', pageId)
+    .maybeSingle();
   if (!row) return null;
+  const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
+    .board_page_revs;
+  const revRow = Array.isArray(embedded) ? embedded[0] : embedded;
   return { row: row as Record<string, unknown>, rev: Number(revRow?.rev) || 0 };
 }
 

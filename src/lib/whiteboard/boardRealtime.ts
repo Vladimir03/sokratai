@@ -25,11 +25,12 @@ export function subscribeBoardRevs(
   handlers: {
     /** Живое событие (INSERT нового листа или UPDATE rev). */
     onRev: (event: BoardRevEvent) => void;
-    /** Первый SUBSCRIBED после обрыва: перечитать снапшот revs целиком. */
+    /** КАЖДЫЙ SUBSCRIBED (включая первый): перечитать снапшот revs целиком.
+     * Первый — тоже gap-fill: между load()-снапшотом и подпиской есть окно,
+     * в котором чужой сейв прошёл бы незамеченным (ревью этапов 3–4, P1). */
     onReconnect: () => void;
   },
 ): () => void {
-  let wasDisconnected = false;
   let disposed = false;
 
   channelSeq += 1;
@@ -51,11 +52,7 @@ export function subscribeBoardRevs(
       },
     )
     .subscribe((status) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-        wasDisconnected = true;
-      }
-      if (status === 'SUBSCRIBED' && wasDisconnected && !disposed) {
-        wasDisconnected = false;
+      if (status === 'SUBSCRIBED' && !disposed) {
         handlers.onReconnect();
       }
     });

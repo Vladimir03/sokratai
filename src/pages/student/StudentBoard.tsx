@@ -1,7 +1,5 @@
 import { useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { SharedBoardView, type SharedBoardTransport } from '@/components/whiteboard/SharedBoardView';
 import {
   addStudentRollPage,
@@ -59,19 +57,9 @@ export default function StudentBoard() {
   }
 
   return (
-    <SharedBoardView
-      transport={transport}
-      headerLeft={
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(-1)}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <ArrowLeft className="mr-1.5 h-4 w-4" />
-          Назад
-        </Button>
-      }
-    />
+    // key: смена :boardId обязана пересоздать вью (иначе старый снимок и
+    // каналы пережили бы новый URL — ревью P2). Выход — гардовый onExit
+    // (SharedBoardView сам ждёт flush; SPA-Back мимо beforeunload — ревью P0).
+    <SharedBoardView key={boardId} transport={transport} onExit={() => navigate(-1)} />
   );
 }

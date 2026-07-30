@@ -324,12 +324,17 @@ const App = () => (
                 </Suspense>
               }
             />
+            {/* Доска ученика: под AuthGuard fullBleed (ревью этапов 3–4, P1 —
+                без гарда незалогиненный получал «доска не найдена» вместо
+                стандартного редиректа на вход). */}
             <Route
               path="/student/board/:boardId"
               element={
-                <Suspense fallback={<PageLoader />}>
-                  <StudentBoard />
-                </Suspense>
+                <AuthGuard fullBleed>
+                  <Suspense fallback={<PageLoader />}>
+                    <StudentBoard />
+                  </Suspense>
+                </AuthGuard>
               }
             />
             <Route

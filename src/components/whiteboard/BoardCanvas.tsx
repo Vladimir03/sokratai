@@ -539,12 +539,15 @@ export function BoardCanvas({
 
       // Тап по призрачной ячейке: жест остался паном того же указателя и не
       // ушёл дальше tap-slop → создаём лист. Пан/pinch кандидата отменяют.
+      // ТОЛЬКО pointerup: системный pointercancel iOS (звонок, жест ОС) в
+      // пределах slop — это НЕ намерение создать лист (ревью P2).
       const pendingGhost = pendingGhostRef.current;
       pendingGhostRef.current = null;
       if (
         pendingGhost &&
         drag.kind === 'pan-canvas' &&
         event &&
+        event.type === 'pointerup' &&
         'clientX' in event &&
         event.pointerId === pendingGhost.pointerId &&
         Math.hypot(event.clientX - pendingGhost.startX, event.clientY - pendingGhost.startY) <

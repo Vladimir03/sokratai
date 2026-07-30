@@ -339,9 +339,14 @@ Deno.serve(async (req) => {
         return jsonError(cors, 400, "VALIDATION", "Некорректные данные листа.");
       }
 
-      // CAS и бамп — одна транзакция (P0 №1): конкурирующий сейв той же базы
-      // не может молча затереть чужие изменения.
-      const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+      // CAS и бамп — одна транзакция. base_rev ОБЯЗАТЕЛЕН (ревью этапов 3–4,
+      // P0): клиент ученика всегда его шлёт, легаси-версий роута в проде не
+      // было — NULL-обход CAS закрыт fail-closed. (У tutor-edge NULL пока
+      // принимается: там живёт прод-клиент Фазы 2а без base_rev.)
+      const baseRev = body.base_rev;
+      if (typeof baseRev !== "number" || !Number.isInteger(baseRev) || baseRev < 0) {
+        return jsonError(cors, 400, "VALIDATION", "Некорректные данные листа.");
+      }
       const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
         p_page_id: pageId,
         p_elements: body.elements,
@@ -364,12 +369,9 @@ Deno.serve(async (req) => {
           { status: 409, headers: { ...cors, "Content-Type": "application/json" } },
         );
       }
-      const { data: saved } = await db
-        .from("board_pages")
-        .select(PAGE_SELECT)
-        .eq("id", pageId)
-        .maybeSingle();
-      return jsonOk(cors, { page: saved ?? { id: pageId }, rev: Number(outcome.rev) || 0 });
+      // Никаких пост-select'ов: rev из RPC — единственная правда снимка;
+      // повторное чтение из ДРУГОГО снапшота и не нужно клиенту (ревью P0).
+      return jsonOk(cors, { rev: Number(outcome.rev) || 0 });
     }
 
     // POST /boards/:id/pages — добавить лист в свой рулон (вниз столбца)
@@ -440,7 +442,10 @@ Deno.serve(async (req) => {
       if (error || !page) {
         return jsonError(cors, 500, "DB_ERROR", "Не удалось добавить лист.");
       }
-      const rev = await bumpRev(db, page.id as string, boardId, `student:${myStudentId}`);
+      // Сигнал обязателен: без строки revs новый лист невидим realtime'у до
+      // первого сейва (ревью P1) — одна повторная попытка при сбое.
+      let rev = await bumpRev(db, page.id as string, boardId, `student:${myStudentId}`);
+      if (rev === 0) rev = await bumpRev(db, page.id as string, boardId, `student:${myStudentId}`);
       return jsonOk(cors, { page, rev }, 201);
     }
 

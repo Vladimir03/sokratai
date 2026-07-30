@@ -294,40 +294,54 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Заголовок — канонический транспорт токена; query — переходный фолбэк
-    // для уже открытых вкладок старого клиента (убрать в Этапе 4).
-    const guestToken = req.headers.get("x-guest-token") ?? url.searchParams.get("guest_token");
+    // Токен — ТОЛЬКО заголовком. Query-фолбэк удалён (ревью этапов 3–4, P1):
+    // прод никогда не жил на query-транспорте (Этап 3 не выкатывался), а bearer
+    // в URL оседает в access-логах и истории.
+    const guestToken = req.headers.get("x-guest-token");
     const guest = await resolveGuest(db, link.id, guestToken);
     if (!guest) return jsonError(401, "UNAUTHORIZED", "Доступ гостя не действует. Войдите по ссылке заново.");
 
     // GET /share/:slug/state
     if (req.method === "GET" && segments.length === 3 && segments[2] === "state") {
-      if (!(await throttleCheck(db, `wb:state:${guest.id}`, 10, 60_000))) {
+      // 40/мин: каждый rev-сигнал поллинга (2.5 с) дёргает resync=/state —
+      // прежние 10/мин душили живой урок собственным лимитом (ревью, P1).
+      if (!(await throttleCheck(db, `wb:state:${guest.id}`, 40, 60_000))) {
         return jsonError(429, "THROTTLED", "Слишком часто. Подождите немного.");
       }
-      const { data: board } = await db
+      const { data: board, error: boardError } = await db
         .from("boards")
         .select("id, title")
         .eq("id", guest.board_id)
         .maybeSingle();
-      const { data: pages } = await db
+      // rev — ВСТРОЕННЫМ селектом (один снапшот): раздельные запросы давали
+      // пару «старые elements + новый rev», и следующий сейв законно затирал
+      // более свежую сцену (ревью, P0). Ошибки НЕ маскируются пустой доской:
+      // клиентский resync снёс бы локальные рамки и очередь сочла бы их
+      // сохранёнными (ревью, P0) — fail-closed 503.
+      const { data: pages, error: pagesError } = await db
         .from("board_pages")
-        .select(PAGE_WHITELIST)
+        .select(`${PAGE_WHITELIST}, board_page_revs(rev)`)
         .eq("board_id", guest.board_id)
         .order("page_index", { ascending: true });
-      const { data: revs } = await db
-        .from("board_page_revs")
-        .select("page_id, rev, updated_by, updated_at")
-        .eq("board_id", guest.board_id);
+      if (boardError || pagesError || !board) {
+        return jsonError(503, "STATE_READ_FAILED", "Не удалось загрузить доску. Попробуйте ещё раз.");
+      }
+      const rows = (pages ?? []).map((p) => {
+        const { board_page_revs: revRow, ...rest } = p as Record<string, unknown> & {
+          board_page_revs?: { rev?: number } | null;
+        };
+        return { ...rest, rev: Number(revRow?.rev) || 0 };
+      });
       await db.from("board_guests").update({ last_seen_at: new Date().toISOString() }).eq("id", guest.id);
       // Подписанные URL картинок: у гостя нет storage-прав, подписывает сервер.
-      const imageUrls = await signBoardImages(db, guest.board_id, pages ?? []);
+      const imageUrls = await signBoardImages(db, guest.board_id, rows);
       return jsonOk({
-        board: { id: board?.id, title: (board?.title as string | null) ?? null },
+        board: { id: board.id, title: (board.title as string | null) ?? null },
         my_tutor_student_id: guest.tutor_student_id,
-        pages: pages ?? [],
-        revs: revs ?? [],
+        pages: rows,
         image_urls: imageUrls,
+        // Watermark поллинга: клиент стартует /signals?since= отсюда.
+        now: new Date().toISOString(),
       });
     }
 
@@ -404,8 +418,13 @@ Deno.serve(async (req) => {
         return jsonError(400, "VALIDATION", "Некорректные данные листа.");
       }
 
-      // CAS и бамп — одна транзакция (P0 №1).
-      const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+      // CAS и бамп — одна транзакция. base_rev ОБЯЗАТЕЛЕН (ревью этапов 3–4,
+      // P0): гостевой клиент всегда его шлёт, легаси-версий этого роута в
+      // проде не существовало — NULL-обход CAS закрыт fail-closed.
+      const baseRev = body.base_rev;
+      if (typeof baseRev !== "number" || !Number.isInteger(baseRev) || baseRev < 0) {
+        return jsonError(400, "VALIDATION", "Некорректные данные листа.");
+      }
       const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
         p_page_id: pageId,
         p_elements: body.elements,

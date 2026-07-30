@@ -107,6 +107,26 @@ export function shouldApplyBring(
   return true;
 }
 
+/** Границы валидны и конечны — битый payload не должен ронять камеру в NaN. */
+export function sanitizeBounds(raw: unknown): BoardBounds | null {
+  const b = raw as BoardBounds | null | undefined;
+  if (
+    !b ||
+    !Number.isFinite(b.minX) || !Number.isFinite(b.minY) ||
+    !Number.isFinite(b.maxX) || !Number.isFinite(b.maxY) ||
+    b.maxX <= b.minX || b.maxY <= b.minY
+  ) {
+    return null;
+  }
+  return { minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY };
+}
+
+const MAX_NAME_LEN = 40;
+
+function clampName(raw: unknown): string {
+  return typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, MAX_NAME_LEN) : 'Участник';
+}
+
 /** Троттл leading+trailing: последний payload не теряется. */
 function makeThrottle<T>(intervalFn: () => number, send: (payload: T) => void) {
   let lastAt = 0;
@@ -151,8 +171,12 @@ export function connectBoardLive(
   let subscribed = false;
   let peers: LivePeer[] = [];
 
+  // private (ревью этапов 3–4, P0): подписка/отправка проверяются политиками
+  // realtime.messages (миграция 20260730160000) — чужак с anon-ключом и
+  // boardId больше не может слушать presence и слать bring/follow.
   const channel: RealtimeChannel = supabase.channel(`board-live-${boardId}`, {
     config: {
+      private: true,
       broadcast: { self: false },
       presence: { key: me.key },
     },
@@ -164,7 +188,13 @@ export function connectBoardLive(
     for (const key of Object.keys(state)) {
       if (key === me.key) continue;
       const meta = state[key][0];
-      if (meta) next.push({ key, name: meta.name ?? 'Участник', role: meta.role ?? 'student' });
+      if (meta) {
+        next.push({
+          key,
+          name: clampName(meta.name),
+          role: meta.role === 'tutor' ? 'tutor' : 'student',
+        });
+      }
     }
     peers = next;
     handlers.onPeers?.(next);
@@ -174,21 +204,42 @@ export function connectBoardLive(
     .on('presence', { event: 'sync' }, readPeers)
     .on('broadcast', { event: 'viewport' }, ({ payload }) => {
       if (disposed || !payload) return;
-      handlers.onViewport?.(payload as ViewportEvent);
+      const e = payload as ViewportEvent;
+      const b = sanitizeBounds(e.bounds);
+      if (!b || typeof e.key !== 'string') return;
+      handlers.onViewport?.({ key: e.key, name: clampName(e.name), bounds: b });
     })
     .on('broadcast', { event: 'cursor' }, ({ payload }) => {
       if (disposed || !payload) return;
-      handlers.onCursor?.(payload as CursorEvent);
+      const e = payload as CursorEvent;
+      if (typeof e.key !== 'string' || !Number.isFinite(e.x) || !Number.isFinite(e.y)) return;
+      handlers.onCursor?.({ key: e.key, name: clampName(e.name), x: e.x, y: e.y });
     })
     .on('broadcast', { event: 'bring' }, ({ payload }) => {
       if (disposed || !payload) return;
-      handlers.onBring?.(payload as BringEvent);
+      const e = payload as BringEvent;
+      const b = sanitizeBounds(e.bounds);
+      if (!b || !Number.isFinite(e.seq)) return;
+      handlers.onBring?.({ seq: e.seq, bounds: b, byName: clampName(e.byName) });
     })
     .on('broadcast', { event: 'follow' }, ({ payload }) => {
       if (disposed || !payload) return;
-      handlers.onFollow?.(payload as FollowEvent);
-    })
-    .subscribe((status) => {
+      const e = payload as FollowEvent;
+      if (typeof e.targetKey !== 'string') return;
+      handlers.onFollow?.({ targetKey: e.targetKey, on: !!e.on, byName: clampName(e.byName) });
+    });
+
+  // Private-канал требует свежий JWT в realtime-сокете ДО subscribe —
+  // setAuth и только затем подписка (иначе политика отвергнет join).
+  void (async () => {
+    try {
+      await supabase.realtime.setAuth();
+    } catch {
+      // без токена подписка честно упадёт CHANNEL_ERROR — live деградирует,
+      // контент продолжает ехать по board_page_revs / поллингу
+    }
+    if (disposed) return;
+    channel.subscribe((status) => {
       if (status === 'SUBSCRIBED' && !disposed) {
         subscribed = true;
         // re-track на КАЖДЫЙ SUBSCRIBED: после обрыва (RU DPI рвёт WS)
@@ -199,6 +250,7 @@ export function connectBoardLive(
         subscribed = false;
       }
     });
+  })();
 
   const sendEvent = (event: string, payload: Record<string, unknown>) => {
     if (disposed || !subscribed) return;

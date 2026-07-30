@@ -111,12 +111,16 @@ export default function GuestBoard() {
             // отсюда (≤2.5 с). Дедуп по seq и свежесть — в applyBring выше.
             if (res.bring) handlers.onBring?.(res.bring);
             if (res.revs.length > 0) {
-              sinceRef.current = res.revs.reduce(
+              const nextSince = res.revs.reduce(
                 (max, r) => (r.updated_at > max ? r.updated_at : max),
                 sinceRef.current ?? '',
               );
               // refetchPage у гостя нет → любой чужой сигнал = resync state.
-              handlers.onResync();
+              // Watermark — ТОЛЬКО после успешного resync (ревью P1): иначе
+              // упавший (429/сеть) resync «съедал» сигнал, и без следующей
+              // правки гость навсегда оставался на старой сцене.
+              const ok = await handlers.onResync();
+              if (!stopped && ok !== false) sinceRef.current = nextSince;
             } else {
               sinceRef.current = res.now;
             }
@@ -207,5 +211,7 @@ export default function GuestBoard() {
     );
   }
 
-  return transport ? <SharedBoardView transport={transport} /> : null;
+  // key: смена slug/токена пересоздаёт вью (старый снимок и поллинг не
+  // переживают новый URL — ревью P2).
+  return transport ? <SharedBoardView key={`${slug}:${guestToken}`} transport={transport} /> : null;
 }

@@ -216,6 +216,9 @@ export default function Whiteboard() {
   const framesRef = useRef<FrameState[]>([]);
   const cameraRef = useRef(camera);
   cameraRef.current = camera;
+  /** Щит reconcile (ревью P2): элементы активного выделения не отдаём remote. */
+  const selectionRef = useRef<BoardSelection | null>(null);
+  selectionRef.current = selection;
   const textDraftRef = useRef<TextDraft | null>(null);
   const savedTitleRef = useRef<string>('');
   const exportedSignatureRef = useRef<string | null>(null);
@@ -263,7 +266,11 @@ export default function Whiteboard() {
           const remote = Array.isArray(outcome.conflict.elements)
             ? (outcome.conflict.elements as BoardElement[])
             : [];
-          const { merged, divergesFromRemote } = reconcileElements(frame.elements, remote);
+          const protectedIds =
+            selectionRef.current && selectionRef.current.frameId === pageId
+              ? new Set(selectionRef.current.ids)
+              : undefined;
+          const { merged, divergesFromRemote } = reconcileElements(frame.elements, remote, protectedIds);
           patchFrameSilently(pageId, { elements: merged, rev: outcome.conflict.rev });
           if (!divergesFromRemote) return;
         }
@@ -394,26 +401,38 @@ export default function Whiteboard() {
     const refetchAndMerge = async (pageId: string, knownRev: number) => {
       const current = framesRef.current.find((f) => f.id === pageId);
       if (current && current.rev >= knownRev && knownRev > 0) return; // наш же сейв
-      const [{ data: row }, { data: revRow }] = await Promise.all([
-        supabase
-          .from('board_pages')
-          .select('id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id')
-          .eq('id', pageId)
-          .maybeSingle(),
-        supabase.from('board_page_revs').select('rev').eq('page_id', pageId).maybeSingle(),
-      ]);
+      // rev — встроенным селектом: ОДИН DB-снимок elements+rev (ревью P0 —
+      // раздельные чтения давали «старые elements + новый rev», и следующий
+      // сейв законно затирал более свежую сцену).
+      const { data: row } = await supabase
+        .from('board_pages')
+        .select(
+          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+        )
+        .eq('id', pageId)
+        .maybeSingle();
       if (!row) return;
+      const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
+        .board_page_revs;
+      const revRow = Array.isArray(embedded) ? embedded[0] : embedded;
       const freshRev = Number(revRow?.rev) || knownRev;
-      const parsed = rowToFrameState(row as BoardPageRow, framesRef.current.length, freshRev);
+      const parsed = rowToFrameState(row as unknown as BoardPageRow, framesRef.current.length, freshRev);
       const existing = framesRef.current.find((f) => f.id === pageId);
       if (!existing) {
         // Ученик добавил лист в свой рулон.
         applyFrames([...framesRef.current, parsed]);
         return;
       }
+      // Пока ждали сеть, параллельный refetch/сейв мог уйти вперёд —
+      // устаревший снапшот не применяем (ревью P0: обратный порядок применений).
+      if (existing.rev >= freshRev) return;
       // Merge, не replace: локальная незасейвленная грязь репетитора переживает
       // чужие правки (rule 100-паттерн; reconcile по version/versionNonce).
-      const { merged } = reconcileElements(existing.elements, parsed.elements);
+      // Щит: элементы активного выделения (move/resize) не отдаются remote-версии.
+      const protectedIds = selectionRef.current && selectionRef.current.frameId === pageId
+        ? new Set(selectionRef.current.ids)
+        : undefined;
+      const { merged } = reconcileElements(existing.elements, parsed.elements, protectedIds);
       patchFrameSilently(pageId, {
         elements: merged,
         rev: freshRev,
@@ -1593,23 +1612,24 @@ export default function Whiteboard() {
           </Button>
         )}
 
-        {livePeers.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void handleBringAll()}
-            disabled={bringBusy}
-            title="Перевести всех участников к вашему виду"
-            style={{ touchAction: 'manipulation' }}
-          >
-            {bringBusy ? (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            ) : (
-              <Magnet className="mr-1.5 h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">Ко мне</span>
-          </Button>
-        )}
+        {/* Всегда видима (ревью P1): гости НЕ входят в live-presence, а
+            persisted-bring сделан именно для них — гейт по livePeers прятал
+            кнопку на уроке «только гости». */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void handleBringAll()}
+          disabled={bringBusy}
+          title="Перевести всех участников к вашему виду"
+          style={{ touchAction: 'manipulation' }}
+        >
+          {bringBusy ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <Magnet className="mr-1.5 h-4 w-4" />
+          )}
+          <span className="hidden sm:inline">Ко мне</span>
+        </Button>
 
         <Button
           variant="outline"

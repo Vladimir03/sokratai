@@ -523,8 +523,11 @@ async function handleCreatePage(
     console.error("whiteboard_api_page_create_failed", { code: error?.code });
     return jsonError(cors, 500, "DB_ERROR", "Не удалось добавить страницу.");
   }
-  await bumpPageRev(db, data.id as string, boardId, "tutor");
-  return jsonOk(cors, { page: data }, 201);
+  // Сигнал обязателен: без строки revs новый лист (в т.ч. PDF-подложка)
+  // невидим realtime'у до первого сейва (ревью P1) — повторная попытка.
+  let createdRev = await bumpPageRev(db, data.id as string, boardId, "tutor");
+  if (createdRev === 0) createdRev = await bumpPageRev(db, data.id as string, boardId, "tutor");
+  return jsonOk(cors, { page: data, rev: createdRev }, 201);
 }
 
 // ─── Зоны-рулоны (Этап 2, B2): раздача по группе занятия ─────────────────────
@@ -645,11 +648,17 @@ async function handleShareLink(
   if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
 
   if (method === "DELETE") {
-    await db
+    // Отзыв — security-операция: молчаливо «успешный» отзыв при упавшем UPDATE
+    // оставил бы ссылку живой (ревью этапов 3–4, P0). Fail-closed.
+    const { error } = await db
       .from("board_share_links")
       .update({ revoked_at: new Date().toISOString() })
       .eq("board_id", boardId)
       .is("revoked_at", null);
+    if (error) {
+      console.error("whiteboard_api_share_revoke_failed", { code: error.code });
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось закрыть доступ. Попробуйте ещё раз.");
+    }
     return jsonOk(cors, { ok: true });
   }
 

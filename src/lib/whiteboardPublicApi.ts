@@ -141,22 +141,15 @@ export async function getGuestState(slug: string, guestToken: string): Promise<G
   }
   if (res.status !== 200) throwGuestError(res, 'Не удалось загрузить доску.');
 
-  const revs = (res.body.revs as { page_id: string; rev: number; updated_at: string }[] | undefined) ?? [];
-  const revByPage = new Map<string, number>();
-  let since: string | null = null;
-  for (const r of revs) {
-    revByPage.set(r.page_id, Number(r.rev) || 0);
-    if (!since || r.updated_at > since) since = r.updated_at;
-  }
-  const pages = (res.body.pages as Record<string, unknown>[] | undefined) ?? [];
+  // rev приходит ВНУТРИ строки (единый DB-снимок elements+rev — ревью P0);
+  // watermark поллинга — серверный now.
+  const pages = (res.body.pages as (Record<string, unknown> & { rev?: number })[] | undefined) ?? [];
   return {
     boardTitle: ((res.body.board as { title?: string | null } | undefined)?.title as string | null) ?? null,
     myZoneStudentId: (res.body.my_tutor_student_id as string | null) ?? null,
     imageUrls: (res.body.image_urls as Record<string, string> | undefined) ?? {},
-    frames: pages.map((row, i) =>
-      parseFrameRow(row as never, i, revByPage.get(row.id as string) ?? 0),
-    ),
-    since,
+    frames: pages.map((row, i) => parseFrameRow(row as never, i, Number(row.rev) || 0)),
+    since: (res.body.now as string | undefined) ?? null,
   };
 }
 
