@@ -194,3 +194,32 @@ Variant 1 = physics ЕГЭ. `_shared/mock-exam-prompts.ts` uses `resolveSubjectR
 **При расширении:** новое per-task курирование Ч2 → отдельный curate-endpoint (UPDATE, без status/score/resync), не extend approve; новое поле, видимое ученику из ai_draft_json → извлекать ИМЕННО его (whitelist), не отдавать draft целиком; per-task флаг видимости — gated на approved-ветке reveal'а.
 
 **Deploy:** миграция first (Lovable) → редеплой `mock-exam-{tutor,student}-api` (Lovable, после миграции — обе SELECTят `hide_ai_feedback`) → `deploy-sokratai` (фронт). Лог: план `~/.claude/plans/fuzzy-gliding-rossum.md`, memory `project_mock_part2_curation_2026_06_11.md`.
+
+## Аудирование (compréhension orale) — трек варианта + транскрипт (2026-07-31)
+
+Запрос Эмилии (DELF, окно оформления пробников **1–5 числа каждого месяца**): «функцию в пробник, чтобы можно было добавить аудиотрек? и его транскрипцию». Закрывает последний блокер «единого пробника» (J1): письмо ✅ и говорение ✅ уже были, аудирования не было — из-за него она держала CloudText. Инварианты — rule 45; здесь глубина. План: `~/.claude/plans/glistening-humming-forest.md`, memory `project_listening_audio_emilia_2026_07_31.md`.
+
+**Модель — variant-level, НЕ per-task.** Эталон Эмилии `delf-b2-tp-coll-exemple1-integral.mp3` (23:46, 21.7 МБ) = ЦЕЛЬНАЯ запись всей секции с экзаменационными паузами (`coll` = collective, `integral` = целиком). Зеркало `variant_pdf_url`: `mock_exam_variants.listening_audio_url` + `listening_transcript` (миграция `20260731180000`). Вопросы по треку — обычные задачи Части 1 (детерминированные чекеры уже работают, AI не нужен).
+
+**Транскрипт v1 — РУЧНОЙ ввод.** Эмилия так и делает на progress.me («мы можем транскрипцию и вручную добавлять»). Это снимает ТРИ блокера разом: лимит Whisper 20/25 МБ (её файл 21.7 МБ не влезал), edge wall-clock ~150 с (24-мин трек синхронно не транскрибировать), необходимость очереди. Авто-Whisper = v2, требует сегментации + очереди.
+
+**Аудио-байты НЕ через edge.** Клиент → Storage напрямую (`uploadListeningAudio`), edge принимает только `storage://` ref; плеер — signed URL прямо в `<audio>`. Иначе `arrayBuffer()+Blob` в изоляте = ~45 МБ пик на 22-МБ файл.
+
+**Бакет `mock-exam-listening-audio`** — private, 50 МБ, `audio/mpeg|mp4|webm|ogg|wav`, RLS own-namespace `{tutorUserId}/…`. ⚠️ Создаётся **ВРУЧНУЮ в дашборде** (Lovable игнорирует `INSERT INTO storage.buckets`, инцидент board-images).
+
+### Инварианты (нарушение = leak или тихий отказ)
+
+1. **Транскрипт = leak-класс `solution_text`.** Отсутствует в taking-select `mock-exam-student-api` и invite-select `mock-exam-public`; reveal ТОЛЬКО post-submit в result (за early-reject 409). Плюс **column-GRANT** (`20260731190000`): `REVOKE` table-SELECT на `mock_exam_variants` → whitelist 16 колонок БЕЗ транскрипта. Без него назначенный ученик читал бы ответы прямым PostgREST (RLS «student read assigned» даёт row-доступ; RLS фильтрует СТРОКИ, не колонки — rule 40 слой 2). **Новая колонка variants → явное решение student-safe/tutor-only + миграция GRANT'а.**
+2. **Prefill транскрипта у репетитора — через edge** `GET /variants/:id/listening` (service_role + owner-гейт): GRANT не различает tutor/student, поэтому колонка закрыта для всех authenticated. Клиентский select с `listening_transcript` уронит ВЕСЬ запрос (permission denied).
+3. **Own-namespace обязателен** для аудио-ref (`validateVariantListeningFields(b, tutorUserId)`) — в отличие от картинок задач, у аудио НЕТ легитимных чужих refs (каталожного аудио нет, duplicate трек не копирует). Иначе тутор A подставил бы ref тутора B, и service_role student-edge подписал бы чужой файл.
+4. **Deploy-handshake `listening_fields_applied`** (create/replace ответы). Старый edge молча игнорировал бы listening-поля и вернул success → тихая потеря трека у Эмилии. Фронт при отправленных полях без маркера показывает ошибку. **Порядок деплоя: миграции → бакет → 3 edge → фронт ПОСЛЕДНИМ.**
+5. **`has_listening_audio` (raw ref) ≠ `listening_audio_url` (signed).** Подпись упала (блоб удалён / бакет не создан) → `has=true, url=null` → блокирующая красная панель «не отправляй без аудио» + «Повторить». Тихо скрывать плеер НЕЛЬЗЯ — ученик сдал бы аудирование без условия, не зная.
+6. **Upload 22 МБ блокирует Save.** `onUploadingChange` → родитель + гард в `handleSubmit`: «Сохранить» посреди 1–3-минутной загрузки подтверждал вариант со старым/пустым ref, а поздний ref никуда не попадал (P0 ревью 5.6).
+7. **listening-пара атомарна.** Сбой prefill транскрипта → заморожены ОБА поля (и аудио), иначе «трек заменили, транскрипт от старого».
+8. **TTL signed URL — 12 ч** (`duration_minutes` допускает 600 мин; 6 ч не покрывали) + `<audio onError>` → one-shot `invalidateQueries` для вкладки старше TTL.
+9. **Canonical MIME на upload:** `audio/x-m4a → audio/mp4`, `audio/mp3 → audio/mpeg` — bucket whitelist строгий, alias из `file.type` отверг бы загрузку.
+10. **Sticky-плеер живёт ВНУТРИ секции Части 1** (первым ребёнком): sticky ограничен высотой родителя — в коротком div над секцией плеер «уезжал» сразу. `min-h-11`, не `h-10` (iOS controls clipping).
+
+**Дубликат варианта listening-поля НЕ копирует** (blob в чужом own-namespace + логика `variant_pdf_url`: после замены задач трек стал бы враньём).
+
+**Известный debt:** замена трека оставляет блоб-сироту (21.7 МБ); `manually_entered`-ветка результата транскрипт не показывает (вся ветка = `ManualEntryView`); авто-Whisper (v2); дробные баллы Ч1 для DELF (1,5/вопрос — Релиз 2, `INT → NUMERIC`, трогает живой грейдинг физики).
