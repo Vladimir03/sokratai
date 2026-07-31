@@ -938,12 +938,16 @@ async function handleSavePage(
   }
 
   // Оптимистическая блокировка (Этап 3, доревизия по ревью P0 №1): CAS и бамп —
-  // ОДНА транзакция в RPC под FOR UPDATE. Прежний check-then-write пропускал
-  // одновременные сейвы с одинаковым base_rev (lost update). base_rev опционален
-  // (переходный клиент без него получает LWW, но бамп всё равно атомарный).
+  // ОДНА транзакция в RPC под FOR UPDATE. base_rev ОБЯЗАТЕЛЕН (сансет 31.07,
+  // сутки после deploy-sokratai): NULL-обход позволял устаревшей вкладке
+  // репетитора молча затирать свежие штрихи ученика в его зоне. Легаси-клиент
+  // Фазы 2а без base_rev больше не обслуживается — фронт всегда его шлёт.
   let rev = 0;
   if ("elements" in patch) {
-    const baseRev = typeof body.base_rev === "number" ? body.base_rev : null;
+    const baseRev = body.base_rev;
+    if (typeof baseRev !== "number" || !Number.isInteger(baseRev) || baseRev < 0) {
+      return jsonError(cors, 400, "VALIDATION", "Устаревшая версия доски — обновите страницу (Ctrl+F5) и повторите.");
+    }
     const { data: cas, error: casError } = await db.rpc("wb_save_page_elements", {
       p_page_id: pageId,
       p_elements: patch.elements,

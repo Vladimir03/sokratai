@@ -200,7 +200,7 @@
 - [x] **P2 — поллинг гостей ре-рендерил страницу каждые 10 с.** Сигнатурное сравнение (`id|display_name|tutor_student_id`, без вечно меняющегося `last_seen_at`) — setState только при смене состава.
 - [x] Валидация: tsc 0, vitest 141/141, build, smoke 24/24, lint чист, esbuild.
 - [x] ДЕПЛОЙ фикс-пасса (2026-07-30): `whiteboard-api` редеплоен с `70af0a3`; deploy-sokratai выполнен владельцем дважды за день (Этап 5 `c17718b`, затем фикс-пасс `70af0a3`) — **прод-фронт = полный Этап 5 с фиксами**.
-- [ ] **base_rev у tutor-edge → закрыть 31.07** (сутки после деплоя истекают): владельцу выдан task-чип «Закрыть NULL base_rev у tutor-edge доски» с полным планом (edge-проверка по образцу student-api + миграция REPLACE `wb_save_page_elements` без NULL-ветки + редеплой whiteboard-api). deploy-sokratai не нужен.
+- [x] **base_rev у tutor-edge закрыт (31.07, сансет по плану)**: edge требует целый `base_rev ≥ 0` для elements-патчей (400 с подсказкой «обновите страницу»); миграция `20260731160000_whiteboard_cas_mandatory.sql` — REPLACE `wb_save_page_elements`, NULL теперь = конфликт (fail-closed, клиент уходит в reconcile). CAS-инвариант чист: каждая запись elements проверяется, без исключений.
 
 ### Фаза 1 «Лист — каждому вошедшему» (2026-07-31) ✅ код готов
 
