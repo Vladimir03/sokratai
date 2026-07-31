@@ -2937,6 +2937,8 @@ export type Database = {
           duration_minutes: number
           exam_type: string
           id: string
+          listening_audio_url: string | null
+          listening_transcript: string | null
           owner_id: string | null
           part1_max: number
           part2_max: number
@@ -2954,6 +2956,8 @@ export type Database = {
           duration_minutes: number
           exam_type?: string
           id?: string
+          listening_audio_url?: string | null
+          listening_transcript?: string | null
           owner_id?: string | null
           part1_max: number
           part2_max: number
@@ -2971,6 +2975,8 @@ export type Database = {
           duration_minutes?: number
           exam_type?: string
           id?: string
+          listening_audio_url?: string | null
+          listening_transcript?: string | null
           owner_id?: string | null
           part1_max?: number
           part2_max?: number
@@ -5788,6 +5794,8 @@ export type Database = {
         Args: {
           _duration_minutes?: number
           _exam_type?: string
+          _listening_audio_url?: string
+          _listening_transcript?: string
           _subject?: string
           _tasks: Json
           _title?: string
