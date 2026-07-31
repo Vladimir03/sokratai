@@ -320,6 +320,7 @@ export type Database = {
           id: string
           page_index: number
           updated_at: string
+          zone_guest_id: string | null
           zone_tutor_student_id: string | null
         }
         Insert: {
@@ -332,6 +333,7 @@ export type Database = {
           id?: string
           page_index?: number
           updated_at?: string
+          zone_guest_id?: string | null
           zone_tutor_student_id?: string | null
         }
         Update: {
@@ -344,6 +346,7 @@ export type Database = {
           id?: string
           page_index?: number
           updated_at?: string
+          zone_guest_id?: string | null
           zone_tutor_student_id?: string | null
         }
         Relationships: [
@@ -352,6 +355,13 @@ export type Database = {
             columns: ["board_id"]
             isOneToOne: false
             referencedRelation: "boards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_pages_zone_guest_id_fkey"
+            columns: ["zone_guest_id"]
+            isOneToOne: false
+            referencedRelation: "board_guests"
             referencedColumns: ["id"]
           },
           {
