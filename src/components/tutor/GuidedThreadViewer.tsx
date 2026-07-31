@@ -28,7 +28,10 @@ import {
 } from '@/hooks/tutorQueryOptions';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
 import { PhotoAnnotateSheet } from '@/components/tutor/photo-annotate/PhotoAnnotateSheet';
+import { sendPhotoToBoard } from '@/components/tutor/photo-annotate/sendPhotoToBoard';
 import { normalizeDegrees } from '@/lib/photoOrientation';
+import { trackPhotoEvent } from '@/lib/photoViewerTelemetry';
+import { useNavigate } from 'react-router-dom';
 import GuidedChatMessage from '@/components/homework/GuidedChatMessage';
 import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
@@ -276,6 +279,7 @@ export function GuidedThreadViewer({
   const [isSending, setIsSending] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachPreview, setAttachPreview] = useState<string | null>(null);
+  const navigate = useNavigate();
   /** Фото, которое сейчас размечают. null — лист закрыт. */
   const [annotateTarget, setAnnotateTarget] = useState<{
     url: string;
@@ -700,6 +704,30 @@ export function GuidedThreadViewer({
     ],
   );
 
+  /** «Разобрать на доске»: фото уезжает на новую доску, туда же уходит и сам тутор. */
+  const handleSendPhotoToBoard = useCallback(
+    (photo: { url: string; ref: string | null; degrees: number }) => {
+      trackPhotoEvent('photo_to_board', { surface: 'homework_thread' });
+      const toastId = toast.loading('Переносим фото на доску…');
+      void sendPhotoToBoard({
+        photoUrl: photo.url,
+        degrees: normalizeDegrees(photo.degrees),
+        studentName: studentDisplayLabel,
+      })
+        .then((boardId) => {
+          toast.dismiss(toastId);
+          navigate(`/tutor/board/${boardId}`);
+        })
+        .catch((error: unknown) => {
+          toast.dismiss(toastId);
+          toast.error(
+            error instanceof Error ? error.message : 'Не удалось перенести фото на доску.',
+          );
+        });
+    },
+    [navigate, studentDisplayLabel],
+  );
+
   const body = (
     <div className="space-y-3">
           {threadQuery.isLoading ? (
@@ -951,6 +979,7 @@ export function GuidedThreadViewer({
                         hiddenFromStudent={message.visible_to_student === false}
                         imageResolver={tutorImageResolver}
                         onAnnotatePhoto={setAnnotateTarget}
+                        onSendPhotoToBoard={handleSendPhotoToBoard}
                         showDateInTimestamp
                         subject={subject}
                       />
