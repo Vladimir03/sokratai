@@ -558,6 +558,19 @@ export async function uploadListeningAudio(
   return { storageRef: `storage://${LISTENING_AUDIO_BUCKET}/${path}` };
 }
 
+/**
+ * Транскрипт аудирования для prefill редактора (edit-режим). Через edge:
+ * listening_transcript отозван у authenticated column-GRANT'ом (20260731190000,
+ * anti-leak «транскрипт = ответы») — прямой PostgREST его не читает ни у кого.
+ */
+export async function getMockExamVariantListening(
+  variantId: string,
+): Promise<{ listening_transcript: string | null }> {
+  return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/listening`, {
+    method: 'GET',
+  });
+}
+
 /** Копия каталожного ИЛИ своего варианта → новый личный (запрос Елены/Ульяны). */
 export async function duplicateMockExamVariant(
   variantId: string,

@@ -39,6 +39,7 @@ import {
   createMockExamVariant,
   deleteMockExamVariant,
   duplicateMockExamVariant,
+  getMockExamVariantListening,
   MockExamApiError,
   replaceMockExamVariantTasks,
   updateMockExamVariantMeta,
@@ -202,12 +203,15 @@ function ListeningAudioSection({
   audioRef,
   transcript,
   disabled,
+  transcriptDisabled,
   onAudioChange,
   onTranscriptChange,
 }: {
   audioRef: string | null;
   transcript: string;
   disabled: boolean;
+  /** Отдельный гейт: prefill транскрипта идёт своим edge-запросом (data-loss гард). */
+  transcriptDisabled: boolean;
   onAudioChange: (ref: string | null) => void;
   onTranscriptChange: (value: string) => void;
 }) {
@@ -324,7 +328,7 @@ function ListeningAudioSection({
           <textarea
             id="listening-transcript"
             value={transcript}
-            disabled={disabled}
+            disabled={transcriptDisabled}
             onChange={(e) => onTranscriptChange(e.target.value)}
             placeholder="Вставьте текст записи. Ученик увидит его только после сдачи пробника — как разбор."
             rows={5}
@@ -575,6 +579,12 @@ function VariantEditorContent() {
   // Аудирование (2026-07-31): storage:// ref трека + ручной транскрипт.
   const [listeningAudioRef, setListeningAudioRef] = useState<string | null>(null);
   const [listeningTranscript, setListeningTranscript] = useState('');
+  // Data-loss гард: в edit-режиме транскрипт приходит ОТДЕЛЬНЫМ edge-запросом
+  // (column-GRANT 20260731190000 закрыл его от PostgREST). Пока запрос не
+  // resolve'нулся (или упал): textarea disabled, а save шлёт undefined
+  // («не менять»), НЕ '' — иначе сбой prefill-фетча молча стирал бы
+  // сохранённый транскрипт.
+  const [transcriptReady, setTranscriptReady] = useState(!isEditMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
@@ -595,8 +605,17 @@ function VariantEditorContent() {
     setPart1Tasks(detail.tasks.filter((t) => t.part === 1).map(rowToDraft));
     setPart2Tasks(detail.tasks.filter((t) => t.part === 2).map(rowToDraft));
     setListeningAudioRef(detail.variant.listening_audio_url ?? null);
-    setListeningTranscript(detail.variant.listening_transcript ?? '');
-  }, [isEditMode, detail]);
+    // Транскрипт — отдельным edge-запросом (см. transcriptReady-гард).
+    void getMockExamVariantListening(editId!)
+      .then((res) => {
+        setListeningTranscript(res.listening_transcript ?? '');
+        setTranscriptReady(true);
+      })
+      .catch(() => {
+        // Гард остаётся false → поле disabled, save не тронет сохранённый транскрипт.
+        toast.error('Не удалось загрузить транскрипт аудирования — поле недоступно, при сохранении он не изменится');
+      });
+  }, [isEditMode, detail, editId]);
 
   // Длительность следует за профилем, пока репетитор не правил поле руками.
   // В edit-режиме молчим — там истина в сохранённом варианте (prefill выше).
@@ -773,10 +792,13 @@ function VariantEditorContent() {
         subject,
         exam,
         duration_minutes: duration,
-        // Тристейт edge: '' = очистить (трек убран), строка = новое значение.
-        // Шлём всегда — редактор владеет полным состоянием listening-полей.
+        // Тристейт edge: '' = очистить (трек убран), строка = новое значение,
+        // undefined = не менять (транскрипт-prefill упал — не стирать
+        // сохранённый, data-loss гард transcriptReady).
         listening_audio_url: listeningAudioRef ?? '',
-        listening_transcript: listeningTranscript.trim(),
+        ...(transcriptReady
+          ? { listening_transcript: listeningTranscript.trim() }
+          : {}),
       });
       invalidateVariantCaches();
       toast.success('Вариант сохранён');
@@ -799,6 +821,7 @@ function VariantEditorContent() {
     editId,
     listeningAudioRef,
     listeningTranscript,
+    transcriptReady,
     buildTasksPayload,
     invalidateVariantCaches,
     navigate,
@@ -985,6 +1008,7 @@ function VariantEditorContent() {
         audioRef={listeningAudioRef}
         transcript={listeningTranscript}
         disabled={contentLocked || isSubmitting}
+        transcriptDisabled={contentLocked || isSubmitting || !transcriptReady}
         onAudioChange={setListeningAudioRef}
         onTranscriptChange={setListeningTranscript}
       />

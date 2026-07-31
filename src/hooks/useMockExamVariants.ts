@@ -26,13 +26,13 @@ export interface MockExamVariantSummary {
   /** NULL = каталожный; non-NULL = мой личный (RLS чужие не отдаёт). */
   owner_id: string | null;
   /**
-   * Аудирование (2026-07-31): storage:// ref трека + ручной транскрипт.
-   * Тьютор-поверхность (RLS «каталог ∪ мои») — транскрипт здесь легален;
-   * студенческий anti-leak живёт в edge-selects (rule 45). undefined =
-   * generated types / старый кэш до регенерации.
+   * Аудирование (2026-07-31): storage:// ref трека. ⚠️ Транскрипта здесь НЕТ
+   * и быть не может: column-GRANT (20260731190000) отозвал listening_transcript
+   * у authenticated — добавление его в клиентский select уронит ВЕСЬ запрос
+   * (permission denied). Prefill транскрипта в редакторе — только через edge
+   * GET /variants/:id/listening (`getMockExamVariantListening`).
    */
   listening_audio_url?: string | null;
-  listening_transcript?: string | null;
 }
 
 export interface MockExamVariantTaskRow {
@@ -57,8 +57,10 @@ export interface MockExamVariantDetail {
   inUse: boolean;
 }
 
+// ⚠️ listening_transcript сюда НЕ добавлять (column-GRANT 20260731190000:
+// колонка отозвана у authenticated — select с ней падает целиком).
 const VARIANT_SUMMARY_SELECT =
-  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url, listening_transcript';
+  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url';
 
 export const MOCK_EXAM_VARIANTS_KEY = ['tutor', 'mock-exams', 'variants'] as const;
 

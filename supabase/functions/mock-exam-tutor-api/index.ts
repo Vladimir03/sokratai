@@ -4515,6 +4515,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return await handleDuplicateVariant(db, userId, seg[1], cors);
     }
 
+    // GET /variants/:id/listening — транскрипт аудирования для prefill
+    // редактора. Отдельный edge-read: listening_transcript отозван у
+    // authenticated column-GRANT'ом (20260731190000 — ученик с row-доступом
+    // «Мои пробники» читал бы ответы аудирования из консоли), а GRANT не
+    // различает tutor/student. service_role + owner-гейт = tutor-only.
+    if (
+      seg.length === 3 && seg[0] === "variants" &&
+      seg[2] === "listening" && route.method === "GET"
+    ) {
+      const variantOrErr = await getOwnedPersonalVariantOrThrow(db, seg[1], userId, cors);
+      if (variantOrErr instanceof Response) return variantOrErr;
+      return jsonOk(cors, {
+        listening_transcript:
+          (variantOrErr.listening_transcript as string | null) ?? null,
+      });
+    }
+
     return jsonError(cors, 404, "NOT_FOUND", `Route not found: ${route.method} /${seg.join("/")}`);
   } catch (err) {
     const elapsed = Date.now() - startTime;
