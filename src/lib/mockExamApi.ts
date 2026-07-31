@@ -444,6 +444,13 @@ export interface CreateMockExamVariantPayload {
   exam: 'ege' | 'oge';
   duration_minutes: number;
   tasks: MockExamVariantTaskInput[];
+  /**
+   * Аудирование (2026-07-31): storage://mock-exam-listening-audio/{userId}/…
+   * Тристейт на update-путях: undefined = не менять, null/'' = убрать трек.
+   */
+  listening_audio_url?: string | null;
+  /** Ручной транскрипт трека (v1). ANTI-LEAK: ученику — только post-submit. */
+  listening_transcript?: string | null;
 }
 
 export async function createMockExamVariant(
@@ -457,7 +464,7 @@ export async function createMockExamVariant(
 
 export async function updateMockExamVariantMeta(
   variantId: string,
-  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes'>>,
+  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript'>>,
 ): Promise<{ updated: true }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}`, {
     method: 'PATCH',
@@ -470,12 +477,85 @@ export async function replaceMockExamVariantTasks(
   tasks: MockExamVariantTaskInput[],
   // Ревью 5.6 P1 #4: мета едет ВМЕСТЕ с задачами — сервер сохраняет всё одной
   // транзакцией (RPC), «предмет сменился, задачи не доехали» невозможен.
-  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes'>>,
+  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript'>>,
 ): Promise<{ updated: true; task_count: number; total_max_score: number }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/tasks`, {
     method: 'PUT',
     body: JSON.stringify({ tasks, ...(meta ?? {}) }),
   });
+}
+
+// ─── Аудирование: upload трека (2026-07-31, запрос Эмилии) ───────────────────
+//
+// Клиент → Storage НАПРЯМУЮ (22 МБ через edge не гоняем — план
+// glistening-humming-forest §3.2). Бакет private, RLS own-namespace
+// {userId}/... (миграция 20260731180000). Edge принимает только storage:// ref.
+
+const LISTENING_AUDIO_BUCKET = 'mock-exam-listening-audio';
+/** Зеркало file_size_limit бакета (50 МБ). Эталон Эмилии — 21.7 МБ / 24 мин. */
+export const MAX_LISTENING_AUDIO_BYTES = 50 * 1024 * 1024;
+
+const LISTENING_AUDIO_MIME_TO_EXT: Record<string, string> = {
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+};
+
+export function validateListeningAudioFile(file: File): string | null {
+  const mime = (file.type || '').toLowerCase().split(';')[0].trim();
+  if (!LISTENING_AUDIO_MIME_TO_EXT[mime]) {
+    return 'Допустимые форматы аудио: MP3, M4A, OGG, WAV, WebM';
+  }
+  if (file.size > MAX_LISTENING_AUDIO_BYTES) {
+    return 'Максимальный размер аудио — 50 МБ';
+  }
+  if (file.size === 0) {
+    return 'Пустой файл';
+  }
+  return null;
+}
+
+/** Safari-safe id (rule 80: crypto.randomUUID требует iOS 15.4+; зеркало kbApi). */
+function generateListeningObjectId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fall through
+    }
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function uploadListeningAudio(
+  file: File,
+): Promise<{ storageRef: string }> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const userId = sessionData?.session?.user?.id;
+  if (!userId) throw new Error('Нет активной сессии');
+
+  const mime = (file.type || '').toLowerCase().split(';')[0].trim();
+  const ext = LISTENING_AUDIO_MIME_TO_EXT[mime] ?? 'mp3';
+  const path = `${userId}/${generateListeningObjectId()}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from(LISTENING_AUDIO_BUCKET)
+    .upload(path, file, {
+      contentType: mime || 'audio/mpeg',
+      // Повторное прослушивание — из кэша (перф-критерий плана §3): контент
+      // иммутабелен (замена трека = новый path).
+      cacheControl: '86400',
+      upsert: false,
+    });
+  if (error) {
+    throw new Error(`Не удалось загрузить аудио: ${error.message}`);
+  }
+  return { storageRef: `storage://${LISTENING_AUDIO_BUCKET}/${path}` };
 }
 
 /** Копия каталожного ИЛИ своего варианта → новый личный (запрос Елены/Ульяны). */

@@ -113,6 +113,20 @@ export interface StudentMockExamVariantSummary {
   task_count: number;
   /** Public URL to PDF with the variant's task list (download for student). */
   variant_pdf_url: string | null;
+  /**
+   * Аудирование (2026-07-31, запрос Эмилии/DELF): browser-facing signed URL
+   * трека секции compréhension orale (6ч TTL, уже proxy-rewritten).
+   * NULL/undefined = вариант без аудио ИЛИ старый edge (deploy-skew) → плеер
+   * скрыт. Транскрипт трека на taking-surface НЕ приходит НИКОГДА (anti-leak
+   * rule 45: транскрипт = ответы аудирования, reveal только post-submit).
+   */
+  listening_audio_url?: string | null;
+  /**
+   * Транскрипт трека аудирования. Приходит ТОЛЬКО из result-эндпоинта
+   * (post-submit reveal — тот же контракт, что correct_answer Ч1). На
+   * taking-surface всегда undefined.
+   */
+  listening_transcript?: string | null;
 }
 
 export interface StudentMockExamPart1Saved {

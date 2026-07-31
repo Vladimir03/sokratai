@@ -39,6 +39,9 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const PART2_PHOTO_BUCKET = "mock-exam-part2-photos";
 const BLANK_PHOTO_BUCKET = "mock-exam-blanks";
 const SIGNED_URL_TTL_SEC = 3600;
+// Аудирование: трек слушают в течение всего пробника (DELF до 210 мин) —
+// часовая ссылка протухла бы посреди попытки. 6 часов покрывает любой exam_mode.
+const AUDIO_SIGNED_URL_TTL_SEC = 6 * 3600;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_PHOTO_MIME = new Set([
   "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
@@ -178,12 +181,16 @@ function toStorageRef(bucket: string, path: string): string {
   return `storage://${bucket}/${path}`;
 }
 
-async function resolveSignedUrl(db: SupabaseClient, ref: string | null): Promise<string | null> {
+async function resolveSignedUrl(
+  db: SupabaseClient,
+  ref: string | null,
+  ttlSec: number = SIGNED_URL_TTL_SEC,
+): Promise<string | null> {
   const parsed = parseStorageRef(ref);
   if (!parsed) return null;
   const { data, error } = await db.storage
     .from(parsed.bucket)
-    .createSignedUrl(parsed.path, SIGNED_URL_TTL_SEC);
+    .createSignedUrl(parsed.path, ttlSec);
   if (error || !data?.signedUrl) {
     console.warn("mock_exam_student_signed_url_failed", { error: error?.message });
     return null;
@@ -326,9 +333,12 @@ async function handleGetStudentAssignment(
   let variant: Record<string, unknown> | null = null;
   let tasks: Record<string, unknown>[] = [];
   if (assignment.variant_id) {
+    // ANTI-LEAK (rule 45): listening_transcript НЕ селектится на taking-surface —
+    // транскрипт трека аудирования = ответы (leak-класс solution_text), он
+    // раскрывается только post-submit в handleGetResult. Само аудио — условие.
     const { data: variantRow, error: variantErr } = await db
       .from("mock_exam_variants")
-      .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url")
+      .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url, listening_audio_url")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     // Rule 45: НЕ глотать error supabase-запроса (класс инцидента 2026-06-08 —
@@ -431,6 +441,13 @@ async function handleGetStudentAssignment(
         variant_pdf_url: variant.variant_pdf_url
           ? rewriteToProxy(variant.variant_pdf_url as string)
           : null,
+        // Аудирование: signed URL приватного бакета (6ч TTL — на весь пробник).
+        // NULL = вариант без аудио, клиент скрывает плеер.
+        listening_audio_url: await resolveSignedUrl(
+          db,
+          variant.listening_audio_url as string | null,
+          AUDIO_SIGNED_URL_TTL_SEC,
+        ),
       }
       : null,
     tasks,
@@ -590,11 +607,15 @@ async function handleGetResult(
   let variant: Record<string, unknown> | null = null;
   const variantTasksByKim: Record<number, Record<string, unknown>> = {};
   if (assignment.variant_id) {
+    // listening_* здесь легальны: до result-эндпоинта доходят только post-submit
+    // статусы (early-reject 409 выше) + manually_entered. Транскрипт аудирования
+    // раскрывается post-submit — тот же reveal-контракт, что correct_answer Ч1 и
+    // solution_text Ч2 (2026-06-02, one-shot exam).
     const { data: variantRow, error: variantErr } = await db
       .from("mock_exam_variants")
       .select(
         "id, title, subject, exam_type, duration_minutes, total_max_score, " +
-          "part1_max, part2_max, task_count",
+          "part1_max, part2_max, task_count, listening_audio_url, listening_transcript",
       )
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
@@ -885,6 +906,15 @@ async function handleGetResult(
         part1_max: variant.part1_max,
         part2_max: variant.part2_max,
         task_count: variant.task_count,
+        // Аудирование, post-submit reveal (early-reject гарантирует не-pre-submit):
+        // аудио — переслушать при разборе; транскрипт — «что звучало» (ценность
+        // работы над ошибками, как эталон Ч2).
+        listening_audio_url: await resolveSignedUrl(
+          db,
+          (variant.listening_audio_url as string | null) ?? null,
+          AUDIO_SIGNED_URL_TTL_SEC,
+        ),
+        listening_transcript: (variant.listening_transcript as string | null) ?? null,
       }
       : null,
     attempt: {

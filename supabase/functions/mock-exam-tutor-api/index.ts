@@ -72,6 +72,12 @@ const VARIANT_DURATION_MAX_MIN = 600;
 // kb-attachments — клиентские загрузки (строго own-namespace {userId}/...),
 // mock-exam-variant-tasks — каталожный контент (копии при duplicate).
 const VARIANT_IMAGE_BUCKETS = new Set(["kb-attachments", "mock-exam-variant-tasks"]);
+// Аудирование (2026-07-31, запрос Эмилии): трек секции compréhension orale.
+// Клиент льёт напрямую в приватный бакет (own-namespace RLS), edge принимает
+// только storage:// ref — байты аудио через edge не гоняем (22 МБ, план §3.2).
+const VARIANT_AUDIO_BUCKETS = new Set(["mock-exam-listening-audio"]);
+// Транскрипт 24-мин трека ≈ 25К символов французского текста; кап с запасом.
+const VARIANT_TRANSCRIPT_MAX = 40000;
 
 const SLUG_RE = /^[a-z0-9]{8}$/i;
 const SLUG_MAX_RETRIES = 5;
@@ -3653,6 +3659,69 @@ function validateVariantImageField(
   return { ok: true, value: trimmed };
 }
 
+/** Валидация listening-полей варианта (аудирование, 2026-07-31).
+ *  Тристейт для RPC: undefined = поле не прислано → не менять (RPC NULL);
+ *  null/'' = явная очистка (RPC ''); строка = новое значение.
+ *  ANTI-LEAK: listening_transcript = ответы аудирования — leak-контракт
+ *  обеспечивают student/public edges (transcript только post-submit),
+ *  здесь только санитизация входа. */
+function validateVariantListeningFields(
+  b: Record<string, unknown>,
+):
+  | { ok: true; audioUrl: string | null | undefined; transcript: string | null | undefined }
+  | { ok: false; message: string } {
+  let audioUrl: string | null | undefined = undefined;
+  if (b.listening_audio_url !== undefined) {
+    if (b.listening_audio_url === null || b.listening_audio_url === "") {
+      audioUrl = null; // очистка
+    } else if (typeof b.listening_audio_url !== "string") {
+      return { ok: false, message: "ссылка на аудио должна быть строкой" };
+    } else {
+      const trimmed = b.listening_audio_url.trim();
+      if (trimmed === "") {
+        audioUrl = null;
+      } else {
+        // Ровно ОДИН ref (трек секции цельный — файл Эмилии `integral`).
+        const refs = parseAttachmentUrls(trimmed);
+        if (refs.length !== 1) {
+          return { ok: false, message: "аудио — один файл (storage://)" };
+        }
+        const parsed = parseStorageRef(refs[0]);
+        if (!parsed || !VARIANT_AUDIO_BUCKETS.has(parsed.bucket)) {
+          return { ok: false, message: "аудио должно быть загружено через Сократ (storage://mock-exam-listening-audio/...)" };
+        }
+        audioUrl = trimmed;
+      }
+    }
+  }
+
+  let transcript: string | null | undefined = undefined;
+  if (b.listening_transcript !== undefined) {
+    if (b.listening_transcript === null || b.listening_transcript === "") {
+      transcript = null; // очистка
+    } else if (typeof b.listening_transcript !== "string") {
+      return { ok: false, message: "транскрипт должен быть строкой" };
+    } else {
+      const trimmed = b.listening_transcript.trim();
+      if (trimmed === "") {
+        transcript = null;
+      } else if (trimmed.length > VARIANT_TRANSCRIPT_MAX) {
+        return { ok: false, message: `транскрипт слишком длинный (максимум ${VARIANT_TRANSCRIPT_MAX} символов)` };
+      } else {
+        transcript = trimmed;
+      }
+    }
+  }
+
+  return { ok: true, audioUrl, transcript };
+}
+
+/** Тристейт → аргумент RPC: undefined → NULL (не менять), null → '' (очистить). */
+function listeningFieldToRpcArg(value: string | null | undefined): string | null {
+  if (value === undefined) return null;
+  return value ?? "";
+}
+
 /** Маппинг RAISE-кодов вариант-RPC → HTTP (rule 97: русские фразы). */
 function mapVariantRpcError(
   message: string | undefined,
@@ -3861,6 +3930,12 @@ async function handleCreateVariant(
     return jsonError(cors, 400, "VALIDATION", tasksCheck.message);
   }
 
+  // Аудирование (2026-07-31): опциональный трек + транскрипт в мете варианта.
+  const listeningCheck = validateVariantListeningFields(b);
+  if (!listeningCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
+  }
+
   // Ревью 5.6 P1 #5: мета + задачи ОДНОЙ транзакцией (RPC) — двухфазный
   // insert с best-effort rollback-delete мог оставить назначаемый «пустой»
   // вариант с ненулевыми тоталами.
@@ -3877,6 +3952,8 @@ async function handleCreateVariant(
         owner_id: tutorUserId,
         subject,
         variant_pdf_url: null,
+        listening_audio_url: listeningCheck.audioUrl ?? null,
+        listening_transcript: listeningCheck.transcript ?? null,
       },
       _tasks: tasksCheck.tasks,
     },
@@ -3915,7 +3992,10 @@ async function handleUpdateVariantMeta(
 
   // Жёсткий whitelist ключей (урок PATCH /templates, rule 40): неизвестный
   // ключ → 400, а не silent ignore.
-  const ALLOWED = new Set(["title", "subject", "exam", "duration_minutes"]);
+  const ALLOWED = new Set([
+    "title", "subject", "exam", "duration_minutes",
+    "listening_audio_url", "listening_transcript",
+  ]);
   const unknownKey = Object.keys(b).find((k) => !ALLOWED.has(k));
   if (unknownKey !== undefined) {
     return jsonError(cors, 400, "VALIDATION", `Неизвестное поле: ${unknownKey}`);
@@ -3934,8 +4014,19 @@ async function handleUpdateVariantMeta(
     patch.title = title;
   }
 
+  // Аудирование = content-мета: смена трека/транскрипта назначенного варианта
+  // запрещена («что видел ученик = что проверялось», тот же инвариант, что
+  // состав задач). Гейтится VARIANT_IN_USE ниже вместе с subject/exam/duration.
+  const listeningCheck = validateVariantListeningFields(b);
+  if (!listeningCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
+  }
+  const touchesListening =
+    b.listening_audio_url !== undefined || b.listening_transcript !== undefined;
+
   const touchesContentMeta =
-    b.subject !== undefined || b.exam !== undefined || b.duration_minutes !== undefined;
+    b.subject !== undefined || b.exam !== undefined || b.duration_minutes !== undefined ||
+    touchesListening;
 
   if (touchesContentMeta) {
     // Ревью 5.6 P1 #3: content-мета — через ту же RPC (_tasks NULL = meta-only):
@@ -3978,6 +4069,9 @@ async function handleUpdateVariantMeta(
       // exam_type пересчитывается при любой смене subject/exam (легаси-гейт физики).
       _exam_type: resolveVariantExamType(subject, exam),
       _duration_minutes: duration,
+      // Тристейт: undefined → NULL (не менять), null → '' (очистить).
+      _listening_audio_url: listeningFieldToRpcArg(listeningCheck.audioUrl),
+      _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
     });
     if (rpcErr) {
       const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4071,6 +4165,12 @@ async function handleReplaceVariantTasks(
     metaExamType = resolveVariantExamType(effSubject, effExam);
   }
 
+  // Аудирование (2026-07-31): редактор шлёт listening-поля тем же сохранением.
+  const listeningCheck = validateVariantListeningFields(b);
+  if (!listeningCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
+  }
+
   const { error: rpcErr } = await db.rpc("mock_exam_variant_replace_tasks", {
     _variant_id: variantId,
     _tasks: tasksCheck.tasks,
@@ -4078,6 +4178,8 @@ async function handleReplaceVariantTasks(
     _subject: metaSubject,
     _exam_type: metaExamType,
     _duration_minutes: metaDuration,
+    _listening_audio_url: listeningFieldToRpcArg(listeningCheck.audioUrl),
+    _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
   });
   if (rpcErr) {
     const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4141,6 +4243,11 @@ async function handleDuplicateVariant(
         subject: (source.subject as string | null) ?? "physics",
         // PDF условий НЕ копируем: после замены задач он стал бы враньём.
         variant_pdf_url: null,
+        // Аудирование НЕ копируем (та же логика + blob остался бы в чужом
+        // own-namespace бакета — копия ссылалась бы на файл исходного владельца,
+        // который тот может удалить). Владелец копии прикрепляет трек заново.
+        listening_audio_url: null,
+        listening_transcript: null,
       },
       _tasks: sourceTasks,
     },

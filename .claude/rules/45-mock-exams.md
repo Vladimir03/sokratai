@@ -20,6 +20,8 @@ Reveal зависит от `attempt.status`. Это **не** «никогда н
 
 `mock_exam_variant_tasks` SELECT — **tutor-only** (`is_tutor(auth.uid())`, миграция `20260607130000`). Ученик читал бы `correct_answer` и эталоны Части 2 прямым PostgREST посреди экзамена. Новое клиентское чтение этой таблицы — только tutor-only; студенческие пути идут через service_role edge.
 
+**Аудирование (2026-07-31, DELF Эмилии): ДВА транскрипта с ПРОТИВОПОЛОЖНЫМИ правилами.** `mock_exam_variants.listening_transcript` (транскрипт ТРЕК-УСЛОВИЯ) = ответы аудирования → leak-класс `solution_text`: НЕ селектить на taking/invite-поверхностях, reveal ТОЛЬКО post-submit в result. Само аудио (`listening_audio_url`) — условие, доступно в `in_progress` (signed URL 6ч, `rewriteToProxy`). НЕ путать с транскриптом РЕЧИ УЧЕНИКА (voice-speaking, rule 40) — тот виден ученику всегда (его же речь). Аудио-байты через edge не гонять (22 МБ) — клиент→Storage напрямую, edge только `storage://` ref.
+
 ## Варианты — ownership и единственный write-path
 
 - **Единственный write-path вариантов — edge `mock-exam-tutor-api`** (клиентских write-политик/грантов на `mock_exam_variants` / `_variant_tasks` нет). Замена задач — атомарной RPC (`mock_exam_variant_replace_tasks`), не delete+insert из edge.

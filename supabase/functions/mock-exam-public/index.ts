@@ -51,6 +51,10 @@ const LEAD_NAME_MAX = 200;
 const LEAD_CONTACT_MAX = 200;
 const VALID_CONTACT_TYPES = new Set(["telegram", "email"]);
 const VARIANT_TASK_BUCKET = "mock-exam-variant-tasks";
+// Аудирование (2026-07-31): трек — условие, доступен на anonymous taking
+// surface; транскрипт = ответы, раскрывается только в parent_result.
+const LISTENING_AUDIO_BUCKET = "mock-exam-listening-audio";
+const AUDIO_SIGNED_URL_TTL_SEC = 6 * 3600;
 const PART2_PHOTO_BUCKET = "mock-exam-part2-photos";
 const BLANK_BUCKET = "mock-exam-blanks";
 
@@ -149,6 +153,7 @@ async function resolveSignedUrl(
   db: SupabaseClient,
   ref: string | null | undefined,
   defaultBucket: string,
+  ttlSec: number = SIGNED_URL_TTL_SEC,
 ): Promise<string | null> {
   if (!ref) return null;
   // Pass-through absolute HTTPS URLs (e.g. external image hosting).
@@ -157,7 +162,7 @@ async function resolveSignedUrl(
   if (!parsed) return null;
   const { data, error } = await db.storage
     .from(parsed.bucket)
-    .createSignedUrl(parsed.objectPath, SIGNED_URL_TTL_SEC);
+    .createSignedUrl(parsed.objectPath, ttlSec);
   if (error || !data?.signedUrl) {
     console.warn("mock_exam_public_signed_url_failed", {
       bucket: parsed.bucket,
@@ -270,13 +275,17 @@ async function handleInviteRead(
   }
 
   // Variant metadata — public-safe (catalog item).
+  // ANTI-LEAK: listening_transcript НЕ селектится — это anonymous taking
+  // surface, транскрипт трека = ответы аудирования (rule 45). Само аудио —
+  // условие задачи, как task_image_url.
   const { data: variant } = await db
     .from("mock_exam_variants")
     .select(
       // `subject` — ревью 5.6 P1 #4: публичное приглашение обязано знать предмет,
       // иначе ученик обществознания читает «пробник по физике».
       "title, exam_type, subject, source, source_attribution, " +
-        "duration_minutes, total_max_score, part1_max, part2_max, task_count",
+        "duration_minutes, total_max_score, part1_max, part2_max, task_count, " +
+        "listening_audio_url",
     )
     .eq("id", assignment.variant_id)
     .maybeSingle();
@@ -338,6 +347,13 @@ async function handleInviteRead(
         part1_max: variant.part1_max,
         part2_max: variant.part2_max,
         task_count: variant.task_count,
+        // Аудирование: signed URL трека (6ч TTL). NULL = плеер скрыт.
+        listening_audio_url: await resolveSignedUrl(
+          db,
+          variant.listening_audio_url as string | null,
+          LISTENING_AUDIO_BUCKET,
+          AUDIO_SIGNED_URL_TTL_SEC,
+        ),
       }
       : null,
     tasks,

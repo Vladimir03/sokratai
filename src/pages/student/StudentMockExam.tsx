@@ -9,6 +9,7 @@ import {
   Clock3,
   Download,
   FileText,
+  Headphones,
   Image as ImageIcon,
   Loader2,
   Pause,
@@ -670,6 +671,45 @@ const GenericAnswerInstructionsPanel = memo(function GenericAnswerInstructionsPa
         </div>
       )}
     </Card>
+  );
+});
+
+/**
+ * Аудирование (2026-07-31, запрос Эмилии/DELF, план glistening-humming-forest):
+ * плеер трека compréhension orale над секцией Часть 1.
+ *
+ * - Гейт — наличие `listening_audio_url` в payload (data-driven, предметно-
+ *   нейтрально: вариант без аудио не рендерит панель ни для какого предмета).
+ * - Нативный <audio controls> — scrubbing + скорость 1.5× бесплатно (тот же
+ *   выбор, что SpeakingSubmissionPlayer в GuidedThreadViewer).
+ * - preload="metadata" — НЕ тянуть 22 МБ при открытии пробника (перф-критерий
+ *   плана §3: старт страницы не зависит от размера трека).
+ * - sticky top — трек играет, пока ученик скроллит вопросы секции.
+ * - Транскрипт трека сюда НЕ приходит (anti-leak rule 45) — appears only
+ *   в результате post-submit.
+ */
+const ListeningAudioPanel = memo(function ListeningAudioPanel({ url }: { url: string }) {
+  return (
+    <div className="sticky top-2 z-20">
+      <Card className="border-sky-200 bg-sky-50/95 shadow-sm backdrop-blur-sm">
+        <CardContent className="p-3 sm:p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+            <h2 className="text-sm font-semibold text-slate-900">Аудирование</h2>
+            <span className="text-xs text-slate-500">— прослушай запись и ответь на вопросы</span>
+          </div>
+          {/* touch-manipulation: контролы плеера тапаются на iOS без 300ms delay */}
+          <audio
+            controls
+            preload="metadata"
+            src={url}
+            className="h-10 w-full touch-manipulation"
+          >
+            Ваш браузер не поддерживает воспроизведение аудио.
+          </audio>
+        </CardContent>
+      </Card>
+    </div>
   );
 });
 
@@ -1466,6 +1506,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           <div className="space-y-4">
             {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsEgeVariant} />}
             {isPhysicsEgeVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
+            {/* Аудирование: гейт — наличие трека в варианте (data-driven). */}
+            {data.variant?.listening_audio_url && (
+              <ListeningAudioPanel url={data.variant.listening_audio_url} />
+            )}
           </div>
 
           <section className="mt-6 space-y-3">

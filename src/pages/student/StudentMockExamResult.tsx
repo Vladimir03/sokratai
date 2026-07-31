@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
+  Headphones,
   Hourglass,
   Loader2,
   MinusCircle,
@@ -761,6 +762,71 @@ function TopPreparingSummary() {
   );
 }
 
+// ─── Аудирование: транскрипт + переслушивание (2026-07-31, запрос Эмилии) ────
+//
+// Post-submit reveal (rule 45): транскрипт трека = ответы аудирования, поэтому
+// на taking-surface он НЕ приходит вообще (нет в edge-select); здесь ученик
+// разбирает ошибки — читает «что звучало» и может переслушать трек. Тот же
+// reveal-класс, что correct_answer Части 1 и эталон Части 2. Collapsed by
+// default: транскрипт длинный (24-мин трек ≈ страницы текста), не должен
+// расталкивать разбалловку.
+function ListeningTranscriptCard({
+  audioUrl,
+  transcript,
+}: {
+  audioUrl: string | null;
+  transcript: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  if (!audioUrl && !transcript) return null;
+
+  return (
+    <Card className="mb-3 overflow-hidden shadow-none hover:shadow-sm">
+      <button
+        type="button"
+        className="flex min-h-11 w-full touch-manipulation items-center justify-between gap-3 px-4 py-3 text-left"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-2">
+          <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Аудирование</h2>
+            <p className="text-sm text-slate-500">
+              {transcript ? 'Запись и транскрипт — для работы над ошибками' : 'Запись — можно переслушать'}
+            </p>
+          </div>
+        </div>
+        <ChevronDown className={cn('h-5 w-5 text-slate-500 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-slate-100 px-4 py-4">
+          {audioUrl && (
+            <audio
+              controls
+              preload="metadata"
+              src={audioUrl}
+              className="h-10 w-full touch-manipulation"
+            >
+              Ваш браузер не поддерживает воспроизведение аудио.
+            </audio>
+          )}
+          {transcript && (
+            <div>
+              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Транскрипт записи
+              </p>
+              <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-slate-700">
+                {transcript}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function FinalSummary({
   totalScore,
   totalMax,
@@ -1130,6 +1196,14 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
                   status={status}
                 />
               )}
+
+              {/* Аудирование: транскрипт + переслушивание — post-submit reveal
+                  (edge отдаёт listening_* только из result-эндпоинта). Рядом с
+                  разбором Части 1: вопросы аудирования живут в ней. */}
+              <ListeningTranscriptCard
+                audioUrl={view.variant?.listening_audio_url ?? null}
+                transcript={view.variant?.listening_transcript ?? null}
+              />
 
               {isPending && (
                 <Part2PreliminarySection

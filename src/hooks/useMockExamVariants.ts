@@ -25,6 +25,14 @@ export interface MockExamVariantSummary {
   task_count: number;
   /** NULL = каталожный; non-NULL = мой личный (RLS чужие не отдаёт). */
   owner_id: string | null;
+  /**
+   * Аудирование (2026-07-31): storage:// ref трека + ручной транскрипт.
+   * Тьютор-поверхность (RLS «каталог ∪ мои») — транскрипт здесь легален;
+   * студенческий anti-leak живёт в edge-selects (rule 45). undefined =
+   * generated types / старый кэш до регенерации.
+   */
+  listening_audio_url?: string | null;
+  listening_transcript?: string | null;
 }
 
 export interface MockExamVariantTaskRow {
@@ -50,7 +58,7 @@ export interface MockExamVariantDetail {
 }
 
 const VARIANT_SUMMARY_SELECT =
-  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id';
+  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url, listening_transcript';
 
 export const MOCK_EXAM_VARIANTS_KEY = ['tutor', 'mock-exams', 'variants'] as const;
 

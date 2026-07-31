@@ -13,6 +13,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Copy,
+  Headphones,
   ImagePlus,
   Loader2,
   Lock,
@@ -41,6 +42,8 @@ import {
   MockExamApiError,
   replaceMockExamVariantTasks,
   updateMockExamVariantMeta,
+  uploadListeningAudio,
+  validateListeningAudioFile,
   type MockExamVariantTaskInput,
 } from '@/lib/mockExamApi';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
@@ -184,6 +187,156 @@ function TaskImageAttachment({
       ) : null}
       <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
     </div>
+  );
+}
+
+// ─── Аудирование: трек + ручной транскрипт (2026-07-31, запрос Эмилии) ───────
+//
+// Compréhension orale: ОДИН цельный трек на вариант (эталон Эмилии —
+// `...integral.mp3`, вся секция с экзаменационными паузами, 21.7 МБ / 24 мин).
+// Upload — клиент → Storage напрямую (private бакет, own-namespace RLS);
+// self-check плеер — client-side signed URL (getKBImageSignedUrl умеет любой
+// бакет из storage:// ref). Транскрипт — ручной ввод (v1, как на progress.me);
+// ученик увидит его ТОЛЬКО после сдачи (anti-leak rule 45, edge-контракт).
+function ListeningAudioSection({
+  audioRef,
+  transcript,
+  disabled,
+  onAudioChange,
+  onTranscriptChange,
+}: {
+  audioRef: string | null;
+  transcript: string;
+  disabled: boolean;
+  onAudioChange: (ref: string | null) => void;
+  onTranscriptChange: (value: string) => void;
+}) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [audioFailed, setAudioFailed] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setAudioFailed(false);
+    setSignedUrl(null);
+    if (!audioRef) return;
+    let cancelled = false;
+    void getKBImageSignedUrl(audioRef).then((url) => {
+      if (cancelled) return;
+      if (url) setSignedUrl(url);
+      else setAudioFailed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [audioRef]);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const validationError = validateListeningAudioFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadListeningAudio(file);
+      onAudioChange(res.storageRef);
+      toast.success('Аудио загружено — проверьте воспроизведение ниже');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Не удалось загрузить аудио');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Card animate={false}>
+      <CardContent className="p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            Аудирование · необязательно
+          </p>
+        </div>
+        <p className="text-sm text-slate-500">
+          Аудиотрек секции аудирования (один файл на вариант, до 50 МБ — MP3, M4A, OGG, WAV).
+          Ученик слушает его во время пробника; вопросы по треку добавляйте как обычные задачи Части 1.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={disabled || uploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 [touch-action:manipulation]"
+          >
+            {uploading ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Headphones className="h-4 w-4" aria-hidden="true" />
+            )}
+            {uploading ? 'Загружаем…' : audioRef ? 'Заменить аудио' : 'Загрузить аудио'}
+          </button>
+          {audioRef ? (
+            <button
+              type="button"
+              disabled={disabled || uploading}
+              onClick={() => onAudioChange(null)}
+              className="rounded-lg px-2.5 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 [touch-action:manipulation]"
+            >
+              Убрать
+            </button>
+          ) : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="audio/*,.mp3,.m4a,.ogg,.wav"
+            onChange={handleFile}
+            className="hidden"
+          />
+        </div>
+
+        {audioRef ? (
+          audioFailed ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              Аудиофайл недоступен — загрузите заново.
+            </p>
+          ) : signedUrl ? (
+            // Self-check: репетитор слушает, что загрузилось (playback-before-use).
+            <audio controls preload="metadata" src={signedUrl} className="h-10 w-full [touch-action:manipulation]">
+              Ваш браузер не поддерживает воспроизведение аудио.
+            </audio>
+          ) : (
+            <div className="flex h-10 items-center gap-2 text-sm text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Готовим плеер…
+            </div>
+          )
+        ) : null}
+
+        <div>
+          <Label htmlFor="listening-transcript" className="mb-1 block text-xs font-semibold text-slate-500">
+            Транскрипт записи
+          </Label>
+          <textarea
+            id="listening-transcript"
+            value={transcript}
+            disabled={disabled}
+            onChange={(e) => onTranscriptChange(e.target.value)}
+            placeholder="Вставьте текст записи. Ученик увидит его только после сдачи пробника — как разбор."
+            rows={5}
+            maxLength={40000}
+            className={cn(INPUT_CLASS, 'min-h-[120px] resize-y leading-relaxed')}
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            До сдачи транскрипт ученику не показывается — он появится в результате для работы над ошибками.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -419,6 +572,9 @@ function VariantEditorContent() {
   const [part2Tasks, setPart2Tasks] = useState<VariantTaskDraft[]>(
     () => cartPrefill?.drafts.filter((d) => d.part === 2) ?? [],
   );
+  // Аудирование (2026-07-31): storage:// ref трека + ручной транскрипт.
+  const [listeningAudioRef, setListeningAudioRef] = useState<string | null>(null);
+  const [listeningTranscript, setListeningTranscript] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
@@ -438,6 +594,8 @@ function VariantEditorContent() {
     setDurationText(String(detail.variant.duration_minutes));
     setPart1Tasks(detail.tasks.filter((t) => t.part === 1).map(rowToDraft));
     setPart2Tasks(detail.tasks.filter((t) => t.part === 2).map(rowToDraft));
+    setListeningAudioRef(detail.variant.listening_audio_url ?? null);
+    setListeningTranscript(detail.variant.listening_transcript ?? '');
   }, [isEditMode, detail]);
 
   // Длительность следует за профилем, пока репетитор не правил поле руками.
@@ -585,6 +743,8 @@ function VariantEditorContent() {
           exam,
           duration_minutes: duration,
           tasks: tasksPayload,
+          listening_audio_url: listeningAudioRef,
+          listening_transcript: listeningTranscript.trim() || null,
         });
         // Ф3: пер-предметный last-used экзамена (дефолт следующего create).
         saveExamLastUsed(subject, exam);
@@ -613,6 +773,10 @@ function VariantEditorContent() {
         subject,
         exam,
         duration_minutes: duration,
+        // Тристейт edge: '' = очистить (трек убран), строка = новое значение.
+        // Шлём всегда — редактор владеет полным состоянием listening-полей.
+        listening_audio_url: listeningAudioRef ?? '',
+        listening_transcript: listeningTranscript.trim(),
       });
       invalidateVariantCaches();
       toast.success('Вариант сохранён');
@@ -633,6 +797,8 @@ function VariantEditorContent() {
     subject,
     exam,
     editId,
+    listeningAudioRef,
+    listeningTranscript,
     buildTasksPayload,
     invalidateVariantCaches,
     navigate,
@@ -812,6 +978,16 @@ function VariantEditorContent() {
           ) : null}
         </CardContent>
       </Card>
+
+      {/* Аудирование (2026-07-31, запрос Эмилии/DELF): трек + ручной транскрипт.
+          Content-мета — заморожена вместе с задачами у назначенного варианта. */}
+      <ListeningAudioSection
+        audioRef={listeningAudioRef}
+        transcript={listeningTranscript}
+        disabled={contentLocked || isSubmitting}
+        onAudioChange={setListeningAudioRef}
+        onTranscriptChange={setListeningTranscript}
+      />
 
       {/* AI-загрузка задач из PDF/фото — shared loader (destination mock_variant).
           Задачи распределяются по частям автоматически (физика КИМ 21-26 → Ч2). */}
