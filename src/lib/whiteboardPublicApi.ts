@@ -28,21 +28,41 @@ interface GuestFetchResult {
   body: Record<string, unknown>;
 }
 
+/** Кап на запрос (ревью синк-пасса, P0): fetch без ответа на мобильной сети
+ * висит минутами — зависший tick/resync держал бы busy-флаги НАВСЕГДА и
+ * поллинг гостя умирал. Ручной AbortController (AbortSignal.timeout — Safari
+ * < 16, rule 80). Сбой по таймауту = обычная сетевая ошибка: следующий тик
+ * повторит. */
+const GUEST_FETCH_TIMEOUT_MS = 15_000;
+
 async function guestFetch(
   path: string,
   init: { method: 'GET' | 'POST'; body?: unknown; guestToken?: string } = { method: 'GET' },
 ): Promise<GuestFetchResult> {
-  const resp = await fetch(`${BASE}${path}`, {
-    method: init.method,
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      // bearer гостя — ЗАГОЛОВКОМ, не query: URL оседает в access-логах,
-      // истории и диагностических дампах (внешнее ревью, P1).
-      ...(init.guestToken ? { 'X-Guest-Token': init.guestToken } : {}),
-      ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
-  });
+  const controller = new AbortController();
+  const killer = setTimeout(() => controller.abort(), GUEST_FETCH_TIMEOUT_MS);
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE}${path}`, {
+      method: init.method,
+      signal: controller.signal,
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        // bearer гостя — ЗАГОЛОВКОМ, не query: URL оседает в access-логах,
+        // истории и диагностических дампах (внешнее ревью, P1).
+        ...(init.guestToken ? { 'X-Guest-Token': init.guestToken } : {}),
+        ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+    });
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new GuestBoardError('Доска не отвечает — проверьте интернет.', 'TIMEOUT', 0);
+    }
+    throw err;
+  } finally {
+    clearTimeout(killer);
+  }
   let body: Record<string, unknown> = {};
   try {
     body = (await resp.json()) as Record<string, unknown>;

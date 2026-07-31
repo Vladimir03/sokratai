@@ -88,6 +88,61 @@ export interface BoardLiveControls {
 
 /** Кап payload'а element-события: крупнее — только DB-путём (rev-сигнал ≤1 с). */
 export const ELEMENT_MAX_JSON = 30_000;
+/** Приёмные капы (ревью синк-пасса, P0 №4): участник канала может прислать
+ * произвольный payload — размер режем и на входе, не только на отправке. */
+const ELEMENT_MAX_POINTS = 12_000; // чисел в points (~4000 точек)
+const ELEMENT_MAX_TEXT = 4000;
+/** Сколько живёт неподтверждённый broadcast-элемент в render-оверлее
+ * получателя. БД-путь подтверждает за ~1 с; не подтверждён за TTL — фантом
+ * (undo автора до сейва / инъекция) и исчезает, НЕ попав в сцену. */
+export const ELEMENT_OVERLAY_TTL_MS = 10_000;
+
+export interface LiveOverlayEntry {
+  element: BoardElement;
+  at: number;
+}
+/** pageId → неподтверждённые broadcast-элементы (render-only, НЕ сцена). */
+export type LiveOverlayMap = Record<string, LiveOverlayEntry[]>;
+
+/** Метла оверлея: выкидывает подтверждённые БД (id уже в elements листа),
+ * просроченные по TTL и осиротевшие (лист удалён). Возвращает prev без
+ * изменений, если чистить нечего — не дёргает setState каждые 3 с. */
+export function pruneLiveOverlays(
+  prev: LiveOverlayMap,
+  frames: { id: string; elements: BoardElement[] }[],
+  now: number,
+): LiveOverlayMap {
+  let changed = false;
+  const next: LiveOverlayMap = {};
+  for (const pageId of Object.keys(prev)) {
+    const frame = frames.find((f) => f.id === pageId);
+    const kept = prev[pageId].filter((o) => {
+      if (now - o.at > ELEMENT_OVERLAY_TTL_MS) return false;
+      if (!frame) return false;
+      return !frame.elements.some((el) => el.id === o.element.id);
+    });
+    if (kept.length !== prev[pageId].length) changed = true;
+    if (kept.length > 0) next[pageId] = kept;
+  }
+  return changed ? next : prev;
+}
+
+/** Элементы листа для РЕНДЕРА: сцена + неподтверждённый оверлей (без дублей).
+ * Если оверлея нет — возвращает исходный массив (memo FrameLayer не рвётся). */
+export function overlayElementsFor(
+  overlays: LiveOverlayMap,
+  pageId: string,
+  elements: BoardElement[],
+): BoardElement[] {
+  const list = overlays[pageId];
+  if (!list || list.length === 0) return elements;
+  const known = new Set(elements.map((el) => el.id));
+  const extra: BoardElement[] = [];
+  for (const o of list) {
+    if (!known.has(o.element.id)) extra.push(o.element);
+  }
+  return extra.length > 0 ? [...elements, ...extra] : elements;
+}
 
 /** Бейдж «репетитор смотрит» гаснет без пинга follow за это время. */
 export const FOLLOW_STALE_MS = 25_000;
@@ -267,9 +322,15 @@ export function connectBoardLive(
       if (typeof e.pageId !== 'string' || !e.pageId) return;
       // parseElements — канонический санитайзер jsonb-входа (model.ts): битый
       // payload участника отбрасывается, а не роняет сцену получателя.
+      // ⚠️ Получатель НЕ доверяет событию запись: элемент идёт только в
+      // render-оверлей (SharedBoardView/Whiteboard) и никогда не сохраняется —
+      // источником истины остаётся БД с серверным zone-enforcement.
       const parsed = parseElements([e.element]);
       if (parsed.length !== 1) return;
-      handlers.onElement?.({ pageId: e.pageId, element: parsed[0] });
+      const el = parsed[0];
+      if (el.type === 'stroke' && el.points.length > ELEMENT_MAX_POINTS) return;
+      if (el.type === 'text' && el.text.length > ELEMENT_MAX_TEXT) return;
+      handlers.onElement?.({ pageId: e.pageId, element: el });
     });
 
   // Private-канал требует свежий JWT в realtime-сокете ДО subscribe —

@@ -116,15 +116,38 @@ describe('AutosaveQueue', () => {
       q.markDirty('a');
       expect(savePage).not.toHaveBeenCalled();
     }
-    await vi.advanceTimersByTimeAsync(200); // t=1000
-    q.markDirty('a');
-    await vi.advanceTimersByTimeAsync(0);
+    // Последний markDirty был на t=800 → остаток окна 200 мс < delayMs:
+    // flush обязан уйти к t=1000 БЕЗ нового markDirty (настоящий дедлайн,
+    // ревью синк-пасса P1 — прежняя версия ждала бы t=800+300=1100+).
+    await vi.advanceTimersByTimeAsync(200);
     expect(savePage).toHaveBeenCalledTimes(1);
 
     // Новое окно после цикла: одиночный штрих уезжает обычным дебаунсом.
     q.markDirty('a');
     await vi.advanceTimersByTimeAsync(300);
     expect(savePage).toHaveBeenCalledTimes(2);
+  });
+
+  it('maxWaitMs: штрих у самой границы окна не продлевает ожидание', async () => {
+    const savePage = vi.fn().mockResolvedValue(undefined);
+    const q = new AutosaveQueue({
+      savePage,
+      onStatus: () => undefined,
+      delayMs: 300,
+      maxWaitMs: 1000,
+    });
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(250);
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(250);
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(250);
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(249); // t=999
+    q.markDirty('a');
+    // Остаток окна = 1 мс → таймер укорочен до 1 мс, НЕ 300.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(savePage).toHaveBeenCalledTimes(1);
   });
 
   it('статус error не понижается новыми правками до успешного сохранения', async () => {

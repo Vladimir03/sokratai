@@ -13,10 +13,13 @@ import {
 } from '@/components/whiteboard/BoardCanvas';
 import {
   connectBoardLive,
+  overlayElementsFor,
+  pruneLiveOverlays,
   stablePeerColor,
   FOLLOW_PING_MS,
   type BoardLiveControls,
   type LivePeer,
+  type LiveOverlayMap,
 } from '@/lib/whiteboard/boardLive';
 import { BoardToolbar } from '@/components/whiteboard/BoardToolbar';
 import { PagesPanel } from '@/components/whiteboard/PagesPanel';
@@ -95,7 +98,7 @@ import {
 } from '@/lib/whiteboard/autosaveQueue';
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 import { reconcileElements } from '@/lib/whiteboard/reconcile';
-import { startBoardSync, type BoardSyncState } from '@/lib/whiteboard/boardSync';
+import { raceDeadline, startBoardSync, type BoardSyncState } from '@/lib/whiteboard/boardSync';
 import { ensureShareLink, revokeShareLink, sendBoardBring } from '@/lib/whiteboardApi';
 import { ensureChatConversation, sendChatMessageApi } from '@/lib/tutorStudentChatApi';
 import { usePasteImages } from '@/hooks/usePasteImages';
@@ -282,12 +285,19 @@ export default function Whiteboard() {
           const remote = Array.isArray(outcome.conflict.elements)
             ? (outcome.conflict.elements as BoardElement[])
             : [];
+          // Мерж с ЖИВЫМ кадром, не со снапшотом до await (ревью синк-пасса,
+          // P0): штрих, дорисованный пока сейв летел, иначе стирался навсегда.
+          const live = framesRef.current.find((f) => f.id === pageId);
+          if (!live) return;
           const protectedIds =
             selectionRef.current && selectionRef.current.frameId === pageId
               ? new Set(selectionRef.current.ids)
               : undefined;
-          const { merged, divergesFromRemote } = reconcileElements(frame.elements, remote, protectedIds);
-          patchFrameSilently(pageId, { elements: merged, rev: outcome.conflict.rev });
+          const { merged, divergesFromRemote } = reconcileElements(live.elements, remote, protectedIds);
+          patchFrameSilently(pageId, {
+            elements: merged,
+            rev: Math.max(live.rev, outcome.conflict.rev),
+          });
           if (!divergesFromRemote) return;
         }
         throw new Error('REV_CONFLICT_RETRY');
@@ -420,23 +430,53 @@ export default function Whiteboard() {
   const boardIdForSync = board?.id ?? null;
   /** Состояние транспорта; 'live' — оптимистичный дефолт (бейдж не флапает). */
   const [syncState, setSyncState] = useState<BoardSyncState>('live');
+  /** Сколько снапшотов подряд лист отсутствует (детектор чужого удаления). */
+  const missingCountsRef = useRef(new Map<string, number>());
 
   useEffect(() => {
     if (!boardIdForSync) return;
 
+    // Single-flight точечных дочиток (ревью синк-пасса, P2): пока запрос
+    // листа летит, новые сигналы лишь поднимают целевой rev; дедлайн — чтобы
+    // зависший fetch не держал гард вечно (поздний результат игнорируется).
+    const refetchPending = new Map<string, number>();
+
     const refetchAndMerge = async (pageId: string, knownRev: number) => {
       const current = framesRef.current.find((f) => f.id === pageId);
       if (current && current.rev >= knownRev && knownRev > 0) return; // наш же сейв
+      const inFlight = refetchPending.get(pageId);
+      if (inFlight !== undefined) {
+        if (knownRev > inFlight) refetchPending.set(pageId, knownRev);
+        return;
+      }
+      refetchPending.set(pageId, knownRev);
+      try {
+        await refetchOnce(pageId, knownRev);
+      } finally {
+        const want = refetchPending.get(pageId) ?? knownRev;
+        refetchPending.delete(pageId);
+        const cur = framesRef.current.find((f) => f.id === pageId);
+        if (want > knownRev && (!cur || cur.rev < want)) void refetchAndMerge(pageId, want);
+      }
+    };
+
+    const refetchOnce = async (pageId: string, knownRev: number) => {
       // rev — встроенным селектом: ОДИН DB-снимок elements+rev (ревью P0 —
       // раздельные чтения давали «старые elements + новый rev», и следующий
       // сейв законно затирал более свежую сцену).
-      const { data: row } = await supabase
-        .from('board_pages')
-        .select(
-          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, board_page_revs(rev)',
-        )
-        .eq('id', pageId)
-        .maybeSingle();
+      const res = await raceDeadline(
+        Promise.resolve(
+          supabase
+            .from('board_pages')
+            .select(
+              'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, board_page_revs(rev)',
+            )
+            .eq('id', pageId)
+            .maybeSingle(),
+        ),
+        12_000,
+      );
+      const row = res?.data ?? null;
       if (!row) return;
       const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
         .board_page_revs;
@@ -475,9 +515,36 @@ export default function Whiteboard() {
     // boardSync (фикс 31.07): WS + поллинг-фолбэк + visibilitychange/online.
     // Gap-fill и тик поллинга сходятся в один снапшот revs; refetchAndMerge
     // сам no-op'ит неизменённые кадры (rev-гард) — оба пути идемпотентны.
+    // Снапшот — авторитетный НАБОР листов (ревью синк-пасса, P0): удаление
+    // каскадит revs без события; отсутствие в ДВУХ снапшотах подряд = лист
+    // удалён другим клиентом (2 тика — щит от гонки со свежесозданным листом,
+    // чей снапшот был запрошен до коммита).
     return startBoardSync(boardIdForSync, {
       onRev: (event) => void refetchAndMerge(event.page_id, event.rev),
       onRevsSnapshot: (revs) => {
+        if (revs.length > 0) {
+          const present = new Set(revs.map((r) => r.page_id));
+          const removedIds: string[] = [];
+          for (const f of framesRef.current) {
+            if (present.has(f.id)) {
+              missingCountsRef.current.delete(f.id);
+              continue;
+            }
+            const count = (missingCountsRef.current.get(f.id) ?? 0) + 1;
+            missingCountsRef.current.set(f.id, count);
+            if (count >= 2) removedIds.push(f.id);
+          }
+          if (removedIds.length > 0) {
+            const removal = new Set(removedIds);
+            for (const id of removedIds) {
+              missingCountsRef.current.delete(id);
+              autosave.forget(id);
+            }
+            applyFrames(framesRef.current.filter((f) => !removal.has(f.id)));
+            setSelection((prev) => (prev && removal.has(prev.frameId) ? null : prev));
+            setActiveFrameId((prev) => (prev && removal.has(prev) ? null : prev));
+          }
+        }
         for (const r of revs) {
           const current = framesRef.current.find((f) => f.id === r.page_id);
           if (!current || current.rev < r.rev) void refetchAndMerge(r.page_id, r.rev);
@@ -485,12 +552,17 @@ export default function Whiteboard() {
       },
       onState: setSyncState,
     });
-  }, [boardIdForSync, applyFrames, patchFrameSilently]);
+  }, [boardIdForSync, applyFrames, patchFrameSilently, autosave]);
 
   // ─── Live-канал (Этап 4, B1): участники, курсоры, follow, bring ─────────────
 
   const [livePeers, setLivePeers] = useState<LivePeer[]>([]);
   const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor & { at: number }>>({});
+  /** Render-оверлей broadcast-элементов (P0 №4 ревью синк-пасса): чужой
+   * элемент НИКОГДА не попадает в frame.elements — только рисуется до
+   * подтверждения БД (rev-refetch) либо исчезает по TTL. Иначе следующий
+   * сейв репетитора закреплял бы в БД инъекцию любого участника канала. */
+  const [liveOverlays, setLiveOverlays] = useState<LiveOverlayMap>({});
   const [followKey, setFollowKey] = useState<string | null>(null);
   const [followName, setFollowName] = useState('');
   const liveRef = useRef<BoardLiveControls | null>(null);
@@ -547,18 +619,17 @@ export default function Whiteboard() {
             [e.key]: { key: e.key, name: e.name, color: stablePeerColor(e.key), x: e.x, y: e.y, at: Date.now() },
           }));
         },
-        // Мгновенный контур (Фаза 2): штрих ученика применяем сразу merge'ем,
-        // rev НЕ трогаем — его выставит DB-refetch по rev-сигналу (LWW
-        // идемпотентен по version/versionNonce).
+        // Мгновенный контур (Фаза 2): штрих ученика — ТОЛЬКО в render-оверлей
+        // (см. liveOverlays), никогда в сцену.
         onElement: (e) => {
           const frame = framesRef.current.find((f) => f.id === e.pageId);
           if (!frame) return; // новый лист доедет rev-сигналом
-          const protectedIds =
-            selectionRef.current && selectionRef.current.frameId === e.pageId
-              ? new Set(selectionRef.current.ids)
-              : undefined;
-          const { merged } = reconcileElements(frame.elements, [e.element], protectedIds);
-          patchFrameSilently(e.pageId, { elements: merged });
+          if (frame.elements.some((el) => el.id === e.element.id)) return; // уже в БД-сцене
+          setLiveOverlays((prev) => {
+            const list = (prev[e.pageId] ?? []).filter((o) => o.element.id !== e.element.id);
+            list.push({ element: e.element, at: Date.now() });
+            return { ...prev, [e.pageId]: list };
+          });
         },
         onStatus: setLiveStatus,
       },
@@ -571,15 +642,17 @@ export default function Whiteboard() {
   }, [boardIdForSync, stopFollow]);
 
   // Курсор без событий 6 с — участник ушёл с холста; убираем, не копим навечно.
+  // Тут же метла оверлея: подтверждённые БД записи и просроченные фантомы.
   useEffect(() => {
     const timer = setInterval(() => {
+      const now = Date.now();
       setRemoteCursors((prev) => {
-        const now = Date.now();
         const alive = Object.values(prev).filter((c) => now - c.at < 6000);
         return alive.length === Object.keys(prev).length
           ? prev
           : Object.fromEntries(alive.map((c) => [c.key, c]));
       });
+      setLiveOverlays((prev) => pruneLiveOverlays(prev, framesRef.current, now));
     }, 3000);
     return () => clearInterval(timer);
   }, []);
@@ -644,8 +717,19 @@ export default function Whiteboard() {
     for (const g of guests) map[g.id] = g.display_name || 'Участник';
     return map;
   }, [guests]);
-  /** Чипы панели — только кто СЕЙЧАС на доске. */
-  const onlineGuests = useMemo(() => guests.filter((g) => g.online !== false), [guests]);
+  /** Чипы панели — только кто СЕЙЧАС на доске. CRM-ученик, открывший
+   * параллельно авторизованную вкладку И /b/-ссылку, — один чип, не два
+   * (UX-ревью синк-пасса): live-peer приоритетнее гостевой записи. */
+  const onlineGuests = useMemo(() => {
+    const livePeerStudentIds = new Set(
+      livePeers.filter((p) => p.key.startsWith('student:')).map((p) => p.key.slice(8)),
+    );
+    return guests.filter(
+      (g) =>
+        g.online !== false &&
+        !(g.tutor_student_id && livePeerStudentIds.has(g.tutor_student_id)),
+    );
+  }, [guests, livePeers]);
   /** Ученики CRM, у которых уже есть лист на доске (пикер + офлайн-чипы). */
   const zonedStudentIds = useMemo(
     () =>
@@ -1331,23 +1415,31 @@ export default function Whiteboard() {
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteLinkError, setInviteLinkError] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteSending, setInviteSending] = useState(false);
 
-  const handleInviteOpen = useCallback(async () => {
+  /** Гостевая ссылка грузится НЕЗАВИСИМО от диалога (ревью синк-пасса, P1):
+   * primary-путь «в чат» шлёт авторизованную ссылку и от share-link не
+   * зависит — его сбой больше не закрывает весь диалог. */
+  const loadInviteLink = useCallback(async () => {
     if (!board || inviteBusy) return;
     setInviteBusy(true);
-    setInviteOpen(true);
+    setInviteLinkError(false);
     try {
       const slug = await ensureShareLink(board.id);
       setInviteLink(`${window.location.origin}/b/${slug}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось создать ссылку');
-      setInviteOpen(false);
+    } catch {
+      setInviteLinkError(true);
     } finally {
       setInviteBusy(false);
     }
   }, [board, inviteBusy]);
+
+  const handleInviteOpen = useCallback(() => {
+    setInviteOpen(true);
+    if (!inviteLink) void loadInviteLink();
+  }, [inviteLink, loadInviteLink]);
 
   const handleInviteCopy = useCallback(async () => {
     if (!inviteLink) return;
@@ -1387,59 +1479,97 @@ export default function Whiteboard() {
       const boardLink = `${window.location.origin}/student/board/${board.id}`;
       setInviteSending(true);
       let sent = 0;
+      const failedIds: string[] = [];
       try {
-        for (const tutorStudentId of tutorStudentIds) {
-          try {
-            const { conversation_id } = await ensureChatConversation(tutorStudentId);
-            await sendChatMessageApi(conversation_id, {
-              content: `Присоединяйся к доске занятия: ${boardLink}`,
-              // НЕ crypto.randomUUID (rule 80, Safari < 15.4).
-              client_msg_id: `board-invite-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-            });
-            sent += 1;
-          } catch {
-            // одного не нашли/чат недоступен — шлём остальным
-          }
+        // Чанками по 4 (UX-ревью синк-пасса: 15 учеников = до 30 запросов,
+        // последовательно это ~десятки секунд; паттерн notify-чанков rule 100).
+        const CHUNK = 4;
+        for (let i = 0; i < tutorStudentIds.length; i += CHUNK) {
+          const chunk = tutorStudentIds.slice(i, i + CHUNK);
+          const results = await Promise.allSettled(
+            chunk.map(async (tutorStudentId) => {
+              const { conversation_id } = await ensureChatConversation(tutorStudentId);
+              await sendChatMessageApi(conversation_id, {
+                content: `Присоединяйся к доске занятия: ${boardLink}`,
+                // НЕ crypto.randomUUID (rule 80, Safari < 15.4).
+                client_msg_id: `board-invite-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+              });
+            }),
+          );
+          results.forEach((r, j) => {
+            if (r.status === 'fulfilled') sent += 1;
+            else failedIds.push(chunk[j]);
+          });
         }
-        if (sent > 0) toast.success(`Отправлено в чаты: ${sent}`);
-        else toast.error('Не удалось отправить ни одному ученику — скопируйте ссылку вручную.');
+        // Честный итог (UX-ревью: частичный сбой раньше выглядел успехом).
+        if (failedIds.length === 0 && sent > 0) {
+          toast.success(`Отправлено в чаты: ${sent}`);
+        } else if (sent > 0) {
+          const names = failedIds
+            .map((id) => students.find((s) => s.id === id)?.name)
+            .filter((v): v is string => !!v)
+            .join(', ');
+          toast.error(
+            `Отправлено: ${sent}. Не ушло: ${names || failedIds.length} — отправьте им ссылку вручную.`,
+          );
+        } else {
+          toast.error('Не удалось отправить ни одному ученику — скопируйте ссылку вручную.');
+        }
       } finally {
         setInviteSending(false);
       }
     },
-    [board],
+    [board, students],
   );
 
   /**
    * «Отправить ученикам в чат» — БЕЗ предусловий (фикс UX 31.07: раньше без
-   * розданных зон кнопка лишь показывала тост «Сначала раздайте зоны» —
-   * порядок действий был обратный). Теперь: листов нет → доска занятия сама
-   * раздаёт их участникам; доска без занятия открывает пикер, который раздаст
-   * и отправит одним ходом.
+   * розданных зон кнопка лишь показывала тост «Сначала раздайте зоны»).
+   * Доска занятия: ВСЕГДА идемпотентно раздаём листы всем участникам (ревью
+   * синк-пасса, P1: при частично розданных листах недостающие пропускались),
+   * затем шлём всем владельцам листов. Доска без занятия: ВСЕГДА пикер в
+   * режиме «раздать и отправить» с предвыбором уже имеющих лист.
    */
   const handleInviteSendToChats = useCallback(async () => {
     if (!board || inviteSending || pageBusy) return;
-    let zoneIds = collectZoneStudentIds();
-    if (zoneIds.length === 0) {
-      if (board.lesson_id) {
-        const ok = await runDistributeZones();
-        if (!ok) return;
-        zoneIds = collectZoneStudentIds();
-        if (zoneIds.length === 0) {
-          toast.message('У занятия нет участников — выберите учеников через «Раздать листы» или скопируйте ссылку.');
-          return;
-        }
-      } else {
-        // Пикер в режиме «раздать и отправить» (см. футер пикера).
-        setZonesSendAfter(true);
-        setZonesSelected(new Set());
-        setInviteOpen(false);
-        setZonesPickerOpen(true);
+    if (board.lesson_id) {
+      const ok = await runDistributeZones();
+      if (!ok) return;
+      const zoneIds = collectZoneStudentIds();
+      if (zoneIds.length === 0) {
+        toast.message('У занятия нет участников — выберите учеников через «Раздать листы» или скопируйте ссылку.');
         return;
       }
+      await sendInviteToStudents(zoneIds);
+      return;
     }
-    await sendInviteToStudents(zoneIds);
-  }, [board, inviteSending, pageBusy, collectZoneStudentIds, runDistributeZones, sendInviteToStudents]);
+    setZonesSendAfter(true);
+    setZonesSelected(new Set(zonedStudentIds));
+    setInviteOpen(false);
+    setZonesPickerOpen(true);
+  }, [
+    board,
+    inviteSending,
+    pageBusy,
+    zonedStudentIds,
+    collectZoneStudentIds,
+    runDistributeZones,
+    sendInviteToStudents,
+  ]);
+
+  // Esc закрывает самодельные модалы (UX-ревью синк-пасса: у оверлеев не было
+  // клавиатурного выхода — только клик по фону).
+  useEffect(() => {
+    if (!inviteOpen && !zonesPickerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setInviteOpen(false);
+      setZonesPickerOpen(false);
+      setZonesSendAfter(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [inviteOpen, zonesPickerOpen]);
 
   const handleInviteRevoke = useCallback(async () => {
     if (!board || inviteBusy) return;
@@ -1804,12 +1934,13 @@ export default function Whiteboard() {
         size: pageSizeMm(f.orientation),
         background: f.background,
         gridMm: f.gridMm,
-        elements: f.elements,
+        // Сцена + неподтверждённый broadcast-оверлей (render-only, P0 №4).
+        elements: overlayElementsFor(liveOverlays, f.id, f.elements),
         title,
         isZone: !!f.zoneTutorStudentId || !!f.zoneGuestId,
       };
     });
-  }, [frames, zoneNames, guestNames]);
+  }, [frames, zoneNames, guestNames, liveOverlays]);
 
   const frameSummaries = useMemo(
     () =>
@@ -2074,7 +2205,12 @@ export default function Whiteboard() {
           (клик = follow); ГОСТИ — из поллинга last_seen_at (follow недоступен:
           у гостя нет live-канала, v1); владельцы листов НЕ на доске — muted
           (фикс UX 31.07: раньше офлайн-ученики не были видны нигде). */}
-      <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-1.5">
+      <div className="flex items-center gap-1.5 border-b border-slate-200 bg-white px-3 py-1.5">
+        {/* Чипы — в своей скролл-ленте (UX-ревью синк-пасса: раньше кнопка
+            «Раздать листы» и статус жили ВНУТРИ overflow-x и на группе 15
+            уезжали за экран). touch-pan-x — rule 80 (кликабельные чипы в
+            горизонтальном скролле съедают свайп на iOS). */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto touch-pan-x">
         <span className="shrink-0 text-xs text-slate-400">На доске:</span>
         {livePeers.map((peer) => (
           <button
@@ -2110,6 +2246,11 @@ export default function Whiteboard() {
             {g.display_name}
           </span>
         ))}
+        {/* Ярлык отделяет офлайн-владельцев от живых: «На доске» не должна
+            содержать тех, кого на доске нет (UX-ревью синк-пасса). */}
+        {offlineSheetOwners.length > 0 && (
+          <span className="shrink-0 pl-1 text-xs text-slate-400">листы выданы:</span>
+        )}
         {offlineSheetOwners.map((o) => (
           <span
             key={o.key}
@@ -2133,7 +2274,8 @@ export default function Whiteboard() {
             </button>
           </>
         )}
-        <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+        </div>
+        <div className="flex shrink-0 items-center gap-2 pl-2">
           {/* Контентный sync-статус приоритетнее статуса курсоров: листы важнее. */}
           {syncState !== 'live' ? (
             <span
@@ -2283,70 +2425,88 @@ export default function Whiteboard() {
             <p className="mt-1 text-sm text-slate-500">
               Каждый вошедший сразу получает свой лист — вы увидите его в панели «На доске».
             </p>
-            {inviteBusy || !inviteLink ? (
-              <div className="flex justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            {/* Кнопки НЕ ждут гостевую ссылку (ревью синк-пасса, P1): primary
+                шлёт авторизованную /student/board/… и от share-link не зависит. */}
+            <p className="mt-4 text-xs font-medium uppercase tracking-wide text-slate-400">
+              Ученикам Сократа
+            </p>
+            {/* Путь 1 (главный): ссылка в личные чаты. Работает БЕЗ
+                предусловий — листы раздаются по ходу (фикс UX 31.07). */}
+            <Button
+              className="mt-1.5 w-full"
+              onClick={() => void handleInviteSendToChats()}
+              disabled={inviteSending || pageBusy}
+              style={{ touchAction: 'manipulation' }}
+            >
+              {inviteSending || pageBusy ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-1.5 h-4 w-4" />
+              )}
+              Отправить ученикам в чат
+            </Button>
+            {/* Путь 2 (равноправный): раздать листы ученикам из списка —
+                полноценная кнопка вместо серой ссылки (жалоба владельца
+                31.07: «не увидел снизу раздать зоны»). */}
+            <Button
+              variant="outline"
+              className="mt-2 w-full"
+              disabled={pageBusy}
+              onClick={() => {
+                setInviteOpen(false);
+                void handleDistributeZones();
+              }}
+              style={{ touchAction: 'manipulation' }}
+            >
+              <Users className="mr-1.5 h-4 w-4" />
+              Раздать листы ученикам
+            </Button>
+            <p className="mt-4 text-xs font-medium uppercase tracking-wide text-slate-400">
+              Гостю без аккаунта
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Откроет по ссылке, назовётся — и получит лист:
+            </p>
+            {inviteBusy ? (
+              <div className="mt-1.5 flex h-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              </div>
+            ) : inviteLinkError || !inviteLink ? (
+              <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="text-sm text-slate-600">Не удалось создать ссылку.</span>
+                <button
+                  type="button"
+                  onClick={() => void loadInviteLink()}
+                  style={{ touchAction: 'manipulation' }}
+                  className="shrink-0 text-sm font-medium text-accent hover:underline"
+                >
+                  Повторить
+                </button>
               </div>
             ) : (
-              <>
-                {/* Путь 1 (главный): ссылка в личные чаты. Работает БЕЗ
-                    предусловий — листы раздаются по ходу (фикс UX 31.07). */}
-                <Button
-                  className="mt-4 w-full"
-                  onClick={() => void handleInviteSendToChats()}
-                  disabled={inviteSending || pageBusy}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  {inviteSending || pageBusy ? (
-                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="mr-1.5 h-4 w-4" />
-                  )}
-                  Отправить ученикам в чат
+              <div className="mt-1.5 flex items-center gap-2">
+                <input
+                  readOnly
+                  value={inviteLink}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 text-base text-slate-700"
+                />
+                <Button variant="outline" onClick={() => void handleInviteCopy()} style={{ touchAction: 'manipulation' }}>
+                  <Copy className="h-4 w-4" />
                 </Button>
-                {/* Путь 2 (равноправный): раздать листы ученикам из списка —
-                    полноценная кнопка вместо серой ссылки (жалоба владельца
-                    31.07: «не увидел снизу раздать зоны»). */}
-                <Button
-                  variant="outline"
-                  className="mt-2 w-full"
-                  disabled={pageBusy}
-                  onClick={() => {
-                    setInviteOpen(false);
-                    void handleDistributeZones();
-                  }}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Users className="mr-1.5 h-4 w-4" />
-                  Раздать листы ученикам
-                </Button>
-                <p className="mt-4 text-xs text-slate-500">
-                  Ссылка для входа без регистрации — гость назовётся и получит лист:
-                </p>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <input
-                    readOnly
-                    value={inviteLink}
-                    onFocus={(e) => e.currentTarget.select()}
-                    className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 text-base text-slate-700"
-                  />
-                  <Button variant="outline" onClick={() => void handleInviteCopy()} style={{ touchAction: 'manipulation' }}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                    onClick={() => void handleInviteRevoke()}
-                    style={{ touchAction: 'manipulation' }}
-                  >
-                    Закрыть доступ
-                  </Button>
-                </div>
-              </>
+              </div>
             )}
+            <div className="mt-4 flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                onClick={() => void handleInviteRevoke()}
+                style={{ touchAction: 'manipulation' }}
+              >
+                Закрыть доступ
+              </Button>
+            </div>
           </div>
         </div>
       )}

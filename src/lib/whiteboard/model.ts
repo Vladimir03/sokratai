@@ -881,20 +881,24 @@ export function scaleElement(
 // ─── Сериализация ─────────────────────────────────────────────────────────────
 
 /**
- * Санитайзер входа из БД. Страница читается из jsonb, и на неё нельзя полагаться:
- * битый элемент не должен ронять весь конспект — он просто отбрасывается.
+ * Санитайзер входа из БД и broadcast'а. На вход нельзя полагаться: битый
+ * элемент не должен ронять весь конспект — он просто отбрасывается.
+ * ⚠️ Числа проверяются Number.isFinite, НЕ typeof (ревью синк-пасса, P0 №4):
+ * JSON.parse("1e999") даёт Infinity — typeof пропускал его, и он ломал
+ * bounds-математику (NaN-камера = белый экран).
  */
 export function parseElements(raw: unknown): BoardElement[] {
   if (!Array.isArray(raw)) return [];
+  const num = (v: unknown): v is number => Number.isFinite(v);
   const out: BoardElement[] = [];
   for (let i = 0; i < raw.length; i++) {
     const el = raw[i] as Partial<BoardElement> | null;
     if (!el || typeof el !== 'object' || typeof el.id !== 'string') continue;
     const base = {
       id: el.id,
-      version: typeof el.version === 'number' ? el.version : 1,
-      versionNonce: typeof el.versionNonce === 'number' ? el.versionNonce : 0,
-      seq: typeof el.seq === 'number' ? el.seq : i + 1,
+      version: num(el.version) ? el.version : 1,
+      versionNonce: num(el.versionNonce) ? el.versionNonce : 0,
+      seq: num(el.seq) ? el.seq : i + 1,
     };
     if (el.type === 'stroke') {
       const s = el as Partial<StrokeElement>;
@@ -902,18 +906,16 @@ export function parseElements(raw: unknown): BoardElement[] {
       out.push({
         ...base,
         type: 'stroke',
-        points: s.points.filter((n) => typeof n === 'number'),
+        points: s.points.filter(num),
         color: typeof s.color === 'string' ? s.color : BOARD_COLORS[0],
-        size: typeof s.size === 'number' ? s.size : DEFAULT_PEN_SIZE_MM,
+        size: num(s.size) ? s.size : DEFAULT_PEN_SIZE_MM,
         // Отсутствие поля = непрозрачный штрих: сцены, записанные до появления
         // маркера, читаются без миграции.
-        ...(typeof s.opacity === 'number' && s.opacity < 1
-          ? { opacity: clampOpacity(s.opacity) }
-          : {}),
+        ...(num(s.opacity) && s.opacity < 1 ? { opacity: clampOpacity(s.opacity) } : {}),
       });
     } else if (el.type === 'shape') {
       const s = el as Partial<ShapeElement>;
-      if (typeof s.x !== 'number' || typeof s.y !== 'number') continue;
+      if (!num(s.x) || !num(s.y)) continue;
       out.push({
         ...base,
         type: 'shape',
@@ -921,16 +923,15 @@ export function parseElements(raw: unknown): BoardElement[] {
           s.kind === 'ellipse' || s.kind === 'line' || s.kind === 'arrow' ? s.kind : 'rect',
         x: s.x,
         y: s.y,
-        w: typeof s.w === 'number' ? s.w : 0,
-        h: typeof s.h === 'number' ? s.h : 0,
+        w: num(s.w) ? s.w : 0,
+        h: num(s.h) ? s.h : 0,
         color: typeof s.color === 'string' ? s.color : BOARD_COLORS[0],
-        size: typeof s.size === 'number' ? s.size : DEFAULT_PEN_SIZE_MM,
+        size: num(s.size) ? s.size : DEFAULT_PEN_SIZE_MM,
       });
     } else if (el.type === 'image') {
       const s = el as Partial<ImageElement>;
       if (
-        typeof s.x !== 'number' || typeof s.y !== 'number' ||
-        typeof s.w !== 'number' || typeof s.h !== 'number' ||
+        !num(s.x) || !num(s.y) || !num(s.w) || !num(s.h) ||
         typeof s.ref !== 'string' || !s.ref.startsWith('storage://')
       ) {
         continue;
@@ -942,12 +943,12 @@ export function parseElements(raw: unknown): BoardElement[] {
         y: s.y,
         w: Math.abs(s.w),
         h: Math.abs(s.h),
-        rotation: typeof s.rotation === 'number' ? s.rotation : 0,
+        rotation: num(s.rotation) ? s.rotation : 0,
         ref: s.ref,
       });
     } else if (el.type === 'text') {
       const s = el as Partial<TextElement>;
-      if (typeof s.x !== 'number' || typeof s.y !== 'number' || typeof s.text !== 'string') continue;
+      if (!num(s.x) || !num(s.y) || typeof s.text !== 'string') continue;
       out.push({
         ...base,
         type: 'text',
@@ -955,7 +956,7 @@ export function parseElements(raw: unknown): BoardElement[] {
         y: s.y,
         text: s.text,
         color: typeof s.color === 'string' ? s.color : BOARD_COLORS[0],
-        size: typeof s.size === 'number' ? s.size : DEFAULT_TEXT_SIZE_MM,
+        size: num(s.size) ? s.size : DEFAULT_TEXT_SIZE_MM,
       });
     }
   }

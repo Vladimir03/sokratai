@@ -24,6 +24,19 @@ import { subscribeBoardRevs, type BoardRevEvent } from '@/lib/whiteboard/boardRe
 
 export type BoardSyncState = 'live' | 'polling' | 'offline';
 
+/**
+ * Гонка промиса с дедлайном: по истечении отдаёт null, НЕ отменяя исходный
+ * запрос (результат просто игнорируется). Для точечных дочиток листа —
+ * single-flight-гард без дедлайна превращался бы в вечный замок при зависшем
+ * fetch'е (ревью синк-пасса, P0 №2/P2).
+ */
+export function raceDeadline<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([
+    promise,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
 export interface BoardSyncHandlers {
   /** Живое WS-событие (как прежний onRev). */
   onRev: (event: BoardRevEvent) => void;
@@ -41,6 +54,11 @@ const SAFETY_POLL_LIVE_MS = 60_000;
 /** «polling» не показываем первые секунды после старта: WS ещё поднимается,
  * ранний бейдж «резервный режим» — ложная тревога на каждом открытии доски. */
 const STATE_GRACE_MS = 8000;
+/** Кап на сам HTTP-запрос тика (ревью синк-пасса, P0): fetch без ответа на
+ * мобильной сети может висеть минутами — без abort'а `ticking` оставался бы
+ * поднятым НАВСЕГДА и цепочка тиков умирала. Ручной AbortController +
+ * setTimeout — НЕ AbortSignal.timeout (Safari < 16, rule 80). */
+const TICK_TIMEOUT_MS = 8000;
 /** Семпл лага сигнала (DB updated_at → клиент) — тренд в консоли прода. */
 const REV_LAG_SAMPLE = 0.1;
 
@@ -50,6 +68,9 @@ export function startBoardSync(boardId: string, handlers: BoardSyncHandlers): ()
   let pollFailures = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let ticking = false;
+  /** Wake пришёл, пока тик в полёте: finally текущего тика перезапустит сразу. */
+  let wakePending = false;
+  let tickAbort: AbortController | null = null;
   let emitted: BoardSyncState = 'live'; // оптимистично: не флапаем бейджем на старте
   const startedAt = Date.now();
 
@@ -81,14 +102,20 @@ export function startBoardSync(boardId: string, handlers: BoardSyncHandlers): ()
   const tick = async () => {
     if (disposed || ticking) return;
     ticking = true;
+    const controller = new AbortController();
+    tickAbort = controller;
+    const killer = setTimeout(() => controller.abort(), TICK_TIMEOUT_MS);
     try {
       const { data, error } = await supabase
         .from('board_page_revs')
         .select('page_id, rev')
-        .eq('board_id', boardId);
+        .eq('board_id', boardId)
+        .abortSignal(controller.signal);
       if (disposed) return;
       if (error || !data) {
-        pollFailures += 1;
+        // Обрыв по wake — не сбой сети, а наш собственный abort ради свежего
+        // тика: счётчик offline не трогаем.
+        if (!wakePending) pollFailures += 1;
       } else {
         pollFailures = 0;
         handlers.onRevsSnapshot(
@@ -97,18 +124,34 @@ export function startBoardSync(boardId: string, handlers: BoardSyncHandlers): ()
       }
       emitState();
     } catch {
-      if (!disposed) {
+      if (!disposed && !wakePending) {
         pollFailures += 1;
         emitState();
       }
     } finally {
+      clearTimeout(killer);
+      if (tickAbort === controller) tickAbort = null;
       ticking = false;
-      schedule(nextDelay());
+      if (!disposed) {
+        if (wakePending) {
+          wakePending = false;
+          schedule(0);
+        } else {
+          schedule(nextDelay());
+        }
+      }
     }
   };
 
   const tickNow = () => {
-    if (disposed || ticking) return;
+    if (disposed) return;
+    if (ticking) {
+      // Тик в полёте (возможно, завис на мобильной сети): просим немедленный
+      // повтор и обрываем текущий запрос — его finally перезапустит цепочку.
+      wakePending = true;
+      tickAbort?.abort();
+      return;
+    }
     if (timer) clearTimeout(timer);
     timer = null;
     void tick();

@@ -74,18 +74,19 @@ export class AutosaveQueue {
     this.setStatus(this.status === 'error' ? 'error' : 'saving');
     if (this.firstDirtyAt === null) this.firstDirtyAt = Date.now();
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    // Потолок ожидания: непрерывное черкание не должно бесконечно перезаводить
-    // дебаунс — flush не позже maxWaitMs от первой грязи (латентность ≤1 с).
+    // Потолок ожидания — НАСТОЯЩИЙ дедлайн (ревью синк-пасса, P1): таймер
+    // укорачивается до остатка окна, а не проверяется лишь на следующем
+    // markDirty (иначе штрих на t=999 уезжал бы в t=1299). Во время полёта
+    // цикла дедлайн не форсим — цикл и так дренит очередь до конца.
     const maxWait = this.options.maxWaitMs;
-    if (maxWait && !this.flushPromise && Date.now() - this.firstDirtyAt >= maxWait) {
-      this.debounceTimer = null;
-      void this.flush();
-      return;
+    let delay = this.options.delayMs ?? DEFAULT_DELAY_MS;
+    if (maxWait && !this.flushPromise) {
+      delay = Math.max(0, Math.min(delay, maxWait - (Date.now() - this.firstDirtyAt)));
     }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       void this.flush();
-    }, this.options.delayMs ?? DEFAULT_DELAY_MS);
+    }, delay);
   }
 
   /** Снять страницу с учёта (например, после её удаления). */

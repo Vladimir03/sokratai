@@ -11,13 +11,17 @@ import {
   type RemoteCursor,
 } from '@/components/whiteboard/BoardCanvas';
 import {
+  overlayElementsFor,
+  pruneLiveOverlays,
   shouldApplyBring,
   stablePeerColor,
   FOLLOW_STALE_MS,
   type BoardLiveControls,
   type BoardLiveHandlers,
   type LivePeer,
+  type LiveOverlayMap,
 } from '@/lib/whiteboard/boardLive';
+import { raceDeadline } from '@/lib/whiteboard/boardSync';
 import { parseFrameRow, type SharedFrame } from '@/lib/whiteboard/frameRows';
 import type { SaveResult } from '@/lib/whiteboardStudentApi';
 import {
@@ -190,18 +194,26 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
               applyFramePatch(pageId, { rev: result.rev || frame.rev + 1 });
               return;
             }
-            // Конфликт: сервер прислал свежие elements — сливаем и пробуем ещё раз.
+            // Конфликт: сервер прислал свежие elements — сливаем и пробуем ещё
+            // раз. Мержим с ЖИВЫМ кадром, не со снапшотом до await (ревью
+            // синк-пасса, P0: штрих, дорисованный ПОКА сейв летел, иначе
+            // стирался merged-патчем из устаревшей базы навсегда).
             // Щит: элементы активного выделения не отдаются remote-версии.
+            const live = framesRef.current.find((f) => f.id === pageId);
+            if (!live) return;
             const protectedIds =
               selectionRef.current && selectionRef.current.frameId === pageId
                 ? new Set(selectionRef.current.ids)
                 : undefined;
             const { merged, divergesFromRemote } = reconcileElements(
-              frame.elements,
+              live.elements,
               sanitizeRemote(result.conflict.elements),
               protectedIds,
             );
-            applyFramePatch(pageId, { elements: merged, rev: result.conflict.rev });
+            applyFramePatch(pageId, {
+              elements: merged,
+              rev: Math.max(live.rev, result.conflict.rev),
+            });
             if (!divergesFromRemote) return; // сервер уже содержит всё наше
           }
           // Два конфликта подряд — необычно; отдаём очереди (retry с backoff).
@@ -325,11 +337,40 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   const imageUrlsRef = useRef(imageUrls);
   imageUrlsRef.current = imageUrls;
 
+  /** Точечные дочитки листа — single-flight (ревью синк-пасса, P2): пока
+   * запрос летит, новые сигналы того же листа лишь поднимают целевой rev. */
+  const refetchPendingRef = useRef(new Map<string, number>());
+
   const handleRemoteRev = useCallback(
     async (pageId: string, rev: number) => {
       const frame = framesRef.current.find((f) => f.id === pageId);
       if (frame && frame.rev >= rev) return; // наше же сохранение
-      const fresh = await transportRef.current.refetchPage(pageId);
+      const pending = refetchPendingRef.current;
+      const inFlight = pending.get(pageId);
+      if (inFlight !== undefined) {
+        if (rev > inFlight) pending.set(pageId, rev);
+        return;
+      }
+      pending.set(pageId, rev);
+      try {
+        await refetchAndApply(pageId);
+      } finally {
+        const want = pending.get(pageId) ?? rev;
+        pending.delete(pageId);
+        // Пока летели — пришёл более свежий сигнал: дочитываем ещё раз.
+        const cur = framesRef.current.find((f) => f.id === pageId);
+        if (want > rev && (!cur || cur.rev < want)) void handleRemoteRev(pageId, want);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchAndApply объявлен ниже, стабилен (те же deps)
+    [applyFrames, applyFramePatch],
+  );
+
+  const refetchAndApply = useCallback(
+    async (pageId: string) => {
+      // Дедлайн: зависший fetch не должен держать single-flight-гард вечно;
+      // исходный промис не отменяется, его поздний результат игнорируется.
+      const fresh = await raceDeadline(transportRef.current.refetchPage(pageId), 12_000);
       if (!fresh) return;
       const parsed = parseFrameRow(fresh.row as never, framesRef.current.length, fresh.rev);
       const existing = framesRef.current.find((f) => f.id === pageId);
@@ -403,12 +444,21 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
 
   /** Занят ли уже resync — rev-diff не должен запускать их пачкой. */
   const resyncBusyRef = useRef(false);
+  /** Сколько снапшотов подряд лист отсутствует (детектор удаления). */
+  const missingCountsRef = useRef(new Map<string, number>());
 
   /**
    * Rev-diff (фикс P0 31.07): снапшот ревизий доски → сверка с локальными
    * кадрами. Изменившиеся дочитываются точечно (авторизованный транспорт)
    * либо одним resync на батч (гость — у него нет чтения одного листа).
    * Идемпотентно с WS-событиями: оба пути упираются в rev-гарды.
+   *
+   * Снапшот — ещё и авторитетный НАБОР листов (ревью синк-пасса, P0):
+   * удаление каскадит board_page_revs, rev-события для него нет — раньше
+   * удалённый репетитором лист жил у ученика до перезагрузки. Удаляем после
+   * ДВУХ снапшотов подряд без листа: один мог быть запрошен до коммита
+   * только что созданного листа (гонка «свежий лист против устаревшего
+   * снапшота» не должна стирать локальные правки).
    */
   const handleRevsSnapshot = useCallback(
     (revs: { page_id: string; rev: number }[]) => {
@@ -416,18 +466,45 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         const frame = framesRef.current.find((f) => f.id === r.page_id);
         return !frame || frame.rev < r.rev;
       });
-      if (changed.length === 0) return;
+      // Детектор удалений. Пустой снапшот не бывает у живой доски (лист ≥1) —
+      // не доверяем ему набор (сервер теперь и так отдаёт 503 вместо пустоты).
+      const removedIds: string[] = [];
+      if (revs.length > 0) {
+        const present = new Set(revs.map((r) => r.page_id));
+        for (const f of framesRef.current) {
+          if (present.has(f.id)) {
+            missingCountsRef.current.delete(f.id);
+            continue;
+          }
+          const count = (missingCountsRef.current.get(f.id) ?? 0) + 1;
+          missingCountsRef.current.set(f.id, count);
+          if (count >= 2) removedIds.push(f.id);
+        }
+      }
+
       if (transportRef.current.supportsPageRefetch === false) {
+        if (changed.length === 0 && removedIds.length === 0) return;
         if (resyncBusyRef.current) return;
         resyncBusyRef.current = true;
+        missingCountsRef.current.clear(); // resync авторитетно заменит набор
         void resync().finally(() => {
           resyncBusyRef.current = false;
         });
         return;
       }
+
+      if (removedIds.length > 0) {
+        const removal = new Set(removedIds);
+        for (const id of removedIds) {
+          missingCountsRef.current.delete(id);
+          autosave.forget(id);
+        }
+        applyFrames(framesRef.current.filter((f) => !removal.has(f.id)));
+        setSelection((prev) => (prev && removal.has(prev.frameId) ? null : prev));
+      }
       for (const r of changed) void handleRemoteRev(r.page_id, r.rev);
     },
-    [resync, handleRemoteRev],
+    [resync, handleRemoteRev, autosave, applyFrames],
   );
 
   /** Состояние транспорта синка; 'live' — оптимистичный дефолт (без флапа бейджа). */
@@ -478,6 +555,17 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   const [followedBy, setFollowedBy] = useState<string | null>(null);
   const followedAtRef = useRef(0);
   const liveRef = useRef<BoardLiveControls | null>(null);
+  /**
+   * Render-оверлей broadcast-элементов (ревью синк-пасса, P0 №4): чужой
+   * элемент из live-канала НИКОГДА не попадает в frame.elements — иначе любой
+   * участник мог бы «писать» в чужой лист мимо серверного zone-enforcement,
+   * а следующий сейв владельца закреплял бы инъекцию в БД. Оверлей только
+   * рисуется; БД-подтверждение (rev-refetch) приносит элемент штатно, после
+   * чего оверлейная копия отфильтровывается по id, а неподтверждённые
+   * (undo автора до сейва / фейк) исчезают по TTL. Побочно закрывает и
+   * P1 «broadcast усиливает отсутствие tombstones».
+   */
+  const [liveOverlays, setLiveOverlays] = useState<LiveOverlayMap>({});
   const lastBringSeqRef = useRef(0);
   const myLiveKeyRef = useRef<string | null>(null);
   const zoneNamesRef = useRef(zoneNames);
@@ -534,18 +622,17 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           setFollowedBy(null);
         }
       },
-      // Мгновенный контур (Фаза 2): чужой завершённый элемент применяем сразу
-      // merge'ем, rev НЕ трогаем — его выставит DB-refetch по rev-сигналу
-      // (идемпотентно: LWW по version/versionNonce).
+      // Мгновенный контур (Фаза 2): чужой завершённый элемент — ТОЛЬКО в
+      // render-оверлей (см. liveOverlays), никогда в сцену.
       onElement: (e) => {
         const frame = framesRef.current.find((f) => f.id === e.pageId);
         if (!frame) return; // новый лист доедет rev-сигналом/поллингом
-        const protectedIds =
-          selectionRef.current && selectionRef.current.frameId === e.pageId
-            ? new Set(selectionRef.current.ids)
-            : undefined;
-        const { merged } = reconcileElements(frame.elements, [e.element], protectedIds);
-        applyFramePatch(e.pageId, { elements: merged });
+        if (frame.elements.some((el) => el.id === e.element.id)) return; // уже в БД-сцене
+        setLiveOverlays((prev) => {
+          const list = (prev[e.pageId] ?? []).filter((o) => o.element.id !== e.element.id);
+          list.push({ element: e.element, at: Date.now() });
+          return { ...prev, [e.pageId]: list };
+        });
       },
     };
     const controls = connect({ key, name, role: 'student' } satisfies LivePeer, handlers);
@@ -557,6 +644,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   }, [loading, loadError, myZoneId, applyBring]);
 
   // Курсор без событий 6 с — убираем; бейдж «смотрит» гаснет без пинга follow.
+  // Тут же метла оверлея: подтверждённые БД записи и просроченные фантомы.
   useEffect(() => {
     const timer = setInterval(() => {
       const now = Date.now();
@@ -567,6 +655,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           : Object.fromEntries(alive.map((c) => [c.key, c]));
       });
       setFollowedBy((prev) => (prev && now - followedAtRef.current > FOLLOW_STALE_MS ? null : prev));
+      setLiveOverlays((prev) => pruneLiveOverlays(prev, framesRef.current, now));
     }, 3000);
     return () => clearInterval(timer);
   }, []);
@@ -805,7 +894,8 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           size: pageSizeMm(f.orientation),
           background: f.background,
           gridMm: f.gridMm,
-          elements: f.elements,
+          // Сцена + неподтверждённый broadcast-оверлей (render-only, P0 №4).
+          elements: overlayElementsFor(liveOverlays, f.id, f.elements),
           title: isMine
             ? `Мой лист${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
             : zoneName
@@ -817,7 +907,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           writable: isMine,
         };
       }),
-    [frames, myZoneId, myGuestId, zoneNames],
+    [frames, myZoneId, myGuestId, zoneNames, liveOverlays],
   );
 
   // ─── Рендер ─────────────────────────────────────────────────────────────────
