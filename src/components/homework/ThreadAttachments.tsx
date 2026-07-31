@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, ImageIcon } from 'lucide-react';
+import { FileText, ImageIcon, Pencil } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   PhotoThumbButton,
@@ -32,6 +32,11 @@ interface ThreadAttachmentsProps {
   compact?: boolean;
   /** Кнопки поворота — только на репетиторской стороне треда. */
   canRotate?: boolean;
+  /**
+   * «Показать ошибку»: репетитор размечает фото ученика прямо из просмотра.
+   * Отправку делает вызывающий — своего write-path у разметки нет (rule 40).
+   */
+  onAnnotate?: (photo: { url: string; ref: string | null; degrees: number }) => void;
 }
 
 interface ResolvedAttachment {
@@ -46,6 +51,7 @@ export function ThreadAttachments({
   resolveSignedUrl,
   compact = false,
   canRotate = false,
+  onAnnotate,
 }: ThreadAttachmentsProps) {
   const refs = useMemo(
     () => parseThreadAttachmentRefs(attachmentValue),
@@ -198,6 +204,27 @@ export function ThreadAttachments({
         canRotate={canRotate}
         ariaTitle="Фото из переписки по задаче"
         ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+        footerActions={
+          onAnnotate && openIndex !== null && viewerItems[openIndex] ? (
+            <button
+              type="button"
+              onClick={() => {
+                const item = viewerItems[openIndex];
+                close();
+                onAnnotate({
+                  url: item.url,
+                  ref: item.ref ?? null,
+                  degrees: orientations[item.ref ?? ''] ?? 0,
+                });
+              }}
+              style={{ touchAction: 'manipulation' }}
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Показать ошибку
+            </button>
+          ) : null
+        }
       />
     </>
   );

@@ -56,7 +56,25 @@ import {
 // 4. Ластик копит попадания и коммитит одним вызовом на pointerup.
 // 5. Коммиты — вне setState-updater'ов; жест привязан к pointerId.
 
-export type BoardTool = 'pen' | 'eraser' | 'text' | 'select' | 'rect' | 'ellipse' | 'line' | 'pan';
+export type BoardTool =
+  | 'pen'
+  | 'marker'
+  | 'eraser'
+  | 'text'
+  | 'select'
+  | 'rect'
+  | 'ellipse'
+  | 'line'
+  | 'arrow'
+  | 'pan';
+
+/**
+ * Маркер (B6) — тот же штрих, но полупрозрачный и заметно толще пера: он
+ * ПОДСВЕЧИВАЕТ уже написанное, а не пишет поверх. Ульяна U9: «показать, что вот
+ * эта связь останется, а этот атом уйдёт».
+ */
+export const MARKER_OPACITY = 0.35;
+export const MARKER_SIZE_FACTOR = 4;
 
 export interface FrameView {
   id: string;
@@ -583,7 +601,12 @@ export function BoardCanvas({
       if (drag.kind === 'stroke' && frameId) {
         const points = livePointsRef.current;
         if (points && points.length >= 3) {
-          onCommitElement(frameId, createStroke(points, color, size));
+          onCommitElement(
+            frameId,
+            tool === 'marker'
+              ? createStroke(points, color, size * MARKER_SIZE_FACTOR, MARKER_OPACITY)
+              : createStroke(points, color, size),
+          );
         }
       } else if (drag.kind === 'shape' && frameId) {
         const shape = liveShapeRef.current;
@@ -869,7 +892,7 @@ export function BoardCanvas({
         return;
       }
 
-      if (tool === 'pen') {
+      if (tool === 'pen' || tool === 'marker') {
         const pressure = pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
         dragRef.current = { kind: 'stroke', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
         livePointsRef.current = [lx, ly, pressure];
@@ -884,7 +907,7 @@ export function BoardCanvas({
         return;
       }
 
-      if (tool === 'rect' || tool === 'ellipse' || tool === 'line') {
+      if (tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow') {
         dragRef.current = { kind: 'shape', pointerId, pointerType, frameId: frame.id, startX: lx, startY: ly };
         liveShapeRef.current = { kind: tool as ShapeKind, x: lx, y: ly, w: 0, h: 0 };
         scheduleFrame();
@@ -1097,10 +1120,14 @@ export function BoardCanvas({
             type: 'stroke',
             points: livePoints,
             color,
-            size,
+            // Превью маркера обязано совпадать с тем, что закоммитится: иначе
+            // репетитор ведёт тонкую непрозрачную линию и получает широкую
+            // полупрозрачную.
+            size: tool === 'marker' ? size * MARKER_SIZE_FACTOR : size,
+            ...(tool === 'marker' ? { opacity: MARKER_OPACITY } : {}),
           }
         : null,
-    [livePoints, color, size],
+    [livePoints, color, size, tool],
   );
 
   const liveShapeElement: BoardElement | null = useMemo(

@@ -27,6 +27,8 @@ import {
   TUTOR_GC_TIME_MS,
 } from '@/hooks/tutorQueryOptions';
 import { PhotoGallery } from '@/components/homework/shared/PhotoGallery';
+import { PhotoAnnotateSheet } from '@/components/tutor/photo-annotate/PhotoAnnotateSheet';
+import { normalizeDegrees } from '@/lib/photoOrientation';
 import GuidedChatMessage from '@/components/homework/GuidedChatMessage';
 import CriteriaBreakdownTable, {
   type CriteriaBreakdownItem,
@@ -274,6 +276,12 @@ export function GuidedThreadViewer({
   const [isSending, setIsSending] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachPreview, setAttachPreview] = useState<string | null>(null);
+  /** Фото, которое сейчас размечают. null — лист закрыт. */
+  const [annotateTarget, setAnnotateTarget] = useState<{
+    url: string;
+    ref: string | null;
+    degrees: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -644,6 +652,54 @@ export function GuidedThreadViewer({
     }
   }, [messageText, attachedFile, hiddenNote, isSending, assignmentId, selectedTask?.id, studentId, taskFilter, clearAttachment, getWasAtBottom, queryClient, scrollToBottomIfNeeded, threadQueryKey]);
 
+  /**
+   * Отправка размеченного фото.
+   *
+   * ⚠️ Идёт ТЕМ ЖЕ путём, что и обычное сообщение с вложением:
+   * `uploadTutorHomeworkTaskImage` → `postTutorThreadMessage` → оптимистичный
+   * merge в кэш треда. Своего пути записи в `homework_tutor_thread_messages`
+   * у разметки нет и быть не должно (rule 40, двойной write-path).
+   */
+  const handleSendAnnotated = useCallback(
+    async (file: File) => {
+      const caption = 'Отметил, где ошибка';
+      const upload = await uploadTutorHomeworkTaskImage(file);
+      const response = await postTutorThreadMessage(assignmentId, studentId, caption, {
+        visible_to_student: true,
+        task_order: taskFilter === 'all' ? undefined : taskFilter,
+        task_id: taskFilter === 'all' ? undefined : selectedTask?.id,
+        image_url: upload.storageRef,
+      });
+      const wasAtBottom = getWasAtBottom();
+      queryClient.setQueryData<TutorStudentGuidedThreadResponse | undefined>(
+        threadQueryKey,
+        (prev) =>
+          mergeThreadMessage(prev, {
+            id: response.id,
+            role: 'tutor',
+            content: caption,
+            image_url: upload.storageRef,
+            task_id: taskFilter === 'all' ? null : selectedTask?.id ?? null,
+            task_order: taskFilter === 'all' ? null : taskFilter,
+            created_at: response.created_at,
+            visible_to_student: true,
+          }),
+      );
+      scrollToBottomIfNeeded(wasAtBottom);
+      toast.success('Отправлено ученику');
+    },
+    [
+      assignmentId,
+      getWasAtBottom,
+      queryClient,
+      scrollToBottomIfNeeded,
+      selectedTask?.id,
+      studentId,
+      taskFilter,
+      threadQueryKey,
+    ],
+  );
+
   const body = (
     <div className="space-y-3">
           {threadQuery.isLoading ? (
@@ -894,6 +950,7 @@ export function GuidedThreadViewer({
                         taskMarker={taskMarker}
                         hiddenFromStudent={message.visible_to_student === false}
                         imageResolver={tutorImageResolver}
+                        onAnnotatePhoto={setAnnotateTarget}
                         showDateInTimestamp
                         subject={subject}
                       />
@@ -997,6 +1054,18 @@ export function GuidedThreadViewer({
           status={(selectedTaskState?.status ?? 'active') as 'active' | 'completed' | 'locked' | 'skipped'}
           tutorForceCompletedAt={selectedTaskState?.tutor_force_completed_at ?? null}
           tutorReviewedAt={selectedTaskState?.tutor_reviewed_at ?? null}
+        />
+      ) : null}
+
+      {annotateTarget ? (
+        <PhotoAnnotateSheet
+          open
+          photoUrl={annotateTarget.url}
+          photoRef={annotateTarget.ref}
+          degrees={normalizeDegrees(annotateTarget.degrees)}
+          surface="homework_thread"
+          onClose={() => setAnnotateTarget(null)}
+          onSend={handleSendAnnotated}
         />
       ) : null}
     </div>

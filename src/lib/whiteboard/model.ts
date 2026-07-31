@@ -351,9 +351,21 @@ export interface StrokeElement extends BoardElementBase {
   color: string;
   /** Толщина в мм. */
   size: number;
+  /**
+   * Непрозрачность 0..1. Отсутствует = 1 (обычное перо).
+   *
+   * Маркер (B6): Ульяна U9 — «этими маркерами очень много работают, особенно
+   * учителя русского, химии: показать, что вот эта связь останется, а этот
+   * атом уйдёт». Третий репетитор подряд после Елены и Егора.
+   *
+   * ⚠️ Поле ДОБАВОЧНОЕ и необязательное: старые сцены без него читаются как
+   * непрозрачные, поэтому миграция данных не нужна.
+   */
+  opacity?: number;
 }
 
-export type ShapeKind = 'rect' | 'ellipse' | 'line';
+/** `arrow` — B5: Елена «прям очень нужно», Егор «часто использую». */
+export type ShapeKind = 'rect' | 'ellipse' | 'line' | 'arrow';
 
 export interface ShapeElement extends BoardElementBase {
   type: 'shape';
@@ -451,8 +463,25 @@ export function reassignIdentity<T extends BoardElement>(el: T): T {
 
 // ─── Фабрики ──────────────────────────────────────────────────────────────────
 
-export function createStroke(points: number[], color: string, size: number): StrokeElement {
-  return { ...baseFields(), type: 'stroke', points, color, size };
+export function createStroke(
+  points: number[],
+  color: string,
+  size: number,
+  opacity?: number,
+): StrokeElement {
+  const base: StrokeElement = { ...baseFields(), type: 'stroke', points, color, size };
+  // Поле пишем только для маркера: обычное перо не должно тащить лишний ключ
+  // в jsonb на каждый штрих конспекта.
+  return opacity !== undefined && opacity < 1
+    ? { ...base, opacity: clampOpacity(opacity) }
+    : base;
+}
+
+/** 0.05..1; мусор и полная прозрачность → 1 (иначе штрих был бы невидим). */
+export function clampOpacity(value: unknown): number {
+  const raw = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(raw)) return 1;
+  return Math.min(1, Math.max(0.05, raw));
 }
 
 export function createShape(
@@ -746,6 +775,15 @@ export function hitTest(el: BoardElement, x: number, y: number, tolerance: numbe
     }
     return false;
   }
+  if (el.type === 'shape' && (el.kind === 'line' || el.kind === 'arrow')) {
+    // Расстояние до отрезка, а не до bbox: у диагонали прямоугольник почти
+    // весь пустой, и ластик стирал бы её, «зацепив» воздух рядом. Та же
+    // причина, по которой штрих меряется по ломаной.
+    return (
+      pointSegmentDistance(x, y, el.x, el.y, el.x + el.w, el.y + el.h) <=
+      tolerance + el.size / 2
+    );
+  }
   if (el.type === 'image' && el.rotation !== 0) {
     // Точное попадание в ПОВЁРНУТЫЙ прямоугольник: точка приводится в локальную
     // систему обратным поворотом (bbox-отсев выше уже прошёл).
@@ -867,6 +905,11 @@ export function parseElements(raw: unknown): BoardElement[] {
         points: s.points.filter((n) => typeof n === 'number'),
         color: typeof s.color === 'string' ? s.color : BOARD_COLORS[0],
         size: typeof s.size === 'number' ? s.size : DEFAULT_PEN_SIZE_MM,
+        // Отсутствие поля = непрозрачный штрих: сцены, записанные до появления
+        // маркера, читаются без миграции.
+        ...(typeof s.opacity === 'number' && s.opacity < 1
+          ? { opacity: clampOpacity(s.opacity) }
+          : {}),
       });
     } else if (el.type === 'shape') {
       const s = el as Partial<ShapeElement>;
@@ -874,7 +917,8 @@ export function parseElements(raw: unknown): BoardElement[] {
       out.push({
         ...base,
         type: 'shape',
-        kind: s.kind === 'ellipse' || s.kind === 'line' ? s.kind : 'rect',
+        kind:
+          s.kind === 'ellipse' || s.kind === 'line' || s.kind === 'arrow' ? s.kind : 'rect',
         x: s.x,
         y: s.y,
         w: typeof s.w === 'number' ? s.w : 0,

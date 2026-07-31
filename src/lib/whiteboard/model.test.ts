@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  type ShapeElement,
   type StrokeElement,
   PAGE_HEIGHT_MM,
   PAGE_WIDTH_MM,
+  clampOpacity,
   clampToPage,
   createImage,
   createShape,
@@ -300,5 +302,126 @@ describe('масштабирование выделения (Этап 5)', () =>
     expect((huge as { w: number }).w).toBeLessThanOrEqual(10 * 20);
     const same = scaleElement(shape, 1, 0, 0);
     expect(same).toMatchObject({ x: 0, y: 0, w: 10, h: 10 });
+  });
+});
+
+// ─── Маркер и стрелка (B6/B5) ───────────────────────────────────────────────
+//
+// Оба поля ДОБАВОЧНЫЕ: сцены, записанные до их появления, обязаны читаться
+// без миграции — иначе конспекты репетиторов открылись бы пустыми.
+
+describe('маркер: StrokeElement.opacity', () => {
+  it('обычное перо не тащит лишний ключ в jsonb', () => {
+    const pen = createStroke([0, 0, 0.5, 10, 10, 0.5], '#000', 0.8);
+    expect('opacity' in pen).toBe(false);
+  });
+
+  it('маркер пишет непрозрачность', () => {
+    const marker = createStroke([0, 0, 0.5, 10, 10, 0.5], '#000', 3, 0.35);
+    expect(marker.opacity).toBeCloseTo(0.35, 5);
+  });
+
+  it('opacity=1 не пишется — это и есть обычное перо', () => {
+    expect('opacity' in createStroke([0, 0, 0.5, 1, 1, 0.5], '#000', 1, 1)).toBe(false);
+  });
+
+  it('clampOpacity держит диапазон и переживает мусор', () => {
+    expect(clampOpacity(0)).toBe(0.05);
+    expect(clampOpacity(-5)).toBe(0.05);
+    expect(clampOpacity(2)).toBe(1);
+    expect(clampOpacity(Number.NaN)).toBe(1);
+    expect(clampOpacity(undefined)).toBe(1);
+    expect(clampOpacity(0.35)).toBeCloseTo(0.35, 5);
+  });
+
+  it('parseElements: старый штрих без opacity читается непрозрачным', () => {
+    const [el] = parseElements([
+      { id: 'a', type: 'stroke', points: [0, 0, 0.5, 5, 5, 0.5], color: '#000', size: 1 },
+    ]);
+    expect(el.type).toBe('stroke');
+    expect('opacity' in el).toBe(false);
+  });
+
+  it('parseElements: битая непрозрачность не роняет сцену', () => {
+    const [el] = parseElements([
+      {
+        id: 'a',
+        type: 'stroke',
+        points: [0, 0, 0.5, 5, 5, 0.5],
+        color: '#000',
+        size: 1,
+        opacity: -3,
+      },
+    ]);
+    expect(el.type).toBe('stroke');
+    expect((el as StrokeElement).opacity).toBe(0.05);
+  });
+});
+
+describe('стрелка: ShapeKind arrow', () => {
+  it('parseElements принимает arrow и не подменяет его прямоугольником', () => {
+    const [el] = parseElements([
+      { id: 'a', type: 'shape', kind: 'arrow', x: 0, y: 0, w: 10, h: 5, color: '#000', size: 1 },
+    ]);
+    expect(el.type).toBe('shape');
+    expect((el as ShapeElement).kind).toBe('arrow');
+  });
+
+  it('неизвестный kind по-прежнему схлопывается в rect', () => {
+    const [el] = parseElements([
+      { id: 'a', type: 'shape', kind: 'star', x: 0, y: 0, w: 10, h: 5, color: '#000', size: 1 },
+    ]);
+    expect((el as ShapeElement).kind).toBe('rect');
+  });
+
+  it('попадание считается по отрезку, а не по bbox — ластик не хватает воздух', () => {
+    // Диагональ (0,0)→(100,100). Точка (90,10) лежит в bbox, но далеко от линии.
+    const arrow = createShape('arrow', 0, 0, 100, 100, '#000', 1);
+    expect(hitTest(arrow, 50, 50, 1)).toBe(true);
+    expect(hitTest(arrow, 90, 10, 1)).toBe(false);
+    // Прямоугольник в той же рамке ловится по bbox — поведение не изменилось.
+    expect(hitTest(createShape('rect', 0, 0, 100, 100, '#000', 1), 90, 10, 1)).toBe(true);
+  });
+});
+
+describe('рендер маркера и стрелки (единый источник для экрана и PDF)', () => {
+  it('маркер отдаёт fill-opacity, а НЕ opacity узла', () => {
+    // opacity на узле дал бы тёмный шов на пересечении двух маркерных штрихов.
+    const [node] = elementToSvg(createStroke([0, 0, 0.5, 20, 0, 0.5], '#F00', 3, 0.35));
+    expect(node.attrs['fill-opacity']).toBeCloseTo(0.35, 5);
+    expect(node.attrs.opacity).toBeUndefined();
+  });
+
+  it('обычное перо рисуется без признаков прозрачности', () => {
+    const [node] = elementToSvg(createStroke([0, 0, 0.5, 20, 0, 0.5], '#F00', 1));
+    expect(node.attrs['fill-opacity']).toBeUndefined();
+  });
+
+  it('стрелка — один path с древком и двумя усами', () => {
+    const nodes = elementToSvg(createShape('arrow', 0, 0, 40, 0, '#000', 1));
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].tag).toBe('path');
+    const d = String(nodes[0].attrs.d);
+    // Древко + перенос пера на ус: два подпути.
+    expect(d.split('M').length - 1).toBe(2);
+    expect(nodes[0].attrs.fill).toBe('none');
+  });
+
+  it('у вырожденной стрелки остаётся только древко — наконечник не разлетается', () => {
+    const nodes = elementToSvg(createShape('arrow', 5, 5, 0, 0, '#000', 1));
+    expect(String(nodes[0].attrs.d).split('M').length - 1).toBe(1);
+  });
+
+  it('наконечник не длиннее трети древка — короткая стрелка остаётся стрелкой', () => {
+    const nodes = elementToSvg(createShape('arrow', 0, 0, 6, 0, '#000', 5));
+    const d = String(nodes[0].attrs.d);
+    const xs = Array.from(d.matchAll(/[ML](-?\d+(?:\.\d+)?),/g)).map((m) => Number(m[1]));
+    // Ус не должен уходить левее начала древка.
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(-0.01);
+  });
+
+  it('стрелка попадает в PDF-строку тем же путём, что и на экран', () => {
+    const svg = pageToSvgString([createShape('arrow', 10, 10, 50, 20, '#000', 1)], 'blank', 5);
+    expect(svg).toContain('<path');
   });
 });

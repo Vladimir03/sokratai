@@ -13,6 +13,7 @@ import {
   type BoardElement,
   type BoardGridMm,
   type PageSizeMm,
+  type ShapeElement,
   type StrokeElement,
   type TextElement,
   PAGE_HEIGHT_MM,
@@ -168,7 +169,21 @@ function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgN
     if (!d) return [];
     // Штрих — ЗАЛИВКА контура, а не обводка линии: perfect-freehand отдаёт
     // outline пера, поэтому fill даёт переменную толщину, а stroke бы её убил.
-    return [{ tag: 'path', attrs: { d, fill: el.color, stroke: 'none' } }];
+    //
+    // ⚠️ Маркер задаётся `fill-opacity`, а НЕ `opacity`: последний применился бы
+    // к узлу целиком и наложение двух маркерных штрихов давало бы тёмный шов на
+    // пересечении. С `fill-opacity` подсветка ложится ровно.
+    return [{
+      tag: 'path',
+      attrs: {
+        d,
+        fill: el.color,
+        stroke: 'none',
+        ...(el.opacity !== undefined && el.opacity < 1
+          ? { 'fill-opacity': round(el.opacity) }
+          : {}),
+      },
+    }];
   }
 
   if (el.type === 'shape') {
@@ -184,6 +199,9 @@ function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgN
         tag: 'line',
         attrs: { x1: round(el.x), y1: round(el.y), x2: round(el.x + el.w), y2: round(el.y + el.h), ...common },
       }];
+    }
+    if (el.kind === 'arrow') {
+      return [{ tag: 'path', attrs: { d: arrowPathData(el), ...common } }];
     }
     const x = Math.min(el.x, el.x + el.w);
     const y = Math.min(el.y, el.y + el.h);
@@ -201,6 +219,38 @@ function computeElementSvg(el: BoardElement, options: StrokeRenderOptions): SvgN
   if (el.type === 'text') return textToSvg(el);
   // image сюда не доходит (обслужен в elementToSvg до кэша).
   return [];
+}
+
+/** Угол половины раствора наконечника. */
+const ARROW_HEAD_ANGLE = Math.PI / 7;
+
+/**
+ * Стрелка (B5) одним `<path>`: древко + два уса.
+ *
+ * ⚠️ Наконечник рисуется ОБВОДКОЙ, а не залитым треугольником, — тогда он
+ * наследует `stroke-width` древка и остаётся стрелкой на любом масштабе, а не
+ * превращается в кляксу при толстом пере.
+ *
+ * Длина уса ограничена сверху третью древка: у короткой стрелки наконечник
+ * иначе съедал бы её целиком.
+ */
+function arrowPathData(el: ShapeElement): string {
+  const x2 = el.x + el.w;
+  const y2 = el.y + el.h;
+  const length = Math.hypot(el.w, el.h);
+  const shaft = `M${round(el.x)},${round(el.y)} L${round(x2)},${round(y2)}`;
+  if (length < 1e-3) return shaft;
+
+  const head = Math.min(Math.max(el.size * 3, 2), length / 3);
+  const angle = Math.atan2(el.h, el.w);
+  const left = angle + Math.PI - ARROW_HEAD_ANGLE;
+  const right = angle + Math.PI + ARROW_HEAD_ANGLE;
+
+  return [
+    shaft,
+    `M${round(x2 + Math.cos(left) * head)},${round(y2 + Math.sin(left) * head)} L${round(x2)},${round(y2)}`,
+    `L${round(x2 + Math.cos(right) * head)},${round(y2 + Math.sin(right) * head)}`,
+  ].join(' ');
 }
 
 function textToSvg(el: TextElement): SvgNodeSpec[] {
@@ -302,6 +352,48 @@ function nodeToString(node: SvgNodeSpec): string {
     return `<text ${attrs}>${escapeXml(node.text ?? '')}</text>`;
   }
   return `<${node.tag} ${attrs}/>`;
+}
+
+/**
+ * Автономный SVG в ПИКСЕЛЯХ — для растеризации разметки поверх фото.
+ *
+ * Отличается от `pageToSvgString` только единицами: у доски мир измеряется в
+ * миллиметрах листа A4, у фото — в пикселях снимка. Геометрия элементов при
+ * этом берётся ровно та же (`elementToSvg`), поэтому инвариант «один источник
+ * для экрана, PDF и растра» не нарушается.
+ *
+ * ⚠️ Документ обязан быть САМОДОСТАТОЧНЫМ: SVG, загруженный как `<img>`, не
+ * подтягивает внешние ресурсы, поэтому картинки сюда класть нельзя — фото
+ * рисуется на канву отдельным проходом.
+ *
+ * ⚠️ Шрифт текста здесь общесистемный: у SVG-как-картинки нет доступа к
+ * шрифтам документа, и `Golos Text` подменился бы молча. Подписи разметки
+ * короткие, поэтому это осознанный размен, а не недосмотр.
+ */
+export function elementsToPixelSvg(
+  elements: BoardElement[],
+  size: { width: number; height: number },
+  options: StrokeRenderOptions = DEFAULT_STROKE_OPTIONS,
+): string {
+  const nodes: SvgNodeSpec[] = [];
+  for (let i = 0; i < elements.length; i++) {
+    // imageUrls намеренно не передаём: картинок в разметке не бывает.
+    nodes.push(...elementToSvg(elements[i], options));
+  }
+  const body = nodes
+    .map((node) =>
+      node.tag === 'text'
+        ? nodeToString({
+            ...node,
+            attrs: { ...node.attrs, 'font-family': 'sans-serif' },
+          })
+        : nodeToString(node),
+    )
+    .join('');
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size.width}" height="${size.height}" ` +
+    `viewBox="0 0 ${size.width} ${size.height}">${body}</svg>`
+  );
 }
 
 /**

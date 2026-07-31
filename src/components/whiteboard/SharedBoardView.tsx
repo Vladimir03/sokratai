@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Hand, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, User, ZoomIn, ZoomOut } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Check, Eraser, Eye, Hand, Highlighter, Loader2, Maximize, MousePointer2, PenLine, Plus, Redo2, Type, Undo2, User, ZoomIn, ZoomOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -112,6 +112,9 @@ let sharedTextDraftSeq = 0;
 
 const SHARED_TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'pen', label: 'Перо', icon: PenLine },
+  // Маркер даём и ученику: подсветить кусок чужой выкладки — ровно тот жест,
+  // ради которого его просили (B6).
+  { id: 'marker', label: 'Маркер — подсветить', icon: Highlighter },
   { id: 'eraser', label: 'Ластик', icon: Eraser },
   { id: 'text', label: 'Текст', icon: Type },
   { id: 'select', label: 'Выделение', icon: MousePointer2 },

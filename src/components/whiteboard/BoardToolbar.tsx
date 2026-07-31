@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import {
+  ArrowUpRight,
   Circle,
+  Highlighter,
   Eraser,
   FileUp,
   ImagePlus,
@@ -85,9 +87,13 @@ interface BoardToolbarProps {
 
 const TOOLS: { id: BoardTool; label: string; icon: typeof PenLine }[] = [
   { id: 'pen', label: 'Перо', icon: PenLine },
+  // B6 (Ульяна U9, третий репетитор подряд): подсветить уже написанное.
+  { id: 'marker', label: 'Маркер — подсветить', icon: Highlighter },
   { id: 'eraser', label: 'Ластик', icon: Eraser },
   { id: 'text', label: 'Текст', icon: Type },
   { id: 'line', label: 'Линия', icon: Minus },
+  // B5 (Елена «прям очень нужно», Егор «часто использую»).
+  { id: 'arrow', label: 'Стрелка', icon: ArrowUpRight },
   { id: 'rect', label: 'Прямоугольник', icon: Square },
   { id: 'ellipse', label: 'Эллипс', icon: Circle },
   { id: 'select', label: 'Выделение', icon: MousePointer2 },

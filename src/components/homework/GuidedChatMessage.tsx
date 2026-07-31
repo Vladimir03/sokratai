@@ -81,6 +81,12 @@ interface GuidedChatMessageProps {
    */
   imageResolver?: (ref: string) => Promise<string | null>;
   /**
+   * «Показать ошибку» на фото ученика. Пробрасывается до `ThreadAttachments`;
+   * отправляет размеченную картинку уже владелец треда — своего write-path у
+   * разметки нет (rule 40).
+   */
+  onAnnotatePhoto?: (photo: { url: string; ref: string | null; degrees: number }) => void;
+  /**
    * If true, message timestamps render as full `DD.MM.YYYY, HH:MM:SS`
    * (date + time). Default — time only (`HH:MM`). Used by the tutor viewer
    * because messages can be days/weeks old; student workspace shows
@@ -158,6 +164,7 @@ const GuidedChatMessage = memo(({
   taskMarker,
   hiddenFromStudent,
   imageResolver,
+  onAnnotatePhoto,
   showDateInTimestamp,
   subject,
 }: GuidedChatMessageProps) => {
@@ -330,6 +337,7 @@ const GuidedChatMessage = memo(({
             attachmentValue={message.image_url}
             resolveSignedUrl={resolveImageRef}
             canRotate={isTutorPerspective}
+            onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
           />
         )}
       </div>
@@ -435,6 +443,7 @@ const GuidedChatMessage = memo(({
             attachmentValue={message.image_url}
             resolveSignedUrl={resolveImageRef}
             canRotate={isTutorPerspective}
+            onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
           />
         )}
       </div>
