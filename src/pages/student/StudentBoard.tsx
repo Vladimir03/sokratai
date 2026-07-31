@@ -8,12 +8,13 @@ import {
   refetchStudentPage,
   saveStudentPage,
 } from '@/lib/whiteboardStudentApi';
-import { subscribeBoardRevs } from '@/lib/whiteboard/boardRealtime';
+import { startBoardSync } from '@/lib/whiteboard/boardSync';
 import { connectBoardLive } from '@/lib/whiteboard/boardLive';
 
 // Доска глазами ученика с аккаунтом (Этап 3, B4): чтение PostgREST под RLS,
-// запись через whiteboard-student-api (только своя зона), синк — Realtime по
-// сигнальной board_page_revs (канон rule 100: merge, gap-fill на reconnect).
+// запись через whiteboard-student-api (только своя зона), синк — boardSync:
+// Realtime по сигнальной board_page_revs + поллинг-фолбэк (фикс 31.07:
+// мёртвый WS на мобильном операторе замораживал доску навсегда).
 
 export default function StudentBoard() {
   const { boardId } = useParams<{ boardId: string }>();
@@ -35,9 +36,10 @@ export default function StudentBoard() {
       savePage: saveStudentPage,
       refetchPage: refetchStudentPage,
       start(handlers) {
-        return subscribeBoardRevs(boardId, {
+        return startBoardSync(boardId, {
           onRev: (event) => handlers.onRemote(event.page_id, event.rev),
-          onReconnect: handlers.onResync,
+          onRevsSnapshot: (revs) => handlers.onRevs?.(revs),
+          onState: (state) => handlers.onSyncState?.(state),
         });
       },
       // Этап 4: live-канал (bring/курсоры/«репетитор смотрит») — у ученика

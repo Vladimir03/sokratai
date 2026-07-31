@@ -24,10 +24,26 @@ export interface AutosaveQueueOptions {
   delayMs?: number;
   /** Пауза перед авторетраем после ошибки, мс. */
   retryMs?: number;
+  /**
+   * Потолок ожидания: flush не позже этого от ПЕРВОГО markDirty после чистого
+   * состояния. Без него непрерывное черкание (штрихи чаще delayMs) бесконечно
+   * перезаводит дебаунс, и партнёр не видит ничего до паузы.
+   */
+  maxWaitMs?: number;
 }
 
 const DEFAULT_DELAY_MS = 900;
 const DEFAULT_RETRY_MS = 5000;
+
+/**
+ * Дебаунс автосейва досок: 300 мс (было 900 — фикс латентности 31.07,
+ * «ученик→репетитор нужно ≤1 с»). markDirty зовётся на commit штриха
+ * (pointerup), не на точку: ≤1-2 сейва/с на пишущего, edge и Realtime-фанаут
+ * держат с запасом. Пара к BOARD_AUTOSAVE_MAX_WAIT_MS.
+ */
+export const BOARD_AUTOSAVE_DELAY_MS = 300;
+/** Потолок ожидания для досок: при непрерывном черкании сейв не позже 1 с. */
+export const BOARD_AUTOSAVE_MAX_WAIT_MS = 1000;
 
 export class AutosaveQueue {
   private dirty = new Set<string>();
@@ -36,6 +52,8 @@ export class AutosaveQueue {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
   private status: AutosaveStatus = 'saved';
+  /** Момент первого markDirty после чистого состояния — для maxWaitMs. */
+  private firstDirtyAt: number | null = null;
 
   constructor(private readonly options: AutosaveQueueOptions) {}
 
@@ -54,7 +72,16 @@ export class AutosaveQueue {
     // Ошибка не «понижается» до saving новыми правками — пользователь должен
     // видеть красный статус, пока хоть что-то не сохранено.
     this.setStatus(this.status === 'error' ? 'error' : 'saving');
+    if (this.firstDirtyAt === null) this.firstDirtyAt = Date.now();
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    // Потолок ожидания: непрерывное черкание не должно бесконечно перезаводить
+    // дебаунс — flush не позже maxWaitMs от первой грязи (латентность ≤1 с).
+    const maxWait = this.options.maxWaitMs;
+    if (maxWait && !this.flushPromise && Date.now() - this.firstDirtyAt >= maxWait) {
+      this.debounceTimer = null;
+      void this.flush();
+      return;
+    }
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
       void this.flush();
@@ -84,6 +111,9 @@ export class AutosaveQueue {
 
     const run = (async (): Promise<boolean> => {
       this.setStatus('saving');
+      // Окно maxWait закрывается стартом цикла: правки во время полёта откроют
+      // новое (их дренит этот же цикл, но таймер следующего burst'а — с нуля).
+      this.firstDirtyAt = null;
       try {
         while (this.dirty.size > 0) {
           const ids = Array.from(this.dirty);

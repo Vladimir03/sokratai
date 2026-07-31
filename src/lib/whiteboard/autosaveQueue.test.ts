@@ -99,6 +99,34 @@ describe('AutosaveQueue', () => {
     expect(savePage).toHaveBeenCalledTimes(1);
   });
 
+  it('maxWaitMs: непрерывное черкание не откладывает flush бесконечно', async () => {
+    const savePage = vi.fn().mockResolvedValue(undefined);
+    const q = new AutosaveQueue({
+      savePage,
+      onStatus: () => undefined,
+      delayMs: 300,
+      maxWaitMs: 1000,
+    });
+
+    // Штрихи каждые 200 мс (чаще delayMs) — чистый дебаунс не выстрелил бы
+    // никогда; окно maxWait форсит flush не позже 1 с от первой грязи.
+    q.markDirty('a');
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(200);
+      q.markDirty('a');
+      expect(savePage).not.toHaveBeenCalled();
+    }
+    await vi.advanceTimersByTimeAsync(200); // t=1000
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(savePage).toHaveBeenCalledTimes(1);
+
+    // Новое окно после цикла: одиночный штрих уезжает обычным дебаунсом.
+    q.markDirty('a');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(savePage).toHaveBeenCalledTimes(2);
+  });
+
   it('статус error не понижается новыми правками до успешного сохранения', async () => {
     const savePage = vi.fn().mockRejectedValueOnce(new Error('x')).mockResolvedValue(undefined);
     const q = new AutosaveQueue({ savePage, onStatus: (s) => statuses.push(s), retryMs: 60000 });

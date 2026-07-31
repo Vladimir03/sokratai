@@ -129,8 +129,6 @@ export interface GuestBoardState {
   myGuestId: string | null;
   imageUrls: Record<string, string>;
   frames: SharedFrame[];
-  /** Watermark поллинга (серверный now). */
-  since: string | null;
 }
 
 export async function getGuestState(slug: string, guestToken: string): Promise<GuestBoardState> {
@@ -144,8 +142,7 @@ export async function getGuestState(slug: string, guestToken: string): Promise<G
   }
   if (res.status !== 200) throwGuestError(res, 'Не удалось загрузить доску.');
 
-  // rev приходит ВНУТРИ строки (единый DB-снимок elements+rev — ревью P0);
-  // watermark поллинга — серверный now.
+  // rev приходит ВНУТРИ строки (единый DB-снимок elements+rev — ревью P0).
   const pages = (res.body.pages as (Record<string, unknown> & { rev?: number })[] | undefined) ?? [];
   return {
     boardTitle: ((res.body.board as { title?: string | null } | undefined)?.title as string | null) ?? null,
@@ -153,7 +150,6 @@ export async function getGuestState(slug: string, guestToken: string): Promise<G
     myGuestId: (res.body.my_guest_id as string | null) ?? null,
     imageUrls: (res.body.image_urls as Record<string, string> | undefined) ?? {},
     frames: pages.map((row, i) => parseFrameRow(row as never, i, Number(row.rev) || 0)),
-    since: (res.body.now as string | undefined) ?? null,
   };
 }
 
@@ -181,13 +177,18 @@ export interface GuestBring {
   at?: string | null;
 }
 
+/**
+ * Полный список ревизий доски (rev-diff, фикс P0 31.07). Часов и watermark
+ * в контуре больше НЕТ: прежний `?since=` сравнивал Postgres-updated_at с
+ * now() эдж-изолята (а фолбэком — с часами телефона), и skew часов делал
+ * гостя слепым навсегда. Клиент сверяет rev с локальными кадрами — пропуск
+ * самовосстанавливается следующим тиком.
+ */
 export async function getGuestSignals(
   slug: string,
   guestToken: string,
-  since: string | null,
-): Promise<{ revs: GuestSignal[]; bring: GuestBring | null; now: string }> {
-  const qs = since ? `?${new URLSearchParams({ since }).toString()}` : '';
-  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/signals${qs}`, {
+): Promise<{ revs: GuestSignal[]; bring: GuestBring | null }> {
+  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/signals`, {
     method: 'GET',
     guestToken,
   });
@@ -195,7 +196,6 @@ export async function getGuestSignals(
   return {
     revs: (res.body.revs as GuestSignal[] | undefined) ?? [],
     bring: (res.body.bring as GuestBring | null | undefined) ?? null,
-    now: (res.body.now as string | undefined) ?? new Date().toISOString(),
   };
 }
 

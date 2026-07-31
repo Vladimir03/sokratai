@@ -87,10 +87,15 @@ import {
   resolveImagesAsDataUrls,
   uploadBoardImage,
 } from '@/lib/whiteboard/boardImages';
-import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQueue';
+import {
+  AutosaveQueue,
+  BOARD_AUTOSAVE_DELAY_MS,
+  BOARD_AUTOSAVE_MAX_WAIT_MS,
+  type AutosaveStatus,
+} from '@/lib/whiteboard/autosaveQueue';
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 import { reconcileElements } from '@/lib/whiteboard/reconcile';
-import { subscribeBoardRevs } from '@/lib/whiteboard/boardRealtime';
+import { startBoardSync, type BoardSyncState } from '@/lib/whiteboard/boardSync';
 import { ensureShareLink, revokeShareLink, sendBoardBring } from '@/lib/whiteboardApi';
 import { ensureChatConversation, sendChatMessageApi } from '@/lib/tutorStudentChatApi';
 import { usePasteImages } from '@/hooks/usePasteImages';
@@ -288,6 +293,8 @@ export default function Whiteboard() {
         throw new Error('REV_CONFLICT_RETRY');
       },
       onStatus: setSaveStatus,
+      delayMs: BOARD_AUTOSAVE_DELAY_MS,
+      maxWaitMs: BOARD_AUTOSAVE_MAX_WAIT_MS,
     });
   }
   const autosave = autosaveRef.current;
@@ -408,9 +415,11 @@ export default function Whiteboard() {
     [autosave],
   );
 
-  // ─── Живой синк (Этап 3): ученики пишут в зоны — репетитор видит ~1–2 с ─────
+  // ─── Живой синк (Этап 3 + boardSync 31.07): WS + поллинг-фолбэк ─────────────
 
   const boardIdForSync = board?.id ?? null;
+  /** Состояние транспорта; 'live' — оптимистичный дефолт (бейдж не флапает). */
+  const [syncState, setSyncState] = useState<BoardSyncState>('live');
 
   useEffect(() => {
     if (!boardIdForSync) return;
@@ -463,19 +472,18 @@ export default function Whiteboard() {
       });
     };
 
-    const resync = async () => {
-      const { data: revs } = await supabase
-        .from('board_page_revs')
-        .select('page_id, rev')
-        .eq('board_id', boardIdForSync);
-      for (const r of revs ?? []) {
-        void refetchAndMerge(r.page_id as string, Number(r.rev) || 0);
-      }
-    };
-
-    return subscribeBoardRevs(boardIdForSync, {
+    // boardSync (фикс 31.07): WS + поллинг-фолбэк + visibilitychange/online.
+    // Gap-fill и тик поллинга сходятся в один снапшот revs; refetchAndMerge
+    // сам no-op'ит неизменённые кадры (rev-гард) — оба пути идемпотентны.
+    return startBoardSync(boardIdForSync, {
       onRev: (event) => void refetchAndMerge(event.page_id, event.rev),
-      onReconnect: () => void resync(),
+      onRevsSnapshot: (revs) => {
+        for (const r of revs) {
+          const current = framesRef.current.find((f) => f.id === r.page_id);
+          if (!current || current.rev < r.rev) void refetchAndMerge(r.page_id, r.rev);
+        }
+      },
+      onState: setSyncState,
     });
   }, [boardIdForSync, applyFrames, patchFrameSilently]);
 
@@ -538,6 +546,19 @@ export default function Whiteboard() {
             ...prev,
             [e.key]: { key: e.key, name: e.name, color: stablePeerColor(e.key), x: e.x, y: e.y, at: Date.now() },
           }));
+        },
+        // Мгновенный контур (Фаза 2): штрих ученика применяем сразу merge'ем,
+        // rev НЕ трогаем — его выставит DB-refetch по rev-сигналу (LWW
+        // идемпотентен по version/versionNonce).
+        onElement: (e) => {
+          const frame = framesRef.current.find((f) => f.id === e.pageId);
+          if (!frame) return; // новый лист доедет rev-сигналом
+          const protectedIds =
+            selectionRef.current && selectionRef.current.frameId === e.pageId
+              ? new Set(selectionRef.current.ids)
+              : undefined;
+          const { merged } = reconcileElements(frame.elements, [e.element], protectedIds);
+          patchFrameSilently(e.pageId, { elements: merged });
         },
         onStatus: setLiveStatus,
       },
@@ -625,6 +646,12 @@ export default function Whiteboard() {
   }, [guests]);
   /** Чипы панели — только кто СЕЙЧАС на доске. */
   const onlineGuests = useMemo(() => guests.filter((g) => g.online !== false), [guests]);
+  /** Ученики CRM, у которых уже есть лист на доске (пикер + офлайн-чипы). */
+  const zonedStudentIds = useMemo(
+    () =>
+      new Set(frames.map((f) => f.zoneTutorStudentId).filter((v): v is string => !!v)),
+    [frames],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -722,6 +749,8 @@ export default function Whiteboard() {
 
   const [zonesPickerOpen, setZonesPickerOpen] = useState(false);
   const [zonesSelected, setZonesSelected] = useState<ReadonlySet<string>>(new Set());
+  /** Пикер открыт из «Отправить в чат»: после раздачи листов сразу шлём ссылки. */
+  const [zonesSendAfter, setZonesSendAfter] = useState(false);
 
   useEffect(() => {
     if (saveStatus === 'saved') return;
@@ -759,6 +788,11 @@ export default function Whiteboard() {
   const handleCommitElement = useCallback(
     (frameId: string, element: BoardElement) => {
       updateFrameElements(frameId, (elements) => [...elements, element]);
+      // Фаза 2: завершённый элемент — сразу слушателям live-канала (~0.3 с);
+      // БД-путь (автосейв → rev-сигнал) остаётся источником истины.
+      if (framesRef.current.some((f) => f.id === frameId)) {
+        liveRef.current?.sendElement(frameId, element);
+      }
     },
     [updateFrameElements],
   );
@@ -1139,6 +1173,31 @@ export default function Whiteboard() {
     };
   }, [frames]);
 
+  /** Владельцы листов, которых сейчас НЕТ на доске — muted-чипы панели
+   * (фикс UX 31.07: офлайн-ученики раньше не были видны на доске нигде). */
+  const offlineSheetOwners = useMemo(() => {
+    const livePeerStudentIds = new Set(
+      livePeers.filter((p) => p.key.startsWith('student:')).map((p) => p.key.slice(8)),
+    );
+    const onlineGuestStudentIds = new Set(
+      onlineGuests.map((g) => g.tutor_student_id).filter((v): v is string => !!v),
+    );
+    const out: { key: string; name: string }[] = [];
+    zonedStudentIds.forEach((id) => {
+      if (livePeerStudentIds.has(id) || onlineGuestStudentIds.has(id)) return;
+      out.push({
+        key: `student:${id}`,
+        name: zoneNames[id] ?? students.find((s) => s.id === id)?.name ?? 'Ученик',
+      });
+    });
+    for (const g of guests) {
+      // CRM-привязанные офлайн-гости покрыты веткой zoned-учеников выше.
+      if (g.online !== false || g.tutor_student_id) continue;
+      out.push({ key: `guest:${g.id}`, name: g.display_name || 'Участник' });
+    }
+    return out;
+  }, [livePeers, onlineGuests, guests, zonedStudentIds, zoneNames, students]);
+
   /** Плюсы сетки: один справа в полосе + внизу каждого рулона (ученики И гости). */
   const ghostCells = useMemo<GhostCell[]>(() => {
     const cellsInfo = frames.map((f) => ({ cell: f.cell, orientation: f.orientation }));
@@ -1230,23 +1289,26 @@ export default function Whiteboard() {
     await createFrameAt(nextCellInStrip(cellsInfo), {});
   }, [createFrameAt]);
 
+  /** true — листы розданы (или уже были); false — сбой (не продолжать отправку). */
   const runDistributeZones = useCallback(
-    async (studentIds?: string[]) => {
-      if (!board || pageBusy) return;
+    async (studentIds?: string[]): Promise<boolean> => {
+      if (!board || pageBusy) return false;
       setPageBusy(true);
       try {
         const pages = await distributeZones(board.id, studentIds);
         if (pages.length === 0) {
-          toast.message('Зоны уже розданы этим ученикам.');
-          return;
+          toast.message('Листы уже розданы этим ученикам.');
+          return true;
         }
         const startIndex = framesRef.current.length;
         const added = pages.map((row, i) => rowToFrameState(row, startIndex + i, 1));
         applyFrames([...framesRef.current, ...added]);
         fitFrames(framesRef.current, viewport);
-        toast.success(`Создано зон: ${pages.length}. Ученики пишут каждый на своих листах.`);
+        toast.success(`Роздано листов: ${pages.length}. Ученики пишут каждый на своих листах.`);
+        return true;
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Не удалось раздать зоны');
+        toast.error(err instanceof Error ? err.message : 'Не удалось раздать листы');
+        return false;
       } finally {
         setPageBusy(false);
       }
@@ -1254,7 +1316,7 @@ export default function Whiteboard() {
     [board, pageBusy, applyFrames, fitFrames, viewport],
   );
 
-  /** Кнопка «Раздать зоны»: доска занятия — авто по группе; иначе — пикер (Этап 5). */
+  /** «Раздать листы»: доска занятия — авто по группе; иначе — пикер (Этап 5). */
   const handleDistributeZones = useCallback(async () => {
     if (!board) return;
     if (board.lesson_id) {
@@ -1297,47 +1359,87 @@ export default function Whiteboard() {
     }
   }, [inviteLink]);
 
+  /** Ученики CRM с листом на доске (уникальные, в порядке появления). */
+  const collectZoneStudentIds = useCallback(
+    () =>
+      Array.from(
+        new Set(
+          framesRef.current
+            .map((f) => f.zoneTutorStudentId)
+            .filter((v): v is string => !!v),
+        ),
+      ),
+    [],
+  );
+
   /**
-   * Отправка ссылки ученикам зон в личные чаты (существующий write-path чата —
-   * rule 100; пуш поедет штатным каскадом push→telegram→email). Известное
-   * ограничение v1: 5-мин троттлинг уведомлений чата НЕ обходится — если
-   * переписка шла только что, пуш молча схлопнется (ученик и так в чате).
+   * Отправка ссылки ученикам в личные чаты (существующий write-path чата —
+   * rule 100; пуш поедет штатным каскадом push→telegram→email). Ссылка —
+   * АВТОРИЗОВАННАЯ (/student/board/…): читатель чата по определению залогинен,
+   * а авторизованный транспорт = WS + мгновенный broadcast штрихов (~0.3 с)
+   * вместо гостевого поллинга. Гостевая /b/-ссылка остаётся в поле копирования
+   * для входа без регистрации. Известное ограничение v1: 5-мин троттлинг
+   * уведомлений чата НЕ обходится (ученик и так в чате — прочтёт).
+   */
+  const sendInviteToStudents = useCallback(
+    async (tutorStudentIds: string[]) => {
+      if (!board || tutorStudentIds.length === 0) return;
+      const boardLink = `${window.location.origin}/student/board/${board.id}`;
+      setInviteSending(true);
+      let sent = 0;
+      try {
+        for (const tutorStudentId of tutorStudentIds) {
+          try {
+            const { conversation_id } = await ensureChatConversation(tutorStudentId);
+            await sendChatMessageApi(conversation_id, {
+              content: `Присоединяйся к доске занятия: ${boardLink}`,
+              // НЕ crypto.randomUUID (rule 80, Safari < 15.4).
+              client_msg_id: `board-invite-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            });
+            sent += 1;
+          } catch {
+            // одного не нашли/чат недоступен — шлём остальным
+          }
+        }
+        if (sent > 0) toast.success(`Отправлено в чаты: ${sent}`);
+        else toast.error('Не удалось отправить ни одному ученику — скопируйте ссылку вручную.');
+      } finally {
+        setInviteSending(false);
+      }
+    },
+    [board],
+  );
+
+  /**
+   * «Отправить ученикам в чат» — БЕЗ предусловий (фикс UX 31.07: раньше без
+   * розданных зон кнопка лишь показывала тост «Сначала раздайте зоны» —
+   * порядок действий был обратный). Теперь: листов нет → доска занятия сама
+   * раздаёт их участникам; доска без занятия открывает пикер, который раздаст
+   * и отправит одним ходом.
    */
   const handleInviteSendToChats = useCallback(async () => {
-    if (!inviteLink || inviteSending) return;
-    const zoneIds = Array.from(
-      new Set(
-        framesRef.current
-          .map((f) => f.zoneTutorStudentId)
-          .filter((v): v is string => !!v),
-      ),
-    );
+    if (!board || inviteSending || pageBusy) return;
+    let zoneIds = collectZoneStudentIds();
     if (zoneIds.length === 0) {
-      toast.message('Сначала раздайте зоны — отправлю ссылку каждому ученику занятия.');
-      return;
-    }
-    setInviteSending(true);
-    let sent = 0;
-    try {
-      for (const tutorStudentId of zoneIds) {
-        try {
-          const { conversation_id } = await ensureChatConversation(tutorStudentId);
-          await sendChatMessageApi(conversation_id, {
-            content: `Присоединяйся к доске занятия: ${inviteLink}`,
-            // НЕ crypto.randomUUID (rule 80, Safari < 15.4).
-            client_msg_id: `board-invite-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          });
-          sent += 1;
-        } catch {
-          // одного не нашли/чат недоступен — шлём остальным
+      if (board.lesson_id) {
+        const ok = await runDistributeZones();
+        if (!ok) return;
+        zoneIds = collectZoneStudentIds();
+        if (zoneIds.length === 0) {
+          toast.message('У занятия нет участников — выберите учеников через «Раздать листы» или скопируйте ссылку.');
+          return;
         }
+      } else {
+        // Пикер в режиме «раздать и отправить» (см. футер пикера).
+        setZonesSendAfter(true);
+        setZonesSelected(new Set());
+        setInviteOpen(false);
+        setZonesPickerOpen(true);
+        return;
       }
-      if (sent > 0) toast.success(`Отправлено в чаты: ${sent}`);
-      else toast.error('Не удалось отправить ни одному ученику — скопируйте ссылку вручную.');
-    } finally {
-      setInviteSending(false);
     }
-  }, [inviteLink, inviteSending]);
+    await sendInviteToStudents(zoneIds);
+  }, [board, inviteSending, pageBusy, collectZoneStudentIds, runDistributeZones, sendInviteToStudents]);
 
   const handleInviteRevoke = useCallback(async () => {
     if (!board || inviteBusy) return;
@@ -1970,7 +2072,8 @@ export default function Whiteboard() {
       {/* Панель участников (Этап 5): видна ВСЕГДА — «Следовать» и состав доски
           дискаверабельны и на пустой доске. Ученики с аккаунтом — из presence
           (клик = follow); ГОСТИ — из поллинга last_seen_at (follow недоступен:
-          у гостя нет live-канала, v1). */}
+          у гостя нет live-канала, v1); владельцы листов НЕ на доске — muted
+          (фикс UX 31.07: раньше офлайн-ученики не были видны нигде). */}
       <div className="flex items-center gap-1.5 overflow-x-auto border-b border-slate-200 bg-white px-3 py-1.5">
         <span className="shrink-0 text-xs text-slate-400">На доске:</span>
         {livePeers.map((peer) => (
@@ -2007,7 +2110,17 @@ export default function Whiteboard() {
             {g.display_name}
           </span>
         ))}
-        {livePeers.length === 0 && onlineGuests.length === 0 && (
+        {offlineSheetOwners.map((o) => (
+          <span
+            key={o.key}
+            title="Лист роздан, но участник сейчас не на доске."
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-100 px-2.5 py-0.5 text-sm text-slate-400"
+          >
+            <span className="h-2 w-2 rounded-full bg-slate-300" />
+            {o.name}
+          </span>
+        ))}
+        {livePeers.length === 0 && onlineGuests.length === 0 && offlineSheetOwners.length === 0 && (
           <>
             <span className="shrink-0 text-sm text-slate-500">пока никого</span>
             <button
@@ -2020,15 +2133,42 @@ export default function Whiteboard() {
             </button>
           </>
         )}
-        {liveStatus === 'error' && (
-          <span
-            title="Живые обновления (курсоры, «Следовать») сейчас не работают — содержимое листов всё равно синхронизируется."
-            className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-amber-600"
+        <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+          {/* Контентный sync-статус приоритетнее статуса курсоров: листы важнее. */}
+          {syncState !== 'live' ? (
+            <span
+              title={
+                syncState === 'offline'
+                  ? 'Нет связи с доской — пробуем восстановить. Правки учеников пока не приходят.'
+                  : 'Правки учеников приходят в резервном режиме — раз в пару секунд.'
+              }
+              className="flex shrink-0 items-center gap-1.5 text-xs text-amber-600"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              {syncState === 'offline' ? 'нет связи — пробуем восстановить' : 'резервный режим'}
+            </span>
+          ) : liveStatus === 'error' ? (
+            <span
+              title="Живые обновления (курсоры, «Следовать») сейчас не работают — содержимое листов всё равно синхронизируется."
+              className="flex shrink-0 items-center gap-1.5 text-xs text-amber-600"
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              без живых обновлений
+            </span>
+          ) : null}
+          {/* Вторая точка входа «Раздать листы» (жалоба 31.07: единственная
+              была спрятана серой ссылкой на дне диалога «Пригласить»). */}
+          <button
+            type="button"
+            onClick={() => void handleDistributeZones()}
+            disabled={pageBusy}
+            style={{ touchAction: 'manipulation' }}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-0.5 text-sm text-slate-600 transition-colors hover:border-accent hover:text-accent"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            без живых обновлений
-          </span>
-        )}
+            <Users className="h-3.5 w-3.5" />
+            Раздать листы
+          </button>
+        </div>
       </div>
 
       <div ref={viewportRef} className="relative min-h-0 flex-1" {...dragHandlers}>
@@ -2141,7 +2281,7 @@ export default function Whiteboard() {
           >
             <h2 className="text-lg font-semibold text-slate-900">Пригласить на доску</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Ученик откроет доску по ссылке без регистрации, назовётся — и сразу получит свой лист. Вы увидите его в панели «На доске».
+              Каждый вошедший сразу получает свой лист — вы увидите его в панели «На доске».
             </p>
             {inviteBusy || !inviteLink ? (
               <div className="flex justify-center py-6">
@@ -2149,7 +2289,41 @@ export default function Whiteboard() {
               </div>
             ) : (
               <>
-                <div className="mt-4 flex items-center gap-2">
+                {/* Путь 1 (главный): ссылка в личные чаты. Работает БЕЗ
+                    предусловий — листы раздаются по ходу (фикс UX 31.07). */}
+                <Button
+                  className="mt-4 w-full"
+                  onClick={() => void handleInviteSendToChats()}
+                  disabled={inviteSending || pageBusy}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  {inviteSending || pageBusy ? (
+                    <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="mr-1.5 h-4 w-4" />
+                  )}
+                  Отправить ученикам в чат
+                </Button>
+                {/* Путь 2 (равноправный): раздать листы ученикам из списка —
+                    полноценная кнопка вместо серой ссылки (жалоба владельца
+                    31.07: «не увидел снизу раздать зоны»). */}
+                <Button
+                  variant="outline"
+                  className="mt-2 w-full"
+                  disabled={pageBusy}
+                  onClick={() => {
+                    setInviteOpen(false);
+                    void handleDistributeZones();
+                  }}
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  <Users className="mr-1.5 h-4 w-4" />
+                  Раздать листы ученикам
+                </Button>
+                <p className="mt-4 text-xs text-slate-500">
+                  Ссылка для входа без регистрации — гость назовётся и получит лист:
+                </p>
+                <div className="mt-1.5 flex items-center gap-2">
                   <input
                     readOnly
                     value={inviteLink}
@@ -2160,21 +2334,10 @@ export default function Whiteboard() {
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <Button
-                    onClick={() => void handleInviteSendToChats()}
-                    disabled={inviteSending}
-                    style={{ touchAction: 'manipulation' }}
-                  >
-                    {inviteSending ? (
-                      <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="mr-1.5 h-4 w-4" />
-                    )}
-                    Отправить ученикам в чат
-                  </Button>
+                <div className="mt-4 flex justify-end">
                   <Button
                     variant="ghost"
+                    size="sm"
                     className="text-red-600 hover:bg-red-50 hover:text-red-700"
                     onClick={() => void handleInviteRevoke()}
                     style={{ touchAction: 'manipulation' }}
@@ -2182,91 +2345,111 @@ export default function Whiteboard() {
                     Закрыть доступ
                   </Button>
                 </div>
-                {/* Вторичный сценарий: разложить листы по ученикам ДО урока. */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setInviteOpen(false);
-                    void handleDistributeZones();
-                  }}
-                  style={{ touchAction: 'manipulation' }}
-                  className="mt-4 text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
-                >
-                  Подготовить листы заранее — раздать зоны ученикам из списка
-                </button>
               </>
             )}
           </div>
         </div>
       )}
 
-      {/* Пикер учеников для «Раздать зоны» на доске без занятия (Этап 5,
-          провал теста Елены: «не нашла, как выдать зону»). */}
+      {/* Пикер учеников «Раздать листы» (Этап 5; язык «листы» вместо «зоны» —
+          фикс UX 31.07). Из «Отправить в чат» открывается в режиме
+          «раздать и отправить» (zonesSendAfter). */}
       {zonesPickerOpen && (
         <div
           className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/30 p-4"
-          onClick={() => setZonesPickerOpen(false)}
+          onClick={() => {
+            setZonesPickerOpen(false);
+            setZonesSendAfter(false);
+          }}
         >
           <div
             className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="text-lg font-semibold text-slate-900">Раздать зоны</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Раздать листы</h2>
             <p className="mt-1 text-sm text-slate-500">
-              У каждого выбранного ученика появится свой столбец листов — он сможет писать только в нём, а вы видите всех сразу.
+              У каждого выбранного ученика появится свой столбец листов — он пишет только в нём, а вы видите всех сразу.
             </p>
             {students.length === 0 ? (
               <p className="mt-4 text-sm text-slate-600">
                 Сначала добавьте учеников в разделе «Ученики».
               </p>
             ) : (
-              <ul className="mt-4 max-h-64 space-y-1 overflow-y-auto">
-                {students.map((s) => {
-                  const checked = zonesSelected.has(s.id);
-                  return (
-                    <li key={s.id}>
-                      <label
-                        style={{ touchAction: 'manipulation' }}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-base text-slate-800 transition-colors hover:border-accent/60"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => {
-                            setZonesSelected((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(s.id)) next.delete(s.id);
-                              else next.add(s.id);
-                              return next;
-                            });
-                          }}
-                          className="h-4 w-4 accent-[#1B6B4A]"
-                        />
-                        {s.name}
-                      </label>
-                    </li>
-                  );
-                })}
-              </ul>
+              <>
+                <button
+                  type="button"
+                  onClick={() => setZonesSelected(new Set(students.map((s) => s.id)))}
+                  style={{ touchAction: 'manipulation' }}
+                  className="mt-3 text-sm font-medium text-accent hover:underline"
+                >
+                  Выбрать всех
+                </button>
+                <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                  {students.map((s) => {
+                    const checked = zonesSelected.has(s.id);
+                    const hasSheet = zonedStudentIds.has(s.id);
+                    return (
+                      <li key={s.id}>
+                        <label
+                          style={{ touchAction: 'manipulation' }}
+                          className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 text-base text-slate-800 transition-colors hover:border-accent/60"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {
+                              setZonesSelected((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(s.id)) next.delete(s.id);
+                                else next.add(s.id);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 accent-[#1B6B4A]"
+                          />
+                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                          {hasSheet && (
+                            <span className="shrink-0 text-xs text-slate-400">уже есть лист</span>
+                          )}
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
             )}
             <div className="mt-4 flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setZonesPickerOpen(false)} style={{ touchAction: 'manipulation' }}>
-                Отмена
-              </Button>
               <Button
-                disabled={zonesSelected.size === 0 || pageBusy}
+                variant="outline"
                 onClick={() => {
                   setZonesPickerOpen(false);
-                  void runDistributeZones(Array.from(zonesSelected));
+                  setZonesSendAfter(false);
                 }}
                 style={{ touchAction: 'manipulation' }}
               >
-                {pageBusy ? (
+                Отмена
+              </Button>
+              <Button
+                disabled={zonesSelected.size === 0 || pageBusy || inviteSending}
+                onClick={() => {
+                  const selected = Array.from(zonesSelected);
+                  const sendAfter = zonesSendAfter;
+                  setZonesPickerOpen(false);
+                  setZonesSendAfter(false);
+                  void (async () => {
+                    const ok = await runDistributeZones(selected);
+                    if (ok && sendAfter) await sendInviteToStudents(selected);
+                  })();
+                }}
+                style={{ touchAction: 'manipulation' }}
+              >
+                {pageBusy || inviteSending ? (
                   <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                 ) : (
                   <Users className="mr-1.5 h-4 w-4" />
                 )}
-                Раздать зоны{zonesSelected.size > 0 ? ` (${zonesSelected.size})` : ''}
+                {zonesSendAfter ? 'Раздать и отправить' : 'Раздать листы'}
+                {zonesSelected.size > 0 ? ` (${zonesSelected.size})` : ''}
               </Button>
             </div>
           </div>

@@ -479,9 +479,9 @@ Deno.serve(async (req) => {
 
     // GET /share/:slug/state
     if (req.method === "GET" && segments.length === 3 && segments[2] === "state") {
-      // 40/мин: каждый rev-сигнал поллинга (2.5 с) дёргает resync=/state —
-      // прежние 10/мин душили живой урок собственным лимитом (ревью, P1).
-      if (!(await throttleCheck(db, `wb:state:${guest.id}`, 40, 60_000))) {
+      // 60/мин (было 40): поллинг ужат до 1.5 с (фикс латентности 31.07), и
+      // каждый rev-сигнал дёргает resync=/state — лимит обязан оставлять запас.
+      if (!(await throttleCheck(db, `wb:state:${guest.id}`, 60, 60_000))) {
         return jsonError(429, "THROTTLED", "Слишком часто. Подождите немного.");
       }
       const { data: board, error: boardError } = await db
@@ -523,18 +523,27 @@ Deno.serve(async (req) => {
       });
     }
 
-    // GET /share/:slug/signals?since=
+    // GET /share/:slug/signals
     if (req.method === "GET" && segments.length === 3 && segments[2] === "signals") {
-      if (!(await throttleCheck(db, `wb:sig:${guest.id}`, 40, 60_000))) {
+      // 60/мин (было 40) — под клиентский поллинг 1.5 с.
+      if (!(await throttleCheck(db, `wb:sig:${guest.id}`, 60, 60_000))) {
         return jsonError(429, "THROTTLED", "Слишком часто.");
       }
-      const since = url.searchParams.get("since");
-      let query = db
+      // Rev-diff вместо watermark по часам (фикс P0 31.07: «репетитор пишет —
+      // ученик не видит НИЧЕГО»). Прежний `?since=` сравнивал updated_at
+      // (Postgres now() = старт транзакции) с now() Deno-изолята: skew часов
+      // edge↔БД ≥ интервала поллинга делал гостя слепым НАВСЕГДА (каждый
+      // пустой тик снова уводил watermark в будущее), а транзакция сейва,
+      // закоммитившаяся после запроса, проглатывалась даже без skew.
+      // Теперь отдаём ПОЛНЫЙ список ревизий (≤50 страниц × 4 поля, ~2-3 КБ) —
+      // клиент сверяет rev с локальными кадрами; часов в контуре нет, пропуск
+      // самовосстанавливается следующим тиком. Параметр since игнорируется
+      // (старый бандл с ним получает полный список → resync каждый тик —
+      // старые вкладки тоже чинятся до deploy-sokratai).
+      const { data: revs } = await db
         .from("board_page_revs")
         .select("page_id, rev, updated_by, updated_at")
         .eq("board_id", guest.board_id);
-      if (since) query = query.gt("updated_at", since);
-      const { data: revs } = await query;
       // Пульс присутствия (Этап 5): панель репетитора видит гостей по
       // last_seen_at — /state дёргается только при изменениях, поэтому
       // «тихий» гость обновляет метку отсюда (каждые 2.5/15 с).

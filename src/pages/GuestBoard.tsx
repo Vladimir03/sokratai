@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Loader2, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,11 +18,15 @@ import {
 // Гостевой вход на доску по ссылке /b/:slug БЕЗ регистрации (Этап 3, B4;
 // решение владельца 29.07 вечер). Паттерн whiteboard.chat: выбор «я — Маша»
 // из списка группы (получает свою зону) или свободное имя (зритель).
-// Realtime гостю недоступен (нет JWT) → поллинг /signals 2.5 с c backoff
-// при неактивности вкладки.
+// Realtime гостю недоступен (нет JWT) → поллинг /signals c backoff при
+// неактивности вкладки. Синк — rev-diff (фикс P0 31.07): /signals отдаёт
+// ПОЛНЫЙ список ревизий, решение «что изменилось» принимает SharedBoardView
+// сверкой с локальными кадрами. Watermark по часам удалён: skew часов
+// edge↔БД↔телефона делал гостя слепым навсегда («репетитор пишет — у
+// ученика ничего 20-30 с+», живой тест владельца).
 
-const POLL_ACTIVE_MS = 2500;
-const POLL_HIDDEN_MS = 15000;
+const POLL_ACTIVE_MS = 1500;
+const POLL_HIDDEN_MS = 10000;
 
 export default function GuestBoard() {
   const { slug } = useParams<{ slug: string }>();
@@ -66,8 +70,6 @@ export default function GuestBoard() {
 
   // ─── Транспорт с поллингом ──────────────────────────────────────────────────
 
-  const sinceRef = useRef<string | null>(null);
-
   const transport = useMemo<SharedBoardTransport | null>(() => {
     if (!slug || !guestToken) return null;
     // Токен протух/отозван (в т.ч. пере-входом той же личности с другого
@@ -84,10 +86,12 @@ export default function GuestBoard() {
       return false;
     };
     return {
+      // У гостя нет точечного чтения листа: rev-diff при изменениях делает
+      // один resync на батч (SharedBoardView.handleRevsSnapshot).
+      supportsPageRefetch: false,
       async load() {
         try {
           const state = await getGuestState(slug, guestToken);
-          sinceRef.current = state.since;
           return {
             boardTitle: state.boardTitle,
             myZoneStudentId: state.myZoneStudentId,
@@ -120,43 +124,60 @@ export default function GuestBoard() {
       },
       start(handlers) {
         let stopped = false;
+        let ticking = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
+        let failures = 0;
 
         const tick = async () => {
-          if (stopped) return;
+          if (stopped || ticking) return;
+          ticking = true;
           try {
-            const res = await getGuestSignals(slug, guestToken, sinceRef.current);
+            const res = await getGuestSignals(slug, guestToken);
             if (stopped) return;
+            failures = 0;
+            handlers.onSyncState?.('polling');
             // «Привести всех» (Этап 4): у гостя нет Realtime — bring доезжает
-            // отсюда (≤2.5 с). Дедуп по seq и свежесть — в applyBring выше.
+            // отсюда. Дедуп по seq и свежесть — в applyBring выше.
             if (res.bring) handlers.onBring?.(res.bring);
-            if (res.revs.length > 0) {
-              const nextSince = res.revs.reduce(
-                (max, r) => (r.updated_at > max ? r.updated_at : max),
-                sinceRef.current ?? '',
-              );
-              // refetchPage у гостя нет → любой чужой сигнал = resync state.
-              // Watermark — ТОЛЬКО после успешного resync (ревью P1): иначе
-              // упавший (429/сеть) resync «съедал» сигнал, и без следующей
-              // правки гость навсегда оставался на старой сцене.
-              const ok = await handlers.onResync();
-              if (!stopped && ok !== false) sinceRef.current = nextSince;
-            } else {
-              sinceRef.current = res.now;
-            }
+            // Rev-diff: полный список ревизий → SharedBoardView сверяет с
+            // кадрами и сам решает, нужен ли resync. Сбой resync не страшен —
+            // rev-разница никуда не денется, следующий тик повторит
+            // (самовосстановление вместо хрупкого watermark, фикс P0 31.07).
+            handlers.onRevs?.(res.revs.map((r) => ({ page_id: r.page_id, rev: r.rev })));
           } catch (err) {
             // 401 = токен ревокнут (пере-вход с другого устройства) → на
             // join-экран; прочее — сетевой сбой, следующий тик попробует снова.
             if (onUnauthorized(err)) return;
+            failures += 1;
+            if (failures >= 2) handlers.onSyncState?.('offline');
+          } finally {
+            ticking = false;
+            if (!stopped) {
+              const delay = document.visibilityState === 'hidden' ? POLL_HIDDEN_MS : POLL_ACTIVE_MS;
+              if (timer) clearTimeout(timer);
+              timer = setTimeout(() => void tick(), delay);
+            }
           }
-          const delay = document.visibilityState === 'hidden' ? POLL_HIDDEN_MS : POLL_ACTIVE_MS;
-          timer = setTimeout(() => void tick(), delay);
         };
+
+        // Возврат из фона / восстановление сети → немедленный тик: тик,
+        // запланированный в hidden (10 с), иначе доигрывал бы свой таймер и
+        // телефон смотрел на устаревшую сцену до 10 с после разворота PWA.
+        const wake = () => {
+          if (stopped || document.visibilityState === 'hidden') return;
+          if (timer) clearTimeout(timer);
+          timer = null;
+          void tick();
+        };
+        document.addEventListener('visibilitychange', wake);
+        window.addEventListener('online', wake);
 
         timer = setTimeout(() => void tick(), POLL_ACTIVE_MS);
         return () => {
           stopped = true;
           if (timer) clearTimeout(timer);
+          document.removeEventListener('visibilitychange', wake);
+          window.removeEventListener('online', wake);
         };
       },
     };

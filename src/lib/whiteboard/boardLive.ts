@@ -3,19 +3,25 @@
 // делится НАМЕРЕННО (broadcast-маршрутизация, как typing-канал чата, rule 100);
 // уникальный суффикс нужен только postgres_changes-каналам.
 //
-// Что едет по каналу (всё эфемерное, гэп-филл не нужен):
+// Что едет по каналу:
 // • viewport — видимое окно участника в мм (~2 Гц, только при слушателях);
 // • cursor   — указка в мировых мм (адаптивно 5→2 Гц при росте участников);
 // • bring    — «привести всех к моему виду» (one-shot, дедуп по seq);
 // • follow   — «репетитор смотрит ваш лист» (пинг каждые 10 с, у получателя
-//   бейдж гаснет сам через FOLLOW_STALE_MS без пинга — обрыв не «замораживает»).
+//   бейдж гаснет сам через FOLLOW_STALE_MS без пинга — обрыв не «замораживает»);
+// • element  — ЗАВЕРШЁННЫЙ элемент (штрих/текст) сразу после коммита (Фаза 2,
+//   «мгновенный контур» 31.07). НЕ поток точек: 1 сообщение на pointerup,
+//   ~1-2/с на пишущего — лимит 500 msg/s проекта не задет. Получатель мержит
+//   через reconcileElements (LWW) БЕЗ смены rev; БД остаётся источником
+//   истины и догоняет rev-сигналом (идемпотентно). Payload > ELEMENT_MAX_JSON
+//   молча не шлётся — доедет DB-путём.
 //
 // Гость сюда НЕ подключается (нет JWT): bring доезжает до него поллингом
-// /signals + boards.live_bring, follow до гостя — v2 (план, ограничение Miro).
+// /signals + boards.live_bring; контент — поллингом rev-diff (1.5 с).
 
 import { supabase } from '@/lib/supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-import type { BoardBounds } from '@/lib/whiteboard/model';
+import { parseElements, type BoardBounds, type BoardElement } from '@/lib/whiteboard/model';
 
 export interface LivePeer {
   key: string;
@@ -48,6 +54,11 @@ export interface FollowEvent {
   byName: string;
 }
 
+export interface ElementEvent {
+  pageId: string;
+  element: BoardElement;
+}
+
 export type BoardLiveStatus = 'connecting' | 'connected' | 'error';
 
 export interface BoardLiveHandlers {
@@ -55,6 +66,8 @@ export interface BoardLiveHandlers {
   onCursor?: (event: CursorEvent) => void;
   onBring?: (event: BringEvent) => void;
   onFollow?: (event: FollowEvent) => void;
+  /** Чужой завершённый элемент (Фаза 2): применить merge'ем, rev не трогать. */
+  onElement?: (event: ElementEvent) => void;
   /** Список ДРУГИХ участников канала (без себя), при каждом изменении presence. */
   onPeers?: (peers: LivePeer[]) => void;
   /** Статус private-канала — для панели участников (диагностика: устойчивый
@@ -67,9 +80,14 @@ export interface BoardLiveControls {
   sendCursor: (x: number, y: number) => void;
   sendBring: (bounds: BoardBounds) => void;
   sendFollow: (targetKey: string, on: boolean) => void;
+  /** Мгновенная доставка завершённого элемента слушателям (Фаза 2). */
+  sendElement: (pageId: string, element: BoardElement) => void;
   peersCount: () => number;
   leave: () => void;
 }
+
+/** Кап payload'а element-события: крупнее — только DB-путём (rev-сигнал ≤1 с). */
+export const ELEMENT_MAX_JSON = 30_000;
 
 /** Бейдж «репетитор смотрит» гаснет без пинга follow за это время. */
 export const FOLLOW_STALE_MS = 25_000;
@@ -242,6 +260,16 @@ export function connectBoardLive(
       const e = payload as FollowEvent;
       if (typeof e.targetKey !== 'string') return;
       handlers.onFollow?.({ targetKey: e.targetKey, on: !!e.on, byName: clampName(e.byName) });
+    })
+    .on('broadcast', { event: 'element' }, ({ payload }) => {
+      if (disposed || !payload) return;
+      const e = payload as { pageId?: unknown; element?: unknown };
+      if (typeof e.pageId !== 'string' || !e.pageId) return;
+      // parseElements — канонический санитайзер jsonb-входа (model.ts): битый
+      // payload участника отбрасывается, а не роняет сцену получателя.
+      const parsed = parseElements([e.element]);
+      if (parsed.length !== 1) return;
+      handlers.onElement?.({ pageId: e.pageId, element: parsed[0] });
     });
 
   // Private-канал требует свежий JWT в realtime-сокете ДО subscribe —
@@ -304,12 +332,25 @@ export function connectBoardLive(
     sendFollow(targetKey, on) {
       sendEvent('follow', { targetKey, on, byName: me.name });
     },
+    sendElement(pageId, element) {
+      if (peers.length === 0) return; // пустой канал — DB-путь и так доставит
+      try {
+        // Кап размера: гигантский элемент (длинный штрих, вставка) не должен
+        // душить канал — молча остаётся DB-пути (rev-сигнал доставит ≤1 с).
+        if (JSON.stringify(element).length > ELEMENT_MAX_JSON) return;
+      } catch {
+        return;
+      }
+      sendEvent('element', { pageId, element });
+    },
     peersCount: () => peers.length,
     leave() {
       disposed = true;
       viewportThrottle.dispose();
       cursorThrottle.dispose();
-      void channel.unsubscribe();
+      // removeChannel, не unsubscribe: канал иначе копится в socket.channels
+      // при каждом переоткрытии доски.
+      void supabase.removeChannel(channel);
     },
   };
 }

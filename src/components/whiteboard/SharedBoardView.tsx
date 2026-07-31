@@ -41,7 +41,12 @@ import {
   zoomCameraAt,
 } from '@/lib/whiteboard/model';
 import { reconcileElements } from '@/lib/whiteboard/reconcile';
-import { AutosaveQueue, type AutosaveStatus } from '@/lib/whiteboard/autosaveQueue';
+import {
+  AutosaveQueue,
+  BOARD_AUTOSAVE_DELAY_MS,
+  BOARD_AUTOSAVE_MAX_WAIT_MS,
+  type AutosaveStatus,
+} from '@/lib/whiteboard/autosaveQueue';
 import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 
 // Общий вью доски для УЧЕНИКА и ГОСТЯ (Этап 3). Транспорт — инъекция:
@@ -54,6 +59,8 @@ import { SceneHistory } from '@/lib/whiteboard/sceneHistory';
 // повтор с новым base_rev; второй конфликт подряд — отдаём очереди (ретрай).
 
 export interface SharedBoardTransport {
+  /** false — точечного чтения листа нет (гость): rev-diff делает resync батчем. */
+  supportsPageRefetch?: boolean;
   load(): Promise<{
     boardTitle: string | null;
     myZoneStudentId: string | null;
@@ -68,8 +75,11 @@ export interface SharedBoardTransport {
   /** Подписка на чужие изменения (realtime или поллинг). Возвращает cleanup. */
   start(handlers: {
     onRemote: (pageId: string, rev: number) => void;
-    /** Полный resync. Promise<false> = сбой — поллинг гостя НЕ двигает watermark. */
-    onResync: () => void | Promise<boolean | void>;
+    /** Снапшот ревизий (rev-diff): сверка с кадрами и точечный догон — здесь.
+     * Gap-fill WS-канала и каждый тик поллинга сходятся в этот один путь. */
+    onRevs?: (revs: { page_id: string; rev: number }[]) => void;
+    /** Состояние транспорта — для нейтрального бейджа в шапке (rule 95). */
+    onSyncState?: (state: 'live' | 'polling' | 'offline') => void;
     /** «Привести всех» из поллинга (гость; Этап 4). Дедуп по seq — у вызывающего. */
     onBring?: (bring: { seq: number; bounds: BoardBounds; at?: string | null }) => void;
   }): () => void;
@@ -219,6 +229,8 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         }
       },
       onStatus: setSaveStatus,
+      delayMs: BOARD_AUTOSAVE_DELAY_MS,
+      maxWaitMs: BOARD_AUTOSAVE_MAX_WAIT_MS,
     });
   }
   const autosave = autosaveRef.current;
@@ -361,7 +373,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
     [applyFrames, applyFramePatch],
   );
 
-  /** true — снапшот применён; false — сбой (гость НЕ двигает watermark, ревью P1). */
+  /** true — снапшот применён; false — сбой (следующий тик/сигнал повторит). */
   const resync = useCallback(async (): Promise<boolean> => {
     try {
       const state = await transportRef.current.load();
@@ -388,6 +400,38 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
       return false;
     }
   }, [applyFrames]);
+
+  /** Занят ли уже resync — rev-diff не должен запускать их пачкой. */
+  const resyncBusyRef = useRef(false);
+
+  /**
+   * Rev-diff (фикс P0 31.07): снапшот ревизий доски → сверка с локальными
+   * кадрами. Изменившиеся дочитываются точечно (авторизованный транспорт)
+   * либо одним resync на батч (гость — у него нет чтения одного листа).
+   * Идемпотентно с WS-событиями: оба пути упираются в rev-гарды.
+   */
+  const handleRevsSnapshot = useCallback(
+    (revs: { page_id: string; rev: number }[]) => {
+      const changed = revs.filter((r) => {
+        const frame = framesRef.current.find((f) => f.id === r.page_id);
+        return !frame || frame.rev < r.rev;
+      });
+      if (changed.length === 0) return;
+      if (transportRef.current.supportsPageRefetch === false) {
+        if (resyncBusyRef.current) return;
+        resyncBusyRef.current = true;
+        void resync().finally(() => {
+          resyncBusyRef.current = false;
+        });
+        return;
+      }
+      for (const r of changed) void handleRemoteRev(r.page_id, r.rev);
+    },
+    [resync, handleRemoteRev],
+  );
+
+  /** Состояние транспорта синка; 'live' — оптимистичный дефолт (без флапа бейджа). */
+  const [syncState, setSyncState] = useState<'live' | 'polling' | 'offline'>('live');
 
   useEffect(() => {
     let cancelled = false;
@@ -456,12 +500,12 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
     if (loading || loadError) return;
     const stop = transportRef.current.start({
       onRemote: (pageId, rev) => void handleRemoteRev(pageId, rev),
-      // Промис наружу: поллинг гостя двигает watermark только при успехе.
-      onResync: () => resync(),
+      onRevs: handleRevsSnapshot,
+      onSyncState: setSyncState,
       onBring: applyBring,
     });
     return stop;
-  }, [loading, loadError, handleRemoteRev, resync, applyBring]);
+  }, [loading, loadError, handleRemoteRev, handleRevsSnapshot, applyBring]);
 
   useEffect(() => {
     if (loading || loadError) return;
@@ -489,6 +533,19 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         } else {
           setFollowedBy(null);
         }
+      },
+      // Мгновенный контур (Фаза 2): чужой завершённый элемент применяем сразу
+      // merge'ем, rev НЕ трогаем — его выставит DB-refetch по rev-сигналу
+      // (идемпотентно: LWW по version/versionNonce).
+      onElement: (e) => {
+        const frame = framesRef.current.find((f) => f.id === e.pageId);
+        if (!frame) return; // новый лист доедет rev-сигналом/поллингом
+        const protectedIds =
+          selectionRef.current && selectionRef.current.frameId === e.pageId
+            ? new Set(selectionRef.current.ids)
+            : undefined;
+        const { merged } = reconcileElements(frame.elements, [e.element], protectedIds);
+        applyFramePatch(e.pageId, { elements: merged });
       },
     };
     const controls = connect({ key, name, role: 'student' } satisfies LivePeer, handlers);
@@ -576,8 +633,12 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   const handleCommitElement = useCallback(
     (frameId: string, element: BoardElement) => {
       updateFrameElements(frameId, (elements) => [...elements, element]);
+      // Фаза 2: завершённый элемент — сразу слушателям live-канала (~0.3 с);
+      // БД-путь (автосейв → rev-сигнал) остаётся источником истины.
+      const frame = framesRef.current.find((f) => f.id === frameId);
+      if (frame && isMyFrame(frame)) liveRef.current?.sendElement(frameId, element);
     },
-    [updateFrameElements],
+    [updateFrameElements, isMyFrame],
   );
 
   const handleEraseElements = useCallback(
@@ -830,6 +891,26 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         <span className="min-w-0 flex-1 truncate text-base font-medium text-slate-900">
           {boardTitle?.trim() || 'Доска'}
         </span>
+        {/* Состояние ПРИЁМА (не сейва): нейтральный амбер, не алярм (rule 95).
+            «Резервный режим» — только у авторизованных (у гостя поллинг и есть
+            штатный транспорт); «нет связи» — у обоих. */}
+        {(syncState === 'offline' ||
+          (syncState === 'polling' && transport.supportsPageRefetch !== false)) && (
+          <span
+            title={
+              syncState === 'offline'
+                ? 'Нет связи с доской — пробуем восстановить. Изменения других участников пока не приходят.'
+                : 'Обновления приходят в резервном режиме — раз в пару секунд.'
+            }
+            className="flex shrink-0 items-center gap-1.5 px-1 text-xs text-amber-600"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            <span className="hidden sm:inline">
+              {syncState === 'offline' ? 'нет связи — пробуем восстановить' : 'резервный режим'}
+            </span>
+            {syncState === 'offline' && <span className="sm:hidden">нет связи</span>}
+          </span>
+        )}
         {saveStatus === 'error' ? (
           <button
             type="button"
