@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteKBTaskImage, parseAttachmentUrls } from '@/lib/kbApi';
+import { isNetworkError, toErrorMessage, withJitter } from '@/lib/queryResilience';
 import { supabase } from '@/lib/supabaseClient';
 import {
   createTutorRetry,
@@ -409,8 +410,8 @@ export function useCreateTasksBulk() {
   return useMutation({
     mutationFn: async (
       items: Array<{ key: number; input: CreateKBTaskInput }>,
-    ): Promise<Array<{ key: number; ok: boolean }>> => {
-      const results: Array<{ key: number; ok: boolean }> = [];
+    ): Promise<Array<{ key: number; ok: boolean; error?: string }>> => {
+      const results: Array<{ key: number; ok: boolean; error?: string }> = [];
       const CONCURRENCY = 3;
       let cursor = 0;
       const worker = async () => {
@@ -420,8 +421,29 @@ export function useCreateTasksBulk() {
           try {
             await insertTask(item.input);
             results.push({ key: item.key, ok: true });
-          } catch {
-            results.push({ key: item.key, ok: false });
+          } catch (first) {
+            // Репорт Егора (2026-07-31): «все 6 заданий неудачные» без единого
+            // слова о причине — раньше здесь стоял голый `catch {}`, и текст
+            // ошибки не доходил ни до репетитора, ни до логов. Причину теперь
+            // ОБЯЗАТЕЛЬНО возвращаем наверх (вызывающий покажет и зарепортит).
+            //
+            // Ретрай ТОЛЬКО на сетевом классе: РФ-DPI рвёт ~1 из N параллельных
+            // соединений до api.sokratai.ru (rule 95), и повтор через секунду
+            // проходит — ровно это Егор и сделал руками через «Повторить
+            // неудачные». Ответ сервера (RLS/CHECK/FK) детерминирован: повтор
+            // даст ту же ошибку, а при съеденном ОТВЕТЕ создал бы дубль
+            // (rule 60) — поэтому ретраим строго сетевые сбои и ровно один раз.
+            if (!isNetworkError(first)) {
+              results.push({ key: item.key, ok: false, error: toErrorMessage(first) });
+              continue;
+            }
+            await new Promise((resolve) => setTimeout(resolve, withJitter(700)));
+            try {
+              await insertTask(item.input);
+              results.push({ key: item.key, ok: true });
+            } catch (second) {
+              results.push({ key: item.key, ok: false, error: toErrorMessage(second) });
+            }
           }
         }
       };

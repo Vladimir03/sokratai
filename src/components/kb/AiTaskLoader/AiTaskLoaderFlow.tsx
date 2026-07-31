@@ -29,6 +29,8 @@ import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { refineDraft, type ExtractStats, type ExtractedTask } from '@/lib/kbAiExtractApi';
 import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type ExamType, type KBSubtopic } from '@/types/kb';
 import { pluralizeRu } from '@/lib/pluralizeRu';
+import { reportClientError } from '@/lib/clientErrorReport';
+import { isNetworkError, withJitter } from '@/lib/queryResilience';
 import { cn } from '@/lib/utils';
 
 /**
@@ -616,20 +618,46 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           else cropFailedCount += 1;
           continue;
         }
-        try {
-          const signedUrl = await getKBImageSignedUrl(draft.attachment_ref);
+        const runCrop = async (): Promise<string> => {
+          const signedUrl = await getKBImageSignedUrl(draft.attachment_ref!);
           if (!signedUrl) throw new Error('no signed url');
-          const file = await cropImageToFile(signedUrl, crop.bbox, `crop-${index + 1}.jpg`);
-          const res = await uploadKBTaskImage(file);
-          attachmentOverrideByIndex.set(index, res.storageRef);
-          cropUploadCacheRef.current.set(index, res.storageRef);
+          const file = await cropImageToFile(signedUrl, crop.bbox!, `crop-${index + 1}.jpg`);
+          const uploaded = await uploadKBTaskImage(file);
+          return uploaded.storageRef;
+        };
+        const acceptCrop = (ref: string) => {
+          attachmentOverrideByIndex.set(index, ref);
+          cropUploadCacheRef.current.set(index, ref);
           croppedCount += 1;
-        } catch {
-          // Решение владельца: сбой кропа → задача сохраняется БЕЗ картинки
-          // (мультизадачный скрин целиком НЕ прикрепляем молча).
-          attachmentOverrideByIndex.set(index, null);
-          cropUploadCacheRef.current.set(index, null);
-          cropFailedCount += 1;
+        };
+        try {
+          acceptCrop(await runCrop());
+        } catch (first) {
+          // Кроп бьёт по сети трижды (signed URL → скачивание → upload), поэтому
+          // РФ-DPI роняет его так же, как insert (rule 95). Один повтор на
+          // сетевом классе — иначе моргнувшая сеть стоит репетитору рисунка.
+          let recovered = false;
+          const networky = isNetworkError(first);
+          if (networky) {
+            await new Promise((resolve) => setTimeout(resolve, withJitter(700)));
+            try {
+              acceptCrop(await runCrop());
+              recovered = true;
+            } catch {
+              /* обработка ниже — как при первом сбое */
+            }
+          }
+          if (!recovered) {
+            // Решение владельца: сбой кропа → задача сохраняется БЕЗ картинки
+            // (мультизадачный скрин целиком НЕ прикрепляем молча).
+            attachmentOverrideByIndex.set(index, null);
+            // Но СЕТЕВОЙ сбой в кэш НЕ пишем: иначе «Повторить неудачные» взял
+            // бы оттуда «без картинки», и рисунок терялся бы навсегда из-за
+            // разрыва связи. Детерминированный сбой (битый файл, рамка меньше
+            // 24px) кэшируем — повторять его бессмысленно.
+            if (!networky) cropUploadCacheRef.current.set(index, null);
+            cropFailedCount += 1;
+          }
         }
       }
 
@@ -716,8 +744,27 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       });
 
       if (failed > 0) {
+        // Репорт Егора (2026-07-31): раньше здесь был только счётчик, а причина
+        // умирала в `catch {}` — репетитор видел «с ошибкой 6» и решал, что
+        // загрузчик сломан (по факту это был разовый сбой: тот же набор
+        // сохранился с повтора). Теперь причина видна ему И уходит в /admin →
+        // «Ошибки», чтобы следующий такой случай не требовал расспросов.
+        const firstError = results.find((r) => !r.ok && r.error)?.error ?? '';
+        const networky = isNetworkError(firstError);
+        const reason = networky
+          ? 'связь прервалась'
+          : firstError
+            ? firstError.slice(0, 120)
+            : 'причина неизвестна';
+        toast.error(
+          `Сохранено ${saved} из ${results.length}: ${reason}. Нажмите «Повторить неудачные»` +
+            (networky ? ' — задачи и рисунки не потеряны.' : '.'),
+          { duration: 12000 },
+        );
+        if (firstError) {
+          reportClientError(`kb_ai_bulk_save_failed: ${firstError}`, networky ? 'net' : 'mutation');
+        }
         // Остаёмся на странице: неудачные строки помечены, CTA → «Повторить».
-        toast.error(`Сохранено ${saved}, с ошибкой ${failed}. Нажмите «Повторить неудачные».`);
         return;
       }
 
@@ -734,7 +781,13 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
 
         const parts = [`Добавлено ${saved}`];
         if (skippedDup > 0) parts.push(`${skippedDup} дубл. пропущено`);
-        if (cropFailedCount > 0) parts.push(`${cropFailedCount} без рисунка (сбой обрезки)`);
+        // Формулировка «сбой обрезки» читалась как «всё сохранилось без
+        // картинок» (репорт Егора) — говорим, сколько задач и что делать.
+        if (cropFailedCount > 0) {
+          parts.push(
+            `${cropFailedCount} ${pluralizeRu(cropFailedCount, ['задача', 'задачи', 'задач'])} без рисунка — прикрепите фото в карточке задачи`,
+          );
+        }
         // ВОЛНА 8: per-task папки — честно сказать, что часть уехала не сюда.
         const customFolderCount = chosen.filter(
           ({ index }) => okKeys.has(index) && overrides[index].folderId,
