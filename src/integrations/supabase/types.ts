@@ -3144,6 +3144,27 @@ export type Database = {
         }
         Relationships: []
       }
+      photo_orientations: {
+        Row: {
+          degrees: number
+          ref: string
+          updated_at: string
+          updated_by: string
+        }
+        Insert: {
+          degrees?: number
+          ref: string
+          updated_at?: string
+          updated_by: string
+        }
+        Update: {
+          degrees?: number
+          ref?: string
+          updated_at?: string
+          updated_by?: string
+        }
+        Relationships: []
+      }
       practice_attempts: {
         Row: {
           asked_ai: boolean | null
@@ -5782,6 +5803,17 @@ export type Database = {
       owns_tutor_student: {
         Args: { _tutor_student_id: string }
         Returns: boolean
+      }
+      photo_orientations_get: {
+        Args: { p_refs: string[] }
+        Returns: {
+          degrees: number
+          ref: string
+        }[]
+      }
+      photo_orientations_set: {
+        Args: { p_degrees: number; p_ref: string }
+        Returns: number
       }
       promote_folder_to_catalog: {
         Args: {
