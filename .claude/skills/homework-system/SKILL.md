@@ -1368,7 +1368,7 @@ xl:grid-cols-[460px_1fr] xl:h-[calc(var(--vv-h,100vh)-56px)]
 **Left aside (tablet + desktop):** tablet breadcrumb topbar `md:flex xl:hidden`; desktop hidden (global nav). Scrollable inner div: `<ProblemContext hideToggle collapsed={false} onToggle={() => undefined}>` (всегда expanded). Sticky bottom footer `<SubmitCtaBar>` **только** при `task_kind !== 'numeric'`.
 
 **Right column:**
-- Mobile-only topbar + ProblemContext peek (`md:hidden`).
+- Mobile-only topbar + ProblemContext peek (`md:hidden`) с **`scrollBody`** — см. ниже.
 - Chat thread (`flex-1 min-h-0 overflow-y-auto`) + `xl:max-w-3xl xl:mx-auto xl:w-full`.
 - ChatChipRow `hidden md:flex` (tablet+desktop only).
 - NumericAnswerComposer (numeric): `hideDiscussion={!useIsMobile()}`.
@@ -1383,6 +1383,14 @@ xl:grid-cols-[460px_1fr] xl:h-[calc(var(--vv-h,100vh)-56px)]
 **MathQuickPicker:** простой popover ~15-18 LaTeX/Unicode templates (**не MathLive**). Parent tracks `lastFocusedInputRef` через `onFocusCapture`. `insertAtCursor` использует `setRangeText(snippet, start, end, 'end')` + manual `dispatchEvent(new Event('input', { bubbles: true }))` (Safari quirk — `setRangeText` не fires input). `onOpenAutoFocus={(e) => e.preventDefault()}` (keep textarea focus, иначе snippet в position 0).
 
 **SubmitSheet — `sm:max-w-2xl` уже на месте (Phase 1).** Mobile (<640px) full-width bottom-sheet; tablet+desktop bottom-centered max-w-2xl.
+
+**`ProblemContext.scrollBody` — мобильное условие ОБЯЗАНО иметь свой скролл (2026-07-31, репорт Глеба, P0).**
+Развёрнутое условие жило в `shrink-0`-блоке внутри root-контейнера высотой ровно с visualViewport и `overflow-hidden`, при `html/body{overflow:hidden}`. Условие длиннее свободной высоты (текст + `options_json`-перечень + график — рядовая задача ЕГЭ) сжимало ленту в ноль, выталкивало композер за экран, а свой хвост отдавало под обрез: **доскроллить было нечем**. Ученик видел «Задача 7 из 11», полтора абзаца и ничего больше.
+- Проп включён ТОЛЬКО на мобильном инстансе. На md+ левая колонка прокручивается целиком — второй скролл внутри прокручиваемой панели там мешает.
+- Потолок — `style={{ maxHeight: 'calc(var(--vv-h, 100vh) * 0.46)' }}`, **не `max-h-[…dvh]`**: `dvh` с Safari 15.4, baseline 15.0 (rule 80). Бонус — потолок ужимается вместе с `--vv-h` при открытой клавиатуре.
+- Градиент «ниже есть ещё» гейтится замером `useHasMoreBelow` (scroll + ResizeObserver: KaTeX и подписанные ссылки на фото дорисовывают высоту ПОСЛЕ первого рендера, одного замера на маунте мало). Без градиента обрезанное условие читается как тот же баг.
+- `id={panelId}` (цель `aria-controls`) остаётся на **внутреннем прокручиваемом** div, не на обёртке.
+- Следующий шаг (утверждён владельцем 31.07, вариант «1а»): мобильный экран переходит на ЕДИНЫЙ скролл — условие первым блоком внутри ленты + закреплённая полоса «Задача N/M · Условие», кнопка скроллит к карточке. Тогда `scrollBody` и весь класс багов «блок переменной длины над лентой» уходят.
 
 **Additive props:** `ProblemContext.hideToggle` (default `false`, скрывает toggle при `true`). `NumericAnswerComposer.hideDiscussion` (default `false`, скрывает Row 2 toggle + Row 3 discussion при `true` — на tablet/desktop chat composer redundant).
 
