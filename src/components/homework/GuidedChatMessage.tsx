@@ -87,7 +87,6 @@ interface GuidedChatMessageProps {
    */
   onAnnotatePhoto?: (photo: { url: string; ref: string | null; degrees: number }) => void;
   /** «Разобрать на доске» — фото уезжает на новую доску репетитора. */
-  onSendPhotoToBoard?: (photo: { url: string; ref: string | null; degrees: number }) => void;
   /**
    * If true, message timestamps render as full `DD.MM.YYYY, HH:MM:SS`
    * (date + time). Default — time only (`HH:MM`). Used by the tutor viewer
@@ -167,7 +166,6 @@ const GuidedChatMessage = memo(({
   hiddenFromStudent,
   imageResolver,
   onAnnotatePhoto,
-  onSendPhotoToBoard,
   showDateInTimestamp,
   subject,
 }: GuidedChatMessageProps) => {
@@ -341,7 +339,6 @@ const GuidedChatMessage = memo(({
             resolveSignedUrl={resolveImageRef}
             canRotate={isTutorPerspective}
             onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
-            onSendToBoard={isTutorPerspective ? onSendPhotoToBoard : undefined}
           />
         )}
       </div>
@@ -448,7 +445,6 @@ const GuidedChatMessage = memo(({
             resolveSignedUrl={resolveImageRef}
             canRotate={isTutorPerspective}
             onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
-            onSendToBoard={isTutorPerspective ? onSendPhotoToBoard : undefined}
           />
         )}
       </div>

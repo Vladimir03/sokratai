@@ -665,14 +665,20 @@ export function GuidedThreadViewer({
    * у разметки нет и быть не должно (rule 40, двойной write-path).
    */
   const handleSendAnnotated = useCallback(
-    async (file: File) => {
-      const caption = 'Отметил, где ошибка';
+    async (file: File, note: string) => {
+      // Подпись репетитора отвечает на «что исправить»; пометка на фото — на
+      // «где». Пустая подпись заменяется нейтральной строкой, чтобы сообщение
+      // не выглядело безымянным вложением.
+      const caption = note || 'Отметил, где ошибка';
       const upload = await uploadTutorHomeworkTaskImage(file);
       const response = await postTutorThreadMessage(assignmentId, studentId, caption, {
         visible_to_student: true,
         task_order: taskFilter === 'all' ? undefined : taskFilter,
         task_id: taskFilter === 'all' ? undefined : selectedTask?.id,
         image_url: upload.storageRef,
+        // Долговечный признак: без него метрику «ученик исправил ошибку»
+        // пришлось бы восстанавливать по русской строке подписи.
+        message_kind: 'photo_annotation',
       });
       const wasAtBottom = getWasAtBottom();
       queryClient.setQueryData<TutorStudentGuidedThreadResponse | undefined>(
@@ -979,7 +985,6 @@ export function GuidedThreadViewer({
                         hiddenFromStudent={message.visible_to_student === false}
                         imageResolver={tutorImageResolver}
                         onAnnotatePhoto={setAnnotateTarget}
-                        onSendPhotoToBoard={handleSendPhotoToBoard}
                         showDateInTimestamp
                         subject={subject}
                       />
@@ -1095,6 +1100,7 @@ export function GuidedThreadViewer({
           surface="homework_thread"
           onClose={() => setAnnotateTarget(null)}
           onSend={handleSendAnnotated}
+          onSendToBoard={() => handleSendPhotoToBoard(annotateTarget)}
         />
       ) : null}
     </div>

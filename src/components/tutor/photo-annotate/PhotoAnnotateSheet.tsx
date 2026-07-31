@@ -39,8 +39,13 @@ export interface PhotoAnnotateSheetProps {
   degrees: PhotoDegrees;
   surface: PhotoSurface;
   onClose: () => void;
-  /** Отправка размеченной картинки СУЩЕСТВУЮЩИМ путём сообщений треда. */
-  onSend: (file: File) => Promise<void>;
+  /**
+   * Отправка размеченной картинки СУЩЕСТВУЮЩИМ путём сообщений треда.
+   * `caption` — необязательная подпись «что исправить».
+   */
+  onSend: (file: File, caption: string) => Promise<void>;
+  /** «Нужно больше места» — продолжить разбор на доске. */
+  onSendToBoard?: () => void;
 }
 
 function draftKey(photoRef: string | null | undefined): string | null {
@@ -55,7 +60,9 @@ export function PhotoAnnotateSheet({
   surface,
   onClose,
   onSend,
+  onSendToBoard,
 }: PhotoAnnotateSheetProps) {
+  const [caption, setCaption] = useState('');
   const [elements, setElements] = useState<BoardElement[]>([]);
   const [tool, setTool] = useState<AnnotateTool>('pen');
   const [color, setColor] = useState<string>(DEFAULT_ANNOTATE_COLOR);
@@ -66,6 +73,8 @@ export function PhotoAnnotateSheet({
   const historyRef = useRef(new SceneHistory());
   const startedAtRef = useRef<number>(0);
   const usedToolsRef = useRef<Set<string>>(new Set());
+  /** Черновик прочитан — до этого писать в хранилище нельзя (см. эффект ниже). */
+  const hydratedRef = useRef(false);
 
   const key = draftKey(photoRef);
 
@@ -76,26 +85,40 @@ export function PhotoAnnotateSheet({
   // закрытая вкладка не должна стоить репетитору разбора.
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      hydratedRef.current = false;
+      return;
+    }
     startedAtRef.current = Date.now();
     usedToolsRef.current = new Set();
     trackPhotoEvent('photo_annotate_started', { surface });
 
-    if (!key) {
-      setElements([]);
-      return;
+    let restored: BoardElement[] = [];
+    if (key) {
+      try {
+        const saved = window.sessionStorage.getItem(key);
+        restored = saved ? parseElements(JSON.parse(saved)) : [];
+      } catch {
+        // Битый черновик — не повод не дать разметить заново.
+        restored = [];
+      }
     }
-    try {
-      const saved = window.sessionStorage.getItem(key);
-      setElements(saved ? parseElements(JSON.parse(saved)) : []);
-    } catch {
-      // Битый черновик — не повод не дать разметить заново.
-      setElements([]);
+    setElements(restored);
+    if (restored.length > 0) {
+      toast.info('Восстановили незаконченную разметку');
     }
+    hydratedRef.current = true;
   }, [key, open, surface]);
 
+  /**
+   * ⚠️ Пишем только ПОСЛЕ гидратации.
+   *
+   * Оба эффекта срабатывают в одном цикле, и этот видел бы ещё пустой
+   * `elements` из прошлого рендера — то есть стирал бы только что прочитанный
+   * черновик. Флаг разрывает эту гонку.
+   */
   useEffect(() => {
-    if (!open || !key) return;
+    if (!open || !key || !hydratedRef.current) return;
     try {
       if (elements.length === 0) window.sessionStorage.removeItem(key);
       else window.sessionStorage.setItem(key, JSON.stringify(elements));
@@ -167,8 +190,7 @@ export function PhotoAnnotateSheet({
 
   // ─── Выход и отправка ──────────────────────────────────────────────────────
 
-  const discard = useCallback(() => {
-    trackPhotoEvent('photo_annotate_discarded', { surface });
+  const clearDraft = useCallback(() => {
     historyRef.current.forget(HISTORY_KEY);
     if (key) {
       try {
@@ -178,8 +200,33 @@ export function PhotoAnnotateSheet({
       }
     }
     setElements([]);
+  }, [key]);
+
+  /**
+   * Крестик = «закрыть, работу оставить».
+   *
+   * ⚠️ Раньше и крестик, и «Отмена» вели в discard, и черновик стирался молча —
+   * то есть обещание «труд не потеряется» (страх Ульяны U17) не выполнялось
+   * ни в одном сценарии, кроме падения вкладки. Закрытие обязано быть
+   * безопасным действием.
+   */
+  const closeKeepingDraft = useCallback(() => {
+    if (elements.length > 0 && key) {
+      toast.info('Пометки сохранены — можно вернуться и дорисовать');
+    }
     onClose();
-  }, [key, onClose, surface]);
+  }, [elements.length, key, onClose]);
+
+  /** «Отмена» = выбросить. С подтверждением, когда есть что терять. */
+  const discard = useCallback(() => {
+    if (elements.length > 0) {
+      const confirmed = window.confirm('Удалить пометки? Их нельзя будет вернуть.');
+      if (!confirmed) return;
+    }
+    trackPhotoEvent('photo_annotate_discarded', { surface });
+    clearDraft();
+    onClose();
+  }, [clearDraft, elements.length, onClose, surface]);
 
   const handleSend = useCallback(async () => {
     if (isSending) return;
@@ -190,22 +237,16 @@ export function PhotoAnnotateSheet({
     setIsSending(true);
     try {
       const file = await renderAnnotatedPhoto({ photoUrl, degrees, elements });
-      await onSend(file);
+      await onSend(file, caption.trim());
       trackPhotoEvent('photo_annotate_sent', {
         surface,
         strokes: elements.length,
         tools: Array.from(usedToolsRef.current).sort().join(','),
         duration_ms: Date.now() - startedAtRef.current,
+        has_caption: caption.trim().length > 0,
       });
-      historyRef.current.forget(HISTORY_KEY);
-      if (key) {
-        try {
-          window.sessionStorage.removeItem(key);
-        } catch {
-          /* не критично */
-        }
-      }
-      setElements([]);
+      setCaption('');
+      clearDraft();
       onClose();
     } catch (error) {
       const message =
@@ -216,10 +257,15 @@ export function PhotoAnnotateSheet({
     } finally {
       setIsSending(false);
     }
-  }, [degrees, elements, isSending, key, onClose, onSend, photoUrl, surface]);
+  }, [caption, clearDraft, degrees, elements, isSending, onClose, onSend, photoUrl, surface]);
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={(next) => (!next ? onClose() : undefined)}>
+    // Esc и системное закрытие тоже СОХРАНЯЮТ черновик — выбросить работу
+    // можно только явной «Отменой».
+    <DialogPrimitive.Root
+      open={open}
+      onOpenChange={(next) => (!next ? closeKeepingDraft() : undefined)}
+    >
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="fixed inset-0 z-[80] bg-slate-950/95" />
         <DialogPrimitive.Content
@@ -243,8 +289,9 @@ export function PhotoAnnotateSheet({
             </p>
             <button
               type="button"
-              onClick={discard}
-              aria-label="Закрыть разметку"
+              onClick={closeKeepingDraft}
+              aria-label="Закрыть — пометки сохранятся"
+              title="Закрыть. Пометки сохранятся, можно вернуться"
               style={{ touchAction: 'manipulation' }}
               className="grid h-11 w-11 place-items-center rounded-full text-white/75 hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
             >
@@ -285,13 +332,40 @@ export function PhotoAnnotateSheet({
             </div>
           </div>
 
-          <footer className="flex shrink-0 items-center justify-end gap-2 px-4 py-2">
+          <footer className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
+            {/* Пометка отвечает на «где», подпись — на «что». Именно вторая
+                половина работает на метрику «ученик исправил ошибку», поэтому
+                поле стоит на пути отправки. Необязательное: обязательность
+                убила бы быстрые обводки, ради которых фичу и делали. */}
+            <input
+              value={caption}
+              onChange={(event) => setCaption(event.target.value)}
+              placeholder="Что исправить? Например: проверь коэффициент перед H₂O"
+              aria-label="Что исправить — короткая подпись ученику"
+              disabled={isSending}
+              // 16 px — иначе iOS зумит форму при фокусе (rule 80).
+              className="h-11 min-w-0 flex-1 rounded-lg border border-white/20 bg-white/10 px-3 text-base text-white placeholder:text-white/40 focus:border-white/40 focus:outline-none disabled:opacity-40"
+            />
+            {onSendToBoard ? (
+              <button
+                type="button"
+                onClick={() => {
+                  closeKeepingDraft();
+                  onSendToBoard();
+                }}
+                disabled={isSending}
+                style={{ touchAction: 'manipulation' }}
+                className="h-11 shrink-0 rounded-lg px-3 text-sm font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+              >
+                Нужно больше места
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={discard}
               disabled={isSending}
               style={{ touchAction: 'manipulation' }}
-              className="h-11 rounded-lg px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
+              className="h-11 shrink-0 rounded-lg px-4 text-sm font-medium text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-40"
             >
               Отмена
             </button>

@@ -102,7 +102,18 @@ export function AnnotateCanvas({
   const livePointsRef = useRef<number[] | null>(null);
   const liveShapeRef = useRef<typeof liveShape>(null);
   const dragRef = useRef<Drag | null>(null);
-  const pointersRef = useRef(new Map<number, Point>());
+  /**
+   * ⚠️ Храним и ТИП указателя, не только координаты.
+   *
+   * Без типа любые два указателя считались пинчем: ладонь, легшая на планшет
+   * рядом со стилусом, отменяла начатый штрих и дёргала масштаб — а это ровно
+   * главный пилотный сценарий (Ульяна пишет с планшета). Правило то же, что на
+   * доске: пинч только когда ОБА указателя `touch`, а при активном пере палец
+   * игнорируется целиком.
+   */
+  const pointersRef = useRef(new Map<number, { point: Point; type: string }>());
+  /** Идентификатор активного пера — пока он есть, касания не рисуют и не пинчат. */
+  const penPointerRef = useRef<number | null>(null);
   const pinchRef = useRef<{ distance: number; scale: number } | null>(null);
   const erasedRef = useRef<Set<string>>(new Set());
   const frameRef = useRef<number | null>(null);
@@ -220,17 +231,40 @@ export function AnnotateCanvas({
       event.preventDefault();
 
       const point = toContainerPoint(event.clientX, event.clientY);
-      pointersRef.current.set(event.pointerId, point);
 
-      if (pointersRef.current.size === 2) {
-        const [a, b] = Array.from(pointersRef.current.values());
-        pinchRef.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), scale: camera.scale };
-        // Начатый одним пальцем жест отменяем: два пальца — это всегда масштаб.
+      // Перо в работе — касания игнорируем полностью, даже не запоминаем.
+      // Это и есть отсечение ладони: она приходит как `touch`.
+      if (penPointerRef.current !== null && event.pointerType !== 'pen') return;
+
+      pointersRef.current.set(event.pointerId, { point, type: event.pointerType });
+      if (event.pointerType === 'pen') {
+        penPointerRef.current = event.pointerId;
+        // Перо главнее: всё, что успели начать пальцем, отменяем.
+        pinchRef.current = null;
+        for (const [id, entry] of pointersRef.current) {
+          if (entry.type !== 'pen') pointersRef.current.delete(id);
+        }
+      }
+
+      const touchPointers = Array.from(pointersRef.current.values()).filter(
+        (entry) => entry.type === 'touch',
+      );
+
+      // Пинч — ТОЛЬКО два касания. Пара «перо + ладонь» под это не подходит.
+      if (touchPointers.length === 2 && penPointerRef.current === null) {
+        const [a, b] = touchPointers;
+        pinchRef.current = {
+          distance: Math.hypot(a.point.x - b.point.x, a.point.y - b.point.y),
+          scale: camera.scale,
+        };
         dragRef.current = null;
         resetLive();
         return;
       }
       if (pointersRef.current.size > 2) return;
+      // Второй указатель, не сложившийся в пинч (например, вторая ладонь), —
+      // просто игнорируем, не ломая уже идущий жест.
+      if (dragRef.current) return;
 
       // ⚠️ Захват указателя — в try: на неактивном pointerId браузер бросает
       // NotFoundError, и необработанное исключение оборвало бы обработчик до
@@ -284,12 +318,15 @@ export function AnnotateCanvas({
       if (!pointersRef.current.has(event.pointerId)) return;
 
       const point = toContainerPoint(event.clientX, event.clientY);
-      pointersRef.current.set(event.pointerId, point);
+      pointersRef.current.set(event.pointerId, { point, type: event.pointerType });
 
       const pinch = pinchRef.current;
-      if (pinch && pointersRef.current.size === 2) {
-        const [a, b] = Array.from(pointersRef.current.values());
-        const distance = Math.hypot(a.x - b.x, a.y - b.y);
+      const touchPointers = Array.from(pointersRef.current.values()).filter(
+        (entry) => entry.type === 'touch',
+      );
+      if (pinch && touchPointers.length === 2) {
+        const [a, b] = touchPointers;
+        const distance = Math.hypot(a.point.x - b.point.x, a.point.y - b.point.y);
         if (pinch.distance > 0) {
           const next = Math.min(
             MAX_CAMERA_SCALE,
@@ -315,9 +352,28 @@ export function AnnotateCanvas({
       const image = containerToImage(point, currentLayout);
 
       if (drag.kind === 'stroke') {
-        const pressure =
-          event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
-        livePointsRef.current?.push(image.x, image.y, pressure);
+        const points = livePointsRef.current;
+        if (!points) return;
+        // Между кадрами перо успевает выдать несколько сэмплов — берём их все,
+        // иначе длинная дуга (химическая связь, овал вокруг ошибки) выходит
+        // угловатой. Метод необязательный: на мыши и старом WebKit его нет.
+        const coalesced =
+          event.pointerType === 'pen' && typeof event.nativeEvent.getCoalescedEvents === 'function'
+            ? event.nativeEvent.getCoalescedEvents()
+            : [];
+        if (coalesced.length > 1) {
+          for (const sample of coalesced) {
+            const p = containerToImage(
+              toContainerPoint(sample.clientX, sample.clientY),
+              currentLayout,
+            );
+            points.push(p.x, p.y, sample.pressure > 0 ? sample.pressure : 0.5);
+          }
+        } else {
+          const pressure =
+            event.pointerType === 'pen' && event.pressure > 0 ? event.pressure : 0.5;
+          points.push(image.x, image.y, pressure);
+        }
         scheduleFrame();
         return;
       }
@@ -344,7 +400,11 @@ export function AnnotateCanvas({
   const handlePointerUp = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       pointersRef.current.delete(event.pointerId);
-      if (pointersRef.current.size < 2) pinchRef.current = null;
+      if (penPointerRef.current === event.pointerId) penPointerRef.current = null;
+      const remainingTouches = Array.from(pointersRef.current.values()).filter(
+        (entry) => entry.type === 'touch',
+      ).length;
+      if (remainingTouches < 2) pinchRef.current = null;
 
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) {

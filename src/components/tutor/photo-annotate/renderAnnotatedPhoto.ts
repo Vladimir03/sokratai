@@ -25,6 +25,7 @@
 import { type BoardElement } from '@/lib/whiteboard/model';
 import { elementsToPixelSvg } from '@/lib/whiteboard/svg';
 import { type PhotoDegrees, isQuarterTurn } from '@/lib/photoOrientation';
+import { decodeHeicToJpegBlob, isHeicLikeFile, isHeicLikeUrl } from '@/lib/heicDecode';
 
 /** Длинная сторона результата. Читаемость рукописи важнее веса файла. */
 const MAX_LONG_SIDE_PX = 2048;
@@ -65,6 +66,20 @@ async function loadPhotoUntainted(
     throw new AnnotatedPhotoError(
       'Не удалось скачать фото для отправки. Проверьте связь и повторите.',
     );
+  }
+
+  // ⚠️ HEIC обязателен и здесь. Во вьюере старое `.heic` показывает `SafeImage`
+  // (конвертирует на лету), поэтому репетитор ВИДИТ фото и спокойно его
+  // размечает — а на отправке `<img>` молча не декодировал бы его, и работа
+  // терялась бы на последнем шаге. Декодер тот же ленивый wasm (баг Ирины).
+  if (isHeicLikeFile({ type: blob.type, name: url }) || isHeicLikeUrl(url)) {
+    try {
+      blob = await decodeHeicToJpegBlob(blob);
+    } catch {
+      throw new AnnotatedPhotoError(
+        'Не удалось преобразовать HEIC-фото для отправки. Попросите ученика прислать JPEG.',
+      );
+    }
   }
   const objectUrl = URL.createObjectURL(blob);
   try {

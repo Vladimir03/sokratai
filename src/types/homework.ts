@@ -147,6 +147,12 @@ export type GuidedMessageKind =
   | 'tutor_message'
   | 'tutor_note'
   /**
+   * Сообщение репетитора с размеченным фото ученика («показать, ГДЕ ошибка»).
+   * Отдельный тип нужен метрике «ученик исправил ошибку»: иначе факт разметки
+   * восстанавливался бы по необязательной русской подписи.
+   */
+  | 'photo_annotation'
+  /**
    * Phase 1 student homework problem screen single-shot submission. Backend
    * stores it with `submission_payload` JSONB — see migration
    * `20260509120100_add_submission_payload_to_thread_messages.sql` (extended

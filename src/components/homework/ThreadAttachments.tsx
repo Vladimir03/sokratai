@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { FileText, ImageIcon, Pencil, PenTool } from 'lucide-react';
+import { FileText, ImageIcon, Pencil } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   PhotoThumbButton,
@@ -37,8 +37,6 @@ interface ThreadAttachmentsProps {
    * Отправку делает вызывающий — своего write-path у разметки нет (rule 40).
    */
   onAnnotate?: (photo: { url: string; ref: string | null; degrees: number }) => void;
-  /** «Разобрать на доске» — когда поверх фото места не хватает. */
-  onSendToBoard?: (photo: { url: string; ref: string | null; degrees: number }) => void;
 }
 
 interface ResolvedAttachment {
@@ -54,7 +52,6 @@ export function ThreadAttachments({
   compact = false,
   canRotate = false,
   onAnnotate,
-  onSendToBoard,
 }: ThreadAttachmentsProps) {
   const refs = useMemo(
     () => parseThreadAttachmentRefs(attachmentValue),
@@ -207,48 +204,29 @@ export function ThreadAttachments({
         canRotate={canRotate}
         ariaTitle="Фото из переписки по задаче"
         ariaDescription="Фото можно повернуть, увеличить и рассмотреть целиком"
+        // ⚠️ В подвале ОДНА первичная кнопка. Вторая CTA «Разобрать на доске»
+        // конкурировала с ней за внимание и не переносилась на узком экране;
+        // путь на доску сохранён, но переехал в сам лист разметки («Нужно
+        // больше места») — туда, где потребность и возникает.
         footerActions={
-          openIndex !== null && viewerItems[openIndex] ? (
-            <>
-              {onAnnotate ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const item = viewerItems[openIndex];
-                    close();
-                    onAnnotate({
-                      url: item.url,
-                      ref: item.ref ?? null,
-                      degrees: orientations[item.ref ?? ''] ?? 0,
-                    });
-                  }}
-                  style={{ touchAction: 'manipulation' }}
-                  className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                >
-                  <Pencil className="h-4 w-4" aria-hidden="true" />
-                  Показать ошибку
-                </button>
-              ) : null}
-              {onSendToBoard ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const item = viewerItems[openIndex];
-                    close();
-                    onSendToBoard({
-                      url: item.url,
-                      ref: item.ref ?? null,
-                      degrees: orientations[item.ref ?? ''] ?? 0,
-                    });
-                  }}
-                  style={{ touchAction: 'manipulation' }}
-                  className="inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-medium text-white/75 transition-colors hover:bg-white/10 hover:text-white"
-                >
-                  <PenTool className="h-4 w-4" aria-hidden="true" />
-                  Разобрать на доске
-                </button>
-              ) : null}
-            </>
+          onAnnotate && openIndex !== null && viewerItems[openIndex] ? (
+            <button
+              type="button"
+              onClick={() => {
+                const item = viewerItems[openIndex];
+                close();
+                onAnnotate({
+                  url: item.url,
+                  ref: item.ref ?? null,
+                  degrees: orientations[item.ref ?? ''] ?? 0,
+                });
+              }}
+              style={{ touchAction: 'manipulation' }}
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-accent px-5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              <Pencil className="h-4 w-4" aria-hidden="true" />
+              Показать ошибку
+            </button>
           ) : null
         }
       />

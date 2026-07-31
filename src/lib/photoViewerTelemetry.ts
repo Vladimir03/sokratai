@@ -46,6 +46,8 @@ interface AnnotateSentPayload extends Record<string, string | number | boolean |
   strokes: number;
   tools: string;
   duration_ms: number;
+  /** Была ли подпись «что исправить» — она и работает на метрику №2. */
+  has_caption: boolean;
 }
 
 interface AnnotateSimplePayload extends Record<string, string | number | boolean | undefined> {

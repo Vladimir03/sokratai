@@ -660,7 +660,11 @@ export async function uploadTutorHomeworkTaskImage(
   }
 
   const ext = generateFileExt(file);
-  const uuid = crypto.randomUUID();
+  // ⚠️ НЕ crypto.randomUUID: он требует HTTPS + Safari 15.4+, а базовая
+  // поддержка проекта — iOS 15 (rule 80). Голый вызов там бросает TypeError, и
+  // загрузка фото падала бы ДО сети. Тот же приём, что в boardImages.ts и
+  // lessonMaterialsApi.
+  const uuid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const primaryPath = `tutor/${userId}/${uuid}.${ext}`;
 
   const { error: primaryError } = await supabase.storage
@@ -1193,6 +1197,15 @@ export async function postTutorThreadMessage(
     task_order?: number;
     task_id?: string;
     image_url?: string;
+    /**
+     * Долговечный признак типа сообщения. Сервер принимает только значения из
+     * своего allowlist, остальное схлопывает в обычное сообщение репетитора.
+     *
+     * Заведено ради метрики «ученик исправил ошибку»: без признака факт
+     * разметки пришлось бы восстанавливать по русской строке подписи, а она
+     * необязательная и меняется.
+     */
+    message_kind?: 'photo_annotation';
   },
 ): Promise<{ id: string; created_at: string }> {
   return requestHomeworkApi<{ id: string; created_at: string }>(
@@ -1205,6 +1218,7 @@ export async function postTutorThreadMessage(
         task_order: options?.task_order,
         task_id: options?.task_id,
         image_url: options?.image_url,
+        message_kind: options?.message_kind,
       }),
     },
   );

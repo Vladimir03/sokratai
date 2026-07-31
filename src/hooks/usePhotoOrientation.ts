@@ -91,6 +91,16 @@ export function usePhotoOrientations(
    */
   const pendingRef = useRef(new Map<string, { degrees: PhotoDegrees; seq: number }>());
   const seqRef = useRef(0);
+  /**
+   * Очередь записи ПО КАЖДОМУ ref.
+   *
+   * ⚠️ Порядкового номера мало: он защищает клиентский кэш, но не сервер.
+   * Два быстрых поворота уходят параллельно, и запрос «180°» может доехать
+   * РАНЬШЕ более старого «90°» — на сервере осталось бы 90°, и после
+   * перезагрузки репетитор увидел бы не то, что оставил, а ученик — тем более.
+   * Поэтому записи одного и того же фото выстраиваются в цепочку.
+   */
+  const writeChainRef = useRef(new Map<string, Promise<unknown>>());
 
   const patchCaches = useCallback(
     (ref: string, degrees: PhotoDegrees) => {
@@ -109,7 +119,16 @@ export function usePhotoOrientations(
   );
 
   const mutation = useMutation({
-    mutationFn: ({ ref, degrees }: RotateVars) => savePhotoOrientation(ref, degrees),
+    mutationFn: ({ ref, degrees }: RotateVars) => {
+      const previousWrite = writeChainRef.current.get(ref) ?? Promise.resolve();
+      // Ошибка предыдущей записи не должна рвать цепочку — её обработает свой
+      // onError, а следующая правка обязана всё равно уехать.
+      const next = previousWrite
+        .catch(() => undefined)
+        .then(() => savePhotoOrientation(ref, degrees));
+      writeChainRef.current.set(ref, next.catch(() => undefined));
+      return next;
+    },
 
     onSuccess: (saved, { ref, seq }) => {
       // Ответ более старой мутации не должен перетирать более новый поворот.

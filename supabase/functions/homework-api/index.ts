@@ -7711,6 +7711,30 @@ interface GuidedTaskIdentityRow {
   max_score?: number | null;
 }
 
+/**
+ * Тип сообщения репетитора.
+ *
+ * ⚠️ Значение из запроса проходит ЧЕРЕЗ ALLOWLIST, а не подставляется как есть:
+ * `message_kind` — это то, по чему считается аналитика и ветвится UI, и
+ * произвольная строка от клиента отравила бы и то, и другое.
+ *
+ * `photo_annotation` заведён ради метрики «ученик исправил ошибку»: без
+ * долговечного признака факт разметки пришлось бы восстанавливать по русской
+ * строке подписи, а она необязательная и меняется.
+ *
+ * Скрытая заметка остаётся заметкой при любом запрошенном типе — иначе пометка
+ * «только для себя» могла бы уехать ученику.
+ */
+const TUTOR_REQUESTABLE_MESSAGE_KINDS = new Set(["photo_annotation"]);
+
+function resolveTutorMessageKind(requested: unknown, visibleToStudent: boolean): string {
+  if (!visibleToStudent) return "tutor_note";
+  if (typeof requested === "string" && TUTOR_REQUESTABLE_MESSAGE_KINDS.has(requested)) {
+    return requested;
+  }
+  return "tutor_message";
+}
+
 function resolveTaskReference(
   tasks: GuidedTaskIdentityRow[],
   options: {
@@ -12425,6 +12449,7 @@ async function handleTutorPostMessage(
   }
   const content = (b.content as string).trim();
   const visibleToStudent = b.visible_to_student !== false; // default true
+  const requestedMessageKind = b.message_kind;
   const requestedTaskOrder = typeof b.task_order === "number" ? b.task_order : undefined;
   const requestedTaskId = isUUID(b.task_id) ? b.task_id as string : undefined;
   const imageUrl = typeof b.image_url === "string" && b.image_url.trim() ? b.image_url.trim() : null;
@@ -12463,7 +12488,7 @@ async function handleTutorPostMessage(
       image_url: imageUrl,
       task_id: taskId,
       task_order: taskOrder,
-      message_kind: visibleToStudent ? "tutor_message" : "tutor_note",
+      message_kind: resolveTutorMessageKind(requestedMessageKind, visibleToStudent),
       visible_to_student: visibleToStudent,
       author_user_id: tutorUserId,
     })
