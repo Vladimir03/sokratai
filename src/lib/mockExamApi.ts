@@ -455,7 +455,10 @@ export interface CreateMockExamVariantPayload {
 
 export async function createMockExamVariant(
   payload: CreateMockExamVariantPayload,
-): Promise<{ variant_id: string }> {
+): Promise<{ variant_id: string; listening_fields_applied?: boolean }> {
+  // listening_fields_applied — deploy-skew handshake (ревью 5.6 P0): старый
+  // edge игнорирует listening-поля и не шлёт маркер → фронт показывает
+  // предупреждение вместо тихого data-loss.
   return requestTutorMockExamApi('/variants', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -478,7 +481,7 @@ export async function replaceMockExamVariantTasks(
   // Ревью 5.6 P1 #4: мета едет ВМЕСТЕ с задачами — сервер сохраняет всё одной
   // транзакцией (RPC), «предмет сменился, задачи не доехали» невозможен.
   meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript'>>,
-): Promise<{ updated: true; task_count: number; total_max_score: number }> {
+): Promise<{ updated: true; task_count: number; total_max_score: number; listening_fields_applied?: boolean }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/tasks`, {
     method: 'PUT',
     body: JSON.stringify({ tasks, ...(meta ?? {}) }),
@@ -504,6 +507,20 @@ const LISTENING_AUDIO_MIME_TO_EXT: Record<string, string> = {
   'audio/ogg': 'ogg',
   'audio/wav': 'wav',
   'audio/x-wav': 'wav',
+};
+
+// Ревью 5.6 P1: браузерный file.type бывает alias-ом (audio/x-m4a, audio/mp3,
+// audio/x-wav), а allowed_mime_types бакета — только канонические. Upload с
+// alias-contentType отвергся бы storage'ем → нормализуем ПЕРЕД отправкой.
+const LISTENING_AUDIO_CANONICAL_MIME: Record<string, string> = {
+  'audio/mpeg': 'audio/mpeg',
+  'audio/mp3': 'audio/mpeg',
+  'audio/mp4': 'audio/mp4',
+  'audio/x-m4a': 'audio/mp4',
+  'audio/webm': 'audio/webm',
+  'audio/ogg': 'audio/ogg',
+  'audio/wav': 'audio/wav',
+  'audio/x-wav': 'audio/wav',
 };
 
 export function validateListeningAudioFile(file: File): string | null {
@@ -546,7 +563,8 @@ export async function uploadListeningAudio(
   const { error } = await supabase.storage
     .from(LISTENING_AUDIO_BUCKET)
     .upload(path, file, {
-      contentType: mime || 'audio/mpeg',
+      // Канонический MIME (не сырой file.type) — bucket whitelist строгий.
+      contentType: LISTENING_AUDIO_CANONICAL_MIME[mime] ?? 'audio/mpeg',
       // Повторное прослушивание — из кэша (перф-критерий плана §3): контент
       // иммутабелен (замена трека = новый path).
       cacheControl: '86400',

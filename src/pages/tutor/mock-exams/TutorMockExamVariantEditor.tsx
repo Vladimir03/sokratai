@@ -206,6 +206,7 @@ function ListeningAudioSection({
   transcriptDisabled,
   onAudioChange,
   onTranscriptChange,
+  onUploadingChange,
 }: {
   audioRef: string | null;
   transcript: string;
@@ -214,10 +215,17 @@ function ListeningAudioSection({
   transcriptDisabled: boolean;
   onAudioChange: (ref: string | null) => void;
   onTranscriptChange: (value: string) => void;
+  /**
+   * Ревью 5.6 P0 (HZ-4): upload 22 МБ идёт 1-3 мин — родитель ОБЯЗАН знать
+   * о нём, иначе «Сохранить» во время загрузки подтверждает вариант без
+   * трека (ref ещё null), а поздний ref никуда не попадает.
+   */
+  onUploadingChange: (uploading: boolean) => void;
 }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [audioFailed, setAudioFailed] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingFileInfo, setUploadingFileInfo] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -245,6 +253,8 @@ function ListeningAudioSection({
       return;
     }
     setUploading(true);
+    onUploadingChange(true);
+    setUploadingFileInfo(`${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} МБ`);
     try {
       const res = await uploadListeningAudio(file);
       onAudioChange(res.storageRef);
@@ -253,6 +263,8 @@ function ListeningAudioSection({
       toast.error(err instanceof Error ? err.message : 'Не удалось загрузить аудио');
     } finally {
       setUploading(false);
+      onUploadingChange(false);
+      setUploadingFileInfo(null);
     }
   };
 
@@ -303,6 +315,13 @@ function ListeningAudioSection({
           />
         </div>
 
+        {uploading && uploadingFileInfo ? (
+          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+            Загружаем {uploadingFileInfo} — большой файл может идти 1–3 минуты.
+            Не закрывайте страницу и не нажимайте «Сохранить», пока загрузка не завершится.
+          </p>
+        ) : null}
+
         {audioRef ? (
           audioFailed ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -335,9 +354,21 @@ function ListeningAudioSection({
             maxLength={40000}
             className={cn(INPUT_CLASS, 'min-h-[120px] resize-y leading-relaxed')}
           />
-          <p className="mt-1 text-xs text-slate-500">
-            До сдачи транскрипт ученику не показывается — он появится в результате для работы над ошибками.
-          </p>
+          <div className="mt-1 flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">
+              До сдачи транскрипт ученику не показывается — он появится в результате для работы над ошибками.
+            </p>
+            {/* Ревью 5.6 P2 (HZ-6): браузер молча обрезает paste на maxLength —
+                счётчик делает лимит видимым. */}
+            <span
+              className={cn(
+                'shrink-0 text-xs tabular-nums',
+                transcript.length >= 40000 ? 'font-semibold text-amber-600' : 'text-slate-400',
+              )}
+            >
+              {transcript.length.toLocaleString('ru-RU')} / 40 000
+            </span>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -585,6 +616,9 @@ function VariantEditorContent() {
   // («не менять»), НЕ '' — иначе сбой prefill-фетча молча стирал бы
   // сохранённый транскрипт.
   const [transcriptReady, setTranscriptReady] = useState(!isEditMode);
+  // Ревью 5.6 P0 (HZ-4): upload аудио (1-3 мин) должен блокировать Save —
+  // иначе «Сохранить» посреди загрузки подтверждает вариант без трека.
+  const [audioUploading, setAudioUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
@@ -737,6 +771,13 @@ function VariantEditorContent() {
 
   const handleSubmit = useCallback(async () => {
     if (isSubmitting) return;
+    // Ревью 5.6 P0 (HZ-4): обязательный гард — Save во время upload аудио
+    // сохранил бы вариант со старым/пустым ref, а завершившаяся позже
+    // загрузка уже никуда не попала бы (тихий data-loss трека).
+    if (audioUploading) {
+      toast.error('Дождитесь окончания загрузки аудио — иначе трек не попадёт в вариант');
+      return;
+    }
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       toast.error('Укажите название варианта');
@@ -768,7 +809,18 @@ function VariantEditorContent() {
         // Ф3: пер-предметный last-used экзамена (дефолт следующего create).
         saveExamLastUsed(subject, exam);
         invalidateVariantCaches();
-        toast.success('Вариант создан — теперь его можно назначить ученикам');
+        // Deploy-skew handshake (ревью 5.6 P0): listening-поля отправлены, но
+        // маркер не пришёл = старый edge их проигнорировал — честно сказать,
+        // а не показать success с потерянным треком.
+        const sentListening = Boolean(listeningAudioRef || listeningTranscript.trim());
+        if (sentListening && !created.listening_fields_applied) {
+          toast.error(
+            'Вариант создан, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Откройте вариант и прикрепите аудио повторно чуть позже.',
+            { duration: 10000 },
+          );
+        } else {
+          toast.success('Вариант создан — теперь его можно назначить ученикам');
+        }
         navigate(`/tutor/mock-exams/new?variant=${created.variant_id}`, { replace: true });
         return;
       }
@@ -787,21 +839,35 @@ function VariantEditorContent() {
         toast.error(tasksPayload);
         return;
       }
-      await replaceMockExamVariantTasks(editId!, tasksPayload, {
+      // Sync-гард пары (ревью 5.6 P1): при !transcriptReady заморожены ОБА
+      // listening-поля (UI disabled) — не шлём ни аудио, ни транскрипт,
+      // сохранённая пара остаётся согласованной.
+      const replaceRes = await replaceMockExamVariantTasks(editId!, tasksPayload, {
         title: trimmedTitle,
         subject,
         exam,
         duration_minutes: duration,
         // Тристейт edge: '' = очистить (трек убран), строка = новое значение,
-        // undefined = не менять (транскрипт-prefill упал — не стирать
-        // сохранённый, data-loss гард transcriptReady).
-        listening_audio_url: listeningAudioRef ?? '',
+        // undefined = не менять.
         ...(transcriptReady
-          ? { listening_transcript: listeningTranscript.trim() }
+          ? {
+              listening_audio_url: listeningAudioRef ?? '',
+              listening_transcript: listeningTranscript.trim(),
+            }
           : {}),
       });
       invalidateVariantCaches();
-      toast.success('Вариант сохранён');
+      // Deploy-skew handshake (ревью 5.6 P0) — mirror create-путь.
+      const sentListeningOnReplace =
+        transcriptReady && Boolean(listeningAudioRef || listeningTranscript.trim());
+      if (sentListeningOnReplace && !replaceRes.listening_fields_applied) {
+        toast.error(
+          'Задачи сохранены, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Повторите сохранение чуть позже.',
+          { duration: 10000 },
+        );
+      } else {
+        toast.success('Вариант сохранён');
+      }
     } catch (err) {
       const msg = err instanceof MockExamApiError || err instanceof Error
         ? err.message
@@ -822,6 +888,7 @@ function VariantEditorContent() {
     listeningAudioRef,
     listeningTranscript,
     transcriptReady,
+    audioUploading,
     buildTasksPayload,
     invalidateVariantCaches,
     navigate,
@@ -1007,10 +1074,14 @@ function VariantEditorContent() {
       <ListeningAudioSection
         audioRef={listeningAudioRef}
         transcript={listeningTranscript}
-        disabled={contentLocked || isSubmitting}
+        // Ревью 5.6 P1 (sync-гард пары): пока транскрипт-prefill не подъехал,
+        // заморожены ОБА listening-поля — иначе «трек заменили, транскрипт
+        // остался от старого» (save шлёт аудио, но не транскрипт).
+        disabled={contentLocked || isSubmitting || !transcriptReady}
         transcriptDisabled={contentLocked || isSubmitting || !transcriptReady}
         onAudioChange={setListeningAudioRef}
         onTranscriptChange={setListeningTranscript}
+        onUploadingChange={setAudioUploading}
       />
 
       {/* AI-загрузка задач из PDF/фото — shared loader (destination mock_variant).
@@ -1092,14 +1163,16 @@ function VariantEditorContent() {
           </p>
           <div className="ml-auto flex items-center gap-2">
             {isEditMode && !inUse ? (
-              <Button variant="ghost" onClick={() => void handleDelete()} disabled={isSubmitting} className="gap-1.5 text-slate-500 hover:text-red-600">
+              <Button variant="ghost" onClick={() => void handleDelete()} disabled={isSubmitting || audioUploading} className="gap-1.5 text-slate-500 hover:text-red-600">
                 <Trash2 className="h-4 w-4" />
                 Удалить
               </Button>
             ) : null}
-            <Button onClick={() => void handleSubmit()} disabled={isSubmitting} className="gap-2 min-w-[180px]">
-              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {isEditMode ? 'Сохранить' : 'Создать вариант'}
+            {/* Ревью 5.6 P0 (HZ-4): disabled на upload аудио — дублирует гард
+                в handleSubmit (кнопка = видимый сигнал, гард = авторитет). */}
+            <Button onClick={() => void handleSubmit()} disabled={isSubmitting || audioUploading} className="gap-2 min-w-[180px]">
+              {isSubmitting || audioUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {audioUploading ? 'Загружаем аудио…' : isEditMode ? 'Сохранить' : 'Создать вариант'}
             </Button>
           </div>
         </div>

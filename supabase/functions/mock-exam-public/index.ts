@@ -54,7 +54,8 @@ const VARIANT_TASK_BUCKET = "mock-exam-variant-tasks";
 // Аудирование (2026-07-31): трек — условие, доступен на anonymous taking
 // surface; транскрипт = ответы, раскрывается только в parent_result.
 const LISTENING_AUDIO_BUCKET = "mock-exam-listening-audio";
-const AUDIO_SIGNED_URL_TTL_SEC = 6 * 3600;
+// 12ч — duration_minutes допускает до 600 мин (ревью 5.6 HZ-3).
+const AUDIO_SIGNED_URL_TTL_SEC = 12 * 3600;
 const PART2_PHOTO_BUCKET = "mock-exam-part2-photos";
 const BLANK_BUCKET = "mock-exam-blanks";
 
@@ -278,7 +279,9 @@ async function handleInviteRead(
   // ANTI-LEAK: listening_transcript НЕ селектится — это anonymous taking
   // surface, транскрипт трека = ответы аудирования (rule 45). Само аудио —
   // условие задачи, как task_image_url.
-  const { data: variant } = await db
+  // Ревью 5.6 (HZ-1b): НЕ глотать error — «column does not exist» при
+  // deploy-skew (edge новее миграции) молча превращался бы в variant:null.
+  const { data: variant, error: variantErr } = await db
     .from("mock_exam_variants")
     .select(
       // `subject` — ревью 5.6 P1 #4: публичное приглашение обязано знать предмет,
@@ -289,6 +292,11 @@ async function handleInviteRead(
     )
     .eq("id", assignment.variant_id)
     .maybeSingle();
+  if (variantErr) {
+    console.error("mock_exam_public_invite_variant_failed", {
+      error: variantErr.message,
+    });
+  }
 
   // Tasks: КОЛОНОЧНЫЙ whitelist без correct_answer / solution_text. Это
   // anonymous student exam surface — не должен видеть ответы. После

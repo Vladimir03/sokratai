@@ -688,7 +688,18 @@ const GenericAnswerInstructionsPanel = memo(function GenericAnswerInstructionsPa
  * - Транскрипт трека сюда НЕ приходит (anti-leak rule 45) — appears only
  *   в результате post-submit.
  */
-const ListeningAudioPanel = memo(function ListeningAudioPanel({ url }: { url: string }) {
+const ListeningAudioPanel = memo(function ListeningAudioPanel({
+  url,
+  onPlaybackError,
+}: {
+  url: string;
+  /**
+   * Ревью 5.6 P1 (HZ-3): вкладка, открытая дольше TTL signed URL (12ч), при
+   * seek/play получит отказ — one-shot refetch перевыпускает ссылку.
+   */
+  onPlaybackError?: () => void;
+}) {
+  const errorFiredRef = useRef(false);
   return (
     <div className="sticky top-2 z-20">
       <Card className="border-sky-200 bg-sky-50/95 shadow-sm backdrop-blur-sm">
@@ -698,12 +709,19 @@ const ListeningAudioPanel = memo(function ListeningAudioPanel({ url }: { url: st
             <h2 className="text-sm font-semibold text-slate-900">Аудирование</h2>
             <span className="text-xs text-slate-500">— прослушай запись и ответь на вопросы</span>
           </div>
-          {/* touch-manipulation: контролы плеера тапаются на iOS без 300ms delay */}
+          {/* touch-manipulation: контролы плеера тапаются на iOS без 300ms delay.
+              min-h-11 (не жёсткая h-10): нативные controls iOS требуют больше
+              высоты, жёсткий clip резал их (ревью 5.6 HZ-5). */}
           <audio
             controls
             preload="metadata"
             src={url}
-            className="h-10 w-full touch-manipulation"
+            className="min-h-11 w-full touch-manipulation"
+            onError={() => {
+              if (errorFiredRef.current) return;
+              errorFiredRef.current = true;
+              onPlaybackError?.();
+            }}
           >
             Ваш браузер не поддерживает воспроизведение аудио.
           </audio>
@@ -712,6 +730,37 @@ const ListeningAudioPanel = memo(function ListeningAudioPanel({ url }: { url: st
     </div>
   );
 });
+
+/**
+ * Ревью 5.6 P1 (HZ-2): подпись трека упала (блоб удалён / storage 5xx / бакет
+ * не создан) — «has_listening_audio=true, url=null». БЛОКИРУЮЩАЯ ошибка вместо
+ * тихого скрытия плеера: ученик НЕ должен сдавать аудирование, не зная, что
+ * условия-аудио не было.
+ */
+function ListeningAudioErrorPanel({ onRetry }: { onRetry: () => void }) {
+  return (
+    <Card className="border-rose-200 bg-rose-50 shadow-none">
+      <CardContent className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <AlertCircle className="h-5 w-5 shrink-0 text-rose-600" aria-hidden="true" />
+          <div className="min-w-[220px] flex-1">
+            <p className="text-sm font-semibold text-rose-800">
+              Не удалось загрузить аудио для аудирования
+            </p>
+            <p className="text-sm text-rose-700">
+              В этом пробнике есть аудиозапись, но она не загрузилась. Не отправляй
+              пробник без неё — нажми «Повторить» или напиши репетитору.
+            </p>
+          </div>
+          <Button variant="outline" size="sm" onClick={onRetry} className="gap-1.5 border-rose-300 touch-manipulation">
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Повторить
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 /**
  * Info-only banner для blank-режима (TASK-13, 2026-05-14): инструкция +
@@ -1506,13 +1555,33 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           <div className="space-y-4">
             {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsEgeVariant} />}
             {isPhysicsEgeVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
-            {/* Аудирование: гейт — наличие трека в варианте (data-driven). */}
-            {data.variant?.listening_audio_url && (
-              <ListeningAudioPanel url={data.variant.listening_audio_url} />
-            )}
           </div>
 
           <section className="mt-6 space-y-3">
+            {/* Аудирование — ПЕРВЫМ ребёнком секции Части 1 (ревью 5.6 HZ-5):
+                sticky ограничен высотой родителя; в прежнем коротком div над
+                секцией плеер «уезжал» сразу. Здесь sticky-scope = весь список
+                вопросов. Гейт — data-driven (наличие трека), не предмет. */}
+            {data.variant?.listening_audio_url ? (
+              <ListeningAudioPanel
+                url={data.variant.listening_audio_url}
+                onPlaybackError={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: ['student', 'mock-exam', data.assignment.id],
+                  });
+                }}
+              />
+            ) : data.variant?.has_listening_audio ? (
+              // HZ-2: трек ЕСТЬ, но подпись упала → блокирующая ошибка, не
+              // тихий экзамен без условия.
+              <ListeningAudioErrorPanel
+                onRetry={() => {
+                  void queryClient.invalidateQueries({
+                    queryKey: ['student', 'mock-exam', data.assignment.id],
+                  });
+                }}
+              />
+            ) : null}
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>

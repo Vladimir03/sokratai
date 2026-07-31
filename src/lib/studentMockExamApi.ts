@@ -115,12 +115,18 @@ export interface StudentMockExamVariantSummary {
   variant_pdf_url: string | null;
   /**
    * Аудирование (2026-07-31, запрос Эмилии/DELF): browser-facing signed URL
-   * трека секции compréhension orale (6ч TTL, уже proxy-rewritten).
-   * NULL/undefined = вариант без аудио ИЛИ старый edge (deploy-skew) → плеер
-   * скрыт. Транскрипт трека на taking-surface НЕ приходит НИКОГДА (anti-leak
+   * трека секции compréhension orale (12ч TTL, уже proxy-rewritten).
+   * Транскрипт трека на taking-surface НЕ приходит НИКОГДА (anti-leak
    * rule 45: транскрипт = ответы аудирования, reveal только post-submit).
    */
   listening_audio_url?: string | null;
+  /**
+   * Ревью 5.6 P1 (HZ-2): наличие RAW ref трека. Отличает «вариант без аудио»
+   * (false/undefined → панели нет) от «подпись URL упала» (true + url null →
+   * блокирующая ошибка с «Повторить» — ученик НЕ должен тихо сдавать
+   * аудирование без условия).
+   */
+  has_listening_audio?: boolean;
   /**
    * Транскрипт трека аудирования. Приходит ТОЛЬКО из result-эндпоинта
    * (post-submit reveal — тот же контракт, что correct_answer Ч1). На

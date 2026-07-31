@@ -39,9 +39,11 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const PART2_PHOTO_BUCKET = "mock-exam-part2-photos";
 const BLANK_PHOTO_BUCKET = "mock-exam-blanks";
 const SIGNED_URL_TTL_SEC = 3600;
-// Аудирование: трек слушают в течение всего пробника (DELF до 210 мин) —
-// часовая ссылка протухла бы посреди попытки. 6 часов покрывает любой exam_mode.
-const AUDIO_SIGNED_URL_TTL_SEC = 6 * 3600;
+// Аудирование: трек слушают в течение всего пробника — часовая ссылка протухла
+// бы посреди попытки. Ревью 5.6 P1 (HZ-3): duration_minutes допускает до 600
+// мин (10ч), «6 часов» НЕ покрывали максимум → 12ч. Клиентский <audio> onError
+// дополнительно делает one-shot refetch (вкладка, открытая дольше TTL).
+const AUDIO_SIGNED_URL_TTL_SEC = 12 * 3600;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_PHOTO_MIME = new Set([
   "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
@@ -367,6 +369,12 @@ async function handleGetStudentAssignment(
     .select("kim_number, photo_url, status, updated_at")
     .eq("attempt_id", attempt.id);
 
+  // Ревью 5.6 P2: подпись аудио — параллельно с остальными signed-ресурсами
+  // (не последовательный await в payload — лишний storage-RTT на каждый GET).
+  const listeningAudioSignedPromise = variant?.listening_audio_url
+    ? resolveSignedUrl(db, variant.listening_audio_url as string, AUDIO_SIGNED_URL_TTL_SEC)
+    : Promise.resolve(null);
+
   const part2WithSignedUrls = await Promise.all(
     (part2Rows ?? []).map(async (row) => ({
       kim_number: row.kim_number,
@@ -441,13 +449,12 @@ async function handleGetStudentAssignment(
         variant_pdf_url: variant.variant_pdf_url
           ? rewriteToProxy(variant.variant_pdf_url as string)
           : null,
-        // Аудирование: signed URL приватного бакета (6ч TTL — на весь пробник).
-        // NULL = вариант без аудио, клиент скрывает плеер.
-        listening_audio_url: await resolveSignedUrl(
-          db,
-          variant.listening_audio_url as string | null,
-          AUDIO_SIGNED_URL_TTL_SEC,
-        ),
+        // Аудирование. Ревью 5.6 P1 (HZ-2): has_listening_audio = наличие
+        // RAW ref — клиент отличает «вариант без аудио» (панели нет) от
+        // «подпись упала» (has=true, url=null → блокирующая ошибка с
+        // «Повторить», НЕ тихий экзамен без условия).
+        has_listening_audio: Boolean(variant.listening_audio_url),
+        listening_audio_url: await listeningAudioSignedPromise,
       }
       : null,
     tasks,

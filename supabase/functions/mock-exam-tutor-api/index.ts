@@ -3664,9 +3664,15 @@ function validateVariantImageField(
  *  null/'' = явная очистка (RPC ''); строка = новое значение.
  *  ANTI-LEAK: listening_transcript = ответы аудирования — leak-контракт
  *  обеспечивают student/public edges (transcript только post-submit),
- *  здесь только санитизация входа. */
+ *  здесь только санитизация входа.
+ *  Own-namespace ОБЯЗАТЕЛЕН (ревью 5.6 P1) — в отличие от картинок
+ *  (validateVariantImageField), у аудио НЕТ легитимных чужих refs:
+ *  каталожного аудио не существует, duplicate трек не копирует. Без гейта
+ *  тутор A вписал бы известный ref тутора B, и student-edge (service_role)
+ *  подписал бы чужой файл. */
 function validateVariantListeningFields(
   b: Record<string, unknown>,
+  tutorUserId: string,
 ):
   | { ok: true; audioUrl: string | null | undefined; transcript: string | null | undefined }
   | { ok: false; message: string } {
@@ -3689,6 +3695,9 @@ function validateVariantListeningFields(
         const parsed = parseStorageRef(refs[0]);
         if (!parsed || !VARIANT_AUDIO_BUCKETS.has(parsed.bucket)) {
           return { ok: false, message: "аудио должно быть загружено через Сократ (storage://mock-exam-listening-audio/...)" };
+        }
+        if (!parsed.path.startsWith(`${tutorUserId}/`)) {
+          return { ok: false, message: "аудио должно быть загружено с вашего аккаунта" };
         }
         audioUrl = trimmed;
       }
@@ -3931,7 +3940,7 @@ async function handleCreateVariant(
   }
 
   // Аудирование (2026-07-31): опциональный трек + транскрипт в мете варианта.
-  const listeningCheck = validateVariantListeningFields(b);
+  const listeningCheck = validateVariantListeningFields(b, tutorUserId);
   if (!listeningCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
@@ -3969,7 +3978,10 @@ async function handleCreateVariant(
     task_count: tasksCheck.tasks.length,
     subject,
   });
-  return jsonOk(cors, { variant_id: variantId }, 201);
+  // listening_fields_applied — deploy-skew handshake (ревью 5.6 P0): старый
+  // edge молча игнорировал listening-поля и возвращал success; новый фронт
+  // требует маркер, иначе показывает «аудио не сохранилось».
+  return jsonOk(cors, { variant_id: variantId, listening_fields_applied: true }, 201);
 }
 
 // PATCH /variants/:id — мета личного варианта. title — всегда; subject/exam/
@@ -4017,7 +4029,7 @@ async function handleUpdateVariantMeta(
   // Аудирование = content-мета: смена трека/транскрипта назначенного варианта
   // запрещена («что видел ученик = что проверялось», тот же инвариант, что
   // состав задач). Гейтится VARIANT_IN_USE ниже вместе с subject/exam/duration.
-  const listeningCheck = validateVariantListeningFields(b);
+  const listeningCheck = validateVariantListeningFields(b, tutorUserId);
   if (!listeningCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
@@ -4166,7 +4178,7 @@ async function handleReplaceVariantTasks(
   }
 
   // Аудирование (2026-07-31): редактор шлёт listening-поля тем же сохранением.
-  const listeningCheck = validateVariantListeningFields(b);
+  const listeningCheck = validateVariantListeningFields(b, tutorUserId);
   if (!listeningCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
@@ -4191,6 +4203,8 @@ async function handleReplaceVariantTasks(
     updated: true,
     task_count: tasksCheck.tasks.length,
     total_max_score: tasksCheck.totalMax,
+    // Deploy-skew handshake (ревью 5.6 P0) — см. handleCreateVariant.
+    listening_fields_applied: true,
   });
 }
 
