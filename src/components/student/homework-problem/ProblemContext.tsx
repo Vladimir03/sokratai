@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronUp, HelpCircle, Info, Lightbulb } from 'lucide-react';
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { StepIndicator } from './StepIndicator';
 import { TaskImagesGallery } from './TaskImagesGallery';
 import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
@@ -9,6 +9,42 @@ import { isHumanitiesWritingSubject } from '@/lib/subjectHelpers';
 const MathText = lazy(() =>
   import('@/components/kb/ui/MathText').then((m) => ({ default: m.MathText })),
 );
+
+/**
+ * true, пока ниже видимой части прокручиваемого условия остаётся текст.
+ *
+ * Нужен ради градиента-подсказки: обрезанное условие БЕЗ визуального сигнала
+ * ученик читает как «опять не листается» — ровно тот баг, из-за которого
+ * появился `scrollBody` (репорт Глеба 31.07). Замер один раз на маунте
+ * недостаточен: KaTeX и подписанные ссылки на фото приходят асинхронно и
+ * дорисовывают высоту уже после первого рендера — отсюда ResizeObserver.
+ */
+function useHasMoreBelow(node: HTMLElement | null, enabled: boolean): boolean {
+  const [hasMore, setHasMore] = useState(false);
+  useEffect(() => {
+    if (!node || !enabled) {
+      setHasMore(false);
+      return undefined;
+    }
+    const measure = () => {
+      setHasMore(node.scrollHeight - node.scrollTop - node.clientHeight > 8);
+    };
+    measure();
+    node.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    // `typeof` — а не голая ссылка на глобал (rule 80: голая ссылка на
+    // необязательный API = ReferenceError, а не undefined).
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(node);
+    return () => {
+      node.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      ro?.disconnect();
+    };
+  }, [node, enabled]);
+  return hasMore;
+}
 
 /**
  * Format score for the chip — drop trailing zeroes (1.5 → "1.5", 2.0 →
@@ -136,6 +172,21 @@ interface ProblemContextProps {
    * `@/lib/subjectHelpers::isHumanitiesWritingSubject`.
    */
   subject?: string | null;
+  /**
+   * Мобильный экран задачи: развёрнутое условие получает СВОЮ прокрутку и
+   * потолок высоты (2026-07-31, репорт Глеба).
+   *
+   * Почему это обязательно именно здесь: на мобиле карточка живёт в контейнере
+   * высотой ровно с visualViewport и с `overflow:hidden`, а скролл страницы
+   * заблокирован (`HomeworkProblem.tsx`). Условие переменной длины (текст +
+   * варианты + фото) без потолка выталкивало ленту и композер за пределы
+   * экрана, и дочитать его было НЕЧЕМ — скроллить было негде.
+   *
+   * На планшете/десктопе прокручивается вся левая колонка целиком, поэтому там
+   * проп НЕ передаётся: второй скролл внутри уже прокручиваемой панели только
+   * мешал бы.
+   */
+  scrollBody?: boolean;
 }
 
 /**
@@ -161,9 +212,12 @@ export function ProblemContext({
   onStepClick,
   hideToggle = false,
   subject = null,
+  scrollBody = false,
 }: ProblemContextProps) {
   const headerId = `problem-context-${task.task_id}`;
   const panelId = `problem-context-panel-${task.task_id}`;
+  const [bodyEl, setBodyEl] = useState<HTMLDivElement | null>(null);
+  const hasMoreBelow = useHasMoreBelow(bodyEl, scrollBody && !collapsed);
   // Ревью-фикс P1 (2026-07-25): формула метрики жила только в `title`, который
   // на телефоне и планшете недоступен — то есть у ВСЕХ учеников. Чип стал
   // кнопкой: тап раскрывает объяснение под рядом чипов. Локальный useState, без
@@ -290,7 +344,23 @@ export function ProblemContext({
       ) : null}
 
       {!collapsed ? (
-        <div id={panelId} className="flex flex-col gap-2.5">
+        <div className={scrollBody ? 'relative min-h-0' : undefined}>
+        <div
+          id={panelId}
+          ref={scrollBody ? setBodyEl : undefined}
+          className={[
+            'flex flex-col gap-2.5',
+            scrollBody
+              ? 'overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]'
+              : '',
+          ].join(' ')}
+          // Потолок — доля ЖИВОГО visualViewport (переменная `--vv-h` ставится
+          // на корне экрана задачи), а не `dvh`: наш baseline — Safari 15.0, где
+          // `dvh` ещё нет (rule 80), и правило с `dvh` там просто не применилось
+          // бы — то есть баг остался бы ровно у тех, у кого он и был. Бонусом
+          // потолок сам ужимается при открытой клавиатуре.
+          style={scrollBody ? { maxHeight: 'calc(var(--vv-h, 100vh) * 0.46)' } : undefined}
+        >
           {/* Body — render through lazy MathText so inline LaTeX (\frac,
               \sqrt, indexes) renders as KaTeX. Phase 1 backend returns
               raw `task_text` which often contains physics ЕГЭ formulas;
@@ -406,6 +476,15 @@ export function ProblemContext({
               </span>
             </div>
           ) : null}
+        </div>
+        {/* Градиент-подсказка «ниже есть ещё»: без неё обрезанное условие
+            выглядит как тот же баг, из-за которого правка и появилась. */}
+        {scrollBody && hasMoreBelow ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-gradient-to-t from-white via-white/80 to-transparent"
+          />
+        ) : null}
         </div>
       ) : null}
     </section>

@@ -130,7 +130,9 @@ export function ComposerMobile({
               }
             }}
             placeholder="Спроси Сократа о шаге…"
-            className="flex-1 min-w-0 h-10 px-3.5 bg-socrat-surface border border-socrat-border rounded-[20px] text-sm text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20"
+            // 16px обязателен: с 31.07 пинч-зум разрешён (index.html), и iOS
+            // зумит страницу при фокусе на поле мельче 16px, не отматывая назад.
+            className="flex-1 min-w-0 h-10 px-3.5 bg-socrat-surface border border-socrat-border rounded-[20px] text-base text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20"
             aria-label="Сообщение Сократу"
             // text-base on iOS would be ideal — but design specifies 14px.
             // 14px causes auto-zoom on iOS Safari; we accept that trade-off

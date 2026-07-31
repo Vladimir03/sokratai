@@ -2,7 +2,15 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <!-- Пинч-зум РАЗРЕШЁН намеренно (2026-07-31). `user-scalable=no` Safari
+         игнорирует, но WKWebView — то есть встроенный браузер Telegram, где
+         сидит половина учеников — его УВАЖАЕТ: график ЕГЭ в условии было не
+         увеличить жестом вообще. Цена решения: iOS зумит страницу при фокусе
+         на поле мельче 16px и обратно не отматывает, поэтому у любого
+         input/textarea/select на ученических экранах шрифт ОБЯЗАН быть ≥16px
+         (rule 80). Возвращать `user-scalable=no` вместо починки шрифта поля —
+         нельзя: это снова убьёт зум картинок. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="google-site-verification" content="5AmhK2OvT-6iLjnZvB8HzO-69R0262iKucwnCUKXEik" />
     <meta name="yandex-verification" content="33d83e09903d1840" />
     

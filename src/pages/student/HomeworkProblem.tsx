@@ -1693,6 +1693,13 @@ export default function HomeworkProblem() {
               collapsed={contextCollapsed}
               onToggle={() => setContextCollapsed((v) => !v)}
               compact
+              // ⚠️ Без своей прокрутки развёрнутое условие ломает весь экран:
+              // блок `shrink-0`, корень имеет высоту visualViewport и
+              // `overflow-hidden`, скролл страницы заблокирован (см. эффект
+              // выше) — хвост условия, лента и композер просто уезжали за
+              // границу без единого способа доскроллить (репорт Глеба 31.07:
+              // задача с перечнем вариантов + график).
+              scrollBody
               assignmentId={data.assignment.id}
               onStepClick={handleStepClick}
               subject={data.assignment.subject}
@@ -2120,7 +2127,9 @@ export default function HomeworkProblem() {
                 : 'Спроси Сократа о шаге…'
             }
             disabled={isStreaming || isTranscribing || recorder.isRecording}
-            className="flex-1 min-w-0 h-10 px-3.5 bg-socrat-surface border border-socrat-border rounded-[20px] text-sm text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 disabled:opacity-50"
+            // 16px обязателен: с 31.07 пинч-зум разрешён (index.html), и iOS
+            // зумит страницу при фокусе на поле мельче 16px, не отматывая назад.
+            className="flex-1 min-w-0 h-10 px-3.5 bg-socrat-surface border border-socrat-border rounded-[20px] text-base text-slate-900 outline-none focus-visible:border-socrat-primary focus-visible:ring-2 focus-visible:ring-socrat-primary/20 disabled:opacity-50"
             aria-label="Сообщение Сократу"
             style={{ fontSize: '16px' }}
           />
