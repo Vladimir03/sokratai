@@ -101,6 +101,17 @@ Force-complete / bulk-close / review — через SECURITY DEFINER RPC (`hw_tu
 
 Дефолты create-режима читаются **СИНХРОННО** из кэша react-query в lazy-init — никаких новых `useQuery` и никаких эффектов-клобберов.
 
+## Фото: просмотр, поворот, разметка (2026-07-31)
+
+**Глубина — skill `homework-system`.** Здесь только первично-нарушаемое.
+
+- **Просмотрщик фото ОДИН — `@/components/common/photo-viewer`.** Своих лайтбоксов и `<a target="_blank">` на картинке больше не заводить: до унификации их было 4 копии + 6 мест «увеличить = сырая вкладка», и HEIC-восстановление жило на 2 поверхностях из ~15. Новая поверхность с фото → `PhotoViewer` / `PhotoThumbButton` / `OrientedPhoto`, сырой `<img>` — только через `SafeImage` (rule 40 image-fallback).
+- **Угол поворота — в `photo_orientations` по storage-ref, файл ученика НИКОГДА не перезаписывается.** Пишет только репетитор (RPC `photo_orientations_set`, гейт `is_tutor` + allowlist бакетов), читают все. Новый бакет с фото → добавить в allowlist явной миграцией, иначе поворот молча отвергается.
+- ⚠️ **Позиционно сопоставлять `refs[i]` с `urls[i]` НЕЛЬЗЯ.** `createSignedStorageUrls` ВЫКИДЫВАЕТ неподписавшиеся файлы, массив URL становится короче — и поворот второго фото уезжает в ref первого. Только `resolveRefsForUrls` (принимает позиционные ref лишь при совпадении длин, иначе восстанавливает ref из самой ссылки).
+- **Координаты разметки — пиксели НЕповёрнутого фото.** Тогда поворот после разметки не сдвигает пометки. Поворот запекается в пиксели РОВНО в одном месте — `renderAnnotatedPhoto`.
+- **Размеченное фото уходит СУЩЕСТВУЮЩИМ путём** (`uploadTutorHomeworkTaskImage` → `postTutorThreadMessage`). Своего write-path у разметки нет.
+- ⚠️ **`message_kind` из запроса проходит через серверный allowlist** (`resolveTutorMessageKind`), и любое новое значение ОБЯЗАНО ехать вместе с CHECK-миграцией на `homework_tutor_thread_messages` — иначе вставка падает 23514. Скрытая заметка остаётся `tutor_note` при любом запрошенном типе.
+
 ## Ключевые файлы
 
 `src/lib/studentHomeworkApi.ts` · `src/lib/tutorHomeworkApi.ts` · `src/hooks/useStudentHomework.ts` · `src/components/homework/*` · `src/components/tutor/GuidedThreadViewer.tsx` · `src/pages/student/HomeworkProblem.tsx` · `supabase/functions/homework-api/` (+ `guided_ai.ts`, `kb_snapshot.ts`) · `supabase/functions/_shared/subject-rubrics/`.
