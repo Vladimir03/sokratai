@@ -197,15 +197,21 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           // Два конфликта подряд — необычно; отдаём очереди (retry с backoff).
           throw new Error('REV_CONFLICT_RETRY');
         } catch (err) {
-          // Права записи отозваны (убрали из группы посреди урока, ревью P1):
-          // ретраить 403 вечно бессмысленно — доска честно переходит в
-          // read-only, страница снимается с очереди.
+          // Права записи отозваны (убрали из группы / лист переназначен /
+          // перепривязан новым входом). Ретраить 403 вечно бессмысленно —
+          // страница снимается с очереди. Ревью guest-sheets, P0 №2: чистим
+          // ОБЕ идентичности (иначе writable-UI жил через myGuestId и очередь
+          // «успешно» глотала отвергнутые штрихи) и говорим ЧЕСТНО: этот путь
+          // срабатывает ровно когда несохранённые правки уже есть.
           const code = (err as { code?: string | null }).code;
           if (code === 'NOT_A_PARTICIPANT' || code === 'FOREIGN_ZONE' || code === 'VIEWER_ONLY') {
             setMyZoneId(null);
+            setMyGuestId(null);
             if (!readOnlyNotifiedRef.current) {
               readOnlyNotifiedRef.current = true;
-              toast.error('Вы больше не участвуете в этом занятии — доска доступна только для чтения.');
+              toast.error(
+                'Лист больше вам не принадлежит — последние правки на нём НЕ сохранились. Доска в режиме просмотра; если это ошибка, перезайдите по ссылке.',
+              );
             }
             return;
           }

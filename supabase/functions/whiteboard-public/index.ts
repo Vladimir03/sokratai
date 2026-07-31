@@ -253,11 +253,23 @@ async function createRollSheet(
     console.error("whiteboard_public_sheet_create_failed", { code: error?.code });
     return null;
   }
-  await db.rpc("wb_bump_page_rev", {
+  // Сигнал обязателен (иначе лист невидим realtime'у репетитора до первого
+  // сейва) — одна повторная попытка, как в остальных create-путях (ревью P1).
+  const bump = await db.rpc("wb_bump_page_rev", {
     p_page_id: page.id,
     p_board_id: boardId,
     p_updated_by: updatedBy,
   });
+  if (bump.error) {
+    const retry = await db.rpc("wb_bump_page_rev", {
+      p_page_id: page.id,
+      p_board_id: boardId,
+      p_updated_by: updatedBy,
+    });
+    if (retry.error) {
+      console.error("whiteboard_public_sheet_bump_failed", { code: retry.error.code });
+    }
+  }
   return page;
 }
 
@@ -342,14 +354,60 @@ Deno.serve(async (req) => {
 
       // Пере-вход той же личности (дискавери 31.07): прежние гости РЕВОКАЮТСЯ,
       // их листы ПЕРЕПРИВЯЗЫВАЮТСЯ новому входу — человек возвращается на свой
-      // лист, а панель не показывает «Владимир, Владимир».
-      const { data: priorGuests } = await db
+      // лист, а панель не показывает «Владимир, Владимир». Порядок «ревок →
+      // insert» обязателен: уникальные partial-индексы активной личности
+      // (миграция 20260731140000) отвергли бы insert при живом прежнем входе.
+      // Конкурентный двойной вход: проигравший ловит 23505 и повторяет цикл
+      // один раз — уже видя победителя как prior (ревью guest-sheets, P1 №1).
+      const nameKey = displayName.trim().toLowerCase();
+      let guest: { id: string; guest_token: string; tutor_student_id: string | null } | null = null;
+      for (let attempt = 0; attempt < 2 && !guest; attempt++) {
+        const { data: priorGuests } = await db
+          .from("board_guests")
+          .select("id, tutor_student_id, display_name")
+          .eq("share_link_id", link.id)
+          .is("revoked_at", null);
+        const priorIds = (priorGuests ?? [])
+          .filter((g) =>
+            tutorStudentId
+              ? g.tutor_student_id === tutorStudentId
+              : !g.tutor_student_id &&
+                typeof g.display_name === "string" &&
+                g.display_name.trim().toLowerCase() === nameKey
+          )
+          .map((g) => g.id as string);
+        if (priorIds.length > 0) {
+          await db
+            .from("board_guests")
+            .update({ revoked_at: new Date().toISOString() })
+            .in("id", priorIds);
+        }
+        const { data: inserted, error } = await db
+          .from("board_guests")
+          .insert({
+            board_id: link.board_id,
+            share_link_id: link.id,
+            tutor_student_id: tutorStudentId,
+            display_name: displayName,
+          })
+          .select("id, guest_token, tutor_student_id")
+          .single();
+        if (inserted) {
+          guest = inserted as typeof guest;
+        } else if (error?.code !== "23505" || attempt === 1) {
+          return jsonError(500, "DB_ERROR", "Не удалось войти на доску.");
+        }
+      }
+      if (!guest) return jsonError(500, "DB_ERROR", "Не удалось войти на доску.");
+
+      // Перепривязка листов ВСЕЙ истории этой личности на ссылке (включая
+      // ревокнутые входы прошлых гонок) — лечит любой хвост.
+      const { data: identityGuests } = await db
         .from("board_guests")
         .select("id, tutor_student_id, display_name")
         .eq("share_link_id", link.id)
-        .is("revoked_at", null);
-      const nameKey = displayName.trim().toLowerCase();
-      const priorIds = (priorGuests ?? [])
+        .neq("id", guest.id);
+      const identityIds = (identityGuests ?? [])
         .filter((g) =>
           tutorStudentId
             ? g.tutor_student_id === tutorStudentId
@@ -358,24 +416,11 @@ Deno.serve(async (req) => {
               g.display_name.trim().toLowerCase() === nameKey
         )
         .map((g) => g.id as string);
-
-      const { data: guest, error } = await db
-        .from("board_guests")
-        .insert({
-          board_id: link.board_id,
-          share_link_id: link.id,
-          tutor_student_id: tutorStudentId,
-          display_name: displayName,
-        })
-        .select("id, guest_token, tutor_student_id")
-        .single();
-      if (error || !guest) return jsonError(500, "DB_ERROR", "Не удалось войти на доску.");
-
-      if (priorIds.length > 0) {
+      if (identityIds.length > 0) {
         const { data: rebound } = await db
           .from("board_pages")
           .update({ zone_guest_id: guest.id })
-          .in("zone_guest_id", priorIds)
+          .in("zone_guest_id", identityIds)
           .select("id");
         for (const p of rebound ?? []) {
           await db.rpc("wb_bump_page_rev", {
@@ -384,17 +429,15 @@ Deno.serve(async (req) => {
             p_updated_by: `guest:${guest.id}`,
           });
         }
-        await db
-          .from("board_guests")
-          .update({ revoked_at: new Date().toISOString() })
-          .in("id", priorIds);
       }
 
       // «Лист — каждому вошедшему»: свой лист появляется САМ, репетитор не
       // делает ничего. Идемпотентно: если лист личности уже есть — не плодим.
+      // Сбой создания = 500 с ревоком входа (ревью P1 №3: 201 без листа
+      // возвращал ровно исходный провал «вижу, но не пишу»).
       const sheetFilter = tutorStudentId
         ? { column: "zone_tutor_student_id", value: tutorStudentId }
-        : { column: "zone_guest_id", value: guest.id as string };
+        : { column: "zone_guest_id", value: guest.id };
       const { data: existingSheet } = await db
         .from("board_pages")
         .select("id")
@@ -402,12 +445,19 @@ Deno.serve(async (req) => {
         .eq(sheetFilter.column, sheetFilter.value)
         .limit(1);
       if (!existingSheet || existingSheet.length === 0) {
-        await createRollSheet(
+        const sheet = await createRollSheet(
           db,
           link.board_id,
-          tutorStudentId ? { tutorStudentId } : { guestId: guest.id as string },
+          tutorStudentId ? { tutorStudentId } : { guestId: guest.id },
           `guest:${guest.id}`,
         );
+        if (!sheet) {
+          await db
+            .from("board_guests")
+            .update({ revoked_at: new Date().toISOString() })
+            .eq("id", guest.id);
+          return jsonError(500, "DB_ERROR", "Не удалось подготовить ваш лист. Попробуйте войти ещё раз.");
+        }
       }
 
       return jsonOk(
@@ -566,9 +616,10 @@ Deno.serve(async (req) => {
     if (req.method === "POST" && segments.length === 4 && segments[2] === "pages") {
       const pageId = segments[3];
       if (!UUID_RE.test(pageId)) return jsonError(400, "VALIDATION", "Некорректный идентификатор листа.");
-      if (!guest.tutor_student_id) {
-        return jsonError(403, "VIEWER_ONLY", "Вы вошли как зритель — писать пока нельзя.");
-      }
+      // ⚠️ Гард «!tutor_student_id → VIEWER_ONLY» УДАЛЁН (ревью guest-sheets,
+      // P0 №1: он стоял ВЫШЕ проверки владения и глушил весь сценарий
+      // свободного гостя). Право писать решает владение листом ниже
+      // (zone_guest_id === guest.id ИЛИ zone_tutor_student_id).
       if (!(await throttleCheck(db, `wb:save:${guest.id}`, 90, 60_000))) {
         return jsonError(429, "THROTTLED", "Слишком часто.");
       }

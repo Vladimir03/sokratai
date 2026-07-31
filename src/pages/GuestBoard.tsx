@@ -70,6 +70,19 @@ export default function GuestBoard() {
 
   const transport = useMemo<SharedBoardTransport | null>(() => {
     if (!slug || !guestToken) return null;
+    // Токен протух/отозван (в т.ч. пере-входом той же личности с другого
+    // устройства): ЛЮБОЙ путь с 401 уводит на join-экран — раньше это делал
+    // только load, а поллинг молча глотал, и вкладка «умирала» (ревью
+    // guest-sheets, P1 №2).
+    const onUnauthorized = (err: unknown): boolean => {
+      if (err instanceof Error && 'status' in err && (err as { status: number }).status === 401) {
+        clearGuestToken(slug);
+        setMeta(null);
+        setGuestToken(null);
+        return true;
+      }
+      return false;
+    };
     return {
       async load() {
         try {
@@ -86,15 +99,18 @@ export default function GuestBoard() {
             frames: state.frames,
           };
         } catch (err) {
-          // Токен протух/отозван → назад на join-экран.
-          if (err instanceof Error && 'status' in err && (err as { status: number }).status === 401) {
-            clearGuestToken(slug);
-            setGuestToken(null);
-          }
+          onUnauthorized(err);
           throw err;
         }
       },
-      savePage: (pageId, elements, baseRev) => saveGuestPage(slug, guestToken, pageId, elements, baseRev),
+      async savePage(pageId, elements, baseRev) {
+        try {
+          return await saveGuestPage(slug, guestToken, pageId, elements, baseRev);
+        } catch (err) {
+          onUnauthorized(err); // размонтирование доски погасит очередь
+          throw err;
+        }
+      },
       // «+ Лист» в свой рулон — теперь и у гостя (кейс «у ученика кончился лист»).
       addMyPage: () => addGuestRollPage(slug, guestToken),
       async refetchPage() {
@@ -128,8 +144,10 @@ export default function GuestBoard() {
             } else {
               sinceRef.current = res.now;
             }
-          } catch {
-            // сетевой сбой — следующий тик попробует снова
+          } catch (err) {
+            // 401 = токен ревокнут (пере-вход с другого устройства) → на
+            // join-экран; прочее — сетевой сбой, следующий тик попробует снова.
+            if (onUnauthorized(err)) return;
           }
           const delay = document.visibilityState === 'hidden' ? POLL_HIDDEN_MS : POLL_ACTIVE_MS;
           timer = setTimeout(() => void tick(), delay);

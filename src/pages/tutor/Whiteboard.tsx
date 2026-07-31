@@ -650,9 +650,14 @@ export default function Whiteboard() {
         // Сигнатурное сравнение (ревью Этапа 5, P2): last_seen_at меняется
         // каждым поллом, а UI его не показывает — свежий массив каждые 10 с
         // ре-рендерил всю страницу вместе с немемоизированным BoardCanvas.
+        // online В сигнатуре (ревью guest-sheets, P2): его смена и есть
+        // событие «гость вошёл/вышел»; сортировка — канонический порядок.
         setGuests((prev) => {
           const sig = (arr: BoardGuestRow[]) =>
-            arr.map((g) => `${g.id}|${g.display_name}|${g.tutor_student_id ?? ''}`).join(';');
+            arr
+              .map((g) => `${g.id}|${g.display_name}|${g.tutor_student_id ?? ''}|${g.online === false ? 0 : 1}`)
+              .sort()
+              .join(';');
           return sig(prev) === sig(list) ? prev : list;
         });
       } catch {
