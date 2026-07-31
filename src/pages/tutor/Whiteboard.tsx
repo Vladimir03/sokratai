@@ -127,6 +127,8 @@ interface FrameState {
   placement: FramePlacement;
   /** Зона ученика (рулон); null — лист репетитора. */
   zoneTutorStudentId: string | null;
+  /** Лист гостя без аккаунта («Лист — каждому вошедшему»). */
+  zoneGuestId: string | null;
   /** Текущий rev листа (base_rev для сохранений; Этап 3). 0 — неизвестен. */
   rev: number;
 }
@@ -153,6 +155,7 @@ function rowToFrameState(row: BoardPageRow, index: number, rev = 0): FrameState 
     cell,
     placement: cellToPlacement(cell),
     zoneTutorStudentId: row.zone_tutor_student_id ?? null,
+    zoneGuestId: row.zone_guest_id ?? null,
     rev,
   };
 }
@@ -421,7 +424,7 @@ export default function Whiteboard() {
       const { data: row } = await supabase
         .from('board_pages')
         .select(
-          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, board_page_revs(rev)',
         )
         .eq('id', pageId)
         .maybeSingle();
@@ -451,6 +454,7 @@ export default function Whiteboard() {
         elements: merged,
         rev: freshRev,
         zoneTutorStudentId: parsed.zoneTutorStudentId,
+        zoneGuestId: parsed.zoneGuestId,
         background: parsed.background,
         gridMm: parsed.gridMm,
         orientation: parsed.orientation,
@@ -613,6 +617,15 @@ export default function Whiteboard() {
   const [guests, setGuests] = useState<BoardGuestRow[]>([]);
   const [students, setStudents] = useState<{ id: string; name: string }[]>([]);
 
+  /** Имена гостей для подписей рамок и селекта «чей лист» (включая офлайн-владельцев). */
+  const guestNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const g of guests) map[g.id] = g.display_name || 'Участник';
+    return map;
+  }, [guests]);
+  /** Чипы панели — только кто СЕЙЧАС на доске. */
+  const onlineGuests = useMemo(() => guests.filter((g) => g.online !== false), [guests]);
+
   useEffect(() => {
     let cancelled = false;
     void getTutorStudents()
@@ -657,21 +670,37 @@ export default function Whiteboard() {
   // ─── «Чей лист» (Этап 5, модель Елены): зона НА СУЩЕСТВУЮЩЕМ листе ──────────
 
   const [ownerBusy, setOwnerBusy] = useState(false);
+  /**
+   * ownerKey: null — общий лист; `guest:<id>` — гость по ссылке; иначе —
+   * tutor_students.id. Сервер зануляет вторую привязку сам (CHECK в БД).
+   */
   const handleAssignSheetOwner = useCallback(
-    async (tutorStudentId: string | null) => {
+    async (ownerKey: string | null) => {
       const frame = activeFrame;
       if (!frame || ownerBusy) return;
+      const newGuestId = ownerKey?.startsWith('guest:') ? ownerKey.slice(6) : null;
+      const newStudentId = ownerKey && !newGuestId ? ownerKey : null;
       setOwnerBusy(true);
       try {
-        const outcome = await saveBoardPage(frame.id, { zone_tutor_student_id: tutorStudentId });
+        const outcome = await saveBoardPage(
+          frame.id,
+          newGuestId
+            ? { zone_guest_id: newGuestId }
+            : newStudentId
+              ? { zone_tutor_student_id: newStudentId }
+              : { zone_tutor_student_id: null, zone_guest_id: null },
+        );
         patchFrameSilently(frame.id, {
-          zoneTutorStudentId: tutorStudentId,
+          zoneTutorStudentId: newStudentId,
+          zoneGuestId: newGuestId,
           ...(typeof outcome.rev === 'number' && outcome.rev > 0 ? { rev: outcome.rev } : {}),
         });
-        if (tutorStudentId) {
-          const s = students.find((x) => x.id === tutorStudentId);
-          if (s) setZoneNames((prev) => ({ ...prev, [tutorStudentId]: s.name }));
+        if (newStudentId) {
+          const s = students.find((x) => x.id === newStudentId);
+          if (s) setZoneNames((prev) => ({ ...prev, [newStudentId]: s.name }));
           toast.success(`Лист отдан: ${s?.name ?? 'ученик'} может писать на нём`);
+        } else if (newGuestId) {
+          toast.success(`Лист отдан: ${guestNames[newGuestId] ?? 'участник'} может писать на нём`);
         } else {
           toast.success('Лист снова общий');
         }
@@ -681,7 +710,7 @@ export default function Whiteboard() {
         setOwnerBusy(false);
       }
     },
-    [activeFrame, ownerBusy, students, patchFrameSilently],
+    [activeFrame, ownerBusy, students, guestNames, patchFrameSilently],
   );
 
   // ─── Пикер учеников для «Раздать зоны» на доске без занятия (Этап 5) ────────
@@ -1105,7 +1134,7 @@ export default function Whiteboard() {
     };
   }, [frames]);
 
-  /** Плюсы сетки: один справа в полосе + внизу каждого рулона. */
+  /** Плюсы сетки: один справа в полосе + внизу каждого рулона (ученики И гости). */
   const ghostCells = useMemo<GhostCell[]>(() => {
     const cellsInfo = frames.map((f) => ({ cell: f.cell, orientation: f.orientation }));
     const out: GhostCell[] = [];
@@ -1117,26 +1146,36 @@ export default function Whiteboard() {
       size: pageSizeMm('portrait'),
       label: 'Лист',
     });
-    const rollCols = new Map<number, string | null>();
+    const rollCols = new Map<number, { studentId: string | null; guestId: string | null }>();
     for (const f of frames) {
-      if (f.cell.row >= 1) rollCols.set(f.cell.col, f.zoneTutorStudentId);
+      if (f.cell.row >= 1) {
+        rollCols.set(f.cell.col, { studentId: f.zoneTutorStudentId, guestId: f.zoneGuestId });
+      }
     }
-    rollCols.forEach((zoneId, col) => {
+    rollCols.forEach((binding, col) => {
       const cell = nextCellInColumn(col, cellsInfo);
       out.push({
         key: `roll-${col}-${cell.row}`,
         cell,
         placement: cellToPlacement(cell),
         size: pageSizeMm('portrait'),
-        label: zoneId ? zoneNames[zoneId] ?? 'Лист' : 'Лист',
-        zoneTutorStudentId: zoneId,
+        label: binding.studentId
+          ? zoneNames[binding.studentId] ?? 'Лист'
+          : binding.guestId
+            ? guestNames[binding.guestId] ?? 'Лист'
+            : 'Лист',
+        zoneTutorStudentId: binding.studentId,
+        zoneGuestId: binding.guestId,
       });
     });
     return out;
-  }, [frames, zoneNames]);
+  }, [frames, zoneNames, guestNames]);
 
   const createFrameAt = useCallback(
-    async (cell: FrameCell, zoneTutorStudentId: string | null) => {
+    async (
+      cell: FrameCell,
+      binding: { studentId?: string | null; guestId?: string | null },
+    ) => {
       if (!board || pageBusy) return;
       setPageBusy(true);
       try {
@@ -1145,16 +1184,19 @@ export default function Whiteboard() {
           background: activeFrame?.background ?? 'grid',
           grid_mm: activeFrame?.gridMm ?? 5,
           app_state: { orientation: 'portrait', frame: cell },
+          // Гость — привязка сразу в create (один вызов, rev=1).
+          ...(binding.guestId ? { zone_guest_id: binding.guestId } : {}),
         });
-        if (zoneTutorStudentId) {
-          await saveBoardPage(created.id, { zone_tutor_student_id: zoneTutorStudentId });
+        if (binding.studentId) {
+          await saveBoardPage(created.id, { zone_tutor_student_id: binding.studentId });
         }
         const newFrame: FrameState = {
-          // rev: создание бампит сигнал до 1, zone-patch — до 2 (протокол edge).
-          ...rowToFrameState(created, framesRef.current.length, zoneTutorStudentId ? 2 : 1),
+          // rev: создание бампит сигнал до 1, zone-patch ученика — до 2.
+          ...rowToFrameState(created, framesRef.current.length, binding.studentId ? 2 : 1),
           cell,
           placement: cellToPlacement(cell),
-          zoneTutorStudentId,
+          zoneTutorStudentId: binding.studentId ?? null,
+          zoneGuestId: binding.guestId ?? null,
         };
         applyFrames([...framesRef.current, newFrame]);
         setActiveFrameId(newFrame.id);
@@ -1170,14 +1212,17 @@ export default function Whiteboard() {
 
   const handleGhostClick = useCallback(
     (ghost: GhostCell) => {
-      void createFrameAt(ghost.cell, ghost.zoneTutorStudentId ?? null);
+      void createFrameAt(ghost.cell, {
+        studentId: ghost.zoneTutorStudentId ?? null,
+        guestId: ghost.zoneGuestId ?? null,
+      });
     },
     [createFrameAt],
   );
 
   const handleAddFrame = useCallback(async () => {
     const cellsInfo = framesRef.current.map((f) => ({ cell: f.cell, orientation: f.orientation }));
-    await createFrameAt(nextCellInStrip(cellsInfo), null);
+    await createFrameAt(nextCellInStrip(cellsInfo), {});
   }, [createFrameAt]);
 
   const runDistributeZones = useCallback(
@@ -1637,10 +1682,14 @@ export default function Whiteboard() {
   const frameViews: FrameView[] = useMemo(() => {
     let stripCounter = 0;
     return frames.map((f) => {
-      const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] ?? 'Ученик' : null;
+      const ownerName = f.zoneTutorStudentId
+        ? zoneNames[f.zoneTutorStudentId] ?? 'Ученик'
+        : f.zoneGuestId
+          ? guestNames[f.zoneGuestId] ?? 'Участник'
+          : null;
       // Подписи человеческие («Лист 3 · Маша»), НЕ координаты [0:0] — челлендж Chattern.
-      const title = zoneName
-        ? `${zoneName} · ${f.cell.row}`
+      const title = ownerName
+        ? `${ownerName} · ${f.cell.row}`
         : `Лист ${f.cell.row === 0 ? ++stripCounter : `${f.cell.col + 1}.${f.cell.row}`}`;
       return {
         id: f.id,
@@ -1650,10 +1699,10 @@ export default function Whiteboard() {
         gridMm: f.gridMm,
         elements: f.elements,
         title,
-        isZone: !!f.zoneTutorStudentId,
+        isZone: !!f.zoneTutorStudentId || !!f.zoneGuestId,
       };
     });
-  }, [frames, zoneNames]);
+  }, [frames, zoneNames, guestNames]);
 
   const frameSummaries = useMemo(
     () =>
@@ -1773,20 +1822,9 @@ export default function Whiteboard() {
             : 'PDF'}
         </Button>
 
-        {/* Этап 5: видна ВСЕГДА — на доске без занятия открывает пикер учеников
-            (тест Елены провалился ровно на «не нашла, как выдать зону»). */}
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void handleDistributeZones()}
-          disabled={pageBusy || exitPhase !== null}
-          title="У каждого выбранного ученика появится свой столбец листов — он пишет только в нём"
-          style={{ touchAction: 'manipulation' }}
-        >
-          <Users className="mr-1.5 h-4 w-4" />
-          <span className="hidden sm:inline">Раздать зоны</span>
-          <span className="sm:hidden">Зоны</span>
-        </Button>
+        {/* «Раздать зоны» уехала ИЗ шапки в диалог «Пригласить» (дискавери
+            31.07): главный путь — лист выдаётся ПРИШЕДШЕМУ сам; раскладка по
+            CRM-списку — подготовка ДО урока, вторичный сценарий. */}
 
         {/* Всегда видима (ревью P1): гости НЕ входят в live-presence, а
             persisted-bring сделан именно для них — гейт по livePeers прятал
@@ -1852,10 +1890,22 @@ export default function Whiteboard() {
         onPickImage={() => fileInputRef.current?.click()}
         onImportPdf={() => pdfInputRef.current?.click()}
         sheetOwner={
-          activeFrame && students.length > 0
+          activeFrame && (students.length > 0 || guests.length > 0)
             ? {
-                value: activeFrame.zoneTutorStudentId,
-                options: students,
+                value: activeFrame.zoneGuestId
+                  ? `guest:${activeFrame.zoneGuestId}`
+                  : activeFrame.zoneTutorStudentId,
+                options: [
+                  ...students,
+                  // Гости по ссылке (не из CRM): офлайн-владельцы тоже в списке —
+                  // лист можно переназначить и после их отключения.
+                  ...guests
+                    .filter((g) => !g.tutor_student_id)
+                    .map((g) => ({
+                      id: `guest:${g.id}`,
+                      name: `${g.display_name || 'Участник'}${g.online === false ? ' (не в сети)' : ' — по ссылке'}`,
+                    })),
+                ],
                 onChange: (id) => void handleAssignSheetOwner(id),
               }
             : undefined
@@ -1939,7 +1989,7 @@ export default function Whiteboard() {
             {followKey === peer.key && <Eye className="h-3.5 w-3.5" />}
           </button>
         ))}
-        {guests.map((g) => (
+        {onlineGuests.map((g) => (
           <span
             key={g.id}
             title="Вошёл по ссылке-приглашению. «Следовать» доступно только ученикам с аккаунтом."
@@ -1952,7 +2002,7 @@ export default function Whiteboard() {
             {g.display_name}
           </span>
         ))}
-        {livePeers.length === 0 && guests.length === 0 && (
+        {livePeers.length === 0 && onlineGuests.length === 0 && (
           <>
             <span className="shrink-0 text-sm text-slate-500">пока никого</span>
             <button
@@ -2086,7 +2136,7 @@ export default function Whiteboard() {
           >
             <h2 className="text-lg font-semibold text-slate-900">Пригласить на доску</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Ученик откроет доску по ссылке — без регистрации. Писать сможет только в своей зоне.
+              Ученик откроет доску по ссылке без регистрации, назовётся — и сразу получит свой лист. Вы увидите его в панели «На доске».
             </p>
             {inviteBusy || !inviteLink ? (
               <div className="flex justify-center py-6">
@@ -2127,6 +2177,18 @@ export default function Whiteboard() {
                     Закрыть доступ
                   </Button>
                 </div>
+                {/* Вторичный сценарий: разложить листы по ученикам ДО урока. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteOpen(false);
+                    void handleDistributeZones();
+                  }}
+                  style={{ touchAction: 'manipulation' }}
+                  className="mt-4 text-sm text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline"
+                >
+                  Подготовить листы заранее — раздать зоны ученикам из списка
+                </button>
               </>
             )}
           </div>

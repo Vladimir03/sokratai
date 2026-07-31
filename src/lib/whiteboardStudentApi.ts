@@ -85,7 +85,7 @@ export async function getStudentBoardState(boardId: string): Promise<StudentBoar
       supabase
         .from('board_pages')
         .select(
-          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+          'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, board_page_revs(rev)',
         )
         .eq('board_id', boardId)
         .order('page_index', { ascending: true }),
@@ -106,10 +106,12 @@ export async function getStudentBoardState(boardId: string): Promise<StudentBoar
     zoneNames: me.zoneNames,
     imageUrls: me.imageUrls,
     frames: (pages ?? []).map((row, i) => {
-      const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
+      // as unknown: typegen Supabase узнаёт zone_guest_id только после
+      // применения миграции — рантайм-колонка уже есть.
+      const embedded = (row as unknown as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
         .board_page_revs;
       const revRow = Array.isArray(embedded) ? embedded[0] : embedded;
-      return parseFrameRow(row, i, Number(revRow?.rev) || 0);
+      return parseFrameRow(row as unknown as Parameters<typeof parseFrameRow>[0], i, Number(revRow?.rev) || 0);
     }),
   };
 }
@@ -150,15 +152,16 @@ export async function refetchStudentPage(
   const { data: row } = await supabase
     .from('board_pages')
     .select(
-      'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, board_page_revs(rev)',
+      'id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, board_page_revs(rev)',
     )
     .eq('id', pageId)
     .maybeSingle();
   if (!row) return null;
-  const embedded = (row as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
+  // as unknown: typegen узнаёт zone_guest_id после применения миграции.
+  const embedded = (row as unknown as { board_page_revs?: { rev?: number } | { rev?: number }[] | null })
     .board_page_revs;
   const revRow = Array.isArray(embedded) ? embedded[0] : embedded;
-  return { row: row as Record<string, unknown>, rev: Number(revRow?.rev) || 0 };
+  return { row: row as unknown as Record<string, unknown>, rev: Number(revRow?.rev) || 0 };
 }
 
 /** Сохранить СВОЮ зону. 409 → conflict с серверными elements. */

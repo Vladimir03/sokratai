@@ -1870,12 +1870,19 @@ async function handleTutorInvite(telegramUserId: number, telegramUsername: strin
     }
 
     // 4. Create tutor_students link
+    // display_name — сразу из профиля (фикс 31.07): связка без имени всплывала
+    // как «Ученик» в пикерах доски, чатах и аналитике.
+    const linkDisplayName =
+      (typeof profile.username === "string" && profile.username.trim()) ||
+      (typeof telegramUsername === "string" && telegramUsername.trim()) ||
+      null;
     const { error: insertError } = await supabase
       .from("tutor_students")
       .insert({
         tutor_id: tutor.id,
         student_id: profile.id,
         status: "active",
+        ...(linkDisplayName ? { display_name: linkDisplayName } : {}),
       });
 
     if (insertError) {

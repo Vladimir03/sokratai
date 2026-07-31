@@ -107,7 +107,7 @@ export async function getGuestMeta(slug: string): Promise<GuestBoardMeta> {
 export async function joinGuestBoard(
   slug: string,
   input: { tutor_student_id?: string; display_name?: string },
-): Promise<{ guestToken: string; myTutorStudentId: string | null }> {
+): Promise<{ guestToken: string; myTutorStudentId: string | null; myGuestId: string | null }> {
   const res = await guestFetch(`/share/${encodeURIComponent(slug)}/join`, {
     method: 'POST',
     body: input,
@@ -118,15 +118,18 @@ export async function joinGuestBoard(
   return {
     guestToken: token,
     myTutorStudentId: (res.body.tutor_student_id as string | null) ?? null,
+    myGuestId: (res.body.guest_id as string | null) ?? null,
   };
 }
 
 export interface GuestBoardState {
   boardTitle: string | null;
   myZoneStudentId: string | null;
+  /** Идентичность гостя — writable по zone_guest_id («Лист — каждому вошедшему»). */
+  myGuestId: string | null;
   imageUrls: Record<string, string>;
   frames: SharedFrame[];
-  /** Курсор поллинга: max(updated_at) из revs. */
+  /** Watermark поллинга (серверный now). */
   since: string | null;
 }
 
@@ -147,10 +150,22 @@ export async function getGuestState(slug: string, guestToken: string): Promise<G
   return {
     boardTitle: ((res.body.board as { title?: string | null } | undefined)?.title as string | null) ?? null,
     myZoneStudentId: (res.body.my_tutor_student_id as string | null) ?? null,
+    myGuestId: (res.body.my_guest_id as string | null) ?? null,
     imageUrls: (res.body.image_urls as Record<string, string> | undefined) ?? {},
     frames: pages.map((row, i) => parseFrameRow(row as never, i, Number(row.rev) || 0)),
     since: (res.body.now as string | undefined) ?? null,
   };
+}
+
+/** POST /share/:slug/pages — «+ Лист» в мой рулон (растёт вниз столбца). */
+export async function addGuestRollPage(slug: string, guestToken: string): Promise<SharedFrame> {
+  const res = await guestFetch(`/share/${encodeURIComponent(slug)}/pages`, {
+    method: 'POST',
+    body: {},
+    guestToken,
+  });
+  if (res.status !== 201) throwGuestError(res, 'Не удалось добавить лист.');
+  return parseFrameRow(res.body.page as never, 0, Number(res.body.rev) || 0);
 }
 
 export interface GuestSignal {

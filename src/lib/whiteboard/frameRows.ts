@@ -28,6 +28,8 @@ export interface SharedFrame {
   cell: FrameCell;
   placement: FramePlacement;
   zoneTutorStudentId: string | null;
+  /** Лист ГОСТЯ без аккаунта («Лист — каждому вошедшему»). */
+  zoneGuestId: string | null;
   /** Текущий rev листа (base_rev для сохранений). 0 — ещё не известен. */
   rev: number;
 }
@@ -40,6 +42,7 @@ export interface BoardPageRowLike {
   background?: unknown;
   grid_mm?: unknown;
   zone_tutor_student_id?: string | null;
+  zone_guest_id?: string | null;
 }
 
 export function parseFrameRow(row: BoardPageRowLike, index: number, rev = 0): SharedFrame {
@@ -56,6 +59,7 @@ export function parseFrameRow(row: BoardPageRowLike, index: number, rev = 0): Sh
     cell,
     placement: cellToPlacement(cell),
     zoneTutorStudentId: row.zone_tutor_student_id ?? null,
+    zoneGuestId: row.zone_guest_id ?? null,
     rev,
   };
 }

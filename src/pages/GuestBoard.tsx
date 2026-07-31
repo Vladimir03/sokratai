@@ -4,6 +4,7 @@ import { Loader2, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SharedBoardView, type SharedBoardTransport } from '@/components/whiteboard/SharedBoardView';
 import {
+  addGuestRollPage,
   clearGuestToken,
   getGuestMeta,
   getGuestSignals,
@@ -77,6 +78,7 @@ export default function GuestBoard() {
           return {
             boardTitle: state.boardTitle,
             myZoneStudentId: state.myZoneStudentId,
+            myGuestId: state.myGuestId,
             zoneNames: Object.fromEntries(
               (meta?.members ?? []).map((m) => [m.tutor_student_id, m.name]),
             ),
@@ -93,6 +95,8 @@ export default function GuestBoard() {
         }
       },
       savePage: (pageId, elements, baseRev) => saveGuestPage(slug, guestToken, pageId, elements, baseRev),
+      // «+ Лист» в свой рулон — теперь и у гостя (кейс «у ученика кончился лист»).
+      addMyPage: () => addGuestRollPage(slug, guestToken),
       async refetchPage() {
         // У гостя нет точечного чтения листа — вернём null, а onResync (ниже)
         // перечитает state целиком: поллинг и так batch'ует изменения.

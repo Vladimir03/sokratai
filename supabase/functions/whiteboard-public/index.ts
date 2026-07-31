@@ -27,7 +27,8 @@ const MAX_PAGE_PAYLOAD_BYTES = 4 * 1024 * 1024;
 const MAX_NAME_LEN = 60;
 
 const PAGE_WHITELIST =
-  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, updated_at";
+  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, updated_at";
+const MAX_ROLL_PAGES = 20; // зеркало whiteboard-student-api
 const IMAGE_URL_TTL_SEC = 4 * 3600;
 const BOARD_IMAGE_BUCKET = "board-images";
 
@@ -207,6 +208,59 @@ async function listCandidates(
     }));
 }
 
+/**
+ * Лист-рулон для участника (фаза «Лист — каждому вошедшему»): свободный
+ * столбец row≥1, привязка ЛИБО к ученику CRM, ЛИБО к гостю (CHECK в БД).
+ * Аллокатор колонок неатомарен (принятый residual зон, ревью Этапа 5) —
+ * коллизии чинит deconflictCells на загрузке у репетитора.
+ */
+async function createRollSheet(
+  db: SupabaseClient,
+  boardId: string,
+  binding: { tutorStudentId?: string | null; guestId?: string | null },
+  updatedBy: string,
+): Promise<Record<string, unknown> | null> {
+  const { data: pages } = await db
+    .from("board_pages")
+    .select("page_index, app_state")
+    .eq("board_id", boardId);
+  const rows = pages ?? [];
+  const usedCols = new Set<number>();
+  let maxIndex = -1;
+  for (const p of rows) {
+    maxIndex = Math.max(maxIndex, (p.page_index as number) ?? 0);
+    const frame = (p.app_state as { frame?: { col?: number; row?: number } } | null)?.frame;
+    if (frame && typeof frame.col === "number" && typeof frame.row === "number" && frame.row >= 1) {
+      usedCols.add(frame.col);
+    }
+  }
+  let col = 0;
+  while (usedCols.has(col)) col++;
+  const { data: page, error } = await db
+    .from("board_pages")
+    .insert({
+      board_id: boardId,
+      page_index: maxIndex + 1,
+      background: "grid",
+      grid_mm: 5,
+      zone_tutor_student_id: binding.tutorStudentId ?? null,
+      zone_guest_id: binding.guestId ?? null,
+      app_state: { orientation: "portrait", frame: { col, row: 1 } },
+    })
+    .select(PAGE_WHITELIST)
+    .single();
+  if (error || !page) {
+    console.error("whiteboard_public_sheet_create_failed", { code: error?.code });
+    return null;
+  }
+  await db.rpc("wb_bump_page_rev", {
+    p_page_id: page.id,
+    p_board_id: boardId,
+    p_updated_by: updatedBy,
+  });
+  return page;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
@@ -286,6 +340,25 @@ Deno.serve(async (req) => {
         return jsonError(400, "VALIDATION", "Выберите себя из списка или введите имя.");
       }
 
+      // Пере-вход той же личности (дискавери 31.07): прежние гости РЕВОКАЮТСЯ,
+      // их листы ПЕРЕПРИВЯЗЫВАЮТСЯ новому входу — человек возвращается на свой
+      // лист, а панель не показывает «Владимир, Владимир».
+      const { data: priorGuests } = await db
+        .from("board_guests")
+        .select("id, tutor_student_id, display_name")
+        .eq("share_link_id", link.id)
+        .is("revoked_at", null);
+      const nameKey = displayName.trim().toLowerCase();
+      const priorIds = (priorGuests ?? [])
+        .filter((g) =>
+          tutorStudentId
+            ? g.tutor_student_id === tutorStudentId
+            : !g.tutor_student_id &&
+              typeof g.display_name === "string" &&
+              g.display_name.trim().toLowerCase() === nameKey
+        )
+        .map((g) => g.id as string);
+
       const { data: guest, error } = await db
         .from("board_guests")
         .insert({
@@ -297,8 +370,52 @@ Deno.serve(async (req) => {
         .select("id, guest_token, tutor_student_id")
         .single();
       if (error || !guest) return jsonError(500, "DB_ERROR", "Не удалось войти на доску.");
+
+      if (priorIds.length > 0) {
+        const { data: rebound } = await db
+          .from("board_pages")
+          .update({ zone_guest_id: guest.id })
+          .in("zone_guest_id", priorIds)
+          .select("id");
+        for (const p of rebound ?? []) {
+          await db.rpc("wb_bump_page_rev", {
+            p_page_id: p.id,
+            p_board_id: link.board_id,
+            p_updated_by: `guest:${guest.id}`,
+          });
+        }
+        await db
+          .from("board_guests")
+          .update({ revoked_at: new Date().toISOString() })
+          .in("id", priorIds);
+      }
+
+      // «Лист — каждому вошедшему»: свой лист появляется САМ, репетитор не
+      // делает ничего. Идемпотентно: если лист личности уже есть — не плодим.
+      const sheetFilter = tutorStudentId
+        ? { column: "zone_tutor_student_id", value: tutorStudentId }
+        : { column: "zone_guest_id", value: guest.id as string };
+      const { data: existingSheet } = await db
+        .from("board_pages")
+        .select("id")
+        .eq("board_id", link.board_id)
+        .eq(sheetFilter.column, sheetFilter.value)
+        .limit(1);
+      if (!existingSheet || existingSheet.length === 0) {
+        await createRollSheet(
+          db,
+          link.board_id,
+          tutorStudentId ? { tutorStudentId } : { guestId: guest.id as string },
+          `guest:${guest.id}`,
+        );
+      }
+
       return jsonOk(
-        { guest_token: guest.guest_token, tutor_student_id: guest.tutor_student_id },
+        {
+          guest_token: guest.guest_token,
+          tutor_student_id: guest.tutor_student_id,
+          guest_id: guest.id,
+        },
         201,
       );
     }
@@ -347,6 +464,8 @@ Deno.serve(async (req) => {
       return jsonOk({
         board: { id: board.id, title: (board.title as string | null) ?? null },
         my_tutor_student_id: guest.tutor_student_id,
+        // Идентичность гостя для writable по zone_guest_id (лист гостя не из CRM).
+        my_guest_id: guest.id,
         pages: rows,
         image_urls: imageUrls,
         // Watermark поллинга: клиент стартует /signals?since= отсюда.
@@ -386,6 +505,63 @@ Deno.serve(async (req) => {
       });
     }
 
+    // POST /share/:slug/pages — «+ Лист» в мой рулон (кейс Елены: «у ученика
+    // кончился лист»; растёт ВНИЗ его столбца, зеркало student-api).
+    if (req.method === "POST" && segments.length === 3 && segments[2] === "pages") {
+      if (!(await throttleCheck(db, `wb:addpage:${guest.id}`, 10, 60_000))) {
+        return jsonError(429, "THROTTLED", "Слишком часто.");
+      }
+      const myFilter = guest.tutor_student_id
+        ? { column: "zone_tutor_student_id", value: guest.tutor_student_id }
+        : { column: "zone_guest_id", value: guest.id };
+      const { data: myPages, error: myPagesError } = await db
+        .from("board_pages")
+        .select("id, page_index, app_state")
+        .eq("board_id", guest.board_id)
+        .eq(myFilter.column, myFilter.value);
+      if (myPagesError) return jsonError(500, "DB_ERROR", "Не удалось добавить лист.");
+      if (!myPages || myPages.length === 0) {
+        return jsonError(409, "NO_ZONE", "У вас пока нет своего листа — попросите репетитора выдать его.");
+      }
+      if (myPages.length >= MAX_ROLL_PAGES) {
+        return jsonError(409, "LIMIT_REACHED", `В вашем рулоне уже ${MAX_ROLL_PAGES} листов.`);
+      }
+      let col = 0;
+      let maxRow = 0;
+      for (const p of myPages) {
+        const frame = (p.app_state as { frame?: { col?: number; row?: number } } | null)?.frame;
+        if (frame && typeof frame.col === "number") col = frame.col;
+        if (frame && typeof frame.row === "number" && frame.row > maxRow) maxRow = frame.row;
+      }
+      const { data: all } = await db
+        .from("board_pages")
+        .select("page_index")
+        .eq("board_id", guest.board_id)
+        .order("page_index", { ascending: false })
+        .limit(1);
+      const nextIndex = all && all.length > 0 ? (all[0].page_index as number) + 1 : 0;
+      const { data: page, error: addError } = await db
+        .from("board_pages")
+        .insert({
+          board_id: guest.board_id,
+          page_index: nextIndex,
+          background: "grid",
+          grid_mm: 5,
+          zone_tutor_student_id: guest.tutor_student_id,
+          zone_guest_id: guest.tutor_student_id ? null : guest.id,
+          app_state: { orientation: "portrait", frame: { col, row: maxRow + 1 } },
+        })
+        .select(PAGE_WHITELIST)
+        .single();
+      if (addError || !page) return jsonError(500, "DB_ERROR", "Не удалось добавить лист.");
+      const { data: revData } = await db.rpc("wb_bump_page_rev", {
+        p_page_id: page.id,
+        p_board_id: guest.board_id,
+        p_updated_by: `guest:${guest.id}`,
+      });
+      return jsonOk({ page, rev: Number(revData) || 0 }, 201);
+    }
+
     // POST /share/:slug/pages/:pageId
     if (req.method === "POST" && segments.length === 4 && segments[2] === "pages") {
       const pageId = segments[3];
@@ -412,20 +588,28 @@ Deno.serve(async (req) => {
 
       const { data: page } = await db
         .from("board_pages")
-        .select("id, board_id, elements, zone_tutor_student_id")
+        .select("id, board_id, elements, zone_tutor_student_id, zone_guest_id")
         .eq("id", pageId)
         .maybeSingle();
       if (!page || page.board_id !== guest.board_id) {
         return jsonError(404, "NOT_FOUND", "Лист не найден.");
       }
-      if (page.zone_tutor_student_id !== guest.tutor_student_id) {
+      // Лист мой ЛИБО как ученика CRM, ЛИБО как гостя (фаза «Лист — каждому
+      // вошедшему»: гость не из списка тоже пишет — в свой zone_guest_id-лист).
+      const ownsByStudent =
+        !!guest.tutor_student_id && page.zone_tutor_student_id === guest.tutor_student_id;
+      const ownsByGuest = page.zone_guest_id === guest.id;
+      if (!ownsByStudent && !ownsByGuest) {
         return jsonError(403, "FOREIGN_ZONE", "Это не ваш лист — писать можно только в своей зоне.");
       }
-      // Живое членство (ревью P0 №2): убранный из группы гость сохраняет зону
-      // как артефакт урока, но только для чтения — join-время не «замораживает» права.
-      const candidates = await listCandidates(db, guest.board_id);
-      if (!candidates.some((c) => c.tutor_student_id === guest.tutor_student_id)) {
-        return jsonError(403, "NOT_A_PARTICIPANT", "Вы больше не участвуете в этом занятии — доска доступна только для чтения.");
+      // Живое членство (ревью P0 №2) — только для привязки через CRM: убранный
+      // из группы сохраняет зону как артефакт, но read-only. Для гостевого листа
+      // «членство» = живой bearer, он уже проверен resolveGuest.
+      if (ownsByStudent && !ownsByGuest) {
+        const candidates = await listCandidates(db, guest.board_id);
+        if (!candidates.some((c) => c.tutor_student_id === guest.tutor_student_id)) {
+          return jsonError(403, "NOT_A_PARTICIPANT", "Вы больше не участвуете в этом занятии — доска доступна только для чтения.");
+        }
       }
       // Fail-closed: чужой image-ref = попытка подписи чужого файла (P0 №3).
       if (hasForeignImageRef(body.elements, guest.board_id)) {

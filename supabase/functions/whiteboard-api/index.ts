@@ -50,7 +50,7 @@ const VALID_GRID_MM = new Set([5, 10]);
 const BOARD_SELECT =
   "id, student_id, lesson_id, title, export_material_id, created_at, updated_at";
 const PAGE_SELECT =
-  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, created_at, updated_at";
+  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, created_at, updated_at";
 
 /**
  * Сигнал синка (Этап 2): бамп rev после КАЖДОГО успешного сохранения листа.
@@ -507,6 +507,23 @@ async function handleCreatePage(
     }
     elements = body.elements;
   }
+  // Лист сразу в рулон ГОСТЯ (ghost-клик по его столбцу, «Лист — каждому
+  // вошедшему»). Ученический аналог идёт исторически через zone-patch.
+  let zoneGuestId: string | null = null;
+  if ("zone_guest_id" in body && body.zone_guest_id !== null) {
+    if (typeof body.zone_guest_id !== "string" || !UUID_RE.test(body.zone_guest_id)) {
+      return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор гостя.");
+    }
+    const { data: guestRow } = await db
+      .from("board_guests")
+      .select("id, board_id")
+      .eq("id", body.zone_guest_id)
+      .maybeSingle();
+    if (!guestRow || guestRow.board_id !== boardId) {
+      return jsonError(cors, 404, "NOT_FOUND", "Гость не найден на этой доске.");
+    }
+    zoneGuestId = body.zone_guest_id;
+  }
   const { data, error } = await db
     .from("board_pages")
     .insert({
@@ -515,6 +532,7 @@ async function handleCreatePage(
       background,
       grid_mm: gridMm,
       app_state: appState,
+      ...(zoneGuestId ? { zone_guest_id: zoneGuestId } : {}),
       ...(elements.length > 0 ? { elements } : {}),
     })
     .select(PAGE_SELECT)
@@ -671,19 +689,46 @@ async function handleListGuests(
 ): Promise<Response> {
   const board = await loadOwnedBoard(db, boardId, tutorPkId);
   if (!board) return jsonError(cors, 404, "NOT_FOUND", "Доска не найдена.");
-  const since = new Date(Date.now() - 40_000).toISOString();
-  const { data, error } = await db
-    .from("board_guests")
-    .select("id, display_name, tutor_student_id, last_seen_at")
-    .eq("board_id", boardId)
-    .is("revoked_at", null)
-    .gte("last_seen_at", since)
-    .order("last_seen_at", { ascending: false })
-    .limit(30);
-  if (error) {
+  const sinceMs = Date.now() - 40_000;
+  const since = new Date(sinceMs).toISOString();
+  // Активные (для чипов «На доске») ∪ владельцы листов (для подписей рамок и
+  // селекта «чей лист» — имя нужно и когда гость отключился).
+  const [{ data: active, error: activeError }, { data: sheetPages }] = await Promise.all([
+    db
+      .from("board_guests")
+      .select("id, display_name, tutor_student_id, last_seen_at")
+      .eq("board_id", boardId)
+      .is("revoked_at", null)
+      .gte("last_seen_at", since)
+      .order("last_seen_at", { ascending: false })
+      .limit(30),
+    db
+      .from("board_pages")
+      .select("zone_guest_id")
+      .eq("board_id", boardId)
+      .not("zone_guest_id", "is", null),
+  ]);
+  if (activeError) {
     return jsonError(cors, 500, "DB_ERROR", "Не удалось получить список гостей.");
   }
-  return jsonOk(cors, { guests: data ?? [] });
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const g of active ?? []) byId.set(g.id as string, { ...g, online: true });
+  const ownerIds = Array.from(
+    new Set((sheetPages ?? []).map((p) => p.zone_guest_id as string)),
+  ).filter((id) => !byId.has(id));
+  if (ownerIds.length > 0) {
+    const { data: owners } = await db
+      .from("board_guests")
+      .select("id, display_name, tutor_student_id, last_seen_at")
+      .in("id", ownerIds);
+    for (const g of owners ?? []) {
+      byId.set(g.id as string, {
+        ...g,
+        online: Date.parse((g.last_seen_at as string) ?? "") >= sinceMs,
+      });
+    }
+  }
+  return jsonOk(cors, { guests: Array.from(byId.values()) });
 }
 
 // ─── Гостевая ссылка (Этап 2, B4): create-or-get / revoke ─────────────────────
@@ -863,8 +908,29 @@ async function handleSavePage(
         return jsonError(cors, 404, "NOT_FOUND", "Ученик не найден.");
       }
       patch.zone_tutor_student_id = body.zone_tutor_student_id;
+      // Привязки взаимоисключимы (CHECK chk_board_pages_single_zone).
+      patch.zone_guest_id = null;
     } else {
       return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор ученика.");
+    }
+  }
+  if ("zone_guest_id" in body) {
+    // «Чей лист» → гость без аккаунта (фаза «Лист — каждому вошедшему»).
+    if (body.zone_guest_id === null) {
+      patch.zone_guest_id = null;
+    } else if (typeof body.zone_guest_id === "string" && UUID_RE.test(body.zone_guest_id)) {
+      const { data: guestRow } = await db
+        .from("board_guests")
+        .select("id, board_id")
+        .eq("id", body.zone_guest_id)
+        .maybeSingle();
+      if (!guestRow || guestRow.board_id !== page.board_id) {
+        return jsonError(cors, 404, "NOT_FOUND", "Гость не найден на этой доске.");
+      }
+      patch.zone_guest_id = body.zone_guest_id;
+      patch.zone_tutor_student_id = null;
+    } else {
+      return jsonError(cors, 400, "VALIDATION", "Некорректный идентификатор гостя.");
     }
   }
   if (Object.keys(patch).length === 0) {

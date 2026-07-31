@@ -106,6 +106,8 @@ export interface GhostCell {
   label: string;
   /** Лист какой зоны создать (рулон ученика) — прокидывается в onGhostClick. */
   zoneTutorStudentId?: string | null;
+  /** Рулон гостя без аккаунта («Лист — каждому вошедшему»). */
+  zoneGuestId?: string | null;
 }
 
 interface BoardCanvasProps {
@@ -656,7 +658,7 @@ export function BoardCanvas({
 
       resetLiveState();
     },
-    [color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, onScaleSelection, onGhostClick, resetLiveState],
+    [tool, color, size, frameById, onCommitElement, onEraseElements, onSelectionChange, onMoveSelection, onTransformElement, onScaleSelection, onGhostClick, resetLiveState],
   );
 
   // ─── Масштаб выделения за угол (Этап 5, Елена/Вадим) ────────────────────────

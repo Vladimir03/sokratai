@@ -29,6 +29,8 @@ export interface BoardPageRow {
   grid_mm: BoardGridMm;
   /** Зона ученика (рулон = несколько строк одного ученика); NULL — лист репетитора. */
   zone_tutor_student_id?: string | null;
+  /** Лист гостя без аккаунта («Лист — каждому вошедшему»). */
+  zone_guest_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -126,6 +128,8 @@ export async function createBoardPage(
     grid_mm?: BoardGridMm;
     app_state?: Record<string, unknown>;
     elements?: unknown[];
+    /** Лист сразу в рулон гостя (ghost-клик по его столбцу). */
+    zone_guest_id?: string;
   } = {},
 ): Promise<BoardPageRow> {
   const res = await invokeWhiteboard<{ page: BoardPageRow }>(
@@ -137,6 +141,7 @@ export async function createBoardPage(
         grid_mm: input.grid_mm ?? 5,
         ...(input.app_state ? { app_state: input.app_state } : {}),
         ...(input.elements ? { elements: input.elements } : {}),
+        ...(input.zone_guest_id ? { zone_guest_id: input.zone_guest_id } : {}),
       },
     },
   );
@@ -168,6 +173,7 @@ export async function saveBoardPage(
     background?: BoardBackground;
     grid_mm?: BoardGridMm;
     zone_tutor_student_id?: string | null;
+    zone_guest_id?: string | null;
     base_rev?: number;
   },
 ): Promise<SavePageOutcome> {
@@ -232,6 +238,8 @@ export interface BoardGuestRow {
   display_name: string;
   tutor_student_id: string | null;
   last_seen_at: string;
+  /** false — гость отключился, но владеет листами (нужен для подписей). */
+  online?: boolean;
 }
 
 /** GET /boards/:id/guests — активные гости для панели участников (Этап 5). */

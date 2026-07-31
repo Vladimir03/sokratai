@@ -104,7 +104,7 @@ async function signBoardImages(
 }
 
 const PAGE_SELECT =
-  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, created_at, updated_at";
+  "id, board_id, page_index, elements, app_state, background, grid_mm, zone_tutor_student_id, zone_guest_id, created_at, updated_at";
 
 function getCorsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("Origin") ?? "";

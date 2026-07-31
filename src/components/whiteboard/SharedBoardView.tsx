@@ -57,6 +57,8 @@ export interface SharedBoardTransport {
   load(): Promise<{
     boardTitle: string | null;
     myZoneStudentId: string | null;
+    /** Идентичность гостя (writable по zone_guest_id); у ученика с аккаунтом — null. */
+    myGuestId?: string | null;
     zoneNames: Record<string, string>;
     imageUrls: Record<string, string>;
     frames: SharedFrame[];
@@ -125,6 +127,8 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   const [frames, setFrames] = useState<SharedFrame[]>([]);
   const [boardTitle, setBoardTitle] = useState<string | null>(null);
   const [myZoneId, setMyZoneId] = useState<string | null>(null);
+  /** Идентичность гостя — второй ключ владения листом («Лист — каждому вошедшему»). */
+  const [myGuestId, setMyGuestId] = useState<string | null>(null);
   const [zoneNames, setZoneNames] = useState<Record<string, string>>({});
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -159,6 +163,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   // ─── Автосейв: 409 → reconcile → немедленный повтор ────────────────────────
 
   const readOnlyNotifiedRef = useRef(false);
+  const writeHintShownRef = useRef(false);
   const selectionRef = useRef<BoardSelection | null>(null);
   selectionRef.current = selection;
 
@@ -276,8 +281,16 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   }, []);
 
   const fitMyZone = useCallback(
-    (list: SharedFrame[], zoneId: string | null, vp: { w: number; h: number }) => {
-      const mine = zoneId ? list.filter((f) => f.zoneTutorStudentId === zoneId) : [];
+    (
+      list: SharedFrame[],
+      me: { zoneId: string | null; guestId: string | null },
+      vp: { w: number; h: number },
+    ) => {
+      const mine = list.filter(
+        (f) =>
+          (me.zoneId && f.zoneTutorStudentId === me.zoneId) ||
+          (me.guestId && f.zoneGuestId === me.guestId),
+      );
       if (mine.length === 0) {
         fitAll(list, vp);
         return;
@@ -322,6 +335,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           cell: parsed.cell,
           placement: parsed.placement,
           zoneTutorStudentId: parsed.zoneTutorStudentId,
+          zoneGuestId: parsed.zoneGuestId,
         });
       }
       // Новая картинка от репетитора → догруз signed URL (не чаще раза в 20 с).
@@ -361,6 +375,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
       setZoneNames(state.zoneNames);
       setImageUrls((prev) => ({ ...prev, ...state.imageUrls }));
       setMyZoneId(state.myZoneStudentId);
+      setMyGuestId(state.myGuestId ?? null);
       return true;
     } catch {
       // best-effort: следующий сигнал/поллинг повторит
@@ -378,10 +393,23 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         applyFrames(state.frames);
         setBoardTitle(state.boardTitle);
         setMyZoneId(state.myZoneStudentId);
+        setMyGuestId(state.myGuestId ?? null);
         setZoneNames(state.zoneNames);
         setImageUrls(state.imageUrls);
+        const me = { zoneId: state.myZoneStudentId, guestId: state.myGuestId ?? null };
         const vp = { w: window.innerWidth, h: Math.max(320, window.innerHeight - 140) };
-        fitMyZone(state.frames, state.myZoneStudentId, vp);
+        // «Первый экран — свой лист крупно» (решение владельца 31.07): камера
+        // сама встаёт на лист вошедшего + одна подсказка, куда писать.
+        fitMyZone(state.frames, me, vp);
+        const hasMine = state.frames.some(
+          (f) =>
+            (me.zoneId && f.zoneTutorStudentId === me.zoneId) ||
+            (me.guestId && f.zoneGuestId === me.guestId),
+        );
+        if (hasMine && !writeHintShownRef.current) {
+          writeHintShownRef.current = true;
+          toast.message('Это ваш лист — пишите на нём. Листы других видны рядом.');
+        }
       })
       .catch((err: unknown) => {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Не удалось открыть доску');
@@ -514,11 +542,19 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
 
   // ─── Правки своей зоны ──────────────────────────────────────────────────────
 
+  /** Лист мой — по любой из двух привязок (ученик CRM / гость по ссылке). */
+  const isMyFrame = useCallback(
+    (f: SharedFrame) =>
+      (!!myZoneId && f.zoneTutorStudentId === myZoneId) ||
+      (!!myGuestId && f.zoneGuestId === myGuestId),
+    [myZoneId, myGuestId],
+  );
+
   const updateFrameElements = useCallback(
     (frameId: string, updater: (elements: BoardElement[]) => BoardElement[], recordHistory = true) => {
       const frame = framesRef.current.find((f) => f.id === frameId);
       if (!frame) return;
-      if (frame.zoneTutorStudentId !== myZoneId || !myZoneId) return; // не моя зона
+      if (!isMyFrame(frame)) return; // не моя зона
       const nextElements = updater(frame.elements);
       if (nextElements === frame.elements) return;
       if (recordHistory) {
@@ -528,7 +564,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
       applyFramePatch(frameId, { elements: nextElements });
       autosave.markDirty(frameId);
     },
-    [myZoneId, autosave, applyFramePatch],
+    [isMyFrame, autosave, applyFramePatch],
   );
 
   const handleCommitElement = useCallback(
@@ -601,7 +637,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
     (direction: 'undo' | 'redo') => {
       // История — только по своим листам; берём последний интерактивный (selection)
       // или первый свой.
-      const myFrames = framesRef.current.filter((f) => f.zoneTutorStudentId === myZoneId);
+      const myFrames = framesRef.current.filter(isMyFrame);
       const frameId = selection?.frameId ?? myFrames[0]?.id;
       const frame = framesRef.current.find((f) => f.id === frameId);
       if (!frame) return;
@@ -614,7 +650,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
       applyFramePatch(frame.id, { elements: restored });
       autosave.markDirty(frame.id);
     },
-    [selection, myZoneId, autosave, applyFramePatch],
+    [selection, isMyFrame, autosave, applyFramePatch],
   );
 
   useEffect(() => {
@@ -692,7 +728,9 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
   const frameViews: FrameView[] = useMemo(
     () =>
       frames.map((f, i) => {
-        const isMine = !!myZoneId && f.zoneTutorStudentId === myZoneId;
+        const isMine =
+          (!!myZoneId && f.zoneTutorStudentId === myZoneId) ||
+          (!!myGuestId && f.zoneGuestId === myGuestId);
         const zoneName = f.zoneTutorStudentId ? zoneNames[f.zoneTutorStudentId] : null;
         return {
           id: f.id,
@@ -705,12 +743,14 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
             ? `Мой лист${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
             : zoneName
               ? `${zoneName}${f.cell.row > 0 ? ` · ${f.cell.row}` : ''}`
-              : `Лист ${i + 1}`,
-          isZone: !!f.zoneTutorStudentId,
+              : f.zoneGuestId
+                ? `Лист участника`
+                : `Лист ${i + 1}`,
+          isZone: !!f.zoneTutorStudentId || !!f.zoneGuestId,
           writable: isMine,
         };
       }),
-    [frames, myZoneId, zoneNames],
+    [frames, myZoneId, myGuestId, zoneNames],
   );
 
   // ─── Рендер ─────────────────────────────────────────────────────────────────
@@ -742,7 +782,7 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
         )
       : null;
 
-  const canWrite = !!myZoneId;
+  const canWrite = !!myZoneId || !!myGuestId;
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-slate-50">
@@ -933,12 +973,12 @@ export function SharedBoardView({ transport, headerLeft, onExit, onChangeIdentit
           </button>
           <button
             type="button"
-            onClick={() => fitMyZone(framesRef.current, myZoneId, viewport)}
+            onClick={() => fitMyZone(framesRef.current, { zoneId: myZoneId, guestId: myGuestId }, viewport)}
             style={{ touchAction: 'manipulation' }}
             className="flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50"
           >
             <Maximize className="h-4 w-4" />
-            {myZoneId ? 'Мой лист' : 'Вся доска'}
+            {myZoneId || myGuestId ? 'Мой лист' : 'Вся доска'}
           </button>
         </div>
       </div>

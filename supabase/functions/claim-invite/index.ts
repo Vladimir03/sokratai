@@ -167,12 +167,24 @@ Deno.serve(async (req) => {
     if (existingLink) {
       status = "already_linked";
     } else {
+      // display_name копируем из профиля СРАЗУ (фикс 31.07): связка без имени
+      // всплывала как «Ученик» в пикерах доски, чатах и аналитике.
+      const { data: studentProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("username")
+        .eq("id", user.id)
+        .maybeSingle();
+      const displayName =
+        typeof studentProfile?.username === "string" && studentProfile.username.trim()
+          ? studentProfile.username.trim()
+          : null;
       const { data: insertedLink, error: insertError } = await supabaseAdmin
         .from("tutor_students")
         .insert({
           tutor_id: tutor.id,
           student_id: user.id,
           status: "active",
+          ...(displayName ? { display_name: displayName } : {}),
         })
         .select("id")
         .single();
