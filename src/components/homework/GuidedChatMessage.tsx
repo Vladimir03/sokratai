@@ -530,6 +530,7 @@ const GuidedChatMessage = memo(({
                   attachmentValue={message.image_url}
                   resolveSignedUrl={resolveImageRef}
                   canRotate={isTutorPerspective}
+                  onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
                 />
               )}
               {isStreaming && (
@@ -617,6 +618,7 @@ const GuidedChatMessage = memo(({
               attachmentValue={message.image_url}
               resolveSignedUrl={resolveImageRef}
               canRotate={isTutorPerspective}
+              onAnnotate={isTutorPerspective ? onAnnotatePhoto : undefined}
             />
           )}
           {isStreaming && (
