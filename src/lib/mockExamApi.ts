@@ -495,8 +495,8 @@ export async function replaceMockExamVariantTasks(
 // {userId}/... (миграция 20260731180000). Edge принимает только storage:// ref.
 
 const LISTENING_AUDIO_BUCKET = 'mock-exam-listening-audio';
-/** Зеркало file_size_limit бакета (50 МБ). Эталон Эмилии — 21.7 МБ / 24 мин. */
-export const MAX_LISTENING_AUDIO_BYTES = 50 * 1024 * 1024;
+/** Зеркало file_size_limit бакета (30 МБ). Эталон Эмилии — 21.7 МБ / 24 мин. */
+export const MAX_LISTENING_AUDIO_BYTES = 30 * 1024 * 1024;
 
 const LISTENING_AUDIO_MIME_TO_EXT: Record<string, string> = {
   'audio/mpeg': 'mp3',
@@ -529,7 +529,7 @@ export function validateListeningAudioFile(file: File): string | null {
     return 'Допустимые форматы аудио: MP3, M4A, OGG, WAV, WebM';
   }
   if (file.size > MAX_LISTENING_AUDIO_BYTES) {
-    return 'Максимальный размер аудио — 50 МБ';
+    return 'Максимальный размер аудио — 30 МБ';
   }
   if (file.size === 0) {
     return 'Пустой файл';

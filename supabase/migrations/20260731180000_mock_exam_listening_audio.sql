@@ -37,21 +37,30 @@ COMMENT ON COLUMN public.mock_exam_variants.listening_transcript IS
   'Транскрипт аудиотрека (ручной ввод репетитором, v1). ANTI-LEAK (rule 45): это фактически ответы аудирования — НИКОГДА не отдавать ученику до сдачи. Раскрывается ТОЛЬКО post-submit в result-эндпоинте (как solution_text). НЕ добавлять в taking-select mock-exam-student-api и в pre-submit selects mock-exam-public.';
 
 -- ============================================================
--- 2. Storage bucket mock-exam-listening-audio (private, 50 МБ, audio/*)
+-- 2. Storage bucket mock-exam-listening-audio (private, 30 МБ, audio/*)
 -- ============================================================
--- ⚠️ Lovable-quirk (rule 100 / инцидент board-images 20260729150000):
--- INSERT INTO storage.buckets в миграции НЕ применяется Lovable'ом —
--- бакет создаётся ВРУЧНУЮ в дашборде Supabase с теми же параметрами:
---   id/name: mock-exam-listening-audio, public: false,
---   file_size_limit: 52428800 (50 МБ),
---   allowed_mime_types: audio/mpeg, audio/mp4, audio/webm, audio/ogg, audio/wav
+-- ⚠️ Lovable-quirk, УТОЧНЁН 2026-07-31 (эмпирика, сильнее чем board-images):
+-- INSERT INTO storage.buckets в миграции НЕ применяется, а сам бакет на Lovable
+-- Cloud создаётся БЕЗ file_size_limit и allowed_mime_types — и выставить их
+-- НЕЧЕМ: service_role-ключ в окружении Lovable недоступен в принципе (PUT
+-- /storage/v1/bucket → 403 с anon), psql заходит как sandbox_exec
+-- (UPDATE storage.buckets → permission denied, SET ROLE supabase_storage_admin →
+-- permission denied), а bucket-тул агента принимает только флаг `public`.
+--
+-- ⇒ ФАКТИЧЕСКИЙ ENFORCEMENT РАЗМЕРА И MIME — КЛИЕНТСКИЙ:
+--   src/lib/mockExamApi.ts::validateListeningAudioFile
+--   (MAX_LISTENING_AUDIO_BYTES = 30 МБ + whitelist 5 аудио-MIME).
+--   Меняешь лимит — меняй ТАМ, здесь только документация намерения.
+-- Бакет-уровневые лимиты остаются defense-in-depth «на когда сможем выставить».
+-- Действующий потолок = глобальный лимит проекта (Supabase default 50 МБ,
+-- эталонный файл 21.7 МБ проходит; проверяется E2E-загрузкой).
 -- INSERT оставлен идемпотентным для сред, где миграции применяются напрямую.
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
   'mock-exam-listening-audio',
   'mock-exam-listening-audio',
   false,
-  52428800,  -- 50 МБ: эталон Эмилии 21.7 МБ (24 мин mp3) × запас 2
+  31457280,  -- 30 МБ: эталон Эмилии 21.7 МБ (24 мин mp3) × запас 2
   ARRAY['audio/mpeg', 'audio/mp4', 'audio/webm', 'audio/ogg', 'audio/wav']
 )
 ON CONFLICT (id) DO NOTHING;
@@ -278,7 +287,7 @@ COMMIT;
 -- Expected: listening_audio_url, listening_transcript.
 --
 -- SELECT id, public, file_size_limit FROM storage.buckets WHERE id = 'mock-exam-listening-audio';
--- Expected: 1 row, public=false, file_size_limit=52428800 (если бакет создан вручную — сверить).
+-- Expected: 1 row, public=false, file_size_limit=31457280 (если бакет создан вручную — сверить).
 --
 -- SELECT COUNT(*) FROM pg_policies
 --   WHERE tablename = 'objects' AND policyname LIKE 'Mock listening audio%';

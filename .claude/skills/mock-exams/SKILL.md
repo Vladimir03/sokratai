@@ -205,7 +205,10 @@ Variant 1 = physics ЕГЭ. `_shared/mock-exam-prompts.ts` uses `resolveSubjectR
 
 **Аудио-байты НЕ через edge.** Клиент → Storage напрямую (`uploadListeningAudio`), edge принимает только `storage://` ref; плеер — signed URL прямо в `<audio>`. Иначе `arrayBuffer()+Blob` в изоляте = ~45 МБ пик на 22-МБ файл.
 
-**Бакет `mock-exam-listening-audio`** — private, 50 МБ, `audio/mpeg|mp4|webm|ogg|wav`, RLS own-namespace `{tutorUserId}/…`. ⚠️ Создаётся **ВРУЧНУЮ в дашборде** (Lovable игнорирует `INSERT INTO storage.buckets`, инцидент board-images).
+**Бакет `mock-exam-listening-audio`** — private, RLS own-namespace `{tutorUserId}/…`.
+
+⚠️ **Лимиты бакета на Lovable Cloud выставить НЕЧЕМ (эмпирика 2026-07-31, сильнее прежнего «создать вручную»).** Агент создаёт бакет БЕЗ `file_size_limit` / `allowed_mime_types` и не может их задать: `SUPABASE_SERVICE_ROLE_KEY` в его окружении отсутствует в принципе (PUT `/storage/v1/bucket` с anon → 403), psql заходит как `sandbox_exec` (`UPDATE storage.buckets` → permission denied; `SET ROLE supabase_storage_admin` → permission denied), а его bucket-тул принимает только флаг `public`. Новый Lovable Cloud UI (Cloud → Storage) — файловый браузер, настроек бакета там нет.
+⇒ **Enforcement размера/MIME — КЛИЕНТСКИЙ** (`validateListeningAudioFile`: 30 МБ + whitelist 5 MIME). Бакет-лимиты = defense-in-depth, которого фактически нет; потолок = глобальный лимит проекта (Supabase default 50 МБ). **Любой новый бакет здесь проектировать с этим допущением: клиентская валидация — не дубль, а единственная линия.**
 
 ### Инварианты (нарушение = leak или тихий отказ)
 
