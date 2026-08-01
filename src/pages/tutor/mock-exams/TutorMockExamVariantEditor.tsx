@@ -719,7 +719,11 @@ function VariantEditorContent() {
         // Deploy-skew handshake (ревью 5.6 P0): listening-поля отправлены, но
         // маркер не пришёл = старый edge их проигнорировал — честно сказать,
         // а не показать success с потерянным треком.
-        const sentListening = Boolean(listeningAudioRef || listeningTranscript.trim());
+        // Блоки едут под тем же handshake: старый edge их МОЛЧА игнорирует
+        // (в create/replace нет unknown-key гарда), и без этого условия
+        // потерянные блоки не дали бы ни ошибки, ни маркера.
+        const sentListening =
+          Boolean(listeningAudioRef || listeningTranscript.trim()) || blocks.length > 0;
         if (sentListening && !created.listening_fields_applied) {
           toast.error(
             'Вариант создан, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Откройте вариант и прикрепите аудио повторно чуть позже.',
@@ -769,7 +773,8 @@ function VariantEditorContent() {
       invalidateVariantCaches();
       // Deploy-skew handshake (ревью 5.6 P0) — mirror create-путь.
       const sentListeningOnReplace =
-        transcriptReady && Boolean(listeningAudioRef || listeningTranscript.trim());
+        transcriptReady &&
+        (Boolean(listeningAudioRef || listeningTranscript.trim()) || blocks.length > 0);
       if (sentListeningOnReplace && !replaceRes.listening_fields_applied) {
         toast.error(
           'Задачи сохранены, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Повторите сохранение чуть позже.',
@@ -797,6 +802,7 @@ function VariantEditorContent() {
     editId,
     listeningAudioRef,
     listeningTranscript,
+    blocks,
     transcriptReady,
     audioUploading,
     buildTasksPayload,
