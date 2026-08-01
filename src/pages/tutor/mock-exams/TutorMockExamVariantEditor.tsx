@@ -520,7 +520,15 @@ function VariantEditorContent() {
       })
       .catch(() => {
         // Гард остаётся false → поле disabled, save не тронет сохранённый транскрипт.
-        toast.error('Не удалось загрузить транскрипт аудирования — поле недоступно, при сохранении он не изменится');
+        // Ревью 5.6 (гипотеза 3): без «Повторить» это тупик до перезагрузки —
+        // секция блоков заморожена целиком, а причина сбоя обычно сетевая.
+        toast.error(
+          'Не удалось загрузить транскрипт аудирования — блоки временно заморожены, при сохранении они не изменятся',
+          {
+            duration: 15000,
+            action: { label: 'Повторить', onClick: () => window.location.reload() },
+          },
+        );
       });
   }, [isEditMode, detail, editId]);
 
@@ -847,7 +855,17 @@ function VariantEditorContent() {
     try {
       const res = await duplicateMockExamVariant(editId);
       invalidateVariantCaches();
-      toast.success('Копия создана — правьте её свободно');
+      // P1-2 ревью 5.6: у каталожного источника аудио скопировать нельзя
+      // (blob в чужом namespace). Молчать об этом нельзя — репетитор назначил
+      // бы копию, а ученик открыл аудирование без единого трека.
+      if (res.dropped_audio_count) {
+        toast.warning(
+          `Копия создана, но аудио не скопировалось (${res.dropped_audio_count}) — каталожные треки принадлежат автору варианта. Загрузите записи в блоки заново.`,
+          { duration: 12000 },
+        );
+      } else {
+        toast.success('Копия создана — правьте её свободно');
+      }
       navigate(`/tutor/mock-exams/variants/${res.variant_id}/edit`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Не удалось создать копию');

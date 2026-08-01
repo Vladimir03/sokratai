@@ -288,7 +288,7 @@ async function handleInviteRead(
       // иначе ученик обществознания читает «пробник по физике».
       "title, exam_type, subject, source, source_attribution, " +
         "duration_minutes, total_max_score, part1_max, part2_max, task_count, " +
-        "listening_audio_url, task_blocks_json",
+        "listening_audio_url",
     )
     .eq("id", assignment.variant_id)
     .maybeSingle();
@@ -362,31 +362,11 @@ async function handleInviteRead(
           LISTENING_AUDIO_BUCKET,
           AUDIO_SIGNED_URL_TTL_SEC,
         ),
-        // Блоки заданий (2026-08-01) — только медиа-условие. Транскрипты в
-        // отдельной колонке и на этой анонимной поверхности не селектятся вовсе.
-        task_blocks: Array.isArray(variant.task_blocks_json)
-          ? await Promise.all(
-            (variant.task_blocks_json as Array<Record<string, unknown>>).map(
-              async (blk) => {
-                const audioRef = (blk.audio_url as string | null) ?? null;
-                const imageRef = (blk.image_url as string | null) ?? null;
-                const [audioSigned, imageSigned] = await Promise.all([
-                  resolveSignedUrl(db, audioRef, LISTENING_AUDIO_BUCKET, AUDIO_SIGNED_URL_TTL_SEC),
-                  resolveSignedUrl(db, imageRef, VARIANT_TASK_BUCKET),
-                ]);
-                return {
-                  id: blk.id ?? null,
-                  title: (blk.title as string | null) ?? "",
-                  instruction: (blk.instruction as string | null) ?? "",
-                  has_audio: Boolean(audioRef),
-                  audio_url: audioSigned,
-                  has_image: Boolean(imageRef),
-                  image_url: imageSigned,
-                };
-              },
-            ),
-          )
-          : null,
+        // P2 ревью 5.6: блоки на приглашении НЕ подписываем и не селектим.
+        // Приглашение — превью перед стартом, медиа блоков оно не показывает,
+        // а подпись стоила до 6 лишних storage-RTT на каждое открытие ссылки:
+        // ученик в метро ждал дольше ради URL, которые никто не читает.
+        // Материал блоков приходит на taking-поверхности (student-api).
       }
       : null,
     tasks,

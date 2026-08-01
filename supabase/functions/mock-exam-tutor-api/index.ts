@@ -4472,16 +4472,27 @@ async function handleDuplicateVariant(
     return jsonError(cors, 500, "DB_ERROR", "Failed to load variant tasks");
   }
 
-  // Блоки копируем СО СТРУКТУРОЙ (название, инструкция, фото — это условие,
-  // ради которого блок и заводят), но БЕЗ аудио: blob лежит в own-namespace
-  // исходного владельца, и копия ссылалась бы на чужой файл — та же логика,
-  // что у listening_audio_url ниже. Привязки задач при этом уцелеют.
+  // P1-2 ревью 5.6: аудио копируется, КОГДА источник — мой собственный вариант.
+  // Блокировало own-namespace правило, но у своей же копии namespace тот же —
+  // ссылка легальна, и валидатор её пропускает. Раньше Эмилия дублировала
+  // прошлый месячный DELF, получала «Копия создана», назначала — и ученик
+  // открывал аудирование без единого трека (тихая неполная копия в ежемесячном
+  // сценарии). Каталожный источник по-прежнему теряет аудио: blob чужой.
+  const isOwnSource = (source.owner_id as string | null) === tutorUserId;
   const sourceBlocks = Array.isArray(source.task_blocks_json)
-    ? (source.task_blocks_json as Array<Record<string, unknown>>).map((blk) => ({
-      ...blk,
-      audio_url: null,
-    }))
+    ? (source.task_blocks_json as Array<Record<string, unknown>>).map((blk) =>
+      isOwnSource ? blk : { ...blk, audio_url: null })
     : null;
+  // Транскрипты — спутники аудио: копируем ровно тогда, когда копируем трек,
+  // иначе получится «текст от записи, которой в копии нет».
+  const sourceTranscripts = isOwnSource
+    ? (source.block_transcripts_json as Record<string, string> | null) ?? null
+    : null;
+  // Сколько треков потеряно — фронт скажет об этом прямо, а не промолчит.
+  const droppedAudioCount = !isOwnSource && Array.isArray(source.task_blocks_json)
+    ? (source.task_blocks_json as Array<Record<string, unknown>>)
+      .filter((blk) => Boolean(blk.audio_url)).length
+    : 0;
 
   const copyTitle = `Копия — ${source.title as string}`.slice(0, VARIANT_TITLE_MAX);
   // Ревью 5.6 P1 #5: копия создаётся ОДНОЙ транзакцией (мета + задачи).
@@ -4502,14 +4513,15 @@ async function handleDuplicateVariant(
         subject: (source.subject as string | null) ?? "physics",
         // PDF условий НЕ копируем: после замены задач он стал бы враньём.
         variant_pdf_url: null,
-        // Аудирование НЕ копируем (та же логика + blob остался бы в чужом
-        // own-namespace бакета — копия ссылалась бы на файл исходного владельца,
-        // который тот может удалить). Владелец копии прикрепляет трек заново.
-        listening_audio_url: null,
-        listening_transcript: null,
-        // Структура блоков едет, аудио и транскрипты — нет (см. sourceBlocks).
+        // Легаси variant-level трек: копируем на тех же условиях, что блоки.
+        listening_audio_url: isOwnSource
+          ? (source.listening_audio_url as string | null) ?? null
+          : null,
+        listening_transcript: isOwnSource
+          ? (source.listening_transcript as string | null) ?? null
+          : null,
         task_blocks_json: sourceBlocks,
-        block_transcripts_json: null,
+        block_transcripts_json: sourceTranscripts,
       },
       _tasks: sourceTasks,
     },
@@ -4525,7 +4537,9 @@ async function handleDuplicateVariant(
     variant_id: newVariantId,
     source_is_catalog: source.owner_id === null,
   });
-  return jsonOk(cors, { variant_id: newVariantId }, 201);
+  // dropped_audio_count — фронт предупреждает явно, а не отдаёт «Копия создана»
+  // при копии без треков (P1-2 ревью 5.6).
+  return jsonOk(cors, { variant_id: newVariantId, dropped_audio_count: droppedAudioCount }, 201);
 }
 
 // DELETE /variants/:id — только личный, не назначенный.

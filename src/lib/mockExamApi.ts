@@ -626,7 +626,7 @@ export async function getMockExamVariantListening(
 /** Копия каталожного ИЛИ своего варианта → новый личный (запрос Елены/Ульяны). */
 export async function duplicateMockExamVariant(
   variantId: string,
-): Promise<{ variant_id: string }> {
+): Promise<{ variant_id: string; dropped_audio_count?: number }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/duplicate`, {
     method: 'POST',
   });

@@ -18,13 +18,14 @@
 // Ученик видит его только после сдачи. Не «схлопывать» их в один объект.
 
 import { useEffect, useRef, useState } from 'react';
-import { Headphones, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Headphones, ImagePlus, Loader2, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { getKBImageSignedUrl } from '@/lib/kbApi';
+import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
+import { parseAttachmentUrls } from '@/lib/attachmentRefs';
 import { uploadListeningAudio, validateListeningAudioFile } from '@/lib/mockExamApi';
 import type { VariantTaskDraft } from './variantTaskDraft';
 
@@ -62,6 +63,111 @@ export function createTaskBlock(index: number): TaskBlockDraft {
 
 export function blockDisplayTitle(block: TaskBlockDraft, index: number): string {
   return block.title.trim() || `Блок ${index + 1}`;
+}
+
+// ─── Документ (фото) одного блока ────────────────────────────────────────────
+//
+// Один файл на блок: скан статьи/документа DELF. Бакет и валидатор те же, что
+// у фото условия задачи — отдельного пути загрузки не заводим.
+
+function BlockImage({
+  imageUrl,
+  disabled,
+  onChange,
+}: {
+  imageUrl: string | null;
+  disabled: boolean;
+  onChange: (ref: string | null) => void;
+}) {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const firstRef = parseAttachmentUrls(imageUrl)[0] ?? null;
+
+  useEffect(() => {
+    setFailed(false);
+    setSignedUrl(null);
+    if (!firstRef) return;
+    let cancelled = false;
+    void getKBImageSignedUrl(firstRef).then((url) => {
+      if (cancelled) return;
+      if (url) setSignedUrl(url);
+      else setFailed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [firstRef]);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    const validationError = validateImageFile(file);
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setUploading(true);
+    try {
+      const res = await uploadKBTaskImage(file);
+      onChange(res.storageRef);
+      toast.success('Документ прикреплён');
+    } catch {
+      toast.error('Не удалось загрузить документ');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {firstRef ? (
+        failed ? (
+          <div className="flex h-16 w-24 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-1 text-center text-[10px] font-medium leading-tight text-amber-700">
+            Файл недоступен
+          </div>
+        ) : signedUrl ? (
+          <img
+            loading="lazy"
+            src={signedUrl}
+            alt="Документ блока"
+            onError={() => setFailed(true)}
+            className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
+          />
+        ) : (
+          <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+            <ImagePlus className="h-4 w-4 animate-pulse text-slate-300" aria-hidden="true" />
+          </div>
+        )
+      ) : null}
+      <button
+        type="button"
+        disabled={disabled || uploading}
+        onClick={() => fileInputRef.current?.click()}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 [touch-action:manipulation]"
+      >
+        {uploading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        ) : (
+          <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+        )}
+        {firstRef ? 'Заменить документ' : 'Документ (фото)'}
+      </button>
+      {firstRef ? (
+        <button
+          type="button"
+          disabled={disabled || uploading}
+          onClick={() => onChange(null)}
+          className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 [touch-action:manipulation]"
+        >
+          Убрать
+        </button>
+      ) : null}
+      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+    </div>
+  );
 }
 
 // ─── Аудио одного блока ──────────────────────────────────────────────────────
@@ -210,8 +316,29 @@ export function TaskBlocksSection({
   onBindTask: (taskLocalId: string, blockId: string | null) => void;
   onUploadingChange: (key: string, uploading: boolean) => void;
 }) {
+  // P1-7 ревью 5.6: удаление блока стирает текст, транскрипт и все привязки.
+  // Два шага вместо одного клика по маленькой корзине — в create-режиме
+  // восстановить введённую статью нечем.
+  const [confirmRemoveId, setConfirmRemoveId] = useState<string | null>(null);
+
   const patchBlock = (id: string, patch: Partial<TaskBlockDraft>) => {
     onBlocksChange(blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  };
+
+  // P1-6 ревью 5.6: транскрипт — спутник КОНКРЕТНОЙ записи. Раньше он переживал
+  // удаление и замену трека (поле лишь скрывалось) и после новой загрузки
+  // публиковался ученику как разбор новой записи. Чистим и говорим об этом.
+  const setBlockAudio = (id: string, ref: string | null) => {
+    const block = blocks.find((b) => b.id === id);
+    const hadTranscript = Boolean(block?.transcript.trim());
+    patchBlock(id, hadTranscript ? { audioUrl: ref, transcript: '' } : { audioUrl: ref });
+    if (hadTranscript) {
+      toast.info(
+        ref
+          ? 'Транскрипт очищен — он относился к прежней записи. Вставьте текст новой.'
+          : 'Транскрипт очищен вместе с записью.',
+      );
+    }
   };
 
   const removeBlock = (id: string) => {
@@ -219,6 +346,18 @@ export function TaskBlocksSection({
     // удалённый блок и словит BLOCK_NOT_FOUND уже на сохранении.
     tasks.filter((t) => t.blockId === id).forEach((t) => onBindTask(t.localId, null));
     onBlocksChange(blocks.filter((b) => b.id !== id));
+    setConfirmRemoveId(null);
+  };
+
+  /** P1-4 ревью 5.6: вопросы блока идут не подряд → у ученика будет НЕСКОЛЬКО
+   *  шапок с одним материалом (группировка идёт по смежным отрезкам). Это
+   *  предсказуемо, но молчать нельзя — она ждёт один общий блок. */
+  const hasGap = (blockId: string): boolean => {
+    const indexes = tasks
+      .map((t, i) => (t.blockId === blockId ? i : -1))
+      .filter((i) => i >= 0);
+    if (indexes.length < 2) return false;
+    return indexes[indexes.length - 1] - indexes[0] + 1 !== indexes.length;
   };
 
   return (
@@ -271,16 +410,43 @@ export function TaskBlocksSection({
                     className={INPUT_CLASS}
                   />
                 </div>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => removeBlock(block.id)}
-                  aria-label={`Удалить блок ${index + 1}`}
-                  title="Удалить блок"
-                  className="rounded-md p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 [touch-action:manipulation]"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                </button>
+                {confirmRemoveId === block.id ? (
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => removeBlock(block.id)}
+                      className="rounded-md bg-red-600 px-2.5 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 [touch-action:manipulation]"
+                    >
+                      Удалить
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmRemoveId(null)}
+                      className="rounded-md px-2 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-slate-100 [touch-action:manipulation]"
+                    >
+                      Отмена
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => {
+                      // Пустой и ни с чем не связанный блок сносим сразу —
+                      // подтверждать нечего.
+                      const isEmpty = !block.title.trim() && !block.instruction.trim()
+                        && !block.audioUrl && !block.imageUrl && !block.transcript.trim()
+                        && !tasks.some((t) => t.blockId === block.id);
+                      if (isEmpty) removeBlock(block.id);
+                      else setConfirmRemoveId(block.id);
+                    }}
+                    aria-label={`Удалить блок ${index + 1}`}
+                    title="Удалить блок"
+                    className="rounded-md p-2 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 [touch-action:manipulation]"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                )}
               </div>
 
               <div>
@@ -298,10 +464,19 @@ export function TaskBlocksSection({
                 />
               </div>
 
+              {/* P1-3 ревью 5.6: раньше контракт и подпись секции обещали
+                  «документ», а загрузить его было нечем — скан DELF прикрепить
+                  невозможно, скопированное фото не проверить и не убрать. */}
+              <BlockImage
+                imageUrl={block.imageUrl}
+                disabled={disabled}
+                onChange={(ref) => patchBlock(block.id, { imageUrl: ref })}
+              />
+
               <BlockAudio
                 audioUrl={block.audioUrl}
                 disabled={disabled}
-                onChange={(ref) => patchBlock(block.id, { audioUrl: ref })}
+                onChange={(ref) => setBlockAudio(block.id, ref)}
                 onUploadingChange={onUploadingChange}
                 uploadKey={block.id}
               />
@@ -387,6 +562,13 @@ export function TaskBlocksSection({
                   <p className="mt-1.5 text-xs text-slate-500">
                     Ни один вопрос не выбран — плеер покажется один раз над всей Частью 1.
                     Это нормально для цельной записи всей секции.
+                  </p>
+                ) : null}
+                {hasGap(block.id) ? (
+                  <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">
+                    Вопросы блока идут не подряд — ученик увидит материал столько раз,
+                    сколько получится отдельных групп. Чтобы блок показался один раз,
+                    переставьте вопросы так, чтобы они шли друг за другом.
                   </p>
                 ) : null}
               </div>
