@@ -746,58 +746,73 @@ const TaskBlockHeader = memo(function TaskBlockHeader({
 }: {
   block: StudentTaskBlock;
 }) {
+  const heading = block.title?.trim()
+    || (block.has_audio ? 'Аудирование' : 'Материал к заданиям');
   return (
-    <div className="sticky top-2 z-20">
-      <Card className="border-sky-200 bg-sky-50/95 shadow-sm backdrop-blur-sm">
-        <CardContent className="space-y-2 p-3 sm:p-4">
-          <div className="flex items-center gap-2">
-            {block.has_audio ? (
-              <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
-            ) : null}
-            <h2 className="text-sm font-semibold text-slate-900">
-              {block.title?.trim() || (block.has_audio ? 'Аудирование' : 'Материал к заданиям')}
-            </h2>
-          </div>
-          {block.instruction?.trim() ? (
-            // Общий текст блока — единственное место, где он живёт; в условиях
-            // задач он больше не дублируется.
-            <p className="max-h-56 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
-              {block.instruction}
-            </p>
-          ) : null}
-          {block.has_image ? (
-            block.image_url ? (
-              <img
-                loading="lazy"
-                src={block.image_url}
-                alt="Материал к заданиям"
-                className="max-h-72 w-full rounded-lg object-contain"
-              />
-            ) : (
-              <p className="text-sm text-rose-700">Не удалось загрузить документ блока.</p>
-            )
-          ) : null}
-          {block.has_audio ? (
-            block.audio_url ? (
-              <audio
-                controls
-                preload="metadata"
-                src={block.audio_url}
-                className="min-h-11 w-full touch-manipulation"
-              >
-                Ваш браузер не поддерживает воспроизведение аудио.
-              </audio>
-            ) : (
-              // has_audio && !audio_url = подпись упала. Говорим прямо: тихо
-              // спрятать плеер = ученик сдаёт аудирование без условия.
-              <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                Аудио к этому блоку не загрузилось — обнови страницу или напиши репетитору.
-                Не отправляй пробник, не прослушав запись.
+    <div className="space-y-3">
+      {/* P1-5 ревью 5.6: СТАТИЧЕСКАЯ часть. Раньше вся карточка была sticky и
+          на маленьком iPhone закрывала ~580 px — инструкция + документ + плеер
+          перекрывали сам вопрос при прокрутке. Длинный контент читают один раз
+          сверху, липким должно быть только то, к чему возвращаются. */}
+      {block.instruction?.trim() || block.has_image ? (
+        <Card className="border-sky-200 bg-sky-50/70 shadow-none">
+          <CardContent className="space-y-2 p-3 sm:p-4">
+            {block.instruction?.trim() ? (
+              // Общий текст блока — единственное место, где он живёт; в условиях
+              // задач он больше не дублируется.
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+                {block.instruction}
               </p>
-            )
-          ) : null}
-        </CardContent>
-      </Card>
+            ) : null}
+            {block.has_image ? (
+              block.image_url ? (
+                <img
+                  loading="lazy"
+                  src={block.image_url}
+                  alt="Материал к заданиям"
+                  className="max-h-96 w-full rounded-lg object-contain"
+                />
+              ) : (
+                <p className="text-sm text-rose-700">Не удалось загрузить документ блока.</p>
+              )
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ЛИПКАЯ часть — только заголовок и плеер: к записи возвращаются на
+          каждом вопросе, к тексту статьи — нет. */}
+      <div className="sticky top-2 z-20">
+        <Card className="border-sky-200 bg-sky-50/95 shadow-sm backdrop-blur-sm">
+          <CardContent className="space-y-2 p-3 sm:p-4">
+            <div className="flex items-center gap-2">
+              {block.has_audio ? (
+                <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+              ) : null}
+              <h2 className="text-sm font-semibold text-slate-900">{heading}</h2>
+            </div>
+            {block.has_audio ? (
+              block.audio_url ? (
+                <audio
+                  controls
+                  preload="metadata"
+                  src={block.audio_url}
+                  className="min-h-11 w-full touch-manipulation"
+                >
+                  Ваш браузер не поддерживает воспроизведение аудио.
+                </audio>
+              ) : (
+                // has_audio && !audio_url = подпись упала. Говорим прямо: тихо
+                // спрятать плеер = ученик сдаёт аудирование без условия.
+                <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                  Аудио к этому блоку не загрузилось — обнови страницу или напиши репетитору.
+                  Не отправляй пробник, не прослушав запись.
+                </p>
+              )
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 });
@@ -1260,9 +1275,9 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     return map;
   }, [data.variant?.task_blocks]);
 
-  const part1Groups = useMemo(() => {
-    const groups: Array<{ key: string; block: StudentTaskBlock | null; tasks: typeof part1Tasks }> = [];
-    for (const task of part1Tasks) {
+  const groupTasksByBlock = useCallback((source: typeof tasks) => {
+    const groups: Array<{ key: string; block: StudentTaskBlock | null; tasks: typeof tasks }> = [];
+    for (const task of source) {
       const blockId = task.block_id ?? null;
       const last = groups[groups.length - 1];
       if (last && (last.block?.id ?? null) === blockId) {
@@ -1276,14 +1291,23 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       });
     }
     return groups;
-  }, [part1Tasks, blocksById]);
+  }, [blocksById]);
 
-  // Блоки БЕЗ привязанных задач = общий материал на всю Часть 1 (её ответ
+  const part1Groups = useMemo(() => groupTasksByBlock(part1Tasks), [groupTasksByBlock, part1Tasks]);
+  // P0-1 ревью 5.6: Часть 2 тоже группируется. Материал блока — это УСЛОВИЕ
+  // (статья, по которой пишут эссе), а не украшение Части 1.
+  const part2Groups = useMemo(() => groupTasksByBlock(part2Tasks), [groupTasksByBlock, part2Tasks]);
+
+  // Блоки БЕЗ привязанных задач = общий материал на всю работу (её ответ
   // «и один файлом, и несколько»: цельный integral-трек привязывать не к чему).
+  //
+  // P0-1 ревью 5.6: «привязан» считается по ВСЕМ задачам, не только Части 1.
+  // Раньше блок, привязанный лишь к задачам Части 2, считался ничейным и
+  // всплывал над Частью 1 — ученик видел статью не там, где по ней пишет.
   const unboundBlocks = useMemo(() => {
-    const bound = new Set(part1Tasks.map((t) => t.block_id).filter(Boolean) as string[]);
+    const bound = new Set(tasks.map((t) => t.block_id).filter(Boolean) as string[]);
     return (data.variant?.task_blocks ?? []).filter((b) => b?.id && !bound.has(b.id));
-  }, [data.variant?.task_blocks, part1Tasks]);
+  }, [data.variant?.task_blocks, tasks]);
   const imagesByKim = useSignedTaskImages(tasks);
   const isFinal = data.attempt.status !== 'in_progress';
   // Длительность: значение варианта → дефолт профиля (предмет × экзамен) →
@@ -1731,10 +1755,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               </Card>
             )}
 
-            {answerMethod === 'form' && part1Groups.map((group) => (
+            {/* P0-1 ревью 5.6: шапка блока рендерится в ОБОИХ режимах ответа.
+                В режиме бланка цифровые поля скрыты, но материал блока (статья,
+                документ, аудиотрек) — это условие: без него ученик решает
+                вслепую. Скрывать можно поля ввода, не условие. */}
+            {part1Groups.map((group) => (
               <div key={group.key} className="space-y-3">
                 {group.block ? <TaskBlockHeader block={group.block} /> : null}
-                {group.tasks.map((task) => (
+                {answerMethod === 'form' && group.tasks.map((task) => (
                   <Part1TaskCard
                     key={task.id}
                     task={task}
@@ -1777,13 +1805,21 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 удалил per-task photo upload, но условия задач остались нужны —
                 ученик ДОЛЖЕН видеть что решать. Карточки без upload UI.
                 Photo upload остаётся bulk (ниже). */}
+            {/* P0-1 ревью 5.6: материал блока и во Части 2 — эссе пишут ПО
+                прочитанному тексту, он должен стоять рядом с заданием, а не
+                всплывать над Частью 1. */}
             <div className="space-y-3">
-              {part2Tasks.map((task) => (
-                <Part2TaskPreviewCard
-                  key={task.id}
-                  task={task}
-                  imageUrls={imagesByKim[task.kim_number] ?? []}
-                />
+              {part2Groups.map((group) => (
+                <div key={group.key} className="space-y-3">
+                  {group.block ? <TaskBlockHeader block={group.block} /> : null}
+                  {group.tasks.map((task) => (
+                    <Part2TaskPreviewCard
+                      key={task.id}
+                      task={task}
+                      imageUrls={imagesByKim[task.kim_number] ?? []}
+                    />
+                  ))}
+                </div>
               ))}
             </div>
 

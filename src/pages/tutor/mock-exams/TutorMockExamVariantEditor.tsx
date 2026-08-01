@@ -441,6 +441,10 @@ function VariantEditorContent() {
   const [listeningTranscript, setListeningTranscript] = useState('');
   // Блоки заданий (2026-08-01): общий материал + привязка вопросов.
   const [blocks, setBlocks] = useState<TaskBlockDraft[]>([]);
+  // CAS-ревизия загруженного варианта (P0-4/P0-5 ревью 5.6): уходит обратно
+  // при сохранении, сервер сверяет. Вкладка с устаревшим снимком получит 409
+  // вместо тихой перезаписи чужих правок и потери привязок блоков.
+  const [loadedRevision, setLoadedRevision] = useState<number | null>(null);
   // Data-loss гард: в edit-режиме транскрипт приходит ОТДЕЛЬНЫМ edge-запросом
   // (column-GRANT 20260731190000 закрыл его от PostgREST). Пока запрос не
   // resolve'нулся (или упал): textarea disabled, а save шлёт undefined
@@ -449,7 +453,20 @@ function VariantEditorContent() {
   const [transcriptReady, setTranscriptReady] = useState(!isEditMode);
   // Ревью 5.6 P0 (HZ-4): upload аудио (1-3 мин) должен блокировать Save —
   // иначе «Сохранить» посреди загрузки подтверждает вариант без трека.
-  const [audioUploading, setAudioUploading] = useState(false);
+  // P0-2 ревью 5.6: параллельные загрузки треков. Один boolean ломался —
+  // короткий файл завершался первым и разблокировал «Сохранить», пока два
+  // других ещё грузились; их поздние storage-ref не попадали никуда.
+  // Множество активных ключей: Save открыт только когда оно пусто.
+  const [uploadingBlocks, setUploadingBlocks] = useState<Set<string>>(() => new Set());
+  const audioUploading = uploadingBlocks.size > 0;
+  const handleUploadingChange = useCallback((key: string, uploading: boolean) => {
+    setUploadingBlocks((prev) => {
+      const next = new Set(prev);
+      if (uploading) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
   const [aiLoaderOpen, setAiLoaderOpen] = useState(false);
@@ -470,6 +487,7 @@ function VariantEditorContent() {
     setPart1Tasks(detail.tasks.filter((t) => t.part === 1).map(rowToDraft));
     setPart2Tasks(detail.tasks.filter((t) => t.part === 2).map(rowToDraft));
     setListeningAudioRef(detail.variant.listening_audio_url ?? null);
+    setLoadedRevision(detail.variant.content_revision ?? null);
     const savedBlocks = detail.variant.task_blocks_json ?? null;
     // Транскрипт — отдельным edge-запросом (см. transcriptReady-гард).
     void getMockExamVariantListening(editId!)
@@ -724,7 +742,7 @@ function VariantEditorContent() {
         // потерянные блоки не дали бы ни ошибки, ни маркера.
         const sentListening =
           Boolean(listeningAudioRef || listeningTranscript.trim()) || blocks.length > 0;
-        if (sentListening && !created.listening_fields_applied) {
+        if (sentListening && !created.block_fields_applied) {
           toast.error(
             'Вариант создан, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Откройте вариант и прикрепите аудио повторно чуть позже.',
             { duration: 10000 },
@@ -769,13 +787,14 @@ function VariantEditorContent() {
               ...buildBlocksPayload(),
             }
           : {}),
+        ...(loadedRevision !== null ? { expected_revision: loadedRevision } : {}),
       });
       invalidateVariantCaches();
       // Deploy-skew handshake (ревью 5.6 P0) — mirror create-путь.
       const sentListeningOnReplace =
         transcriptReady &&
         (Boolean(listeningAudioRef || listeningTranscript.trim()) || blocks.length > 0);
-      if (sentListeningOnReplace && !replaceRes.listening_fields_applied) {
+      if (sentListeningOnReplace && !replaceRes.block_fields_applied) {
         toast.error(
           'Задачи сохранены, но аудио/транскрипт НЕ сохранились — сервер ещё обновляется. Повторите сохранение чуть позже.',
           { duration: 10000 },
@@ -784,6 +803,16 @@ function VariantEditorContent() {
         toast.success('Вариант сохранён');
       }
     } catch (err) {
+      // VARIANT_STALE (P0-4/P0-5 ревью 5.6): другая вкладка успела сохранить
+      // вариант. Обычный toast тут мало — репетитор не должен продолжать
+      // печатать в форму, которая гарантированно не сохранится.
+      if (err instanceof MockExamApiError && err.code === 'VARIANT_STALE') {
+        toast.error(err.message, {
+          duration: 15000,
+          action: { label: 'Обновить', onClick: () => window.location.reload() },
+        });
+        return;
+      }
       const msg = err instanceof MockExamApiError || err instanceof Error
         ? err.message
         : 'Не удалось сохранить вариант';
@@ -805,6 +834,7 @@ function VariantEditorContent() {
     blocks,
     transcriptReady,
     audioUploading,
+    loadedRevision,
     buildTasksPayload,
     buildBlocksPayload,
     invalidateVariantCaches,
@@ -1002,7 +1032,7 @@ function VariantEditorContent() {
         transcriptDisabled={contentLocked || isSubmitting || !transcriptReady}
         onBlocksChange={setBlocks}
         onBindTask={handleBindTaskToBlock}
-        onUploadingChange={setAudioUploading}
+        onUploadingChange={handleUploadingChange}
       />
       ) : null}
 

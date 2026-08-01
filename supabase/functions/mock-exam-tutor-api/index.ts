@@ -3872,6 +3872,15 @@ function blockFieldToRpcArg<T>(value: T | undefined): T | null {
   return value === undefined ? null : value;
 }
 
+/** Ревизия контента, которую видел клиент (CAS против lost update и против
+ *  устаревшего бандла, потерявшего block_id). undefined = клиент ревизий не
+ *  поддерживает; решение об отказе принимает RPC, зная, есть ли что терять. */
+function parseExpectedRevision(b: Record<string, unknown>): number | null {
+  const raw = b.expected_revision;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 1) return null;
+  return raw;
+}
+
 /** Дружелюбный 400 вместо «BLOCK_NOT_FOUND» из RPC, когда блоки и задачи
  *  пришли ОДНИМ запросом (обычный путь редактора). Когда блоки не присланы
  *  (meta-only / частичное сохранение) — судить не по чему, и последнее слово
@@ -3912,6 +3921,10 @@ function mapVariantRpcError(
   // Fail-closed гард блоков (2026-08-01). Обычно до RPC не доходит —
   // validateTaskBlockRefs ловит раньше и называет номер задачи; сюда попадают
   // частичные сохранения, где блоки не присланы вместе с задачами.
+  if (msg.includes("VARIANT_STALE")) {
+    return jsonError(cors, 409, "VARIANT_STALE",
+      "Страница устарела — вариант успели изменить в другой вкладке. Обновите страницу, иначе ваши правки перезапишут чужие.");
+  }
   if (msg.includes("BLOCK_NOT_FOUND")) {
     return jsonError(cors, 409, "BLOCK_NOT_FOUND",
       "Задача ссылается на блок, которого больше нет. Обновите страницу и выберите блок заново.");
@@ -4128,6 +4141,7 @@ async function handleCreateVariant(
   }
 
   // Блоки заданий (2026-08-01): общий материал + привязка задач.
+  const expectedRevision = parseExpectedRevision(b);
   const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
   if (!blocksCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
@@ -4175,7 +4189,7 @@ async function handleCreateVariant(
   // listening_fields_applied — deploy-skew handshake (ревью 5.6 P0): старый
   // edge молча игнорировал listening-поля и возвращал success; новый фронт
   // требует маркер, иначе показывает «аудио не сохранилось».
-  return jsonOk(cors, { variant_id: variantId, listening_fields_applied: true }, 201);
+  return jsonOk(cors, { variant_id: variantId, listening_fields_applied: true, block_fields_applied: true }, 201);
 }
 
 // PATCH /variants/:id — мета личного варианта. title — всегда; subject/exam/
@@ -4201,7 +4215,7 @@ async function handleUpdateVariantMeta(
   const ALLOWED = new Set([
     "title", "subject", "exam", "duration_minutes",
     "listening_audio_url", "listening_transcript",
-    "task_blocks", "block_transcripts",
+    "task_blocks", "block_transcripts", "expected_revision",
   ]);
   const unknownKey = Object.keys(b).find((k) => !ALLOWED.has(k));
   if (unknownKey !== undefined) {
@@ -4229,6 +4243,7 @@ async function handleUpdateVariantMeta(
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
   // Блоки — тоже content-мета (в них живёт условие и трек).
+  const expectedRevision = parseExpectedRevision(b);
   const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
   if (!blocksCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
@@ -4287,6 +4302,7 @@ async function handleUpdateVariantMeta(
       _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
       _task_blocks: blockFieldToRpcArg(blocksCheck.blocks),
       _block_transcripts: blockFieldToRpcArg(blocksCheck.transcripts),
+      _expected_revision: expectedRevision,
     });
     if (rpcErr) {
       const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4388,6 +4404,7 @@ async function handleReplaceVariantTasks(
 
   // Блоки (2026-08-01) — тем же сохранением, атомарно с задачами: иначе
   // «блок удалён, а задачи на него ещё ссылаются» жило бы между двумя запросами.
+  const expectedRevision = parseExpectedRevision(b);
   const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
   if (!blocksCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
@@ -4408,6 +4425,7 @@ async function handleReplaceVariantTasks(
     _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
     _task_blocks: blockFieldToRpcArg(blocksCheck.blocks),
     _block_transcripts: blockFieldToRpcArg(blocksCheck.transcripts),
+      _expected_revision: expectedRevision,
   });
   if (rpcErr) {
     const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4420,7 +4438,7 @@ async function handleReplaceVariantTasks(
     task_count: tasksCheck.tasks.length,
     total_max_score: tasksCheck.totalMax,
     // Deploy-skew handshake (ревью 5.6 P0) — см. handleCreateVariant.
-    listening_fields_applied: true,
+    listening_fields_applied: true, block_fields_applied: true,
   });
 }
 

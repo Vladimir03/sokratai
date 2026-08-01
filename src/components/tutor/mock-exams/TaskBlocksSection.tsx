@@ -71,11 +71,14 @@ function BlockAudio({
   disabled,
   onChange,
   onUploadingChange,
+  uploadKey,
 }: {
   audioUrl: string | null;
   disabled: boolean;
   onChange: (ref: string | null) => void;
-  onUploadingChange: (uploading: boolean) => void;
+  /** P0-2: ключ блока, а не голый boolean — параллельные загрузки. */
+  onUploadingChange: (key: string, uploading: boolean) => void;
+  uploadKey: string;
 }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [audioFailed, setAudioFailed] = useState(false);
@@ -108,7 +111,7 @@ function BlockAudio({
       return;
     }
     setUploading(true);
-    onUploadingChange(true);
+    onUploadingChange(uploadKey, true);
     setFileInfo(`${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} МБ`);
     try {
       const res = await uploadListeningAudio(file);
@@ -118,7 +121,7 @@ function BlockAudio({
       toast.error(err instanceof Error ? err.message : 'Не удалось загрузить аудио');
     } finally {
       setUploading(false);
-      onUploadingChange(false);
+      onUploadingChange(uploadKey, false);
       setFileInfo(null);
     }
   };
@@ -205,7 +208,7 @@ export function TaskBlocksSection({
   transcriptDisabled: boolean;
   onBlocksChange: (next: TaskBlockDraft[]) => void;
   onBindTask: (taskLocalId: string, blockId: string | null) => void;
-  onUploadingChange: (uploading: boolean) => void;
+  onUploadingChange: (key: string, uploading: boolean) => void;
 }) {
   const patchBlock = (id: string, patch: Partial<TaskBlockDraft>) => {
     onBlocksChange(blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)));
@@ -300,6 +303,7 @@ export function TaskBlocksSection({
                 disabled={disabled}
                 onChange={(ref) => patchBlock(block.id, { audioUrl: ref })}
                 onUploadingChange={onUploadingChange}
+                uploadKey={block.id}
               />
 
               {block.audioUrl ? (

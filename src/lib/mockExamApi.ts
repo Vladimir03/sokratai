@@ -476,11 +476,16 @@ export interface CreateMockExamVariantPayload {
   task_blocks?: MockExamTaskBlockInput[];
   /** Транскрипты по blockId. ANTI-LEAK: ученику — только post-submit. */
   block_transcripts?: Record<string, string>;
+  /**
+   * CAS-ревизия контента, которую видел клиент (2026-08-01, P0-4/P0-5 ревью).
+   * Не совпала с серверной → 409 VARIANT_STALE вместо тихого lost update.
+   */
+  expected_revision?: number;
 }
 
 export async function createMockExamVariant(
   payload: CreateMockExamVariantPayload,
-): Promise<{ variant_id: string; listening_fields_applied?: boolean }> {
+): Promise<{ variant_id: string; listening_fields_applied?: boolean; block_fields_applied?: boolean }> {
   // listening_fields_applied — deploy-skew handshake (ревью 5.6 P0): старый
   // edge игнорирует listening-поля и не шлёт маркер → фронт показывает
   // предупреждение вместо тихого data-loss.
@@ -492,7 +497,7 @@ export async function createMockExamVariant(
 
 export async function updateMockExamVariantMeta(
   variantId: string,
-  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts'>>,
+  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts' | 'expected_revision'>>,
 ): Promise<{ updated: true }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}`, {
     method: 'PATCH',
@@ -505,8 +510,8 @@ export async function replaceMockExamVariantTasks(
   tasks: MockExamVariantTaskInput[],
   // Ревью 5.6 P1 #4: мета едет ВМЕСТЕ с задачами — сервер сохраняет всё одной
   // транзакцией (RPC), «предмет сменился, задачи не доехали» невозможен.
-  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts'>>,
-): Promise<{ updated: true; task_count: number; total_max_score: number; listening_fields_applied?: boolean }> {
+  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts' | 'expected_revision'>>,
+): Promise<{ updated: true; task_count: number; total_max_score: number; listening_fields_applied?: boolean; block_fields_applied?: boolean }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/tasks`, {
     method: 'PUT',
     body: JSON.stringify({ tasks, ...(meta ?? {}) }),

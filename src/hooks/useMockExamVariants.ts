@@ -46,6 +46,11 @@ export interface MockExamVariantSummary {
     image_url?: string | null;
     audio_url?: string | null;
   }> | null;
+  /**
+   * CAS-ревизия контента (2026-08-01). Клиент возвращает её при сохранении;
+   * расхождение → 409 VARIANT_STALE вместо тихого lost update между вкладками.
+   */
+  content_revision?: number | null;
 }
 
 export interface MockExamVariantTaskRow {
@@ -75,7 +80,7 @@ export interface MockExamVariantDetail {
 // ⚠️ listening_transcript сюда НЕ добавлять (column-GRANT 20260731190000:
 // колонка отозвана у authenticated — select с ней падает целиком).
 const VARIANT_SUMMARY_SELECT =
-  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url, task_blocks_json';
+  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url, task_blocks_json, content_revision';
 
 export const MOCK_EXAM_VARIANTS_KEY = ['tutor', 'mock-exams', 'variants'] as const;
 

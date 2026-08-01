@@ -414,6 +414,8 @@ async function handleGetStudentAssignment(
     ? resolveSignedUrl(db, variant.listening_audio_url as string, AUDIO_SIGNED_URL_TTL_SEC)
     : Promise.resolve(null);
   const taskBlocksPromise = signTaskBlocks(db, variant?.task_blocks_json);
+  const hasTaskBlocks = Array.isArray(variant?.task_blocks_json)
+    && (variant?.task_blocks_json as unknown[]).length > 0;
 
   const part2WithSignedUrls = await Promise.all(
     (part2Rows ?? []).map(async (row) => ({
@@ -493,8 +495,14 @@ async function handleGetStudentAssignment(
         // RAW ref — клиент отличает «вариант без аудио» (панели нет) от
         // «подпись упала» (has=true, url=null → блокирующая ошибка с
         // «Повторить», НЕ тихий экзамен без условия).
-        has_listening_audio: Boolean(variant.listening_audio_url),
-        listening_audio_url: await listeningAudioSignedPromise,
+        // P1-1 ревью 5.6: backfill положил легаси-трек И в variant-level поля,
+        // И в блок «legacy» — отдать оба значит показать ДВА одинаковых
+        // sticky-плеера (и два транскрипта в результате). Подавляем легаси
+        // ровно тогда, когда есть блоки: они новее и несут название+инструкцию.
+        // Подавление СЕРВЕРНОЕ — иначе правило пришлось бы дублировать на трёх
+        // клиентских поверхностях и оно бы разъехалось.
+        has_listening_audio: hasTaskBlocks ? false : Boolean(variant.listening_audio_url),
+        listening_audio_url: hasTaskBlocks ? null : await listeningAudioSignedPromise,
         // Блоки заданий (2026-08-01). Транскриптов здесь нет и быть не может —
         // они в отдельной колонке, не селектятся до сдачи (rule 45).
         task_blocks: await taskBlocksPromise,
@@ -960,12 +968,16 @@ async function handleGetResult(
         // Аудирование, post-submit reveal (early-reject гарантирует не-pre-submit):
         // аудио — переслушать при разборе; транскрипт — «что звучало» (ценность
         // работы над ошибками, как эталон Ч2).
-        listening_audio_url: await resolveSignedUrl(
+        // P1-1 ревью 5.6: то же подавление легаси, что на taking-поверхности —
+        // иначе результат показывает две одинаковые карточки транскрипта.
+        listening_audio_url: resultHasBlocks ? null : await resolveSignedUrl(
           db,
           (variant.listening_audio_url as string | null) ?? null,
           AUDIO_SIGNED_URL_TTL_SEC,
         ),
-        listening_transcript: (variant.listening_transcript as string | null) ?? null,
+        listening_transcript: resultHasBlocks
+          ? null
+          : (variant.listening_transcript as string | null) ?? null,
         // Блоки: тот же post-submit reveal. Транскрипты по blockId отдаются
         // ТОЛЬКО здесь — на taking-surface колонка не селектится вовсе.
         task_blocks: await signTaskBlocks(db, variant.task_blocks_json),
