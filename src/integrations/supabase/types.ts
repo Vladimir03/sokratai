@@ -2876,6 +2876,7 @@ export type Database = {
       }
       mock_exam_variant_tasks: {
         Row: {
+          block_id: string | null
           check_mode: string | null
           correct_answer: string | null
           id: string
@@ -2891,6 +2892,7 @@ export type Database = {
           variant_id: string
         }
         Insert: {
+          block_id?: string | null
           check_mode?: string | null
           correct_answer?: string | null
           id?: string
@@ -2906,6 +2908,7 @@ export type Database = {
           variant_id: string
         }
         Update: {
+          block_id?: string | null
           check_mode?: string | null
           correct_answer?: string | null
           id?: string
@@ -2932,6 +2935,7 @@ export type Database = {
       }
       mock_exam_variants: {
         Row: {
+          block_transcripts_json: Json | null
           created_at: string
           created_by: string
           duration_minutes: number
@@ -2945,12 +2949,14 @@ export type Database = {
           source: string
           source_attribution: string | null
           subject: string
+          task_blocks_json: Json | null
           task_count: number
           title: string
           total_max_score: number
           variant_pdf_url: string | null
         }
         Insert: {
+          block_transcripts_json?: Json | null
           created_at?: string
           created_by: string
           duration_minutes: number
@@ -2964,12 +2970,14 @@ export type Database = {
           source: string
           source_attribution?: string | null
           subject?: string
+          task_blocks_json?: Json | null
           task_count: number
           title: string
           total_max_score: number
           variant_pdf_url?: string | null
         }
         Update: {
+          block_transcripts_json?: Json | null
           created_at?: string
           created_by?: string
           duration_minutes?: number
@@ -2983,6 +2991,7 @@ export type Database = {
           source?: string
           source_attribution?: string | null
           subject?: string
+          task_blocks_json?: Json | null
           task_count?: number
           title?: string
           total_max_score?: number
@@ -5792,11 +5801,13 @@ export type Database = {
       }
       mock_exam_variant_replace_tasks: {
         Args: {
+          _block_transcripts?: Json
           _duration_minutes?: number
           _exam_type?: string
           _listening_audio_url?: string
           _listening_transcript?: string
           _subject?: string
+          _task_blocks?: Json
           _tasks: Json
           _title?: string
           _variant_id: string
