@@ -2936,6 +2936,7 @@ export type Database = {
       mock_exam_variants: {
         Row: {
           block_transcripts_json: Json | null
+          content_revision: number
           created_at: string
           created_by: string
           duration_minutes: number
@@ -2957,6 +2958,7 @@ export type Database = {
         }
         Insert: {
           block_transcripts_json?: Json | null
+          content_revision?: number
           created_at?: string
           created_by: string
           duration_minutes: number
@@ -2978,6 +2980,7 @@ export type Database = {
         }
         Update: {
           block_transcripts_json?: Json | null
+          content_revision?: number
           created_at?: string
           created_by?: string
           duration_minutes?: number
@@ -5804,6 +5807,7 @@ export type Database = {
           _block_transcripts?: Json
           _duration_minutes?: number
           _exam_type?: string
+          _expected_revision?: number
           _listening_audio_url?: string
           _listening_transcript?: string
           _subject?: string
