@@ -200,6 +200,45 @@ async function resolveSignedUrl(
   return rewriteToProxy(data.signedUrl);
 }
 
+/** Блоки заданий (2026-08-01) → student-safe вид с подписанными медиа.
+ *
+ *  ⚠️ ANTI-LEAK: транскрипты сюда НЕ приходят в принципе — они лежат в
+ *  ОТДЕЛЬНОЙ колонке block_transcripts_json, которая на taking-surface даже
+ *  не селектится. Не добавлять их в этот хелпер: он используется и до сдачи.
+ *
+ *  Подпись параллельная (Promise.all): 3 блока × 2 медиа = 6 storage-RTT
+ *  последовательно превратили бы открытие пробника в секунды ожидания.
+ *
+ *  Инвариант has_audio ≠ audio_url (зеркало HZ-2 для variant-level трека):
+ *  ref есть, а подпись упала → фронт обязан показать блокирующую ошибку,
+ *  а не молча спрятать плеер (ученик сдал бы аудирование без условия). */
+async function signTaskBlocks(
+  db: SupabaseClient,
+  raw: unknown,
+): Promise<Array<Record<string, unknown>> | null> {
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  return await Promise.all(
+    raw.map(async (blk) => {
+      const b = (blk ?? {}) as Record<string, unknown>;
+      const audioRef = (b.audio_url as string | null) ?? null;
+      const imageRef = (b.image_url as string | null) ?? null;
+      const [audioSigned, imageSigned] = await Promise.all([
+        resolveSignedUrl(db, audioRef, AUDIO_SIGNED_URL_TTL_SEC),
+        resolveSignedUrl(db, imageRef),
+      ]);
+      return {
+        id: b.id ?? null,
+        title: (b.title as string | null) ?? "",
+        instruction: (b.instruction as string | null) ?? "",
+        has_audio: Boolean(audioRef),
+        audio_url: audioSigned,
+        has_image: Boolean(imageRef),
+        image_url: imageSigned,
+      };
+    }),
+  );
+}
+
 function inferExtension(mimeType: string, fallback = "jpg"): string {
   switch (mimeType) {
     case "image/png": return "png";
@@ -340,7 +379,7 @@ async function handleGetStudentAssignment(
     // раскрывается только post-submit в handleGetResult. Само аудио — условие.
     const { data: variantRow, error: variantErr } = await db
       .from("mock_exam_variants")
-      .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url, listening_audio_url")
+      .select("id, title, subject, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count, variant_pdf_url, listening_audio_url, task_blocks_json")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     // Rule 45: НЕ глотать error supabase-запроса (класс инцидента 2026-06-08 —
@@ -351,7 +390,7 @@ async function handleGetStudentAssignment(
     // Anti-leak: SELECT explicitly omits correct_answer, solution_text.
     const { data: variantTasks, error: tasksErr } = await db
       .from("mock_exam_variant_tasks")
-      .select("id, kim_number, part, order_num, task_text, task_image_url, check_mode, max_score, topic")
+      .select("id, kim_number, part, order_num, task_text, task_image_url, check_mode, max_score, topic, block_id")
       .eq("variant_id", assignment.variant_id as string)
       .order("order_num", { ascending: true });
     if (tasksErr) return jsonError(cors, 500, "DB_ERROR", "Failed to load variant tasks");
@@ -374,6 +413,7 @@ async function handleGetStudentAssignment(
   const listeningAudioSignedPromise = variant?.listening_audio_url
     ? resolveSignedUrl(db, variant.listening_audio_url as string, AUDIO_SIGNED_URL_TTL_SEC)
     : Promise.resolve(null);
+  const taskBlocksPromise = signTaskBlocks(db, variant?.task_blocks_json);
 
   const part2WithSignedUrls = await Promise.all(
     (part2Rows ?? []).map(async (row) => ({
@@ -455,6 +495,9 @@ async function handleGetStudentAssignment(
         // «Повторить», НЕ тихий экзамен без условия).
         has_listening_audio: Boolean(variant.listening_audio_url),
         listening_audio_url: await listeningAudioSignedPromise,
+        // Блоки заданий (2026-08-01). Транскриптов здесь нет и быть не может —
+        // они в отдельной колонке, не селектятся до сдачи (rule 45).
+        task_blocks: await taskBlocksPromise,
       }
       : null,
     tasks,
@@ -622,7 +665,8 @@ async function handleGetResult(
       .from("mock_exam_variants")
       .select(
         "id, title, subject, exam_type, duration_minutes, total_max_score, " +
-          "part1_max, part2_max, task_count, listening_audio_url, listening_transcript",
+          "part1_max, part2_max, task_count, listening_audio_url, listening_transcript, " +
+          "task_blocks_json, block_transcripts_json",
       )
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
@@ -640,7 +684,7 @@ async function handleGetResult(
     // Pre-SUBMIT (in_progress/paused) сюда не доходит — early-reject 409 выше.
     const taskSelect = isPostSubmit
       ? "kim_number, part, order_num, task_text, task_image_url, " +
-        "correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic"
+        "correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic, block_id"
       : "kim_number, part, correct_answer, check_mode, max_score";
     const { data: variantTasks } = await db
       .from("mock_exam_variant_tasks")
@@ -922,6 +966,11 @@ async function handleGetResult(
           AUDIO_SIGNED_URL_TTL_SEC,
         ),
         listening_transcript: (variant.listening_transcript as string | null) ?? null,
+        // Блоки: тот же post-submit reveal. Транскрипты по blockId отдаются
+        // ТОЛЬКО здесь — на taking-surface колонка не селектится вовсе.
+        task_blocks: await signTaskBlocks(db, variant.task_blocks_json),
+        block_transcripts:
+          (variant.block_transcripts_json as Record<string, string> | null) ?? null,
       }
       : null,
     attempt: {

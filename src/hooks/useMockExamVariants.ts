@@ -33,6 +33,19 @@ export interface MockExamVariantSummary {
    * GET /variants/:id/listening (`getMockExamVariantListening`).
    */
   listening_audio_url?: string | null;
+  /**
+   * Блоки заданий (2026-08-01): общий материал + N вопросов. Student-safe
+   * (это условие), поэтому колонка в column-GRANT есть. ⚠️ Транскриптов блоков
+   * здесь тоже НЕТ — они в block_transcripts_json, не гранится (ответы
+   * аудирования); prefill через тот же edge GET /variants/:id/listening.
+   */
+  task_blocks_json?: Array<{
+    id: string;
+    title?: string | null;
+    instruction?: string | null;
+    image_url?: string | null;
+    audio_url?: string | null;
+  }> | null;
 }
 
 export interface MockExamVariantTaskRow {
@@ -48,6 +61,8 @@ export interface MockExamVariantTaskRow {
   solution_text: string | null;
   solution_image_urls: string | null;
   topic: string | null;
+  /** Привязка к элементу task_blocks_json[].id; null = вне блока. */
+  block_id?: string | null;
 }
 
 export interface MockExamVariantDetail {
@@ -60,7 +75,7 @@ export interface MockExamVariantDetail {
 // ⚠️ listening_transcript сюда НЕ добавлять (column-GRANT 20260731190000:
 // колонка отозвана у authenticated — select с ней падает целиком).
 const VARIANT_SUMMARY_SELECT =
-  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url';
+  'id, title, exam_type, subject, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_count, owner_id, listening_audio_url, task_blocks_json';
 
 export const MOCK_EXAM_VARIANTS_KEY = ['tutor', 'mock-exams', 'variants'] as const;
 
@@ -101,7 +116,7 @@ export function useMockExamVariantDetail(variantId: string | null) {
           .maybeSingle(),
         supabase
           .from('mock_exam_variant_tasks')
-          .select('id, kim_number, part, order_num, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic')
+          .select('id, kim_number, part, order_num, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic, block_id')
           .eq('variant_id', variantId!)
           .order('order_num', { ascending: true }),
         supabase

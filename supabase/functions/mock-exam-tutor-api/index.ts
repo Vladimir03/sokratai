@@ -3731,6 +3731,171 @@ function listeningFieldToRpcArg(value: string | null | undefined): string | null
   return value ?? "";
 }
 
+/** Блок заданий = общий материал (текст / фото / аудио) + N привязанных задач.
+ *  Обобщение variant-level трека (2026-08-01): у DELF каждый exercice — свой
+ *  документ, а на чтении общая преамбула иначе дублируется в каждый вопрос
+ *  руками (реальные данные Эмилии: одна преамбула в 6 задачах).
+ *
+ *  ANTI-LEAK: transcripts едут ОТДЕЛЬНЫМ объектом, а не полем внутри блока —
+ *  в БД это две разные колонки, потому что column-GRANT работает по колонкам
+ *  (task_blocks_json гранится ученику, block_transcripts_json — никогда).
+ *  Сложить их в один JSONB = отдать ответы аудирования прямым PostgREST. */
+const MAX_TASK_BLOCKS = 10;
+const BLOCK_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const BLOCK_TITLE_MAX = 120;
+const BLOCK_INSTRUCTION_MAX = 8000;
+
+function validateVariantTaskBlocks(
+  b: Record<string, unknown>,
+  tutorUserId: string,
+):
+  | { ok: true; blocks: unknown[] | undefined; transcripts: Record<string, string> | undefined }
+  | { ok: false; message: string } {
+  let blocks: unknown[] | undefined = undefined;
+  const blockIds = new Set<string>();
+
+  if (b.task_blocks !== undefined) {
+    if (b.task_blocks === null) {
+      blocks = [];
+    } else if (!Array.isArray(b.task_blocks)) {
+      return { ok: false, message: "блоки заданий должны быть списком" };
+    } else if (b.task_blocks.length > MAX_TASK_BLOCKS) {
+      return { ok: false, message: `слишком много блоков (максимум ${MAX_TASK_BLOCKS})` };
+    } else {
+      const normalized: unknown[] = [];
+      for (const raw of b.task_blocks) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+          return { ok: false, message: "блок должен быть объектом" };
+        }
+        const blk = raw as Record<string, unknown>;
+
+        const id = typeof blk.id === "string" ? blk.id.trim() : "";
+        if (!BLOCK_ID_RE.test(id)) {
+          return { ok: false, message: "у блока некорректный идентификатор" };
+        }
+        if (blockIds.has(id)) {
+          return { ok: false, message: "идентификаторы блоков должны быть уникальны" };
+        }
+        blockIds.add(id);
+
+        const title = typeof blk.title === "string" ? blk.title.trim() : "";
+        if (title.length > BLOCK_TITLE_MAX) {
+          return { ok: false, message: `название блока слишком длинное (максимум ${BLOCK_TITLE_MAX} символов)` };
+        }
+
+        const instruction = typeof blk.instruction === "string" ? blk.instruction.trim() : "";
+        if (instruction.length > BLOCK_INSTRUCTION_MAX) {
+          return { ok: false, message: `текст блока слишком длинный (максимум ${BLOCK_INSTRUCTION_MAX} символов)` };
+        }
+
+        // Фото блока — те же бакеты, что у картинок задач (каталожные refs
+        // легитимны при дублировании варианта), кап 5 как у task_image_url.
+        const imageCheck = validateVariantImageField(blk.image_url ?? null, 5);
+        if (!imageCheck.ok) {
+          return { ok: false, message: `фото блока: ${imageCheck.message}` };
+        }
+
+        // Аудио — own-namespace ОБЯЗАТЕЛЕН (та же логика, что в
+        // validateVariantListeningFields: чужих легитимных аудио-refs нет).
+        let audioUrl: string | null = null;
+        const rawAudio = blk.audio_url;
+        if (rawAudio !== undefined && rawAudio !== null && rawAudio !== "") {
+          if (typeof rawAudio !== "string") {
+            return { ok: false, message: "ссылка на аудио должна быть строкой" };
+          }
+          const trimmed = rawAudio.trim();
+          if (trimmed !== "") {
+            const refs = parseAttachmentUrls(trimmed);
+            if (refs.length !== 1) {
+              return { ok: false, message: "аудио блока — один файл (storage://)" };
+            }
+            const parsed = parseStorageRef(refs[0]);
+            if (!parsed || !VARIANT_AUDIO_BUCKETS.has(parsed.bucket)) {
+              return { ok: false, message: "аудио должно быть загружено через Сократ (storage://mock-exam-listening-audio/...)" };
+            }
+            if (!parsed.path.startsWith(`${tutorUserId}/`)) {
+              return { ok: false, message: "аудио должно быть загружено с вашего аккаунта" };
+            }
+            audioUrl = trimmed;
+          }
+        }
+
+        normalized.push({
+          id,
+          title,
+          instruction,
+          image_url: imageCheck.value,
+          audio_url: audioUrl,
+        });
+      }
+      blocks = normalized;
+    }
+  }
+
+  let transcripts: Record<string, string> | undefined = undefined;
+  if (b.block_transcripts !== undefined) {
+    if (b.block_transcripts === null) {
+      transcripts = {};
+    } else if (
+      typeof b.block_transcripts !== "object" || Array.isArray(b.block_transcripts)
+    ) {
+      return { ok: false, message: "транскрипты должны быть объектом" };
+    } else {
+      const out: Record<string, string> = {};
+      for (const [key, value] of Object.entries(b.block_transcripts as Record<string, unknown>)) {
+        if (!BLOCK_ID_RE.test(key)) {
+          return { ok: false, message: "у транскрипта некорректный идентификатор блока" };
+        }
+        // Осиротевший транскрипт отбрасываем ТОЛЬКО когда блоки пришли в этом
+        // же запросе (иначе судить не по чему — блоки могли не меняться).
+        if (blocks !== undefined && !blockIds.has(key)) continue;
+        if (typeof value !== "string") {
+          return { ok: false, message: "транскрипт должен быть строкой" };
+        }
+        const trimmed = value.trim();
+        if (trimmed === "") continue;
+        if (trimmed.length > VARIANT_TRANSCRIPT_MAX) {
+          return { ok: false, message: `транскрипт слишком длинный (максимум ${VARIANT_TRANSCRIPT_MAX} символов)` };
+        }
+        out[key] = trimmed;
+      }
+      transcripts = out;
+    }
+  }
+
+  return { ok: true, blocks, transcripts };
+}
+
+/** Тристейт JSONB → аргумент RPC: undefined → null (не менять),
+ *  пустой список/объект → он же (RPC трактует как очистку). */
+function blockFieldToRpcArg<T>(value: T | undefined): T | null {
+  return value === undefined ? null : value;
+}
+
+/** Дружелюбный 400 вместо «BLOCK_NOT_FOUND» из RPC, когда блоки и задачи
+ *  пришли ОДНИМ запросом (обычный путь редактора). Когда блоки не присланы
+ *  (meta-only / частичное сохранение) — судить не по чему, и последнее слово
+ *  остаётся за fail-closed гардом внутри RPC. */
+function validateTaskBlockRefs(
+  tasks: Array<Record<string, unknown>>,
+  blocks: unknown[] | undefined,
+): { ok: true } | { ok: false; message: string } {
+  if (blocks === undefined) return { ok: true };
+  const ids = new Set(
+    blocks.map((b) => (b as Record<string, unknown>).id as string),
+  );
+  for (const t of tasks) {
+    const blockId = t.block_id as string | null;
+    if (blockId && !ids.has(blockId)) {
+      return {
+        ok: false,
+        message: `задача № ${t.kim_number} привязана к удалённому блоку — выберите блок заново`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
 /** Маппинг RAISE-кодов вариант-RPC → HTTP (rule 97: русские фразы). */
 function mapVariantRpcError(
   message: string | undefined,
@@ -3743,6 +3908,16 @@ function mapVariantRpcError(
   }
   if (msg.includes("VARIANT_NOT_FOUND")) {
     return jsonError(cors, 404, "NOT_FOUND", "Variant not found");
+  }
+  // Fail-closed гард блоков (2026-08-01). Обычно до RPC не доходит —
+  // validateTaskBlockRefs ловит раньше и называет номер задачи; сюда попадают
+  // частичные сохранения, где блоки не присланы вместе с задачами.
+  if (msg.includes("BLOCK_NOT_FOUND")) {
+    return jsonError(cors, 409, "BLOCK_NOT_FOUND",
+      "Задача ссылается на блок, которого больше нет. Обновите страницу и выберите блок заново.");
+  }
+  if (msg.includes("BLOCKS_MALFORMED")) {
+    return jsonError(cors, 400, "VALIDATION", "Некорректный формат блоков заданий");
   }
   return null;
 }
@@ -3832,6 +4007,12 @@ function validateVariantTasksPayload(
       return { ok: false, message: `${label}: эталонное решение слишком длинное` };
     }
     const topic = typeof row.topic === "string" ? row.topic.trim().slice(0, 200) : "";
+    // Привязка к блоку (2026-08-01). Существование блока проверяет
+    // validateTaskBlockRefs + fail-closed гард внутри RPC.
+    const blockId = typeof row.block_id === "string" ? row.block_id.trim() : "";
+    if (blockId !== "" && !BLOCK_ID_RE.test(blockId)) {
+      return { ok: false, message: `${label}: некорректная привязка к блоку` };
+    }
 
     if (part === 1) part1Max += maxScore;
     else part2Max += maxScore;
@@ -3848,6 +4029,7 @@ function validateVariantTasksPayload(
       solution_text: solutionText || null,
       solution_image_urls: solutionImagesCheck.value,
       topic: topic || null,
+      block_id: blockId || null,
     });
   }
   return { ok: true, tasks, part1Max, part2Max, totalMax: part1Max + part2Max };
@@ -3945,6 +4127,16 @@ async function handleCreateVariant(
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
 
+  // Блоки заданий (2026-08-01): общий материал + привязка задач.
+  const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
+  if (!blocksCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
+  }
+  const blockIdCheck = validateTaskBlockRefs(tasksCheck.tasks, blocksCheck.blocks);
+  if (!blockIdCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", blockIdCheck.message);
+  }
+
   // Ревью 5.6 P1 #5: мета + задачи ОДНОЙ транзакцией (RPC) — двухфазный
   // insert с best-effort rollback-delete мог оставить назначаемый «пустой»
   // вариант с ненулевыми тоталами.
@@ -3963,6 +4155,8 @@ async function handleCreateVariant(
         variant_pdf_url: null,
         listening_audio_url: listeningCheck.audioUrl ?? null,
         listening_transcript: listeningCheck.transcript ?? null,
+        task_blocks_json: blocksCheck.blocks ?? null,
+        block_transcripts_json: blocksCheck.transcripts ?? null,
       },
       _tasks: tasksCheck.tasks,
     },
@@ -4007,6 +4201,7 @@ async function handleUpdateVariantMeta(
   const ALLOWED = new Set([
     "title", "subject", "exam", "duration_minutes",
     "listening_audio_url", "listening_transcript",
+    "task_blocks", "block_transcripts",
   ]);
   const unknownKey = Object.keys(b).find((k) => !ALLOWED.has(k));
   if (unknownKey !== undefined) {
@@ -4033,8 +4228,14 @@ async function handleUpdateVariantMeta(
   if (!listeningCheck.ok) {
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
+  // Блоки — тоже content-мета (в них живёт условие и трек).
+  const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
+  if (!blocksCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
+  }
   const touchesListening =
-    b.listening_audio_url !== undefined || b.listening_transcript !== undefined;
+    b.listening_audio_url !== undefined || b.listening_transcript !== undefined ||
+    b.task_blocks !== undefined || b.block_transcripts !== undefined;
 
   const touchesContentMeta =
     b.subject !== undefined || b.exam !== undefined || b.duration_minutes !== undefined ||
@@ -4084,6 +4285,8 @@ async function handleUpdateVariantMeta(
       // Тристейт: undefined → NULL (не менять), null → '' (очистить).
       _listening_audio_url: listeningFieldToRpcArg(listeningCheck.audioUrl),
       _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
+      _task_blocks: blockFieldToRpcArg(blocksCheck.blocks),
+      _block_transcripts: blockFieldToRpcArg(blocksCheck.transcripts),
     });
     if (rpcErr) {
       const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4183,6 +4386,17 @@ async function handleReplaceVariantTasks(
     return jsonError(cors, 400, "VALIDATION", listeningCheck.message);
   }
 
+  // Блоки (2026-08-01) — тем же сохранением, атомарно с задачами: иначе
+  // «блок удалён, а задачи на него ещё ссылаются» жило бы между двумя запросами.
+  const blocksCheck = validateVariantTaskBlocks(b, tutorUserId);
+  if (!blocksCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", blocksCheck.message);
+  }
+  const blockIdCheck = validateTaskBlockRefs(tasksCheck.tasks, blocksCheck.blocks);
+  if (!blockIdCheck.ok) {
+    return jsonError(cors, 400, "VALIDATION", blockIdCheck.message);
+  }
+
   const { error: rpcErr } = await db.rpc("mock_exam_variant_replace_tasks", {
     _variant_id: variantId,
     _tasks: tasksCheck.tasks,
@@ -4192,6 +4406,8 @@ async function handleReplaceVariantTasks(
     _duration_minutes: metaDuration,
     _listening_audio_url: listeningFieldToRpcArg(listeningCheck.audioUrl),
     _listening_transcript: listeningFieldToRpcArg(listeningCheck.transcript),
+    _task_blocks: blockFieldToRpcArg(blocksCheck.blocks),
+    _block_transcripts: blockFieldToRpcArg(blocksCheck.transcripts),
   });
   if (rpcErr) {
     const mapped = mapVariantRpcError(rpcErr.message, cors);
@@ -4231,12 +4447,23 @@ async function handleDuplicateVariant(
 
   const { data: sourceTasks, error: tasksErr } = await db
     .from("mock_exam_variant_tasks")
-    .select("kim_number, part, order_num, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic")
+    .select("kim_number, part, order_num, task_text, task_image_url, correct_answer, check_mode, max_score, solution_text, solution_image_urls, topic, block_id")
     .eq("variant_id", variantId)
     .order("order_num", { ascending: true });
   if (tasksErr || !sourceTasks || sourceTasks.length === 0) {
     return jsonError(cors, 500, "DB_ERROR", "Failed to load variant tasks");
   }
+
+  // Блоки копируем СО СТРУКТУРОЙ (название, инструкция, фото — это условие,
+  // ради которого блок и заводят), но БЕЗ аудио: blob лежит в own-namespace
+  // исходного владельца, и копия ссылалась бы на чужой файл — та же логика,
+  // что у listening_audio_url ниже. Привязки задач при этом уцелеют.
+  const sourceBlocks = Array.isArray(source.task_blocks_json)
+    ? (source.task_blocks_json as Array<Record<string, unknown>>).map((blk) => ({
+      ...blk,
+      audio_url: null,
+    }))
+    : null;
 
   const copyTitle = `Копия — ${source.title as string}`.slice(0, VARIANT_TITLE_MAX);
   // Ревью 5.6 P1 #5: копия создаётся ОДНОЙ транзакцией (мета + задачи).
@@ -4262,6 +4489,9 @@ async function handleDuplicateVariant(
         // который тот может удалить). Владелец копии прикрепляет трек заново.
         listening_audio_url: null,
         listening_transcript: null,
+        // Структура блоков едет, аудио и транскрипты — нет (см. sourceBlocks).
+        task_blocks_json: sourceBlocks,
+        block_transcripts_json: null,
       },
       _tasks: sourceTasks,
     },
@@ -4543,6 +4773,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonOk(cors, {
         listening_transcript:
           (variantOrErr.listening_transcript as string | null) ?? null,
+        // Блоки (2026-08-01): транскрипты по blockId той же причине не
+        // грантятся authenticated — prefill только отсюда.
+        block_transcripts:
+          (variantOrErr.block_transcripts_json as Record<string, string> | null) ?? {},
       });
     }
 

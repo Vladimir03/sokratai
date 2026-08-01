@@ -773,9 +773,12 @@ function TopPreparingSummary() {
 function ListeningTranscriptCard({
   audioUrl,
   transcript,
+  title,
 }: {
   audioUrl: string | null;
   transcript: string | null;
+  /** Название блока (2026-08-01); без него — легаси variant-level трек. */
+  title?: string | null;
 }) {
   const [open, setOpen] = useState(false);
   if (!audioUrl && !transcript) return null;
@@ -791,7 +794,9 @@ function ListeningTranscriptCard({
         <div className="flex items-center gap-2">
           <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
           <div>
-            <h2 className="text-base font-semibold text-slate-900">Аудирование</h2>
+            <h2 className="text-base font-semibold text-slate-900">
+              {title?.trim() || 'Аудирование'}
+            </h2>
             <p className="text-sm text-slate-500">
               {transcript ? 'Запись и транскрипт — для работы над ошибками' : 'Запись — можно переслушать'}
             </p>
@@ -1204,6 +1209,17 @@ function ResultContent({ view }: { view: StudentMockExamResultView }) {
                 audioUrl={view.variant?.listening_audio_url ?? null}
                 transcript={view.variant?.listening_transcript ?? null}
               />
+              {/* Блоки (2026-08-01): свой транскрипт у каждого трека. Карточка
+                  сама возвращает null, если у блока нет ни аудио, ни текста —
+                  блоки-документы (только текст статьи) здесь не шумят. */}
+              {(view.variant?.task_blocks ?? []).map((block) => (
+                <ListeningTranscriptCard
+                  key={block.id}
+                  title={block.title}
+                  audioUrl={block.audio_url}
+                  transcript={view.variant?.block_transcripts?.[block.id] ?? null}
+                />
+              ))}
 
               {isPending && (
                 <Part2PreliminarySection

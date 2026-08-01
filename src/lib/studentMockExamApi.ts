@@ -94,6 +94,8 @@ export interface StudentMockExamVariantTask {
   check_mode: MockExamCheckMode | null;
   max_score: number;
   topic: string | null;
+  /** Блок, к которому относится задача (2026-08-01); null = сама по себе. */
+  block_id?: string | null;
 }
 
 export interface StudentMockExamVariantSummary {
@@ -133,6 +135,33 @@ export interface StudentMockExamVariantSummary {
    * taking-surface всегда undefined.
    */
   listening_transcript?: string | null;
+  /**
+   * Блоки заданий (2026-08-01): общий материал + группа вопросов. Приходят на
+   * ОБЕИХ поверхностях (условие), медиа уже подписаны сервером.
+   */
+  task_blocks?: StudentTaskBlock[] | null;
+  /**
+   * Транскрипты блоков по blockId. Как и `listening_transcript`, приходят
+   * ТОЛЬКО из result-эндпоинта — на taking-surface колонка не селектится.
+   */
+  block_transcripts?: Record<string, string> | null;
+}
+
+/**
+ * Блок = общий материал над группой вопросов (текст статьи / документ / трек).
+ *
+ * `has_audio` ≠ `audio_url`: ref есть, а подпись упала → показываем явную
+ * ошибку, а не прячем плеер (ученик иначе сдаёт аудирование, не зная, что
+ * условия не было). Тот же контракт, что `has_listening_audio` выше.
+ */
+export interface StudentTaskBlock {
+  id: string;
+  title: string | null;
+  instruction: string | null;
+  has_audio: boolean;
+  audio_url: string | null;
+  has_image: boolean;
+  image_url: string | null;
 }
 
 export interface StudentMockExamPart1Saved {

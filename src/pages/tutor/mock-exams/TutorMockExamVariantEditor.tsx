@@ -13,7 +13,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
   Copy,
-  Headphones,
   ImagePlus,
   Loader2,
   Lock,
@@ -43,8 +42,6 @@ import {
   MockExamApiError,
   replaceMockExamVariantTasks,
   updateMockExamVariantMeta,
-  uploadListeningAudio,
-  validateListeningAudioFile,
   type MockExamVariantTaskInput,
 } from '@/lib/mockExamApi';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
@@ -57,8 +54,14 @@ import {
   type VariantTaskDraft,
 } from '@/components/tutor/mock-exams/variantTaskDraft';
 import { MockExamAiLoaderSheet } from '@/components/tutor/mock-exams/MockExamAiLoaderSheet';
+import {
+  TaskBlocksSection,
+  blockDisplayTitle,
+  type TaskBlockDraft,
+} from '@/components/tutor/mock-exams/TaskBlocksSection';
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import { getSubjectLabel } from '@/types/homework';
+import { subjectRequiresCefr } from '@/lib/subjects/registry';
 import { getExamProfile } from '@/lib/examProfiles';
 import {
   resolveTutorDefaultExamEgeOge,
@@ -191,190 +194,6 @@ function TaskImageAttachment({
   );
 }
 
-// ─── Аудирование: трек + ручной транскрипт (2026-07-31, запрос Эмилии) ───────
-//
-// Compréhension orale: ОДИН цельный трек на вариант (эталон Эмилии —
-// `...integral.mp3`, вся секция с экзаменационными паузами, 21.7 МБ / 24 мин).
-// Upload — клиент → Storage напрямую (private бакет, own-namespace RLS);
-// self-check плеер — client-side signed URL (getKBImageSignedUrl умеет любой
-// бакет из storage:// ref). Транскрипт — ручной ввод (v1, как на progress.me);
-// ученик увидит его ТОЛЬКО после сдачи (anti-leak rule 45, edge-контракт).
-function ListeningAudioSection({
-  audioRef,
-  transcript,
-  disabled,
-  transcriptDisabled,
-  onAudioChange,
-  onTranscriptChange,
-  onUploadingChange,
-}: {
-  audioRef: string | null;
-  transcript: string;
-  disabled: boolean;
-  /** Отдельный гейт: prefill транскрипта идёт своим edge-запросом (data-loss гард). */
-  transcriptDisabled: boolean;
-  onAudioChange: (ref: string | null) => void;
-  onTranscriptChange: (value: string) => void;
-  /**
-   * Ревью 5.6 P0 (HZ-4): upload 22 МБ идёт 1-3 мин — родитель ОБЯЗАН знать
-   * о нём, иначе «Сохранить» во время загрузки подтверждает вариант без
-   * трека (ref ещё null), а поздний ref никуда не попадает.
-   */
-  onUploadingChange: (uploading: boolean) => void;
-}) {
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
-  const [audioFailed, setAudioFailed] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadingFileInfo, setUploadingFileInfo] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    setAudioFailed(false);
-    setSignedUrl(null);
-    if (!audioRef) return;
-    let cancelled = false;
-    void getKBImageSignedUrl(audioRef).then((url) => {
-      if (cancelled) return;
-      if (url) setSignedUrl(url);
-      else setAudioFailed(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [audioRef]);
-
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    const validationError = validateListeningAudioFile(file);
-    if (validationError) {
-      toast.error(validationError);
-      return;
-    }
-    setUploading(true);
-    onUploadingChange(true);
-    setUploadingFileInfo(`${file.name} · ${(file.size / (1024 * 1024)).toFixed(1)} МБ`);
-    try {
-      const res = await uploadListeningAudio(file);
-      onAudioChange(res.storageRef);
-      toast.success('Аудио загружено — проверьте воспроизведение ниже');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Не удалось загрузить аудио');
-    } finally {
-      setUploading(false);
-      onUploadingChange(false);
-      setUploadingFileInfo(null);
-    }
-  };
-
-  return (
-    <Card animate={false}>
-      <CardContent className="p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Аудирование · необязательно
-          </p>
-        </div>
-        <p className="text-sm text-slate-500">
-          Аудиотрек секции аудирования (один файл на вариант, до 30 МБ — MP3, M4A, OGG, WAV).
-          Ученик слушает его во время пробника; вопросы по треку добавляйте как обычные задачи Части 1.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            disabled={disabled || uploading}
-            onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 [touch-action:manipulation]"
-          >
-            {uploading ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Headphones className="h-4 w-4" aria-hidden="true" />
-            )}
-            {uploading ? 'Загружаем…' : audioRef ? 'Заменить аудио' : 'Загрузить аудио'}
-          </button>
-          {audioRef ? (
-            <button
-              type="button"
-              disabled={disabled || uploading}
-              onClick={() => onAudioChange(null)}
-              className="rounded-lg px-2.5 py-2 text-sm font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 [touch-action:manipulation]"
-            >
-              Убрать
-            </button>
-          ) : null}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="audio/*,.mp3,.m4a,.ogg,.wav"
-            onChange={handleFile}
-            className="hidden"
-          />
-        </div>
-
-        {uploading && uploadingFileInfo ? (
-          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-            Загружаем {uploadingFileInfo} — большой файл может идти 1–3 минуты.
-            Не закрывайте страницу и не нажимайте «Сохранить», пока загрузка не завершится.
-          </p>
-        ) : null}
-
-        {audioRef ? (
-          audioFailed ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              Аудиофайл недоступен — загрузите заново.
-            </p>
-          ) : signedUrl ? (
-            // Self-check: репетитор слушает, что загрузилось (playback-before-use).
-            <audio controls preload="metadata" src={signedUrl} className="h-10 w-full [touch-action:manipulation]">
-              Ваш браузер не поддерживает воспроизведение аудио.
-            </audio>
-          ) : (
-            <div className="flex h-10 items-center gap-2 text-sm text-slate-400">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Готовим плеер…
-            </div>
-          )
-        ) : null}
-
-        <div>
-          <Label htmlFor="listening-transcript" className="mb-1 block text-xs font-semibold text-slate-500">
-            Транскрипт записи
-          </Label>
-          <textarea
-            id="listening-transcript"
-            value={transcript}
-            disabled={transcriptDisabled}
-            onChange={(e) => onTranscriptChange(e.target.value)}
-            placeholder="Вставьте текст записи. Ученик увидит его только после сдачи пробника — как разбор."
-            rows={5}
-            maxLength={40000}
-            className={cn(INPUT_CLASS, 'min-h-[120px] resize-y leading-relaxed')}
-          />
-          <div className="mt-1 flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-500">
-              До сдачи транскрипт ученику не показывается — он появится в результате для работы над ошибками.
-            </p>
-            {/* Ревью 5.6 P2 (HZ-6): браузер молча обрезает paste на maxLength —
-                счётчик делает лимит видимым. */}
-            <span
-              className={cn(
-                'shrink-0 text-xs tabular-nums',
-                transcript.length >= 40000 ? 'font-semibold text-amber-600' : 'text-slate-400',
-              )}
-            >
-              {transcript.length.toLocaleString('ru-RU')} / 40 000
-            </span>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 // ─── Task card ───────────────────────────────────────────────────────────────
 
 const VariantTaskCard = memo(function VariantTaskCard({
@@ -382,6 +201,7 @@ const VariantTaskCard = memo(function VariantTaskCard({
   index,
   disabled,
   duplicateKim,
+  blockLabel,
   onUpdate,
   onRemove,
 }: {
@@ -390,6 +210,8 @@ const VariantTaskCard = memo(function VariantTaskCard({
   disabled: boolean;
   /** true = № КИМ конфликтует с другой задачей (live-подсветка). */
   duplicateKim: boolean;
+  /** Read-only бейдж блока; правится чипами в секции блоков (один источник). */
+  blockLabel: string | null;
   onUpdate: (localId: string, patch: Partial<VariantTaskDraft>) => void;
   onRemove: (localId: string) => void;
 }) {
@@ -450,6 +272,11 @@ const VariantTaskCard = memo(function VariantTaskCard({
       </div>
       {duplicateKim ? (
         <p className="text-[11px] text-red-600">№ КИМ повторяется — номера в варианте должны быть уникальны.</p>
+      ) : null}
+      {blockLabel ? (
+        <p className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+          Блок: {blockLabel}
+        </p>
       ) : null}
 
       <div>
@@ -608,8 +435,12 @@ function VariantEditorContent() {
     () => cartPrefill?.drafts.filter((d) => d.part === 2) ?? [],
   );
   // Аудирование (2026-07-31): storage:// ref трека + ручной транскрипт.
+  // Легаси variant-level модель — читается для обратной совместимости и
+  // нормализуется в блок при prefill; новые сохранения пишут только блоки.
   const [listeningAudioRef, setListeningAudioRef] = useState<string | null>(null);
   const [listeningTranscript, setListeningTranscript] = useState('');
+  // Блоки заданий (2026-08-01): общий материал + привязка вопросов.
+  const [blocks, setBlocks] = useState<TaskBlockDraft[]>([]);
   // Data-loss гард: в edit-режиме транскрипт приходит ОТДЕЛЬНЫМ edge-запросом
   // (column-GRANT 20260731190000 закрыл его от PostgREST). Пока запрос не
   // resolve'нулся (или упал): textarea disabled, а save шлёт undefined
@@ -639,10 +470,34 @@ function VariantEditorContent() {
     setPart1Tasks(detail.tasks.filter((t) => t.part === 1).map(rowToDraft));
     setPart2Tasks(detail.tasks.filter((t) => t.part === 2).map(rowToDraft));
     setListeningAudioRef(detail.variant.listening_audio_url ?? null);
+    const savedBlocks = detail.variant.task_blocks_json ?? null;
     // Транскрипт — отдельным edge-запросом (см. transcriptReady-гард).
     void getMockExamVariantListening(editId!)
       .then((res) => {
         setListeningTranscript(res.listening_transcript ?? '');
+        const transcripts = res.block_transcripts ?? {};
+        if (savedBlocks && savedBlocks.length > 0) {
+          setBlocks(savedBlocks.map((b) => ({
+            id: b.id,
+            title: b.title ?? '',
+            instruction: b.instruction ?? '',
+            imageUrl: b.image_url ?? null,
+            audioUrl: b.audio_url ?? null,
+            transcript: transcripts[b.id] ?? '',
+          })));
+        } else if (detail.variant.listening_audio_url) {
+          // Легаси variant-level трек → синтетический блок без привязок.
+          // Без привязок = общий плеер над Частью 1, то есть ровно прежнее
+          // поведение: репетитору ничего перенастраивать не нужно.
+          setBlocks([{
+            id: 'legacy',
+            title: 'Аудирование',
+            instruction: '',
+            imageUrl: null,
+            audioUrl: detail.variant.listening_audio_url,
+            transcript: res.listening_transcript ?? '',
+          }]);
+        }
         setTranscriptReady(true);
       })
       .catch(() => {
@@ -757,10 +612,61 @@ function VariantEditorContent() {
         solution_text: t.solutionText.trim() || null,
         solution_image_urls: t.solutionImageUrls,
         topic: t.topic.trim() || null,
+        block_id: t.blockId,
       });
     }
     return payload;
   }, [part1Tasks, part2Tasks, duplicateKims]);
+
+  // Чипы привязки показывают ВСЕ задачи варианта: блок-документ бывает и у
+  // задачи Части 2 (эссе по прочитанному тексту), не только у аудирования.
+  const allTasks = useMemo(() => [...part1Tasks, ...part2Tasks], [part1Tasks, part2Tasks]);
+
+  // Секция блоков — только иностранные языки (решение владельца 01.08):
+  // физику/математику она бы засоряла, аудирования и разбитых на exercice
+  // документов там нет.
+  //
+  // Гейт — КАНОНИЧЕСКИЙ предикат `subjectRequiresCefr` (AGENTS.md: никаких
+  // локальных ['french','english',…] — расхождение списков уже ломало создание
+  // ДЗ). Плюс `blocks.length > 0`: если блоки уже заведены, а предмет потом
+  // сменили, секция обязана остаться видимой — иначе контент становится
+  // недостижимым, а сохранение молча уносит его вместе с привязками.
+  const showBlocksSection = subjectRequiresCefr(subject) || blocks.length > 0;
+
+  // Бейдж на карточке задачи — READ-ONLY: привязка правится в ОДНОМ месте,
+  // чипами внутри блока. Второй редактируемый контрол на ту же связь дал бы
+  // два источника истины и «почему тут пусто, а там выбрано».
+  const blockLabelFor = useCallback((blockId: string | null): string | null => {
+    if (!blockId) return null;
+    const index = blocks.findIndex((b) => b.id === blockId);
+    return index < 0 ? null : blockDisplayTitle(blocks[index], index);
+  }, [blocks]);
+
+  const handleBindTaskToBlock = useCallback((taskLocalId: string, blockId: string | null) => {
+    const patch = (list: VariantTaskDraft[]) =>
+      list.map((t) => (t.localId === taskLocalId ? { ...t, blockId } : t));
+    setPart1Tasks(patch);
+    setPart2Tasks(patch);
+  }, []);
+
+  // Блоки → две части проводного контракта. Транскрипты уходят ОТДЕЛЬНЫМ
+  // объектом, потому что в БД это отдельная колонка без column-GRANT'а
+  // (транскрипт = ответы аудирования, rule 45). Не схлопывать.
+  const buildBlocksPayload = useCallback(() => {
+    const task_blocks = blocks.map((b) => ({
+      id: b.id,
+      title: b.title.trim(),
+      instruction: b.instruction.trim(),
+      image_url: b.imageUrl,
+      audio_url: b.audioUrl,
+    }));
+    const block_transcripts: Record<string, string> = {};
+    for (const b of blocks) {
+      const value = b.transcript.trim();
+      if (value) block_transcripts[b.id] = value;
+    }
+    return { task_blocks, block_transcripts };
+  }, [blocks]);
 
   const invalidateVariantCaches = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: MOCK_EXAM_VARIANTS_KEY });
@@ -805,6 +711,7 @@ function VariantEditorContent() {
           tasks: tasksPayload,
           listening_audio_url: listeningAudioRef,
           listening_transcript: listeningTranscript.trim() || null,
+          ...buildBlocksPayload(),
         });
         // Ф3: пер-предметный last-used экзамена (дефолт следующего create).
         saveExamLastUsed(subject, exam);
@@ -853,6 +760,9 @@ function VariantEditorContent() {
           ? {
               listening_audio_url: listeningAudioRef ?? '',
               listening_transcript: listeningTranscript.trim(),
+              // Блоки под тем же гардом: их транскрипты приходят тем же
+              // prefill-запросом, значит и замораживаются вместе с ним.
+              ...buildBlocksPayload(),
             }
           : {}),
       });
@@ -890,6 +800,7 @@ function VariantEditorContent() {
     transcriptReady,
     audioUploading,
     buildTasksPayload,
+    buildBlocksPayload,
     invalidateVariantCaches,
     navigate,
   ]);
@@ -1069,20 +980,25 @@ function VariantEditorContent() {
         </CardContent>
       </Card>
 
-      {/* Аудирование (2026-07-31, запрос Эмилии/DELF): трек + ручной транскрипт.
-          Content-мета — заморожена вместе с задачами у назначенного варианта. */}
-      <ListeningAudioSection
-        audioRef={listeningAudioRef}
-        transcript={listeningTranscript}
-        // Ревью 5.6 P1 (sync-гард пары): пока транскрипт-prefill не подъехал,
-        // заморожены ОБА listening-поля — иначе «трек заменили, транскрипт
-        // остался от старого» (save шлёт аудио, но не транскрипт).
+      {/* Блоки заданий (2026-08-01): общий материал (текст / фото / аудиотрек)
+          + привязанные вопросы. Обобщение variant-level трека 31.07 — у DELF
+          каждый exercice свой документ, а на чтении общая преамбула иначе
+          дублируется в каждый вопрос руками.
+          Content-мета — заморожена вместе с задачами у назначенного варианта.
+          Sync-гард пары (ревью 5.6 P1): пока prefill транскриптов не подъехал,
+          секция заморожена целиком — save тогда не шлёт блоки вообще, и
+          сохранённая пара «трек ↔ транскрипт» остаётся согласованной. */}
+      {showBlocksSection ? (
+      <TaskBlocksSection
+        blocks={blocks}
+        tasks={allTasks}
         disabled={contentLocked || isSubmitting || !transcriptReady}
         transcriptDisabled={contentLocked || isSubmitting || !transcriptReady}
-        onAudioChange={setListeningAudioRef}
-        onTranscriptChange={setListeningTranscript}
+        onBlocksChange={setBlocks}
+        onBindTask={handleBindTaskToBlock}
         onUploadingChange={setAudioUploading}
       />
+      ) : null}
 
       {/* AI-загрузка задач из PDF/фото — shared loader (destination mock_variant).
           Задачи распределяются по частям автоматически (физика КИМ 21-26 → Ч2). */}
@@ -1113,6 +1029,7 @@ function VariantEditorContent() {
               index={i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
+              blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
             />
@@ -1137,6 +1054,7 @@ function VariantEditorContent() {
               index={part1Tasks.length + i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
+              blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
             />

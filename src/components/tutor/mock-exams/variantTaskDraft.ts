@@ -27,6 +27,8 @@ export interface VariantTaskDraft {
   solutionText: string;
   solutionImageUrls: string | null;
   topic: string;
+  /** Привязка к блоку заданий (общий материал + N вопросов); null = вне блока. */
+  blockId: string | null;
 }
 
 export function createEmptyVariantTask(part: 1 | 2): VariantTaskDraft {
@@ -42,6 +44,7 @@ export function createEmptyVariantTask(part: 1 | 2): VariantTaskDraft {
     solutionText: '',
     solutionImageUrls: null,
     topic: '',
+    blockId: null,
   };
 }
 
@@ -60,6 +63,7 @@ export function rowToDraft(row: MockExamVariantTaskRow): VariantTaskDraft {
     solutionText: row.solution_text ?? '',
     solutionImageUrls: row.solution_image_urls,
     topic: row.topic ?? '',
+    blockId: row.block_id ?? null,
   };
 }
 
@@ -206,6 +210,7 @@ export function aiExtractToVariantTaskDraft(
     solutionImageUrls:
       item.solutionRefs.length > 0 ? serializeAttachmentUrls(item.solutionRefs) : null,
     topic: draft.topic_suggestion.trim(),
+    blockId: null,
   };
 }
 
@@ -234,6 +239,7 @@ export function hwDraftToVariantTaskDraft(
     solutionText: t.solutionSnapshot ?? '',
     solutionImageUrls: t.solutionAttachmentSnapshot ?? null,
     topic: t.topicName?.trim() ?? '',
+    blockId: null,
   };
 }
 

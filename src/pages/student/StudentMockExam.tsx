@@ -46,6 +46,7 @@ import {
   uploadMockExamPart2Photo,
   type StudentMockExamAssignmentView,
   type StudentMockExamVariantTask,
+  type StudentTaskBlock,
 } from '@/lib/studentMockExamApi';
 import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
@@ -731,6 +732,76 @@ const ListeningAudioPanel = memo(function ListeningAudioPanel({
   );
 });
 
+/** Шапка блока заданий (2026-08-01): общий материал над группой вопросов —
+ *  название, текст-инструкция, документ-картинка, аудиотрек.
+ *
+ *  Sticky ограничен высотой РОДИТЕЛЯ, поэтому шапка живёт внутри div'а группы
+ *  (тот же урок, что с variant-level плеером: в коротком контейнере sticky
+ *  «уезжает» сразу). Пока листаешь вопросы блока — плеер под рукой.
+ *
+ *  ⚠️ Транскрипта здесь нет и быть не может: до сдачи он не приходит с сервера
+ *  вовсе (отдельная колонка без column-GRANT'а, rule 45). */
+const TaskBlockHeader = memo(function TaskBlockHeader({
+  block,
+}: {
+  block: StudentTaskBlock;
+}) {
+  return (
+    <div className="sticky top-2 z-20">
+      <Card className="border-sky-200 bg-sky-50/95 shadow-sm backdrop-blur-sm">
+        <CardContent className="space-y-2 p-3 sm:p-4">
+          <div className="flex items-center gap-2">
+            {block.has_audio ? (
+              <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+            ) : null}
+            <h2 className="text-sm font-semibold text-slate-900">
+              {block.title?.trim() || (block.has_audio ? 'Аудирование' : 'Материал к заданиям')}
+            </h2>
+          </div>
+          {block.instruction?.trim() ? (
+            // Общий текст блока — единственное место, где он живёт; в условиях
+            // задач он больше не дублируется.
+            <p className="max-h-56 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+              {block.instruction}
+            </p>
+          ) : null}
+          {block.has_image ? (
+            block.image_url ? (
+              <img
+                loading="lazy"
+                src={block.image_url}
+                alt="Материал к заданиям"
+                className="max-h-72 w-full rounded-lg object-contain"
+              />
+            ) : (
+              <p className="text-sm text-rose-700">Не удалось загрузить документ блока.</p>
+            )
+          ) : null}
+          {block.has_audio ? (
+            block.audio_url ? (
+              <audio
+                controls
+                preload="metadata"
+                src={block.audio_url}
+                className="min-h-11 w-full touch-manipulation"
+              >
+                Ваш браузер не поддерживает воспроизведение аудио.
+              </audio>
+            ) : (
+              // has_audio && !audio_url = подпись упала. Говорим прямо: тихо
+              // спрятать плеер = ученик сдаёт аудирование без условия.
+              <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                Аудио к этому блоку не загрузилось — обнови страницу или напиши репетитору.
+                Не отправляй пробник, не прослушав запись.
+              </p>
+            )
+          ) : null}
+        </CardContent>
+      </Card>
+    </div>
+  );
+});
+
 /**
  * Ревью 5.6 P1 (HZ-2): подпись трека упала (блоб удалён / storage 5xx / бакет
  * не создан) — «has_listening_audio=true, url=null». БЛОКИРУЮЩАЯ ошибка вместо
@@ -1175,6 +1246,44 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   );
   const part1Tasks = useMemo(() => tasks.filter((task) => task.part === 1), [tasks]);
   const part2Tasks = useMemo(() => tasks.filter((task) => task.part === 2), [tasks]);
+
+  // Блоки заданий (2026-08-01). Группируем ПОДРЯД ИДУЩИЕ задачи с одним
+  // block_id: repetitor задаёт порядок номерами, и «exercice 1 = вопросы 1–8»
+  // — естественный смежный отрезок. Если он привяжет к блоку разрозненные
+  // задачи, получится две группы с одним материалом — предсказуемо и без
+  // магии (файл уже в кэше браузера, повторной закачки нет).
+  const blocksById = useMemo(() => {
+    const map = new Map<string, StudentTaskBlock>();
+    for (const b of data.variant?.task_blocks ?? []) {
+      if (b?.id) map.set(b.id, b);
+    }
+    return map;
+  }, [data.variant?.task_blocks]);
+
+  const part1Groups = useMemo(() => {
+    const groups: Array<{ key: string; block: StudentTaskBlock | null; tasks: typeof part1Tasks }> = [];
+    for (const task of part1Tasks) {
+      const blockId = task.block_id ?? null;
+      const last = groups[groups.length - 1];
+      if (last && (last.block?.id ?? null) === blockId) {
+        last.tasks.push(task);
+        continue;
+      }
+      groups.push({
+        key: `${blockId ?? 'none'}-${task.id}`,
+        block: blockId ? blocksById.get(blockId) ?? null : null,
+        tasks: [task],
+      });
+    }
+    return groups;
+  }, [part1Tasks, blocksById]);
+
+  // Блоки БЕЗ привязанных задач = общий материал на всю Часть 1 (её ответ
+  // «и один файлом, и несколько»: цельный integral-трек привязывать не к чему).
+  const unboundBlocks = useMemo(() => {
+    const bound = new Set(part1Tasks.map((t) => t.block_id).filter(Boolean) as string[]);
+    return (data.variant?.task_blocks ?? []).filter((b) => b?.id && !bound.has(b.id));
+  }, [data.variant?.task_blocks, part1Tasks]);
   const imagesByKim = useSignedTaskImages(tasks);
   const isFinal = data.attempt.status !== 'in_progress';
   // Длительность: значение варианта → дефолт профиля (предмет × экзамен) →
@@ -1582,6 +1691,11 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 }}
               />
             ) : null}
+            {/* Блоки без привязанных вопросов — общий материал на всю Часть 1
+                (цельная запись всей секции; её «и один файлом, и несколько»). */}
+            {unboundBlocks.map((block) => (
+              <TaskBlockHeader key={block.id} block={block} />
+            ))}
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>
@@ -1617,17 +1731,22 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               </Card>
             )}
 
-            {answerMethod === 'form' && part1Tasks.map((task) => (
-              <Part1TaskCard
-                key={task.id}
-                task={task}
-                answer={autosave.answers[task.kim_number] ?? ''}
-                status={autosave.statusByKim[task.kim_number]}
-                imageUrls={imagesByKim[task.kim_number] ?? []}
-                onAnswer={autosave.setAnswer}
-                disabled={isFinal}
-                isPhysics={isPhysicsEgeVariant}
-              />
+            {answerMethod === 'form' && part1Groups.map((group) => (
+              <div key={group.key} className="space-y-3">
+                {group.block ? <TaskBlockHeader block={group.block} /> : null}
+                {group.tasks.map((task) => (
+                  <Part1TaskCard
+                    key={task.id}
+                    task={task}
+                    answer={autosave.answers[task.kim_number] ?? ''}
+                    status={autosave.statusByKim[task.kim_number]}
+                    imageUrls={imagesByKim[task.kim_number] ?? []}
+                    onAnswer={autosave.setAnswer}
+                    disabled={isFinal}
+                    isPhysics={isPhysicsEgeVariant}
+                  />
+                ))}
+              </div>
             ))}
             {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
                 ученик пишет ответы на распечатанном бланке и загружает фото в

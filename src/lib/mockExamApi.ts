@@ -436,6 +436,27 @@ export interface MockExamVariantTaskInput {
   solution_text: string | null;
   solution_image_urls: string | null;
   topic: string | null;
+  /** Привязка к блоку заданий (2026-08-01); null = задача вне блока. */
+  block_id?: string | null;
+}
+
+/** Блок заданий = общий материал + N привязанных вопросов (2026-08-01).
+ *
+ *  Одна сущность вместо двух: у DELF каждый exercice — свой документ (текст
+ *  статьи ИЛИ аудиотрек), и без блока репетитор копирует общую преамбулу в
+ *  каждый вопрос руками. Аудио здесь — просто один из видов материала.
+ *
+ *  ⚠️ Транскрипт в этот тип НЕ входит: на проводе он едет отдельным объектом
+ *  `block_transcripts`, а в БД — отдельной колонкой, потому что column-GRANT
+ *  работает по колонкам (транскрипт = ответы аудирования, ученику до сдачи
+ *  не показывается никогда). Сложить их вместе = отдать ответы. */
+export interface MockExamTaskBlockInput {
+  /** Стабильный slug ([A-Za-z0-9_-], ≤64) — на него ссылается task.block_id. */
+  id: string;
+  title: string;
+  instruction: string;
+  image_url: string | null;
+  audio_url: string | null;
 }
 
 export interface CreateMockExamVariantPayload {
@@ -451,6 +472,10 @@ export interface CreateMockExamVariantPayload {
   listening_audio_url?: string | null;
   /** Ручной транскрипт трека (v1). ANTI-LEAK: ученику — только post-submit. */
   listening_transcript?: string | null;
+  /** Блоки заданий (2026-08-01). Тристейт: undefined = не менять, [] = убрать все. */
+  task_blocks?: MockExamTaskBlockInput[];
+  /** Транскрипты по blockId. ANTI-LEAK: ученику — только post-submit. */
+  block_transcripts?: Record<string, string>;
 }
 
 export async function createMockExamVariant(
@@ -467,7 +492,7 @@ export async function createMockExamVariant(
 
 export async function updateMockExamVariantMeta(
   variantId: string,
-  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript'>>,
+  patch: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts'>>,
 ): Promise<{ updated: true }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}`, {
     method: 'PATCH',
@@ -480,7 +505,7 @@ export async function replaceMockExamVariantTasks(
   tasks: MockExamVariantTaskInput[],
   // Ревью 5.6 P1 #4: мета едет ВМЕСТЕ с задачами — сервер сохраняет всё одной
   // транзакцией (RPC), «предмет сменился, задачи не доехали» невозможен.
-  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript'>>,
+  meta?: Partial<Pick<CreateMockExamVariantPayload, 'title' | 'subject' | 'exam' | 'duration_minutes' | 'listening_audio_url' | 'listening_transcript' | 'task_blocks' | 'block_transcripts'>>,
 ): Promise<{ updated: true; task_count: number; total_max_score: number; listening_fields_applied?: boolean }> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/tasks`, {
     method: 'PUT',
@@ -583,7 +608,11 @@ export async function uploadListeningAudio(
  */
 export async function getMockExamVariantListening(
   variantId: string,
-): Promise<{ listening_transcript: string | null }> {
+): Promise<{
+  listening_transcript: string | null;
+  /** Транскрипты по blockId (2026-08-01). Старый edge поля не шлёт → {}. */
+  block_transcripts?: Record<string, string>;
+}> {
   return requestTutorMockExamApi(`/variants/${encodeURIComponent(variantId)}/listening`, {
     method: 'GET',
   });
