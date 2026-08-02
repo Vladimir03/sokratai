@@ -29,6 +29,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   GraduationCap,
+  Headphones,
   ImageIcon,
   Library,
   Loader2,
@@ -81,6 +82,22 @@ interface VariantSummaryRow {
   total_max_score: number;
   part1_max: number;
   part2_max: number;
+  /**
+   * Блоки заданий (2026-08-02): общий материал над группой вопросов.
+   * ⚠️ Транскриптов здесь НЕТ и быть не может: `block_transcripts_json` не
+   * гранится authenticated (rule 45 — это ответы аудирования), и его
+   * добавление в select уронило бы ВЕСЬ запрос. Превью и так показывает
+   * то, что увидит ученик, а ученик транскрипт до сдачи не видит.
+   */
+  task_blocks_json?: PreviewTaskBlock[] | null;
+}
+
+interface PreviewTaskBlock {
+  id: string;
+  title?: string | null;
+  instruction?: string | null;
+  image_url?: string | null;
+  audio_url?: string | null;
 }
 
 interface VariantTaskRow {
@@ -98,6 +115,8 @@ interface VariantTaskRow {
   check_mode: string | null;
   max_score: number;
   topic: string | null;
+  /** Привязка к элементу task_blocks_json[].id; null = задача вне блока. */
+  block_id?: string | null;
 }
 
 function parseTaskImageRefs(raw: string | null): string[] {
@@ -172,6 +191,27 @@ async function resolveImagesByKim(
     }
   }
   return result;
+}
+
+/** Подписывает медиа блоков (2026-08-02). Параллельно, а не в цикле: блоков
+ *  до 10, у каждого до двух файлов — последовательные RTT затянули бы открытие
+ *  превью на секунды. Аудио живёт в приватном бакете с own-namespace RLS,
+ *  поэтому у ЧУЖОГО (каталожного) варианта подпись честно не сработает —
+ *  шапка тогда скажет об этом прямо, а не притворится, что аудио нет. */
+async function resolveBlockMedia(
+  blocks: PreviewTaskBlock[] | null,
+): Promise<Record<string, { audio: string | null; image: string | null }>> {
+  if (!Array.isArray(blocks) || blocks.length === 0) return {};
+  const entries = await Promise.all(
+    blocks.filter((b) => b?.id).map(async (block) => {
+      const [audio, image] = await Promise.all([
+        block.audio_url ? resolveRefsToSignedUrls([block.audio_url]) : Promise.resolve([]),
+        block.image_url ? resolveRefsToSignedUrls([block.image_url]) : Promise.resolve([]),
+      ]);
+      return [block.id, { audio: audio[0] ?? null, image: image[0] ?? null }] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 function MathBlock({ text, className }: { text: string; className?: string }) {
@@ -416,11 +456,107 @@ function PreviewTaskCard({ task, imageUrls, solutionImageUrls }: PreviewTaskCard
   );
 }
 
+/** Шапка блока в превью (2026-08-02).
+ *
+ *  Зачем: репетитор проверяет вариант ПЕРЕД назначением, а этот экран
+ *  показывал только задачи — прикреплённый трек и общий текст были не видны.
+ *  Эмилия из-за этого решила, что аудио не загрузилось (оно было в базе).
+ *
+ *  Показываем ровно то, что увидит ученик: материал блока. Транскрипт сюда НЕ
+ *  выводим — ученик до сдачи его не видит, а колонка вдобавок не гранится
+ *  клиенту. Репетитор правит транскрипт в редакторе варианта. */
+function PreviewBlockHeader({
+  block,
+  audioUrl,
+  imageUrl,
+}: {
+  block: PreviewTaskBlock;
+  audioUrl: string | null;
+  imageUrl: string | null;
+}) {
+  const heading = block.title?.trim()
+    || (block.audio_url ? 'Аудирование' : 'Материал к заданиям');
+  return (
+    <Card animate={false} className="border-sky-200 bg-sky-50/70 shadow-none">
+      <CardContent className="space-y-2 p-3 sm:p-4">
+        <div className="flex items-center gap-2">
+          {block.audio_url ? (
+            <Headphones className="h-4 w-4 shrink-0 text-sky-700" aria-hidden="true" />
+          ) : null}
+          <h5 className="text-sm font-semibold text-slate-900">{heading}</h5>
+          <span className="text-xs text-muted-foreground">— общий для задач ниже</span>
+        </div>
+        {block.instruction?.trim() ? (
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
+            {block.instruction}
+          </p>
+        ) : null}
+        {block.image_url ? (
+          imageUrl ? (
+            <SafeImage
+              src={imageUrl}
+              alt="Материал к заданиям"
+              className="max-h-72 w-full rounded-lg object-contain"
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground">Готовим документ…</p>
+          )
+        ) : null}
+        {block.audio_url ? (
+          audioUrl ? (
+            <audio
+              controls
+              preload="metadata"
+              src={audioUrl}
+              className="min-h-11 w-full touch-manipulation"
+            >
+              Ваш браузер не поддерживает воспроизведение аудио.
+            </audio>
+          ) : (
+            // Ref есть, подпись не сработала. Говорим прямо: именно здесь
+            // репетитор решает, готов ли вариант к выдаче.
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Аудио прикреплено, но не проигрывается здесь. Откройте вариант на
+              редактирование и проверьте запись перед выдачей ученикам.
+            </p>
+          )
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Группировка задач по СМЕЖНЫМ отрезкам одного блока — зеркало логики
+ *  студенческого экрана (`StudentMockExam`), чтобы превью не расходилось с
+ *  тем, что реально увидит ученик. */
+function groupByBlock(
+  tasks: VariantTaskRow[],
+  blocksById: Map<string, PreviewTaskBlock>,
+): Array<{ key: string; block: PreviewTaskBlock | null; tasks: VariantTaskRow[] }> {
+  const groups: Array<{ key: string; block: PreviewTaskBlock | null; tasks: VariantTaskRow[] }> = [];
+  for (const task of tasks) {
+    const blockId = task.block_id ?? null;
+    const last = groups[groups.length - 1];
+    if (last && (last.block?.id ?? null) === blockId) {
+      last.tasks.push(task);
+      continue;
+    }
+    groups.push({
+      key: `${blockId ?? 'none'}-${task.id}`,
+      block: blockId ? blocksById.get(blockId) ?? null : null,
+      tasks: [task],
+    });
+  }
+  return groups;
+}
+
 interface PreviewBodyProps {
   variant: VariantSummaryRow | null;
   tasks: VariantTaskRow[];
   imagesByKim: Record<number, string[]>;
   solutionImagesByKim: Record<number, string[]>;
+  /** Подписанные медиа блоков, keyed by blockId. */
+  blockMedia: Record<string, { audio: string | null; image: string | null }>;
   loading: boolean;
   error: string | null;
 }
@@ -430,6 +566,7 @@ function PreviewBody({
   tasks,
   imagesByKim,
   solutionImagesByKim,
+  blockMedia,
   loading,
   error,
 }: PreviewBodyProps) {
@@ -462,6 +599,38 @@ function PreviewBody({
 
   const part1Tasks = tasks.filter((t) => t.part === 1);
   const part2Tasks = tasks.filter((t) => t.part === 2);
+
+  const blocks = variant.task_blocks_json ?? [];
+  const blocksById = new Map(blocks.filter((b) => b?.id).map((b) => [b.id, b]));
+  const part1Groups = groupByBlock(part1Tasks, blocksById);
+  const part2Groups = groupByBlock(part2Tasks, blocksById);
+  // Блок без привязанных задач = материал на всю работу (цельный трек секции).
+  // Показываем его над Частью 1 — там же, где увидит ученик.
+  const boundIds = new Set(tasks.map((t) => t.block_id).filter(Boolean) as string[]);
+  const unboundBlocks = blocks.filter((b) => b?.id && !boundIds.has(b.id));
+
+  const renderGroups = (
+    groups: Array<{ key: string; block: PreviewTaskBlock | null; tasks: VariantTaskRow[] }>,
+  ) =>
+    groups.map((group) => (
+      <div key={group.key} className="space-y-2">
+        {group.block ? (
+          <PreviewBlockHeader
+            block={group.block}
+            audioUrl={blockMedia[group.block.id]?.audio ?? null}
+            imageUrl={blockMedia[group.block.id]?.image ?? null}
+          />
+        ) : null}
+        {group.tasks.map((task) => (
+          <PreviewTaskCard
+            key={task.id}
+            task={task}
+            imageUrls={imagesByKim[task.kim_number] ?? []}
+            solutionImageUrls={solutionImagesByKim[task.kim_number] ?? []}
+          />
+        ))}
+      </div>
+    ));
 
   return (
     <div className="space-y-4">
@@ -506,14 +675,15 @@ function PreviewBody({
             </span>
           </div>
           <div className="space-y-2">
-            {part1Tasks.map((task) => (
-              <PreviewTaskCard
-                key={task.id}
-                task={task}
-                imageUrls={imagesByKim[task.kim_number] ?? []}
-                solutionImageUrls={solutionImagesByKim[task.kim_number] ?? []}
+            {unboundBlocks.map((block) => (
+              <PreviewBlockHeader
+                key={block.id}
+                block={block}
+                audioUrl={blockMedia[block.id]?.audio ?? null}
+                imageUrl={blockMedia[block.id]?.image ?? null}
               />
             ))}
+            {renderGroups(part1Groups)}
           </div>
         </section>
       )}
@@ -527,16 +697,7 @@ function PreviewBody({
               Развёрнутые решения · AI-черновик + твоё подтверждение
             </span>
           </div>
-          <div className="space-y-2">
-            {part2Tasks.map((task) => (
-              <PreviewTaskCard
-                key={task.id}
-                task={task}
-                imageUrls={imagesByKim[task.kim_number] ?? []}
-                solutionImageUrls={solutionImagesByKim[task.kim_number] ?? []}
-              />
-            ))}
-          </div>
+          <div className="space-y-2">{renderGroups(part2Groups)}</div>
         </section>
       )}
     </div>
@@ -560,6 +721,9 @@ export function MockExamVariantPreviewSheet({
   const [solutionImagesByKim, setSolutionImagesByKim] = useState<
     Record<number, string[]>
   >({});
+  const [blockMedia, setBlockMedia] = useState<
+    Record<string, { audio: string | null; image: string | null }>
+  >({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -580,7 +744,7 @@ export function MockExamVariantPreviewSheet({
         const variantQ = await supabase
           .from('mock_exam_variants')
           .select(
-            'id, title, exam_type, source, source_attribution, duration_minutes, total_max_score, part1_max, part2_max',
+            'id, title, exam_type, source, source_attribution, duration_minutes, total_max_score, part1_max, part2_max, task_blocks_json',
           )
           .eq('id', variantId)
           .maybeSingle();
@@ -594,7 +758,7 @@ export function MockExamVariantPreviewSheet({
         const tasksQ = await supabase
           .from('mock_exam_variant_tasks')
           .select(
-            'id, kim_number, part, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, check_mode, max_score, topic',
+            'id, kim_number, part, order_num, task_text, task_image_url, correct_answer, solution_text, solution_image_urls, check_mode, max_score, topic, block_id',
           )
           .eq('variant_id', variantId)
           .order('order_num', { ascending: true });
@@ -605,8 +769,11 @@ export function MockExamVariantPreviewSheet({
           return;
         }
 
-        const variantRow = variantQ.data as VariantSummaryRow | null;
-        const taskRows = (tasksQ.data ?? []) as VariantTaskRow[];
+        // `task_blocks_json` в generated-типах — широкий `Json`, поэтому каст
+        // через unknown (конвенция escape-hatch этого файла для новых колонок,
+        // пока Lovable не перегенерит types.ts).
+        const variantRow = variantQ.data as unknown as VariantSummaryRow | null;
+        const taskRows = (tasksQ.data ?? []) as unknown as VariantTaskRow[];
 
         setVariant(variantRow);
         setTasks(taskRows);
@@ -614,13 +781,15 @@ export function MockExamVariantPreviewSheet({
 
         // Resolve images асинхронно — body уже отрисуется без них, картинки
         // подтянутся когда будут готовы. Не блокируем основной paint.
-        const [taskImgs, solutionImgs] = await Promise.all([
+        const [taskImgs, solutionImgs, blockMediaResolved] = await Promise.all([
           resolveImagesByKim(taskRows, (t) => t.task_image_url),
           resolveImagesByKim(taskRows, (t) => t.solution_image_urls),
+          resolveBlockMedia(variantRow?.task_blocks_json ?? null),
         ]);
         if (!cancelled) {
           setImagesByKim(taskImgs);
           setSolutionImagesByKim(solutionImgs);
+          setBlockMedia(blockMediaResolved);
         }
       } catch (err) {
         if (cancelled) return;
@@ -673,6 +842,7 @@ export function MockExamVariantPreviewSheet({
             tasks={tasks}
             imagesByKim={imagesByKim}
             solutionImagesByKim={solutionImagesByKim}
+            blockMedia={blockMedia}
             loading={loading}
             error={error}
           />
