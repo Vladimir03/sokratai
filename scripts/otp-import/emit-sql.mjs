@@ -10,7 +10,7 @@
 // Выход: out/chunks/diana-NN.sql + out/chunks/clone-vladimir.sql
 // Запуск: node scripts/otp-import/emit-sql.mjs [размер-чанка]
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -27,8 +27,10 @@ const { folders, rows } = JSON.parse(readFileSync(resolve(OUT, "rows.json"), "ut
 
 const lit = (v) => (v == null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`);
 
-rmSync(CHUNKS, { recursive: true, force: true });
+// Чистим ФАЙЛЫ, а не каталог: rmSync падал EPERM, если каталог открыт
+// оболочкой (Windows держит cwd) — прогон обрывался на пустом месте.
 mkdirSync(CHUNKS, { recursive: true });
+for (const f of readdirSync(CHUNKS)) { if (f.endsWith(".sql")) rmSync(resolve(CHUNKS, f), { force: true }); }
 
 const files = [];
 const write = (name, sql) => { writeFileSync(resolve(CHUNKS, name), sql, "utf8"); files.push(name); };
