@@ -648,16 +648,21 @@ function VariantEditorContent() {
   // задачи Части 2 (эссе по прочитанному тексту), не только у аудирования.
   const allTasks = useMemo(() => [...part1Tasks, ...part2Tasks], [part1Tasks, part2Tasks]);
 
-  // Секция блоков — только иностранные языки (решение владельца 01.08):
-  // физику/математику она бы засоряла, аудирования и разбитых на exercice
-  // документов там нет.
-  //
-  // Гейт — КАНОНИЧЕСКИЙ предикат `subjectRequiresCefr` (AGENTS.md: никаких
-  // локальных ['french','english',…] — расхождение списков уже ломало создание
-  // ДЗ). Плюс `blocks.length > 0`: если блоки уже заведены, а предмет потом
-  // сменили, секция обязана остаться видимой — иначе контент становится
-  // недостижимым, а сохранение молча уносит его вместе с привязками.
-  const showBlocksSection = subjectRequiresCefr(subject) || blocks.length > 0;
+  // Этап 0 блоков (решение владельца 2026-08-02, docs/delivery/features/
+  // task-blocks/research.md §2.7): секция доступна ВСЕМ предметам — паттерн
+  // «общий материал + группа вопросов» есть почти во всех КИМ (химия №29–30,
+  // обществознание №17–20, русский №23–27, история 9–12…), а не только в
+  // языках. Прежний языковой гейт заменён ДВУМЯ состояниями: чтобы не засорять
+  // редактор тем, кто блоками не пользуется, по умолчанию секция свёрнута в
+  // одну compact-строку; развёрнута — у иностранных языков (КАНОНИЧЕСКИЙ
+  // предикат `subjectRequiresCefr`, AGENTS.md: никаких локальных
+  // ['french','english',…] — расхождение списков уже ломало создание ДЗ) и
+  // ВСЕГДА при уже заведённых блоках: если блоки есть, а предмет сменили,
+  // секция обязана остаться видимой — иначе контент становится недостижимым,
+  // а сохранение молча уносит его вместе с привязками.
+  const [blocksManuallyOpened, setBlocksManuallyOpened] = useState(false);
+  const blocksExpanded =
+    blocksManuallyOpened || subjectRequiresCefr(subject) || blocks.length > 0;
 
   // Бейдж на карточке задачи — READ-ONLY: привязка правится в ОДНОМ месте,
   // чипами внутри блока. Второй редактируемый контрол на ту же связь дал бы
@@ -1042,7 +1047,7 @@ function VariantEditorContent() {
           Sync-гард пары (ревью 5.6 P1): пока prefill транскриптов не подъехал,
           секция заморожена целиком — save тогда не шлёт блоки вообще, и
           сохранённая пара «трек ↔ транскрипт» остаётся согласованной. */}
-      {showBlocksSection ? (
+      {blocksExpanded ? (
       <TaskBlocksSection
         blocks={blocks}
         tasks={allTasks}
@@ -1052,6 +1057,25 @@ function VariantEditorContent() {
         onBindTask={handleBindTaskToBlock}
         onUploadingChange={handleUploadingChange}
       />
+      ) : !contentLocked ? (
+        // Compact-состояние: одна строка вместо целой секции (Этап 0).
+        // У заблокированного варианта без блоков строку не показываем —
+        // развернуть можно, а сделать внутри ничего нельзя.
+        <button
+          type="button"
+          onClick={() => setBlocksManuallyOpened(true)}
+          disabled={isSubmitting}
+          className="w-full rounded-xl border border-dashed border-slate-300 bg-white px-4 py-3 text-left transition-colors hover:border-accent/40 disabled:opacity-50 [touch-action:manipulation]"
+        >
+          <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <Plus className="h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+            Блоки заданий: общий материал для нескольких вопросов
+          </span>
+          <span className="mt-0.5 block pl-6 text-xs text-slate-500">
+            Текст, документ или аудио пишутся один раз — например, перечень веществ
+            для №29–30 (химия) или текст для №17–20 (обществознание).
+          </span>
+        </button>
       ) : null}
 
       {/* AI-загрузка задач из PDF/фото — shared loader (destination mock_variant).
