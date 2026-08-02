@@ -20,6 +20,7 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { formatScore, parseScoreInput } from '@/lib/formatters';
 import { toast } from 'sonner';
 import {
   AlertCircle,
@@ -209,7 +210,7 @@ function EditScoreDialog({
     [initialComment, initialScore, onOpenChange],
   );
 
-  const numeric = Number.parseInt(score, 10);
+  const numeric = parseScoreInput(score);
   const isValid =
     Number.isFinite(numeric) && numeric >= 0 && numeric <= maxScore;
 
@@ -418,7 +419,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
     for (const t of variantPart1Tasks) {
       const raw = drafts[t.kim_number] ?? '';
       if (raw.trim() === '') continue;
-      const parsed = Number.parseInt(raw, 10);
+      const parsed = parseScoreInput(raw);
       if (!Number.isFinite(parsed) || parsed < 0 || parsed > t.max_score) continue;
       if (existingScores.get(t.kim_number) !== parsed) set.add(t.kim_number);
     }
@@ -440,7 +441,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
   const handleScoreBlur = async (kim: number, maxScore: number) => {
     const raw = drafts[kim] ?? '';
     if (raw.trim() === '') { untouch(kim); return; } // пусто — не сохраняем, вернуть авто-fill
-    const parsed = Number.parseInt(raw, 10);
+    const parsed = parseScoreInput(raw);
     if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxScore) {
       toast.error(`Балл для KIM ${kim}: 0..${maxScore}`);
       // restore previous + untouch (авто-fill восстановится)
@@ -490,7 +491,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
         for (const kim of dirtyKims) {
           const t = variantPart1Tasks.find((x) => x.kim_number === kim);
           if (!t) continue;
-          const parsed = Number.parseInt(drafts[kim] ?? '', 10);
+          const parsed = parseScoreInput(drafts[kim] ?? '');
           if (!Number.isFinite(parsed) || parsed < 0 || parsed > t.max_score) continue;
           flushPromises.push(
             setMockExamPart1ManualScore(attempt.id, {
@@ -552,7 +553,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
   const draftSum = useMemo(() => {
     let sum = 0;
     for (const t of variantPart1Tasks) {
-      const v = Number.parseInt(drafts[t.kim_number] ?? '', 10);
+      const v = parseScoreInput(drafts[t.kim_number] ?? '');
       if (Number.isFinite(v)) sum += v;
     }
     return sum;
@@ -824,7 +825,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
                     aria-hidden="true"
                   />
                   <span className="flex-1">
-                    KIM {t.kim_number} <span className="text-slate-400">/ {t.max_score}</span>
+                    KIM {t.kim_number} <span className="text-slate-400">/ {formatScore(t.max_score)}</span>
                   </span>
                   {/* AC-P11: 💬 indicator если есть comment */}
                   {hasComment && (
@@ -881,14 +882,16 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
                     «Балл AI» пока авто, «Ваш балл» после ручной правки. */}
                 <span className={cn('text-[11px] font-semibold leading-snug', scoreLineClass)}>
                   {isTutorScore ? 'Ваш балл' : 'Балл AI'}:{' '}
-                  {earnedScore !== null ? earnedScore : '—'} / {t.max_score}
+                  {earnedScore !== null ? formatScore(earnedScore) : '—'} / {formatScore(t.max_score)}
                 </span>
                 <Input
                   type="number"
-                  inputMode="numeric"
+                  /* decimal, НЕ numeric: на iOS numeric-клавиатура идёт БЕЗ
+                     разделителя — дробный балл там физически не набрать. */
+                  inputMode="decimal"
                   min={0}
                   max={t.max_score}
-                  step={1}
+                  step={0.5}
                   disabled={isReadOnly || savingKims.has(t.kim_number)}
                   value={drafts[t.kim_number] ?? ''}
                   onChange={(e) => {
@@ -972,7 +975,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
               <tbody>
                 {variantPart1Tasks.map((t) => {
                   const raw = drafts[t.kim_number] ?? '';
-                  const parsed = Number.parseInt(raw, 10);
+                  const parsed = parseScoreInput(raw);
                   const isEntered = raw.trim() !== '' && Number.isFinite(parsed);
                   return (
                     <tr key={t.kim_number} className="border-t border-slate-100 dark:border-slate-800">
@@ -990,7 +993,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
                         )}
                       </td>
                       <td className="px-3 py-1.5 text-right text-slate-400 tabular-nums">
-                        / {t.max_score}
+                        / {formatScore(t.max_score)}
                       </td>
                     </tr>
                   );
@@ -1419,11 +1422,11 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
           {isApproved ? (
             <span className="text-emerald-700 font-medium flex items-center gap-1.5">
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              Подтверждено: <strong>{displayScore} / {solution.max_score}</strong>
+              Подтверждено: <strong>{formatScore(displayScore)} / {formatScore(solution.max_score)}</strong>
             </span>
           ) : aiSuggested !== null ? (
             <>
-              AI предлагает: <strong className="text-slate-900">{aiSuggested} / {solution.max_score}</strong>
+              AI предлагает: <strong className="text-slate-900">{formatScore(aiSuggested)} / {formatScore(solution.max_score)}</strong>
             </>
           ) : (
             <span className="text-rose-700">AI не смог распознать</span>

@@ -62,6 +62,7 @@ import {
 import { SubjectSelect } from '@/components/tutor/SubjectSelect';
 import { getSubjectLabel } from '@/types/homework';
 import { subjectRequiresCefr } from '@/lib/subjects/registry';
+import { parseScoreInput } from '@/lib/formatters';
 import { getExamProfile } from '@/lib/examProfiles';
 import {
   resolveTutorDefaultExamEgeOge,
@@ -235,10 +236,18 @@ const VariantTaskCard = memo(function VariantTaskCard({
           <Label className="mb-1 block text-xs font-semibold text-slate-500">Балл</Label>
           <input
             type="text"
-            inputMode="numeric"
+            /* decimal, НЕ numeric: iOS-клавиатура numeric идёт без разделителя.
+               Маска пускает цифры и ОДИН разделитель — прежний \D вырезал
+               запятую, и «0,5» превращалось в «05», то есть дробный балл
+               было не ввести в принципе. */
+            inputMode="decimal"
             value={draft.maxScore}
             disabled={disabled}
-            onChange={(e) => onUpdate(draft.localId, { maxScore: e.target.value.replace(/\D/g, '') })}
+            onChange={(e) => onUpdate(draft.localId, {
+              maxScore: e.target.value
+                .replace(/[^\d.,]/g, '')
+                .replace(/[.,](?=[^.,]*[.,])/g, ''),
+            })}
             className={INPUT_CLASS}
             aria-label={`Макс. балл задачи ${index + 1}`}
           />
@@ -608,7 +617,7 @@ function VariantEditorContent() {
   const totalMax = useMemo(
     () =>
       [...part1Tasks, ...part2Tasks].reduce((acc, t) => {
-        const n = parseInt(t.maxScore.trim(), 10);
+        const n = parseScoreInput(t.maxScore);
         return acc + (Number.isFinite(n) && n > 0 ? n : 0);
       }, 0),
     [part1Tasks, part2Tasks],
@@ -623,8 +632,13 @@ function VariantEditorContent() {
       const kim = parseInt(t.kimNumber.trim(), 10);
       if (!Number.isFinite(kim) || kim < 1 || kim > 99) return `${label}: укажите № КИМ (1–99)`;
       if (duplicateKims.has(t.kimNumber.trim())) return `№ КИМ ${kim} повторяется — исправьте дубли`;
-      const maxScore = parseInt(t.maxScore.trim(), 10);
-      if (!Number.isFinite(maxScore) || maxScore < 1 || maxScore > 25) return `${label}: макс. балл 1–25`;
+      const maxScore = parseScoreInput(t.maxScore);
+      // Шаг 0,5 — зеркало серверного isPositiveHalfStep. DELF даёт 0,5 и 1,5;
+      // свободная дробь пустила бы 1,1666 от деления «7 баллов на 6 вопросов»,
+      // и итог перестал бы сходиться с бланком.
+      if (!Number.isFinite(maxScore) || maxScore <= 0 || maxScore > 25 || !Number.isInteger(maxScore * 2)) {
+        return `${label}: макс. балл от 0,5 до 25 с шагом 0,5`;
+      }
       if (!t.taskText.trim() && !t.taskImageUrl) return `${label}: добавьте текст условия или фото`;
       if (t.part === 1 && !t.correctAnswer.trim()) return `${label}: для Части 1 обязателен правильный ответ`;
       payload.push({

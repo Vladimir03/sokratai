@@ -46,6 +46,7 @@ import { OrientedPhoto } from '@/components/common/photo-viewer';
 import { useStudentMockExamResult } from '@/hooks/useStudentMockExamResult';
 import { StudentMockExamApiError } from '@/lib/studentMockExamApi';
 import { primaryToSecondary, getEgePhysicsBenchmarks } from '@/lib/mockExamScaleEge2025';
+import { formatScore } from '@/lib/formatters';
 import type {
   StudentMockExamResultPart1Answer,
   StudentMockExamResultPart2Solution,
@@ -208,8 +209,8 @@ function Part1Card({
           </span>
         </div>
         <div className="text-3xl font-semibold text-accent tabular-nums">
-          {score}{' '}
-          <span className="text-lg font-normal text-slate-500">/ {max}</span>
+          {formatScore(score)}{' '}
+          <span className="text-lg font-normal text-slate-500">/ {formatScore(max)}</span>
         </div>
         {hasAnswers && (
           <button
@@ -291,14 +292,14 @@ function Part1Card({
                                 <button
                                   type="button"
                                   className="mt-0.5 inline-flex flex-shrink-0 cursor-help touch-manipulation items-center justify-center rounded-sm p-3.5 -m-3.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-                                  aria-label={`Частично верно: ${earned} из ${row.max_score}`}
+                                  aria-label={`Частично верно: ${formatScore(earned)} из ${formatScore(row.max_score)}`}
                                 >
                                   <Check className="h-4 w-4 text-amber-600" />
                                 </button>
                               </TooltipTrigger>
                               <TooltipContent side="top" className="max-w-xs">
                                 <p className="text-xs leading-snug">
-                                  {earned} балл из {row.max_score} — одна ошибка
+                                  {formatScore(earned)} балл из {formatScore(row.max_score)} — одна ошибка
                                   по критериям ФИПИ 2026. Полный балл — только
                                   при полном совпадении всех символов.
                                 </p>
@@ -351,7 +352,7 @@ function Part1Card({
                                 : 'font-semibold text-rose-700',
                         )}
                       >
-                        {earned}/{row.max_score}
+                        {formatScore(earned)}/{formatScore(row.max_score)}
                       </td>
                     </tr>
                   );
@@ -508,7 +509,7 @@ function Part2PreliminaryCard({
                 <Sparkles className="h-3 w-3" aria-hidden="true" /> AI
               </span>
               {typeof aiScore === 'number' ? `${aiScore}` : '—'}
-              <span className="text-slate-400"> / {solution.max_score}</span>
+              <span className="text-slate-400"> / {formatScore(solution.max_score)}</span>
             </span>
           )}
         </div>
@@ -620,7 +621,7 @@ function Part2SolutionCard({
           </span>
           <span className="text-sm tabular-nums text-slate-700">
             {typeof score === 'number' ? `${score}` : '—'}
-            <span className="text-slate-400"> / {solution.max_score}</span>
+            <span className="text-slate-400"> / {formatScore(solution.max_score)}</span>
           </span>
         </div>
 

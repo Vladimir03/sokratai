@@ -172,6 +172,25 @@ function isNonNegativeInt(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= 0;
 }
 
+/** Балл с шагом 0,5 (2026-08-02, DELF).
+ *
+ *  Почему полшага, а не любое дробное: у Эмилии реальные веса — 0,5 (четыре
+ *  вопроса на 2 балла) и 1,5; ФИПИ-предметы работают целыми, а целые кратны
+ *  0,5, поэтому физика и обществознание проходят валидатор без изменений.
+ *  Свободная дробь пустила бы в баллы 1,3333 от деления «7 баллов на 6
+ *  вопросов» — итог перестал бы сходиться с бланком.
+ *
+ *  `Number.isInteger(v * 2)` вместо `v % 0.5 === 0`: остаток от деления на
+ *  дробь у float даёт ложные хвосты (2.5 % 0.5 не гарантирован нулём), а
+ *  удвоение значений вида 0.5/1.5 точное. */
+function isPositiveHalfStep(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 && Number.isInteger(v * 2);
+}
+
+function isNonNegativeHalfStep(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 && Number.isInteger(v * 2);
+}
+
 // Phase 6 review-fix #4: compare two number arrays as sets (order-independent,
 // duplicate-tolerant). Used to detect actual assignment changes in
 // /assign-part2-photos.
@@ -728,11 +747,11 @@ async function handleCreateAssignment(
     if (!isNonEmptyString(me.manual_entered_date) || !isISODate(me.manual_entered_date)) {
       return jsonError(cors, 400, "VALIDATION", "manual_entry.manual_entered_date must be an ISO date");
     }
-    if (!isNonNegativeInt(me.total_score)) {
-      return jsonError(cors, 400, "VALIDATION", "manual_entry.total_score must be a non-negative integer");
+    if (!isNonNegativeHalfStep(me.total_score)) {
+      return jsonError(cors, 400, "VALIDATION", "manual_entry.total_score — балл с шагом 0,5 (не меньше нуля)");
     }
-    if (!isPositiveInt(me.total_max_score)) {
-      return jsonError(cors, 400, "VALIDATION", "manual_entry.total_max_score must be a positive integer");
+    if (!isPositiveHalfStep(me.total_max_score)) {
+      return jsonError(cors, 400, "VALIDATION", "manual_entry.total_max_score — балл с шагом 0,5 (больше нуля)");
     }
     if ((me.total_score as number) > (me.total_max_score as number)) {
       return jsonError(cors, 400, "VALIDATION", "total_score cannot exceed total_max_score");
@@ -1590,8 +1609,8 @@ async function handleApproveTask(
   if (!isPositiveInt(b.kim_number)) {
     return jsonError(cors, 400, "VALIDATION", "kim_number must be a positive integer");
   }
-  if (!isNonNegativeInt(b.score)) {
-    return jsonError(cors, 400, "VALIDATION", "score must be a non-negative integer");
+  if (!isNonNegativeHalfStep(b.score)) {
+    return jsonError(cors, 400, "VALIDATION", "Балл — число с шагом 0,5 (например 1,5), не меньше нуля");
   }
 
   // Validate kim_number is a Часть 2 task and score ≤ max.
@@ -2016,8 +2035,8 @@ async function handlePart1ManualScore(
   if (!isPositiveInt(b.kim_number)) {
     return jsonError(cors, 400, "VALIDATION", "kim_number must be a positive integer");
   }
-  if (!isNonNegativeInt(b.earned_score)) {
-    return jsonError(cors, 400, "VALIDATION", "earned_score must be a non-negative integer");
+  if (!isNonNegativeHalfStep(b.earned_score)) {
+    return jsonError(cors, 400, "VALIDATION", "Балл — число с шагом 0,5 (например 0,5), не меньше нуля");
   }
   // AC-P11 (2026-05-26): optional `comment` field — tutor comment к KIM,
   // видим ученику после approval. Max 600 chars defensive.
@@ -4011,8 +4030,8 @@ function validateVariantTasksPayload(
     }
 
     const maxScore = row.max_score;
-    if (!isPositiveInt(maxScore) || maxScore > 25) {
-      return { ok: false, message: `${label}: макс. балл должен быть целым числом 1–25` };
+    if (!isPositiveHalfStep(maxScore) || maxScore > 25) {
+      return { ok: false, message: `${label}: макс. балл — от 0,5 до 25 с шагом 0,5 (например 0,5 или 1,5)` };
     }
 
     const solutionText = typeof row.solution_text === "string" ? row.solution_text.trim() : "";

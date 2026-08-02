@@ -60,6 +60,40 @@ export function formatExamType(examType: string | null): string {
 }
 
 /**
+ * Балл пробника/ДЗ для показа человеку (2026-08-02, дробные баллы DELF).
+ *
+ * Целое остаётся целым («7», не «7,0»), дробь пишется по-русски запятой
+ * («1,5», «0,5»). Хвост обрезается до 2 знаков — колонки `numeric(6,2)`,
+ * больше в базе не бывает, а «1,50» читается как ошибка вёрстки.
+ *
+ * Отдельная функция, а не `toLocaleString` по месту: балл рисуется на четырёх
+ * поверхностях (ученик, репетитор, публичный результат, heatmap), и «0,5» на
+ * одной против «0.5» на другой — ровно тот дрейф, которым живут дубли.
+ */
+export function formatScore(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  return new Intl.NumberFormat('ru-RU', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+/**
+ * Разбор балла, введённого руками. Пара к `formatScore`: тот пишет «1,5»,
+ * этот обязан «1,5» прочитать.
+ *
+ * ⚠️ Запятая — не косметика. `parseFloat('1,5')` возвращает **1**, молча теряя
+ * половину балла, а форматтер выше сам показывает русскую запятую — то есть
+ * репетитор копирует значение из интерфейса и получает другое число.
+ * Возвращает NaN на пустой строке и мусоре, чтобы вызывающий сам решал.
+ */
+export function parseScoreInput(raw: string): number {
+  const trimmed = raw.trim().replace(',', '.');
+  if (trimmed === '') return NaN;
+  return Number.parseFloat(trimmed);
+}
+
+/**
  * Format a number as Russian rubles currency
  */
 export function formatCurrency(amount: number): string {
