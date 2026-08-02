@@ -87,6 +87,7 @@
   .ht td.mid{ background:var(--amber-lt); color:#92400E; }
   .ht td.bad{ background:var(--rose-lt); color:#991B1B; }
   .cell-main{ font-weight:600; }
+  .cell-ind{ font-size:10px; opacity:.72; margin-top:1px; }
   .dots{ display:flex; gap:3px; justify-content:center; margin-top:3px; }
   .dot{ width:7px; height:7px; border-radius:2px; }
   .dot.g{ background:#10B981; } .dot.r{ background:#EF4444; } .dot.a{ background:#F59E0B; }
@@ -278,31 +279,33 @@
             <tr><th class="name">Ученик</th><th>№1</th><th>№2</th><th>№3 (а–г)</th><th>№4</th><th>Балл</th><th>Самост.</th></tr>
             <tr>
               <td class="name">Вася П.</td>
-              <td class="ok">1/1</td>
-              <td class="bad">0/2</td>
+              <td class="ok"><div class="cell-main">1/1</div><div class="cell-ind">100%</div></td>
+              <td class="bad"><div class="cell-main">0/2</div><div class="cell-ind">80%</div></td>
               <td class="mid">
                 <div class="cell-main">6/8</div>
                 <div class="dots"><span class="dot g"></span><span class="dot r"></span><span class="dot g"></span><span class="dot a"></span></div>
+                <div class="cell-ind">90%</div>
               </td>
-              <td class="ok">2/2</td>
+              <td class="ok"><div class="cell-main">2/2</div><div class="cell-ind">100%</div></td>
               <td><b>9/13</b></td>
               <td>92%</td>
             </tr>
             <tr>
               <td class="name">Аня С.</td>
-              <td class="ok">1/1</td>
-              <td class="ok">2/2</td>
+              <td class="ok"><div class="cell-main">1/1</div><div class="cell-ind">100%</div></td>
+              <td class="ok"><div class="cell-main">2/2</div><div class="cell-ind">100%</div></td>
               <td class="bad">
                 <div class="cell-main">2/8</div>
                 <div class="dots"><span class="dot g"></span><span class="dot r"></span><span class="dot r"></span><span class="dot r"></span></div>
+                <div class="cell-ind">70%</div>
               </td>
-              <td class="mid">1/2</td>
+              <td class="mid"><div class="cell-main">1/2</div><div class="cell-ind">90%</div></td>
               <td><b>6/13</b></td>
               <td>~80%</td>
             </tr>
           </table>
         </div>
-        <p class="ht-note">Точки под баллом = вопросы а–г: зелёная ✓, красная ✗, янтарная — AI-черновик ждёт подтверждения. Задача остаётся одной колонкой, «кто завалил б)» видно без клика; полная разбивка — по клику в разборе ↓</p>
+        <p class="ht-note">Как сейчас в проде: в каждой клетке балл + процент самостоятельности задания второй строкой. Точки — вопросы а–г: зелёная ✓, красная ✗, янтарная — AI-черновик ждёт подтверждения. У задания с вопросами процент ОДИН на всю задачу (90%), как договорились. Задача остаётся одной колонкой, «кто завалил б)» видно без клика; полная разбивка — по клику в разборе ↓</p>
         <div class="drill">
           <h3>Клик по клетке → разбор: Задача 3 · Вася П.</h3>
           <table>
@@ -326,25 +329,25 @@
             <tr><th>а</th><th>б</th><th>в</th><th>г</th></tr>
             <tr>
               <td class="name">Вася П.</td>
-              <td class="ok">1/1</td>
-              <td class="bad">0/2</td>
+              <td class="ok"><div class="cell-main">1/1</div><div class="cell-ind">100%</div></td>
+              <td class="bad"><div class="cell-main">0/2</div><div class="cell-ind">80%</div></td>
               <td class="ok">2</td><td class="bad">0</td><td class="ok">2</td><td class="mid">≈2</td>
-              <td class="ok">2/2</td>
+              <td class="ok"><div class="cell-main">2/2</div><div class="cell-ind">100%</div></td>
               <td><b>9/13</b></td>
               <td>92%</td>
             </tr>
             <tr>
               <td class="name">Аня С.</td>
-              <td class="ok">1/1</td>
-              <td class="ok">2/2</td>
+              <td class="ok"><div class="cell-main">1/1</div><div class="cell-ind">100%</div></td>
+              <td class="ok"><div class="cell-main">2/2</div><div class="cell-ind">100%</div></td>
               <td class="ok">2</td><td class="bad">0</td><td class="bad">0</td><td class="bad">0</td>
-              <td class="mid">1/2</td>
+              <td class="mid"><div class="cell-main">1/2</div><div class="cell-ind">90%</div></td>
               <td><b>6/13</b></td>
               <td>~80%</td>
             </tr>
           </table>
         </div>
-        <p class="ht-note">Честно шире: ДЗ из 8 задач, из них два таких задания по 4 вопроса → 14 колонок и горизонтальный скролл уже на ноутбуке. Задача перестаёт быть одной визуальной единицей, а у остальных задач колонки «худеют». Предлагаем начать с А; если точек окажется мало — Б добавляется как разворачивание группы по клику на заголовок «№3», не как дефолт.</p>
+        <p class="ht-note">Честно шире: ДЗ из 8 задач, из них два таких задания по 4 вопроса → 14 колонок и горизонтальный скролл уже на ноутбуке. Задача перестаёт быть одной визуальной единицей, а у остальных задач колонки «худеют». Плюс процент самостоятельности задания (он ОДИН на задачу) в под-колонках а–г показать негде — повторять «90%» в каждой из четырёх клеток нельзя, читается как процент пункта. Ещё один довод к А. Предлагаем начать с А; если точек окажется мало — Б добавляется как разворачивание группы по клику на заголовок «№3», не как дефолт.</p>
       </div>
     </div>
   </div>
