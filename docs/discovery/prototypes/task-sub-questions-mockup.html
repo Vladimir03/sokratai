@@ -1,0 +1,199 @@
+<style>
+  :root{
+    --bg:#F8FAFC; --surface:#FFFFFF; --border:#E2E8F0; --text1:#0F172A; --text2:#64748B;
+    --accent:#1B6B4A; --accent-lt:#DCFCE7; --amber:#F59E0B; --amber-lt:#FEF3C7;
+    --rose:#EF4444; --rose-lt:#FEE2E2; --slate800:#1E293B;
+  }
+  .mock{ background:var(--bg); color:var(--text1); min-height:100vh; padding:32px 20px 64px;
+    font-family:'Golos Text', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:16px; line-height:1.5; }
+  .mock *{ box-sizing:border-box; }
+  .wrap{ max-width:1200px; margin:0 auto; }
+  .hero h1{ font-size:24px; font-weight:600; margin:0 0 6px; }
+  .hero p{ color:var(--text2); font-size:14px; margin:0; max-width:760px; }
+  .hero .claims{ display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+  .claim{ font-size:12px; background:var(--surface); border:1px solid var(--border); border-radius:9999px; padding:4px 12px; color:var(--slate800); }
+  .claim b{ color:var(--accent); font-weight:600; }
+  .cols{ display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:24px; margin-top:28px; align-items:start; }
+  @media (max-width:1000px){ .cols{ grid-template-columns:1fr; } }
+  .col-label{ font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--text2); margin:0 0 10px; }
+
+  /* ── карточка конструктора ── */
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  .task-head{ display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .task-head .num{ font-weight:600; }
+  .chip{ font-size:12px; border-radius:9999px; padding:2px 10px; background:#EEF2FF; color:#3730A3; }
+  .chip.oly{ background:#FFF7ED; color:#9A3412; }
+  .fld{ margin-bottom:12px; }
+  .fld label{ display:block; font-size:13px; font-weight:500; color:#334155; margin-bottom:4px; }
+  .box, textarea.box{ width:100%; border:1px solid var(--border); border-radius:6px; padding:8px 10px; font-size:16px; font-family:inherit; background:#fff; color:var(--text1); }
+  textarea.box{ resize:vertical; }
+  .select{ position:relative; }
+  .select .box{ font-weight:500; }
+  .select:after{ content:"▾"; position:absolute; right:10px; top:8px; color:var(--text2); pointer-events:none; }
+  .sub{ border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-bottom:8px; background:#FBFDFC; }
+  .sub .sub-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .sub .sub-head .t{ font-weight:600; font-size:14px; }
+  .sub .sub-head .x{ color:var(--text2); font-size:13px; cursor:default; }
+  .sub .row{ display:grid; grid-template-columns:1fr; gap:8px; }
+  .sub .row3{ display:grid; grid-template-columns:1.4fr 1fr .6fr; gap:8px; }
+  @media (max-width:520px){ .sub .row3{ grid-template-columns:1fr; } }
+  .mini-label{ font-size:11px; color:var(--text2); margin-bottom:2px; display:block; }
+  .hint{ font-size:12px; color:var(--text2); margin-top:2px; }
+  .add-btn{ display:inline-block; border:1px dashed #94A3B8; color:#334155; border-radius:6px; padding:7px 14px; font-size:14px; background:#fff; }
+  .sum-line{ display:flex; justify-content:space-between; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); font-size:14px; }
+  .sum-line b{ font-size:16px; }
+  .sum-line .lock{ color:var(--text2); font-size:12px; }
+
+  /* ── телефон ученика ── */
+  .phone{ width:100%; max-width:340px; margin:0 auto; background:var(--surface); border:1px solid #CBD5E1; border-radius:22px; padding:14px 12px 16px; box-shadow:0 1px 3px rgba(15,23,42,.08); }
+  .phone .pc{ background:#F1F5F9; border-radius:10px; padding:10px 12px; margin-bottom:12px; }
+  .phone .pc .eyebrow{ font-size:11px; color:var(--text2); margin-bottom:4px; letter-spacing:.04em; }
+  .phone .pc .cond{ font-size:14px; }
+  .q{ margin-bottom:10px; }
+  .q .ql{ font-size:14px; margin-bottom:4px; }
+  .q .ql b{ font-weight:600; }
+  .q input{ width:100%; border:1px solid var(--border); border-radius:6px; padding:9px 10px; font-size:16px; font-family:inherit; }
+  .q .pts{ font-size:11px; color:var(--text2); margin-top:2px; }
+  .cta{ display:block; width:100%; text-align:center; background:var(--accent); color:#fff; border:none; border-radius:8px; padding:12px; font-size:16px; font-weight:600; margin-top:6px; font-family:inherit; }
+  .note-under{ text-align:center; font-size:11px; color:var(--text2); margin-top:6px; }
+
+  /* результат */
+  .res{ border-radius:8px; padding:10px 12px; margin-bottom:8px; display:flex; gap:10px; align-items:flex-start; font-size:14px; }
+  .res .mark{ font-weight:700; line-height:1.3; }
+  .res.ok{ background:var(--accent-lt); } .res.ok .mark{ color:#047857; }
+  .res.bad{ background:var(--rose-lt); } .res.bad .mark{ color:#B91C1C; }
+  .res .sc{ margin-left:auto; font-variant-numeric:tabular-nums; color:#334155; white-space:nowrap; font-size:13px; }
+  .total{ background:var(--amber-lt); border-radius:8px; padding:12px; text-align:center; margin:12px 0; }
+  .total .big{ font-size:22px; font-weight:700; color:#92400E; }
+  .total .cap{ font-size:12px; color:#92400E; }
+  .ai{ border:1px solid var(--border); border-left:3px solid var(--accent); border-radius:8px; padding:10px 12px; font-size:13px; color:#334155; background:#fff; }
+  .ai .who{ font-weight:600; color:var(--accent); margin-bottom:4px; font-size:12px; }
+  .foot{ margin-top:28px; font-size:13px; color:var(--text2); max-width:860px; }
+  .foot b{ color:var(--slate800); }
+</style>
+
+<div class="mock"><div class="wrap">
+  <div class="hero">
+    <h1>Задание с несколькими вопросами — макет</h1>
+    <p>Одно неделимое задание: общее условие → вопрос + поле ответа (у каждого поля свой формат проверки и верный ответ). Перемещается между папками как одно целое, самостоятельность считается на всё задание.</p>
+    <div class="claims">
+      <span class="claim">Проверка каждого поля — <b>кодом, мгновенно</b></span>
+      <span class="claim"><b>Без расхода AI-квоты</b> на подсчёт балла</span>
+      <span class="claim">Частичный балл по пунктам</span>
+      <span class="claim">Одна строка в статистике и heatmap</span>
+      <span class="claim">Диапазоны и варианты ответа («3,4–3,5», «12 или 12,0») уже работают</span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <!-- ═══ Репетитор ═══ -->
+    <div>
+      <p class="col-label">Репетитор · конструктор ДЗ</p>
+      <div class="card">
+        <div class="task-head">
+          <span class="num">Задача 3</span>
+          <span class="chip oly">Олимпиада · сложность 4</span>
+        </div>
+        <div class="fld">
+          <label>Условие (общее для всех вопросов)</label>
+          <textarea class="box" rows="4" readonly>Мяч бросают с горизонтальной поверхности со скоростью v₀ = 20 м/с под углом 60° к горизонту. Сопротивлением воздуха пренебречь, g = 10 м/с².</textarea>
+        </div>
+        <div class="fld">
+          <label>Формат проверки</label>
+          <div class="select"><div class="box">Задание с несколькими вопросами (а, б, в…)</div></div>
+        </div>
+
+        <div class="sub">
+          <div class="sub-head"><span class="t">а)</span><span class="x">✕</span></div>
+          <div class="row">
+            <div><span class="mini-label">Вопрос</span><input class="box" readonly value="Найдите время полёта мяча."></div>
+            <div class="row3">
+              <div><span class="mini-label">Верный ответ</span><input class="box" readonly value="3,4–3,5 с"></div>
+              <div><span class="mini-label">Формат поля</span><input class="box" readonly value="Число"></div>
+              <div><span class="mini-label">Балл</span><input class="box" readonly value="2"></div>
+            </div>
+          </div>
+          <div class="hint">Диапазон: зачтётся любой ответ от 3,4 до 3,5</div>
+        </div>
+
+        <div class="sub">
+          <div class="sub-head"><span class="t">б)</span><span class="x">✕</span></div>
+          <div class="row">
+            <div><span class="mini-label">Вопрос</span><input class="box" readonly value="Найдите дальность полёта."></div>
+            <div class="row3">
+              <div><span class="mini-label">Верный ответ</span><input class="box" readonly value="34,6 или 35 м"></div>
+              <div><span class="mini-label">Формат поля</span><input class="box" readonly value="Число"></div>
+              <div><span class="mini-label">Балл</span><input class="box" readonly value="2"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub">
+          <div class="sub-head"><span class="t">в)</span><span class="x">✕</span></div>
+          <div class="row">
+            <div><span class="mini-label">Вопрос</span><input class="box" readonly value="Найдите максимальную высоту подъёма."></div>
+            <div class="row3">
+              <div><span class="mini-label">Верный ответ</span><input class="box" readonly value="15 м"></div>
+              <div><span class="mini-label">Формат поля</span><input class="box" readonly value="Число"></div>
+              <div><span class="mini-label">Балл</span><input class="box" readonly value="2"></div>
+            </div>
+          </div>
+        </div>
+
+        <span class="add-btn">+ Добавить вопрос</span>
+        <div class="sum-line">
+          <span>Макс. баллов за задачу: <b>6</b></span>
+          <span class="lock">сумма по вопросам, считается автоматически</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Ученик: ввод ═══ -->
+    <div>
+      <p class="col-label">Ученик · решает</p>
+      <div class="phone">
+        <div class="pc">
+          <div class="eyebrow">ЗАДАЧА 3 ИЗ 8 · УСЛОВИЕ</div>
+          <div class="cond">Мяч бросают с горизонтальной поверхности со скоростью v₀ = 20 м/с под углом 60° к горизонту. Сопротивлением воздуха пренебречь, g = 10 м/с².</div>
+        </div>
+        <div class="q">
+          <div class="ql"><b>а)</b> Найдите время полёта мяча.</div>
+          <input placeholder="Ответ, с" value="3,45" readonly>
+          <div class="pts">2 балла</div>
+        </div>
+        <div class="q">
+          <div class="ql"><b>б)</b> Найдите дальность полёта.</div>
+          <input placeholder="Ответ, м" value="30" readonly>
+          <div class="pts">2 балла</div>
+        </div>
+        <div class="q">
+          <div class="ql"><b>в)</b> Найдите максимальную высоту подъёма.</div>
+          <input placeholder="Ответ, м" value="15" readonly>
+          <div class="pts">2 балла</div>
+        </div>
+        <button class="cta">Сдать ответы</button>
+        <div class="note-under">Можно приложить фото решения — репетитор его увидит</div>
+      </div>
+    </div>
+
+    <!-- ═══ Ученик: результат ═══ -->
+    <div>
+      <p class="col-label">Ученик · сразу после сдачи</p>
+      <div class="phone">
+        <div class="res ok"><span class="mark">✓ а)</span><span>3,45 — верно</span><span class="sc">2/2</span></div>
+        <div class="res bad"><span class="mark">✗ б)</span><span>30 — неверно</span><span class="sc">0/2</span></div>
+        <div class="res ok"><span class="mark">✓ в)</span><span>15 — верно</span><span class="sc">2/2</span></div>
+        <div class="total">
+          <div class="big">4 / 6</div>
+          <div class="cap">пункты а) и в) — зачёт, вернись к б)</div>
+        </div>
+        <div class="ai">
+          <div class="who">Сократ AI</div>
+          Время и высота сходятся — значит, v₀ и угол ты разложил правильно. В пункте б) проверь формулу дальности: там удвоенный угол. Пересчитай — и сдай ещё раз, попытки не ограничены.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="foot"><b>Что под капотом (для нас):</b> снаружи это одна задача — одна строка в heatmap, один шаг в чате ДЗ, один балл в итогах, «% самостоятельности» на задание целиком. Правильные ответы пунктов ученику не раскрываются (пересдача без ограничений). Блоки с общим материалом (текст/аудио + независимые задания разных номеров КИМ) — отдельный, уже живущий механизм: такая задача может входить в блок как один из его вопросов.</p>
+</div></div>
