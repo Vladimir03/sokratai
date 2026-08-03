@@ -22,41 +22,59 @@ interface AnswerMethodSelectModalProps {
   onSelect: (method: MockExamAnswerMethod) => void;
   /** First open — не позволяем закрыть, ученик должен выбрать. Switch — есть Cancel. */
   onCancel?: () => void;
+  /**
+   * Способ по умолчанию + бейдж «Рекомендуем» (репорт Ульяны 2026-08-02).
+   * Раньше `blank` был захардкожен и преселекчен ВСЕГДА — независимо от
+   * предмета и от режима, который выбрал репетитор. Ученик по химии просто
+   * нажимал «Начать» и попадал в бланк-режим, для которого у его варианта нет
+   * ни официального бланка, ни PDF с условиями.
+   */
+  recommended?: MockExamAnswerMethod;
+  /**
+   * Есть ли официальный PDF бланка ФИПИ (сейчас только физика ЕГЭ). Без него
+   * обещание «скачай официальный бланк» — ложь: ученик пишет на обычном листе.
+   */
+  blankHasOfficialPdf?: boolean;
 }
 
-const METHOD_CARDS: Array<{
+function buildMethodCards(blankHasOfficialPdf: boolean): Array<{
   method: MockExamAnswerMethod;
   title: string;
-  recommended?: boolean;
   icon: typeof Pencil;
   description: string;
   highlights: string[];
-}> = [
-  {
-    method: 'blank',
-    title: 'Заполнить бланк ФИПИ от руки',
-    recommended: true,
-    icon: Pencil,
-    description:
-      'Тренировка как на настоящем ЕГЭ. Скачай официальный бланк, заполни ручкой, сфотографируй.',
-    highlights: [
-      'Привыкаешь к настоящему формату',
-      'На ЕГЭ одна ошибка в клеточке = минус балл',
-      'Часть 1 пишешь на бланке, цифровые поля скрыты',
-    ],
-  },
-  {
-    method: 'form',
-    title: 'Ввести ответы цифрой',
-    icon: Keyboard,
-    description: 'Удобно для быстрой проверки. Часть 1 вводится через поля на экране.',
-    highlights: [
-      'Быстрее без печати бланка',
-      'Подходит для тренировки решения, не оформления',
-      'Можно переключиться обратно на бланк в любой момент',
-    ],
-  },
-];
+}> {
+  return [
+    {
+      method: 'blank',
+      title: blankHasOfficialPdf
+        ? 'Заполнить бланк ФИПИ от руки'
+        : 'Написать ответы от руки',
+      icon: Pencil,
+      description: blankHasOfficialPdf
+        ? 'Тренировка как на настоящем ЕГЭ. Скачай официальный бланк, заполни ручкой, сфотографируй.'
+        : 'Запиши ответы Части 1 на листе (номер задания → ответ) и сфотографируй. Официального бланка для этого предмета у нас пока нет.',
+      highlights: [
+        blankHasOfficialPdf
+          ? 'Привыкаешь к настоящему формату'
+          : 'Ближе к тому, как пишешь на экзамене',
+        'На экзамене одна ошибка в клеточке = минус балл',
+        'Условия задач видны на экране, скрыты только поля ввода',
+      ],
+    },
+    {
+      method: 'form',
+      title: 'Ввести ответы цифрой',
+      icon: Keyboard,
+      description: 'Удобно для быстрой проверки. Часть 1 вводится через поля на экране.',
+      highlights: [
+        'Быстрее без печати бланка',
+        'Ответы проверятся автоматически сразу после сдачи',
+        'Переключиться на бланк можно в любой момент',
+      ],
+    },
+  ];
+}
 
 export function AnswerMethodSelectModal({
   open,
@@ -65,10 +83,13 @@ export function AnswerMethodSelectModal({
   isSubmitting = false,
   onSelect,
   onCancel,
+  recommended = 'blank',
+  blankHasOfficialPdf = true,
 }: AnswerMethodSelectModalProps) {
   const [pending, setPending] = useState<MockExamAnswerMethod | null>(
-    currentMethod ?? 'blank',
+    currentMethod ?? recommended,
   );
+  const methodCards = buildMethodCards(blankHasOfficialPdf);
 
   const handleConfirm = () => {
     if (!pending) return;
@@ -102,9 +123,10 @@ export function AnswerMethodSelectModal({
         </DialogHeader>
 
         <div className="my-2 grid gap-3 md:grid-cols-2">
-          {METHOD_CARDS.map((card) => {
+          {methodCards.map((card) => {
             const Icon = card.icon;
             const isPending = pending === card.method;
+            const isRecommended = card.method === recommended;
             return (
               <button
                 key={card.method}
@@ -121,7 +143,7 @@ export function AnswerMethodSelectModal({
                 )}
               >
                 <div className="flex items-start justify-between gap-2">
-                  {card.recommended ? (
+                  {isRecommended ? (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
                       Рекомендуем
                     </span>

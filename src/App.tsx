@@ -50,6 +50,7 @@ const StudentBoard = lazy(() => import("./pages/student/StudentBoard"));
 const GuestBoard = lazy(() => import("./pages/GuestBoard"));
 const PublicHomeworkShare = lazy(() => import("./pages/PublicHomeworkShare"));
 const PublicMockInvite = lazy(() => import("./pages/PublicMockInvite"));
+const PublicMockInviteClaim = lazy(() => import("./pages/PublicMockInviteClaim"));
 const PublicMockResult = lazy(() => import("./pages/PublicMockResult"));
 const PublicStudentReport = lazy(() => import("./pages/PublicStudentReport"));
 const Progress = lazy(() => import("./pages/Progress"));
@@ -374,6 +375,16 @@ const App = () => (
               element={
                 <Suspense fallback={<PageLoader />}>
                   <PublicMockInvite />
+                </Suspense>
+              }
+            />
+            {/* Шаг привязки анонимной попытки к аккаунту (вариант «б»,
+                2026-08-02). Публичный: сюда приходят ДО регистрации. */}
+            <Route
+              path="/p/mock-invite/:slug/start"
+              element={
+                <Suspense fallback={<PageLoader />}>
+                  <PublicMockInviteClaim />
                 </Suspense>
               }
             />

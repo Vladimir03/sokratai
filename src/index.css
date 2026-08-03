@@ -156,8 +156,27 @@ All colors MUST be HSL.
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* iOS-specific fixes for input and textarea */
-  input,
+  /* iOS-specific fixes for input and textarea.
+   *
+   * ⚠️ checkbox/radio ИСКЛЮЧЕНЫ ЯВНО (2026-08-02, ученица Ульяны не смогла
+   * поставить галочку согласия на публичной странице пробника).
+   * `appearance: none` стирает нативный виджет ЦЕЛИКОМ: квадрат становится
+   * прозрачным 16×16 без рамки и галочки, а `accent-color` (tailwind
+   * `accent-accent`) после этого красить уже нечего. Тапнуть «невидимое» можно
+   * только вслепую, и обратной связи всё равно нет — форма выглядит сломанной.
+   *
+   * Правило било ВСЕ 14 сырых checkbox/radio в проекте, включая радио выбора
+   * режима в модалке «Как будешь решать?» — то есть следующий экран того же
+   * ученика. Прежний обход был локальным (`.rtc-consent-checkbox` в
+   * RegisterTutor.tsx, `.tst-checkbox` в TutorSignupTrial.tsx — там прямо
+   * написано «рендерился невидимым, white-on-white»); чиним корень.
+   *
+   * Кастомные чекбоксы, которые СОЗНАТЕЛЬНО рисуют себя сами, объявляют
+   * `appearance:none` в собственном правиле (вне `@layer base`) и продолжают
+   * работать как раньше.
+   *
+   * Гард — smoke-check §25. */
+  input:not([type='checkbox']):not([type='radio']),
   textarea {
     -webkit-appearance: none;
     -moz-appearance: none;

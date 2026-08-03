@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { z } from "zod";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 
 import { supabase, getAuthErrorMessage } from "@/lib/supabaseClient";
 import { claimPendingInvite } from "@/lib/inviteApi";
+import { resolveSafeNextPath, withSafeNext } from "@/lib/safeNextPath";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import {
@@ -46,6 +47,7 @@ type FieldErrors = Partial<
 
 const SignUp = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
@@ -59,6 +61,21 @@ const SignUp = () => {
     consent: false,
   });
 
+  // Куда вести после регистрации (зеркало Login.tsx, 2026-08-02). Нужно
+  // публичному приглашению пробника: оно отправляет сюда с
+  // `?next=/p/mock-invite/:slug/start`, чтобы после создания аккаунта вернуть
+  // ученика на шаг привязки анонимной попытки, а не на общее расписание.
+  //
+  // Валидация — только через `resolveSafeNextPath` (внешнее ревью, P0):
+  // прежний префиксный гард пропускал `/\evil.example` (браузер нормализует
+  // обратный слеш в прямой → protocol-relative → чужой origin).
+  const safeNext = resolveSafeNextPath(searchParams.get("next"));
+  // Точка возврата должна пережить ВСЕ способы регистрации, а не только
+  // пароль: OAuth уходит на внешний домен и возвращается по `redirectPath`,
+  // подтверждение email — по `emailRedirectTo`. Раньше оба вели на дефолт, и
+  // ученик с публичной ссылки пробника оказывался в расписании (P0 ревью).
+  const postAuthPath = safeNext ?? "/student/schedule";
+
   // Redirect authenticated users to chat
   useEffect(() => {
     let cancelled = false;
@@ -68,13 +85,13 @@ const SignUp = () => {
       } = await supabase.auth.getSession();
       if (cancelled) return;
       if (session) {
-        navigate("/student/schedule", { replace: true });
+        navigate(safeNext ?? "/student/schedule", { replace: true });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, safeNext]);
 
   // Apply consent stashed before OAuth redirect (Google / Telegram).
   useEffect(() => {
@@ -151,7 +168,10 @@ const SignUp = () => {
             signup_source: "student-signup",
             consent_intent: "web-signup-student",
           },
-          emailRedirectTo: `${window.location.origin}/chat`,
+          // `postAuthPath`, а не хардкод `/chat`: иначе ученик, пришедший по
+          // публичной ссылке пробника, после подтверждения email попадал бы в
+          // AI-чат, а не на шаг привязки попытки (P0 внешнего ревью).
+          emailRedirectTo: `${window.location.origin}${postAuthPath}`,
         },
       });
 
@@ -188,7 +208,7 @@ const SignUp = () => {
       }
 
       toast.success("Регистрация успешна! Входим в систему...");
-      navigate("/student/schedule");
+      navigate(safeNext ?? "/student/schedule");
     } catch (error) {
       toast.error(getAuthErrorMessage(error, "Ошибка регистрации"));
     } finally {
@@ -527,13 +547,17 @@ const SignUp = () => {
 
           {/* OAuth — Yandex ID + VK ID (российские сервисы, 406-ФЗ), gated by consent */}
           <div className="flex flex-col gap-3" style={{ marginBottom: 8 }}>
+            {/* `postAuthPath` вместо хардкода: OAuth уходит на внешний домен и
+                возвращается сюда, поэтому точку возврата надо отдать ему явно —
+                localStorage-self-heal привяжет попытку, но экран покажет
+                расписание вместо пробника (P0 внешнего ревью). */}
             <YandexAuthButton
-              redirectPath="/student/schedule"
+              redirectPath={postAuthPath}
               consentSource="yandex-oauth-student"
               enabled={consent}
             />
             <VkAuthButton
-              redirectPath="/student/schedule"
+              redirectPath={postAuthPath}
               consentSource="vk-oauth-student"
               enabled={consent}
             />
@@ -686,7 +710,9 @@ const SignUp = () => {
           </form>
 
           <p className="tst-login-link">
-            Уже есть аккаунт? <Link to="/login">Войти</Link>
+            {/* `next` переносим на вход: иначе ученик, пришедший по публичной
+                ссылке пробника, терял бы точку возврата, кликнув «Войти». */}
+            Уже есть аккаунт? <Link to={withSafeNext('/login', safeNext)}>Войти</Link>
           </p>
         </section>
 

@@ -13,6 +13,7 @@ npm run smoke-check
 
 Notes:
 
+- ⚠️ **`npm run build` ЛОКАЛЬНО перезаписывает `supabase/functions/mcp/index.ts`.** Файл авто-генерируется Vite-плагином `@lovable.dev/mcp-js` и на твоей машине получает импорт `npm:C:\Users\<...>\src\lib\mcp\index.ts` — абсолютный путь разработчика. На проде это гарантированный **503 boot-fail** функции. После любой локальной сборки: `git checkout -- supabase/functions/mcp/index.ts` ДО коммита. Симптом-ловушка: файл выглядит как чужая правка в `git status` (2026-08-02 я дважды списал его на параллельную сессию).
 - `test` runs `smoke-check` (Node-based smoke checks).
 - `smoke-test` keeps the original bash-based smoke script.
 - If lint fails, still run `build` + `smoke-check` and report failures precisely.

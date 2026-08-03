@@ -125,11 +125,15 @@ export async function fetchPublicMockInvite(
   }
 
   if (!response.ok) {
-    const message =
-      typeof payload?.error === 'string'
-        ? payload.error
-        : 'Не удалось загрузить пробник';
-    return { status: 'error', message };
+    // Тело несёт машинный код (`internal_error`), а не фразу — показывать его
+    // ученику нельзя. Тот же контракт, что у /claim.
+    const code = typeof payload?.error === 'string' ? payload.error : null;
+    return {
+      status: 'error',
+      message:
+        (code && CLAIM_ERROR_MESSAGES[code]) ||
+        'Не удалось загрузить пробник. Обновите страницу или попросите репетитора прислать ссылку заново.',
+    };
   }
 
   const assignment = payload?.assignment as PublicMockInviteAssignment | undefined;
@@ -227,6 +231,275 @@ export async function startPublicMockInvite(
       anonymous_id: body.anonymous_id,
     },
   };
+}
+
+// ─── POST /share/mock-invite/:slug/claim ─────────────────────────────────────
+//
+// Привязка анонимной попытки к аккаунту после входа/регистрации (решение
+// владельца 2026-08-02, вариант «б»).
+//
+// Раньше страница приглашения после лид-формы вела прямо на
+// `/student/mock-exams/:assignment_id`, а тот эндпоинт ищет попытку по
+// `student_id = auth.uid()`. У анонимной попытки `student_id` NULL, поэтому
+// КАЖДЫЙ, кто заполнил форму, получал «Пробник не найден или не назначен
+// этому ученику». Теперь между формой и пробником стоит шаг привязки.
+//
+// `anonymous_id` — bearer-секрет из ответа /start: держим его в localStorage
+// (а не в sessionStorage), потому что вход через Yandex/VK уводит браузер на
+// внешний домен и обратно — sessionStorage переживает это не на всех
+// платформах.
+
+const PENDING_CLAIM_KEY = 'pending_mock_invite_claim';
+/** Потолок ожидания привязки: дольше — показываем «Повторить», а не спиннер. */
+const CLAIM_TIMEOUT_MS = 20_000;
+
+/** Машинные коды edge-роута → фразы для ученика (сырой код показывать нельзя). */
+const CLAIM_ERROR_MESSAGES: Record<string, string> = {
+  internal_error: 'Не удалось связать пробник с аккаунтом. Попробуйте ещё раз.',
+  invalid_body: 'Данные заявки повреждены. Откройте ссылку от репетитора заново.',
+  validation: 'Данные заявки повреждены. Откройте ссылку от репетитора заново.',
+  invalid_slug: 'Ссылка на пробник некорректна. Попросите репетитора прислать новую.',
+};
+
+export interface PendingMockInviteClaim {
+  slug: string;
+  assignment_id: string;
+  attempt_id: string;
+  anonymous_id: string;
+}
+
+/**
+ * Зеркало в памяти модуля (внешнее ревью 2026-08-02, P0).
+ *
+ * Прежний код глотал сбой `localStorage.setItem` с комментарием «данные придут
+ * пропсами» — но такого пути не существовало. В приватном режиме / урезанном
+ * WebView запись бросает `QuotaExceededError`, лид и попытка на сервере УЖЕ
+ * созданы, а экран привязки честно отвечает «Заявка не найдена»: тупик после
+ * успешно отправленной формы.
+ *
+ * Память переживает SPA-навигацию (форма → экран привязки → вход по паролю
+ * без перезагрузки), то есть закрывает основной сценарий. Полную перезагрузку
+ * и OAuth-редирект она не переживёт — на этот случай `persist…` возвращает
+ * `false`, и вызывающий обязан предупредить пользователя ДО перехода.
+ */
+let inMemoryClaim: PendingMockInviteClaim | null = null;
+
+/** @returns `true`, если запись переживёт перезагрузку страницы. */
+export function persistPendingMockInviteClaim(
+  claim: PendingMockInviteClaim,
+): boolean {
+  inMemoryClaim = claim;
+  try {
+    localStorage.setItem(PENDING_CLAIM_KEY, JSON.stringify(claim));
+    // Проверяем чтением: часть WebView «принимает» setItem молча, ничего не
+    // сохраняя, — тогда мы бы соврали пользователю про надёжность.
+    return localStorage.getItem(PENDING_CLAIM_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+export function readPendingMockInviteClaim(
+  slug?: string,
+): PendingMockInviteClaim | null {
+  try {
+    const raw = localStorage.getItem(PENDING_CLAIM_KEY);
+    if (!raw) return matchSlug(inMemoryClaim, slug);
+    const parsed = JSON.parse(raw) as Partial<PendingMockInviteClaim> | null;
+    if (
+      !parsed ||
+      typeof parsed.slug !== 'string' ||
+      typeof parsed.assignment_id !== 'string' ||
+      typeof parsed.attempt_id !== 'string' ||
+      typeof parsed.anonymous_id !== 'string'
+    ) {
+      return matchSlug(inMemoryClaim, slug);
+    }
+    return matchSlug(parsed as PendingMockInviteClaim, slug);
+  } catch {
+    return matchSlug(inMemoryClaim, slug);
+  }
+}
+
+/** Чужой slug — не наш пробник (ученик открыл вторую ссылку). */
+function matchSlug(
+  claim: PendingMockInviteClaim | null,
+  slug?: string,
+): PendingMockInviteClaim | null {
+  if (!claim) return null;
+  if (slug && claim.slug.toLowerCase() !== slug.trim().toLowerCase()) return null;
+  return claim;
+}
+
+export function clearPendingMockInviteClaim(): void {
+  inMemoryClaim = null;
+  try {
+    localStorage.removeItem(PENDING_CLAIM_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+export type ClaimMockInviteResult =
+  | {
+    status: 'claimed' | 'already_claimed' | 'already_has_attempt';
+    assignment_id: string;
+  }
+  | { status: 'unauthorized' }
+  | { status: 'not_found' }
+  | { status: 'error'; message: string };
+
+export async function claimMockInviteAttempt(
+  claim: PendingMockInviteClaim,
+  accessToken: string,
+): Promise<ClaimMockInviteResult> {
+  const normalizedSlug = claim.slug.trim().toLowerCase();
+  if (!MOCK_INVITE_SLUG_RE.test(normalizedSlug)) {
+    return { status: 'not_found' };
+  }
+
+  // Таймаут обязателен (rule 95: «зависшая загрузка обязана иметь выход»).
+  // Под РФ-DPI соединение устанавливается, а ответ не приходит никогда — без
+  // AbortController промис не резолвится, и экран навсегда застревает на
+  // «Готовим пробник…» без кнопки «Повторить» (P1 внешнего ревью).
+  // `AbortSignal.timeout()` НЕ используем — Safari < 16 (rule 80).
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLAIM_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(
+      `${FUNCTIONS_BASE_URL}/mock-exam-public/share/mock-invite/${encodeURIComponent(normalizedSlug)}/claim`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          attempt_id: claim.attempt_id,
+          anonymous_id: claim.anonymous_id,
+        }),
+        signal: controller.signal,
+      },
+    );
+  } catch (err) {
+    // Таймаут/обрыв — RETRYABLE: bearer-секрет НЕ трогаем, пользователь жмёт
+    // «Повторить». Отличаем от терминального 404 намеренно.
+    const aborted = err instanceof Error && err.name === 'AbortError';
+    return {
+      status: 'error',
+      message: aborted
+        ? 'Сервер не ответил вовремя. Проверьте интернет и нажмите «Повторить».'
+        : err instanceof Error
+          ? err.message
+          : 'Не удалось связать пробник с аккаунтом. Проверьте интернет.',
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  const body = (await response.json().catch(() => null)) as
+    | Record<string, unknown>
+    | null;
+
+  if (response.status === 401) return { status: 'unauthorized' };
+  if (response.status === 404) return { status: 'not_found' };
+  if (!response.ok) {
+    // Тело этого edge-роута несёт МАШИННЫЕ коды (`internal_error`,
+    // `invalid_body`…), а не готовую фразу — исторический контракт функции,
+    // русские тексты живут на клиенте. Показывать код пользователю нельзя
+    // (P2 внешнего ревью: юзер видел буквальное «internal_error»).
+    const code = typeof body?.error === 'string' ? body.error : null;
+    return {
+      status: 'error',
+      message:
+        code && CLAIM_ERROR_MESSAGES[code]
+          ? CLAIM_ERROR_MESSAGES[code]
+          : 'Не удалось связать пробник с аккаунтом. Попробуйте ещё раз.',
+    };
+  }
+  if (typeof body?.assignment_id !== 'string') {
+    return { status: 'error', message: 'Неполный ответ сервера' };
+  }
+  const status = body.status;
+  return {
+    status:
+      status === 'already_claimed' || status === 'already_has_attempt'
+        ? status
+        : 'claimed',
+    assignment_id: body.assignment_id,
+  };
+}
+
+/**
+ * Self-heal привязки (зеркало `ensurePushSubscriptionSaved`, main.tsx).
+ *
+ * Экран `/p/mock-invite/:slug/start` — основной путь, но он не покрывает два
+ * случая: регистрация с подтверждением email (возврат идёт через `email-verify`
+ * мимо `?next=`) и OAuth-провайдеры, которые не несут наш `next`. Без этой
+ * сети попытка навсегда осталась бы анонимной и не появилась бы в «Моих
+ * пробниках», хотя аккаунт уже создан.
+ *
+ * Идемпотентно (сервер отвечает `already_claimed`), тихо, без навигации.
+ * `supabase` импортируется динамически: публичная страница приглашения не
+ * должна тянуть auth-клиент в свой чанк.
+ *
+ * ⚠️ НЕ запускается на самом экране привязки (P0 внешнего ревью): там тот же
+ * `INITIAL_SESSION` получал бы и экран, и фон, оба читали бы ещё анонимную
+ * попытку и оба слали бы CAS-UPDATE. Проигравший получал бы отказ, хотя
+ * попытка уже принадлежит тому же пользователю, и экран отправлял бы ученика
+ * заполнять форму заново. Фон здесь не нужен: экран сам всё сделает и покажет.
+ */
+export function ensurePendingMockInviteClaimed(): void {
+  if (!readPendingMockInviteClaim()) return;
+  if (
+    typeof window !== 'undefined' &&
+    /^\/p\/mock-invite\/[^/]+\/start\/?$/.test(window.location.pathname)
+  ) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      const { supabase } = await import('@/lib/supabaseClient');
+      let done = false;
+      // rule 96 §1: ждём INITIAL_SESSION — синхронный getSession() на старте
+      // приложения вернёт null до разбора `#access_token=…` из редиректа.
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if (done) return;
+        if (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN') return;
+        const token = session?.access_token;
+        if (!token) return;
+        const claim = readPendingMockInviteClaim();
+        if (!claim) {
+          done = true;
+          data.subscription.unsubscribe();
+          return;
+        }
+        done = true;
+        void claimMockInviteAttempt(claim, token)
+          .then((result) => {
+            // Чистим ТОЛЬКО на реальном успехе. Раньше сюда попадал и
+            // `not_found` — фон стирал bearer-секрет, и открытый в соседней
+            // вкладке экран привязки терял единственный шанс (P0 ревью).
+            if (
+              result.status === 'claimed' ||
+              result.status === 'already_claimed' ||
+              result.status === 'already_has_attempt'
+            ) {
+              clearPendingMockInviteClaim();
+            }
+          })
+          .catch(() => {
+            // фон — молча, повторим на следующем старте
+          })
+          .finally(() => data.subscription.unsubscribe());
+      });
+    } catch {
+      // фон — молча
+    }
+  })();
 }
 
 // ─── GET /share/mock-result/:slug ────────────────────────────────────────────

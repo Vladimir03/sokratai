@@ -11,6 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 
@@ -151,6 +152,50 @@ test("registry: длительность экзамена = подтверждё
   assert.equal(profiles.getExamProfile("physics", "ege").durationMinutes, 235);
   assert.equal(profiles.getExamProfile("social", "ege").durationMinutes, 210);
   assert.equal(profiles.getExamProfile("physics", "oge").durationMinutes, null);
+  // Химия (репорт Ульяны 2026-08-02): без профиля её ОГЭ-вариант показывал
+  // физические 235 мин («3 ч 55 мин») на публичном приглашении.
+  assert.equal(profiles.getExamProfile("chemistry", "oge").durationMinutes, 180);
+  assert.equal(profiles.getExamProfile("chemistry", "ege").durationMinutes, 210);
+});
+
+// ─── Химия (репорт Ульяны 2026-08-02) ───────────────────────────────────────
+// Профиля не было вовсе → вариант получал физические дефолты. Баллы КИМ
+// намеренно НЕ заводим (предметник не подтверждал таблицу ФИПИ).
+
+const FROZEN_CHEMISTRY_OGE_CHECK_MODES = {
+  1: "task20", 5: "task20", 6: "task20", 8: "task20",
+  11: "task20", 13: "task20", 14: "task20", 16: "task20",
+};
+
+test("registry: химия ОГЭ — множественный выбор ≠ strict (репорт Ульяны)", () => {
+  const chOge = profiles.getExamProfile("chemistry", "oge");
+  assert.deepEqual(chOge.part1CheckModes, FROZEN_CHEMISTRY_OGE_CHECK_MODES);
+  assert.equal(chOge.defaultPart1CheckMode, "strict");
+  // Границы частей: 23 задания, Ч2 = 20–23 (её «вариант 1 д.2025»).
+  assert.deepEqual(chOge.part2KimRange, [20, 23]);
+  assert.deepEqual(profiles.getExamProfile("chemistry", "ege").part2KimRange, [29, 34]);
+  // Баллы вручную — карты ФИПИ по химии нет.
+  assert.equal(chOge.kimPrimaryScores, null);
+  assert.equal(profiles.getExamProfile("chemistry", "ege").kimPrimaryScores, null);
+  // ЕГЭ-химия: частичный балл Ч1 не подтверждён → карты нет, ложный ноль
+  // лечится правкой режима, ложный балл не заметил бы никто.
+  assert.equal(profiles.getExamProfile("chemistry", "ege").part1CheckModes, null);
+});
+
+test("химия: соответствие/последовательность остаются strict (порядок задан)", () => {
+  const f = variantDraft.inferPart1CheckMode;
+  // «Выберите два…» — набор цифр, порядок не важен.
+  for (const k of [1, 5, 6, 8, 11, 13, 14, 16]) {
+    assert.equal(f("chemistry", "oge", k), "task20", `химия ОГЭ КИМ ${k}`);
+  }
+  // Соответствие (4/9/10/12/15/17), последовательность (3), «сначала X, затем Y»
+  // (2/7), числа (18/19) — позиция значима, strict.
+  for (const k of [2, 3, 4, 7, 9, 10, 12, 15, 17, 18, 19]) {
+    assert.equal(f("chemistry", "oge", k), "strict", `химия ОГЭ КИМ ${k}`);
+  }
+  // Гейт по экзамену: карта ОГЭ не течёт в ЕГЭ и в неуказанный экзамен.
+  assert.equal(f("chemistry", "ege", 1), "strict");
+  assert.equal(f("chemistry", "", 1), "strict");
 });
 
 test("normalizeExamType: легаси exam_type физики → generic ключ профиля", () => {
@@ -164,8 +209,46 @@ test("normalizeExamType: легаси exam_type физики → generic клю�
   assert.equal(n("olympiad"), null, "неизвестное → null, чужой профиль не подставляем");
 });
 
+test("бланк ФИПИ — общий на экзамен, а не на предмет (Ульяна 2026-08-02)", () => {
+  const f = profiles.getBlankPdfUrl;
+  // ЕГЭ: форма одна на все предметы — файл обязан отдаваться КАЖДОМУ,
+  // включая предметы без профиля в реестре (иначе биология/история остались
+  // бы без бланка на ровном месте).
+  for (const subject of ["physics", "chemistry", "social", "biology", null]) {
+    const url = f(subject, "ege");
+    assert.equal(typeof url, "string", `ЕГЭ ${subject}: бланк должен быть`);
+    // Статика фронта (public/blanks), а не Supabase-бакет: тот же origin,
+    // RU-safe по построению, едет обычным deploy-sokratai.
+    assert.match(url, /^\/blanks\//, "относительный путь на свой же origin");
+    assert.doesNotMatch(url, /supabase\.co/, "rule 96: заблокированный домен");
+  }
+  // Все ЕГЭ-предметы получают ОДИН и тот же файл — расхождение означало бы
+  // копии по предметам, которые разъедутся по годам.
+  assert.equal(f("chemistry", "ege"), f("physics", "ege"));
+
+  // ⚠️ ОГЭ — ДРУГАЯ форма. Пока файла нет, честный null: ЕГЭ-бланк ученику
+  // ОГЭ подсовывать нельзя (пробник Ульяны — ОГЭ-химия).
+  for (const subject of ["physics", "chemistry", "biology"]) {
+    assert.equal(f(subject, "oge"), null, `ОГЭ ${subject}: бланк ещё не залит`);
+  }
+  assert.equal(f("physics", null), null, "экзамен не указан → бланк не обещаем");
+});
+
+test("бланк ЕГЭ реально лежит в public/ (ссылка не должна вести в 404)", () => {
+  // Реестр указывает на статику фронта, а не на внешний бакет: значит файл
+  // обязан быть в репозитории. Иначе ученик жмёт «Открыть PDF бланка» и
+  // получает пустую страницу — молчаливая дыра ровно того класса, что мы
+  // чинили (обещание бланка без бланка).
+  const url = profiles.getBlankPdfUrl("physics", "ege");
+  const abs = fileURLToPath(new URL(`../public${url}`, import.meta.url));
+  assert.ok(fs.existsSync(abs), `нет файла ${url} в public/`);
+  const head = fs.readFileSync(abs).subarray(0, 5).toString("latin1");
+  assert.equal(head, "%PDF-", "файл не PDF");
+});
+
 test("registry: неизвестный профиль → null (балл/режим вручную)", () => {
-  assert.equal(profiles.getExamProfile("chemistry", "ege"), null);
+  // 2026-08-02: химия ПЕРЕЕХАЛА в заведённые — канарейкой теперь биология.
+  assert.equal(profiles.getExamProfile("biology", "ege"), null);
   assert.equal(profiles.getExamProfile("social", "oge"), null);
   assert.equal(profiles.getExamProfile(null, "ege"), null);
 });
@@ -273,7 +356,8 @@ test("reclassifyDraftsForSubjectExam: смена предмета пересчи
   assert.equal(r3.changed, 0);
   assert.equal(r3.drafts[0].checkMode, "strict");
 
-  // Предмет без карты (chemistry): режим Ч1 → strict, балл не трогаем (карты нет).
+  // Предмет без карт баллов/режимов Ч1 (chemistry ЕГЭ — профиль есть, карт нет):
+  // режим Ч1 → defaultPart1CheckMode (strict), балл не трогаем.
   const r4 = f([mk({ kimNumber: "5", checkMode: "multi_choice", maxScore: "2" })], "chemistry", "ege");
   assert.equal(r4.drafts[0].checkMode, "strict");
   assert.equal(r4.drafts[0].maxScore, "2", "нет карты → maxScore не трогаем");

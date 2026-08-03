@@ -38,6 +38,9 @@ import {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// Функция публичная (verify_jwt=false), поэтому JWT для /claim проверяем САМИ —
+// шлюз этого не делает (rule 96 #12).
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const VAPID_PUBLIC_KEY = Deno.env.get("VAPID_PUBLIC_KEY") ?? "";
 const VAPID_PRIVATE_KEY = Deno.env.get("VAPID_PRIVATE_KEY") ?? "";
 const VAPID_SUBJECT =
@@ -188,6 +191,27 @@ async function parseJsonBody(req: Request): Promise<unknown> {
   }
 }
 
+// ─── Auth (только для /claim — остальные роуты анонимные) ────────────────────
+//
+// Зеркало `mock-exam-student-api::authenticateUser`. Здесь функция публичная,
+// и это НЕ значит «без авторизации везде»: конкретный роут вправе её требовать.
+
+async function authenticateUser(
+  req: Request,
+): Promise<{ userId: string } | Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return jsonResponse({ error: "unauthorized" }, 401);
+  }
+  const resp = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: { Authorization: authHeader, apikey: SUPABASE_ANON_KEY },
+  });
+  if (!resp.ok) return jsonResponse({ error: "unauthorized" }, 401);
+  const user = await resp.json();
+  if (!user?.id) return jsonResponse({ error: "unauthorized" }, 401);
+  return { userId: user.id as string };
+}
+
 // ─── Tutor card whitelist ────────────────────────────────────────────────────
 //
 // HARD anti-leak invariant: только публично-безопасные поля. Никогда
@@ -296,6 +320,14 @@ async function handleInviteRead(
     console.error("mock_exam_public_invite_variant_failed", {
       error: variantErr.message,
     });
+    // Fail-closed (P2 внешнего ревью). Прежний код только логировал и отдавал
+    // 200 с `variant: null`, а клиент читает `variant?.subject ?? 'physics'` —
+    // то есть сбой чтения (deploy-skew, отсутствующая колонка) СНОВА выдавал
+    // «пробник по физике» и чужую длительность. Ровно тот баг, который мы
+    // сегодня чинили, только с другой стороны.
+    // Отсутствие СТРОКИ — не ошибка запроса, оно обрабатывается ниже (variant
+    // остаётся null, и мета честно деградирует до нейтральной).
+    return jsonResponse({ error: "internal_error" }, 500);
   }
 
   // Tasks: КОЛОНОЧНЫЙ whitelist без correct_answer / solution_text. Это
@@ -348,6 +380,12 @@ async function handleInviteRead(
       ? {
         title: variant.title,
         exam_type: variant.exam_type,
+        // ⚠️ Правка ревью 5.6 P1 #4 была сделана НАПОЛОВИНУ: `subject` добавили
+        // в SELECT выше, а в ответ положить забыли. Клиент читает
+        // `variant?.subject ?? 'physics'`, поэтому ОГЭ-химия Ульяны открывалась
+        // как «Бесплатный диагностический пробник по физике» (репорт
+        // 2026-08-02). Поле в SELECT без поля в ответе = молчаливый фолбэк.
+        subject: variant.subject,
         source: variant.source,
         source_attribution: variant.source_attribution,
         duration_minutes: variant.duration_minutes,
@@ -489,9 +527,15 @@ async function handleInviteStart(
   // (Postgres транзакции через PostgREST не доступны; rollback
   // best-effort для избежания сирот в attempt-таблице).
   const anonymousId = crypto.randomUUID();
-  const startedAt = new Date().toISOString();
-  const consentAt = startedAt;
+  const consentAt = new Date().toISOString();
 
+  // ⚠️ `started_at` НАМЕРЕННО остаётся NULL (2026-08-02, вариант «б»).
+  // Раньше таймер запускался прямо здесь — в момент отправки лид-формы. Теперь
+  // между формой и пробником стоит вход/регистрация, и предзаполненный
+  // `started_at` списывал бы экзаменационное время, пока ученик заводит
+  // аккаунт. NULL = taking-поверхность покажет обычную модалку выбора режима
+  // (`simulation`/`training`) и стартанёт попытку по-настоящему — ровно так же,
+  // как у назначенного ученика.
   const { data: attempt, error: attemptErr } = await db
     .from("mock_exam_attempts")
     .insert({
@@ -499,7 +543,7 @@ async function handleInviteStart(
       student_id: null,
       anonymous_id: anonymousId,
       status: "in_progress",
-      started_at: startedAt,
+      started_at: null,
     })
     .select("id, anonymous_id")
     .single();
@@ -557,6 +601,160 @@ async function handleInviteStart(
     },
     201,
   );
+}
+
+// ─── POST /share/mock-invite/:slug/claim ─────────────────────────────────────
+//
+// Привязка анонимной попытки к только что созданному/вошедшему аккаунту
+// (решение владельца 2026-08-02, вариант «б»).
+//
+// ЗАЧЕМ. Анонимное прохождение (TASK-12) так и не было реализовано, но
+// лид-форма работала и создавала попытку с `student_id = NULL`. Клиент затем
+// уходил на `/student/mock-exams/:assignment_id`, а `mock-exam-student-api`
+// ищет попытку по `student_id = auth.uid()` → 404 «Пробник не найден или не
+// назначен этому ученику». В проде это дало осиротевшие попытки и «ошибку по
+// ссылке» у КАЖДОГО, кто заполнил форму.
+//
+// БЕЗОПАСНОСТЬ. `anonymous_id` — bearer-секрет, выданный ровно один раз в
+// ответе /start. Без него привязка невозможна, поэтому чужую попытку присвоить
+// нельзя даже зная attempt_id. Плюс проверяем, что попытка принадлежит
+// назначению ЭТОЙ ссылки.
+//
+// ⚠️ CHECK `mock_exam_attempts_owner_xor` требует student_id XOR anonymous_id —
+// поэтому UPDATE обязан в ОДНОМ выражении проставить student_id и обнулить
+// anonymous_id. Раздельные UPDATE'ы упали бы на констрейнте.
+//
+// ⚠️ UNIQUE (assignment_id, student_id): если у пользователя уже есть попытка
+// по этому пробнику (зашёл как назначенный ученик / повторно открыл ссылку),
+// привязка даст 23505. Это НЕ ошибка для пользователя — ведём его в
+// существующую попытку, анонимная остаётся у репетитора как лид.
+
+async function handleInviteClaim(
+  db: SupabaseClient,
+  slug: string,
+  userId: string,
+  body: unknown,
+): Promise<Response> {
+  if (!body || typeof body !== "object") {
+    return jsonResponse({ error: "invalid_body" }, 400);
+  }
+  const b = body as Record<string, unknown>;
+  if (!isNonEmptyString(b.attempt_id) || !isNonEmptyString(b.anonymous_id)) {
+    return jsonResponse(
+      { error: "validation", field: "attempt_id", message: "required" },
+      400,
+    );
+  }
+  const attemptId = (b.attempt_id as string).trim();
+  const anonymousId = (b.anonymous_id as string).trim();
+
+  const { data: link, error: linkErr } = await db
+    .from("mock_exam_public_links")
+    .select("slug, scope, mock_exam_id, expires_at")
+    .eq("slug", slug)
+    .eq("scope", "invite")
+    .maybeSingle();
+  if (linkErr) {
+    console.error("mock_exam_public_invite_claim_link_failed", {
+      error: linkErr.message,
+    });
+    return jsonResponse({ error: "internal_error" }, 500);
+  }
+  if (!link || !link.mock_exam_id) {
+    return jsonResponse({ error: "not_found" }, 404);
+  }
+
+  const { data: attempt, error: attemptErr } = await db
+    .from("mock_exam_attempts")
+    .select("id, assignment_id, student_id, anonymous_id, status")
+    .eq("id", attemptId)
+    .maybeSingle();
+  if (attemptErr) {
+    console.error("mock_exam_public_invite_claim_attempt_failed", {
+      error: attemptErr.message,
+    });
+    return jsonResponse({ error: "internal_error" }, 500);
+  }
+  if (!attempt || attempt.assignment_id !== link.mock_exam_id) {
+    return jsonResponse({ error: "not_found" }, 404);
+  }
+
+  // Идемпотентность: повторный клик / возврат по кнопке «Назад» не должен
+  // выглядеть ошибкой — попытка уже наша, просто ведём дальше.
+  if (attempt.student_id === userId) {
+    return jsonResponse({
+      status: "already_claimed",
+      assignment_id: attempt.assignment_id,
+    });
+  }
+  if (attempt.student_id) {
+    // Чужая попытка — не раскрываем чью.
+    return jsonResponse({ error: "not_found" }, 404);
+  }
+  if (attempt.anonymous_id !== anonymousId) {
+    logEvent("mock_exam_invite_claim_token_mismatch", slug);
+    return jsonResponse({ error: "not_found" }, 404);
+  }
+
+  const { data: claimed, error: claimErr } = await db
+    .from("mock_exam_attempts")
+    .update({ student_id: userId, anonymous_id: null })
+    // CAS: только пока попытка всё ещё анонимна и с тем же токеном.
+    .eq("id", attemptId)
+    .is("student_id", null)
+    .eq("anonymous_id", anonymousId)
+    .select("id, assignment_id")
+    .maybeSingle();
+
+  if (claimErr) {
+    if (claimErr.code === "23505") {
+      // У пользователя уже есть попытка по этому назначению — ведём в неё.
+      const { data: existing } = await db
+        .from("mock_exam_attempts")
+        .select("assignment_id")
+        .eq("assignment_id", link.mock_exam_id)
+        .eq("student_id", userId)
+        .maybeSingle();
+      if (existing) {
+        logEvent("mock_exam_invite_claim_duplicate", slug);
+        return jsonResponse({
+          status: "already_has_attempt",
+          assignment_id: existing.assignment_id,
+        });
+      }
+    }
+    console.error("mock_exam_public_invite_claim_update_failed", {
+      error: claimErr.message,
+      code: claimErr.code,
+    });
+    return jsonResponse({ error: "internal_error" }, 500);
+  }
+  if (!claimed) {
+    // CAS не сработал — попытку забрали между нашим чтением и записью.
+    // ⚠️ НЕ отвечаем 404 вслепую (P0 внешнего ревью): почти всегда это гонка
+    // ДВУХ НАШИХ ЖЕ вызовов (экран привязки + фоновый self-heal, оба стартуют
+    // от одного `INITIAL_SESSION`). Проигравший получал бы «заявка больше не
+    // действует» на попытке, которая уже принадлежит ему. Перечитываем строку
+    // и решаем по факту владельца.
+    const { data: after } = await db
+      .from("mock_exam_attempts")
+      .select("assignment_id, student_id")
+      .eq("id", attemptId)
+      .maybeSingle();
+    if (after?.student_id === userId) {
+      return jsonResponse({
+        status: "already_claimed",
+        assignment_id: after.assignment_id,
+      });
+    }
+    return jsonResponse({ error: "not_found" }, 404);
+  }
+
+  logEvent("mock_exam_invite_claimed", slug);
+  return jsonResponse({
+    status: "claimed",
+    assignment_id: claimed.assignment_id,
+  });
 }
 
 // ─── Tutor push on new anonymous lead (AC-6) ────────────────────────────────
@@ -957,6 +1155,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       const body = await parseJsonBody(req);
       return await handleInviteStart(db, slug, body);
+    }
+
+    // POST /share/mock-invite/:slug/claim — привязка анонимной попытки к
+    // аккаунту после входа/регистрации (вариант «б», 2026-08-02).
+    if (
+      route.method === "POST" &&
+      seg.length === 4 &&
+      seg[0] === "share" &&
+      seg[1] === "mock-invite" &&
+      seg[3] === "claim"
+    ) {
+      const slug = seg[2].toLowerCase();
+      if (!SLUG_RE.test(slug)) {
+        return jsonResponse({ error: "invalid_slug" }, 400);
+      }
+      const auth = await authenticateUser(req);
+      if (auth instanceof Response) return auth;
+      const body = await parseJsonBody(req);
+      return await handleInviteClaim(db, slug, auth.userId, body);
     }
 
     // GET /share/mock-result/:slug

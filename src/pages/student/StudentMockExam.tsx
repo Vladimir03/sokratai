@@ -51,7 +51,7 @@ import {
 import { compressMockExamPhoto } from '@/lib/mockExamPhotoCompress';
 import { cn } from '@/lib/utils';
 import { getSubjectDative } from '@/lib/subjectHelpers';
-import { getExamProfile, normalizeExamType } from '@/lib/examProfiles';
+import { getBlankPdfUrl, getExamProfile, normalizeExamType } from '@/lib/examProfiles';
 import { toast } from 'sonner';
 import { useMockExamAutoSave } from '@/components/student/useMockExamAutoSave';
 import type { MockExamAnswerMethod, MockExamCheckMode, MockExamMode } from '@/types/mockExam';
@@ -70,12 +70,10 @@ const MarkdownTableRenderer = lazy(() =>
   })),
 );
 
-// Phase 4 (2026-05-15) — заменён с `ege-physics-2025.pdf` (старый бланк требовал
-// вписывать ФИО) на новый `ege-physics-2026.pdf` (4 страницы: бланк № 1 для
-// кратких ответов + бланк № 2 лист 1 + бланк № 2 лист 2 для развёрнутых +
-// дополнительный бланк № 2). Манualьно загружен через Supabase Studio.
-const BLANK_PDF_URL =
-  'https://api.sokratai.ru/storage/v1/object/public/mock-exam-blank-templates/ege-physics-2026.pdf';
+// Ссылка на официальный бланк переехала в ExamProfile registry
+// (`examProfiles.ts` → `blankPdfUrl`, 2026-08-02). Здесь она была захардкожена
+// физикой, поэтому «Открыть PDF бланка» физически не мог появиться ни у одного
+// другого предмета — гейт был по предмету, а не по наличию файла.
 
 type UploadKind = 'blank' | 'part2';
 type UploadStatus = 'idle' | 'uploading' | 'saved' | 'error';
@@ -852,10 +850,21 @@ function ListeningAudioErrorPanel({ onRetry }: { onRetry: () => void }) {
  * Info-only banner для blank-режима (TASK-13, 2026-05-14): инструкция +
  * ссылка на PDF бланка. PhotoUploadBox для фото бланка перенесён в секцию
  * «Часть 1» (рядом с инструкцией к Часть 1) — там он семантически логичнее.
- * `showPdfLink=false` для не-физики (PDF бланка — физический ege-physics-2026).
+ *
+ * `blankPdfUrl` приходит из ExamProfile registry (2026-08-02): гейт теперь по
+ * НАЛИЧИЮ файла у профиля предмет×экзамен, а не по «это физика». Появится
+ * бланк ОГЭ-химии в бакете — ссылка включится сама, без правки этого файла.
+ * Нет файла → честная инструкция «пиши на листе», а не обещание бланка.
  */
-function BlankModeBanner({ mode, showPdfLink = true }: { mode: MockExamMode; showPdfLink?: boolean }) {
+function BlankModeBanner({
+  mode,
+  blankPdfUrl,
+}: {
+  mode: MockExamMode;
+  blankPdfUrl: string | null;
+}) {
   if (mode !== 'blank') return null;
+  const showPdfLink = blankPdfUrl !== null;
 
   return (
     <Card className="border-amber-200 bg-amber-50 shadow-none hover:shadow-sm">
@@ -870,9 +879,9 @@ function BlankModeBanner({ mode, showPdfLink = true }: { mode: MockExamMode; sho
               ? 'Распечатай PDF официального бланка, заполни ручкой, потом сфотографируй бланк. Фото бланка загрузишь ниже в секции «Часть 1».'
               : 'Запиши ответы Части 1 ручкой на листе (номер задания → ответ), потом сфотографируй его. Фото загрузишь ниже в секции «Часть 1».'}
           </p>
-          {showPdfLink && (
+          {blankPdfUrl && (
             <a
-              href={BLANK_PDF_URL}
+              href={blankPdfUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex min-h-11 touch-manipulation items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 font-medium text-amber-900 underline-offset-4 hover:underline"
@@ -1017,6 +1026,7 @@ function Part1TaskCard({
   onAnswer,
   disabled,
   isPhysics,
+  showAnswerInput,
 }: {
   task: StudentMockExamVariantTask;
   answer: string;
@@ -1025,6 +1035,13 @@ function Part1TaskCard({
   onAnswer: (kim: number, answer: string) => void;
   disabled: boolean;
   isPhysics: boolean;
+  /**
+   * Режим «Бланк ФИПИ» скрывает ПОЛЕ ВВОДА — но не условие задачи (репорт
+   * Ульяны 2026-08-02). Раньше вся карточка не рендерилась, и у ученика по
+   * химии Часть 1 исчезала целиком: репетиторские варианты не имеют PDF с
+   * условиями, читать было физически нечего.
+   */
+  showAnswerInput: boolean;
 }) {
   return (
     <Card className="shadow-none hover:shadow-sm" id={`task-${task.kim_number}`}>
@@ -1060,6 +1077,12 @@ function Part1TaskCard({
             })}
           </div>
         )}
+        {!showAnswerInput && (
+          <p className="mt-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Ответ пиши от руки — здесь поля ввода нет. Формат: {getAnswerHint(task.check_mode, task.kim_number, isPhysics).toLowerCase()}
+          </p>
+        )}
+        {showAnswerInput && (
         <div className="mt-4">
           <label htmlFor={`answer-${task.kim_number}`} className="text-sm font-medium text-slate-700">
             Ответ
@@ -1092,6 +1115,7 @@ function Part1TaskCard({
             </div>
           )}
         </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1214,6 +1238,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     () => data.assignment.default_exam_mode ?? 'training',
   );
   const [isStartingAttempt, setIsStartingAttempt] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   // exam_mode immutable после старта. Default 'training' для backward compat
   // (existing attempts до миграции получают DB default).
   const examMode: 'simulation' | 'training' = data.attempt.exam_mode ?? 'training';
@@ -1340,14 +1365,16 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
     // AC-P10 Phase 2 (PAUSE-4): НЕ auto-start если start modal открыт.
     // Старый flow auto-fire'ил /start с no mode → backend применял default
     // training. Новый flow ждёт student explicit choice (или close → default).
-    if (!data.attempt.started_at && !startModalOpen) {
+    // `!methodModalOpen` (2026-08-02): у свежей попытки ОБА поля пусты, и без
+    // этого условия таймер стартовал бы, пока ученик ещё выбирает способ ответа.
+    if (!data.attempt.started_at && !startModalOpen && !methodModalOpen) {
       const optimisticStart = new Date().toISOString();
       setStartedAt(optimisticStart);
       startMockExamAttempt(data.attempt.id).catch((err) => {
         console.warn('[mock-exam] failed to start attempt', err);
       });
     }
-  }, [data.assignment.id, data.attempt.id, data.attempt.started_at, data.attempt.status, navigate, startModalOpen]);
+  }, [data.assignment.id, data.attempt.id, data.attempt.started_at, data.attempt.status, navigate, startModalOpen, methodModalOpen]);
 
   useEffect(() => {
     return () => {
@@ -1512,6 +1539,10 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // ended_at: null}] и exam_mode immutably.
   const handleStartConfirm = async () => {
     setIsStartingAttempt(true);
+    setStartError(null);
+    // Оптимистичный `startedAt` запоминаем, чтобы откатить при сбое: иначе
+    // таймер тикает от несуществующего старта (P2 внешнего ревью).
+    const previousStartedAt = startedAt;
     try {
       const optimisticStart = new Date().toISOString();
       setStartedAt(optimisticStart);
@@ -1523,12 +1554,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
       setStartModalOpen(false);
     } catch (err) {
       console.error('[mock-exam] start failed', err);
-      const msg =
+      // Раньше сообщение вычислялось в `msg` и НИКУДА не выводилось: спиннер
+      // гас, диалог оставался пустым, и ученик не понимал, запустился таймер
+      // или нет. Плюс откатываем оптимистичный старт.
+      setStartedAt(previousStartedAt);
+      setStartError(
         err instanceof Error
           ? err.message
-          : 'Не удалось запустить пробник. Попробуй ещё раз.';
-      // Inline в start modal? Для простоты — toast через console + keep modal open.
-      // User видит «Начать» button enabled снова, может retry.
+          : 'Не удалось запустить пробник. Проверь интернет и попробуй ещё раз.',
+      );
     } finally {
       setIsStartingAttempt(false);
     }
@@ -1606,6 +1640,44 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // справочник, чужой PDF бланка и подсказку по несуществующему у неё номеру.
   const isPhysicsEgeVariant = variantSubject === 'physics' && variantExam === 'ege';
 
+  // Официальный бланк — по НАЛИЧИЮ файла для уровня экзамена, а не по предмету
+  // (2026-08-02, подтверждение Ульяны: форма бланка одна на все предметы).
+  // Гейт был «физика ЕГЭ», поэтому химия/обществознание бланк не получали
+  // никогда. Залить бланк ОГЭ = одна строка в реестре, без правок здесь.
+  const blankPdfUrl = getBlankPdfUrl(variantSubject, variantExam);
+
+  // Номера заданий Части 2 (репорт Ульяны 2026-08-02). Было захардкожено
+  // «№ 21–26» — физика ЕГЭ; у её ОГЭ-химии Часть 2 = 20–23, и обе подписи
+  // врали. Истина рантайма — САМ вариант (задачи уже загружены), профиль
+  // предмет×экзамен остаётся фолбэком; нет ни того, ни другого → номера не
+  // называем вовсе (лучше молчать, чем врать).
+  // Способ ответа по умолчанию (репорт Ульяны 2026-08-02). Модалка всегда
+  // преселектила «Бланк ФИПИ» и вешала на него «Рекомендуем» — в том числе
+  // когда репетитор назначил `mode='form'`. Ученик жал «Начать», проваливался
+  // в бланк-режим, а официального бланка у не-физики нет. Теперь выбор
+  // репетитора первичен; фолбэк — бланк только там, где PDF реально есть.
+  const recommendedAnswerMethod: MockExamAnswerMethod =
+    data.assignment.mode === 'blank'
+      ? 'blank'
+      : data.assignment.mode === 'form'
+        ? 'form'
+        : isPhysicsEgeVariant
+          ? 'blank'
+          : 'form';
+
+  const part2NumbersLabel = useMemo(() => {
+    const kims = part2Tasks
+      .map((t) => t.kim_number)
+      .filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
+    if (kims.length > 0) {
+      const min = Math.min(...kims);
+      const max = Math.max(...kims);
+      return min === max ? `№ ${min}` : `№ ${min}–${max}`;
+    }
+    const range = getExamProfile(variantSubject, variantExam)?.part2KimRange;
+    return range ? `№ ${range[0]}–${range[1]}` : null;
+  }, [part2Tasks, variantSubject, variantExam]);
+
   return (
     <div className="sokrat min-h-[100dvh] bg-slate-50" data-sokrat-mode="student">
       <AnswerMethodSelectModal
@@ -1613,6 +1685,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
         currentMethod={answerMethod}
         confirmLabel={answerMethod ? 'Сохранить выбор' : 'Начать пробник'}
         isSubmitting={methodSwitching}
+        recommended={recommendedAnswerMethod}
+        blankHasOfficialPdf={blankPdfUrl !== null}
         onSelect={handleAnswerMethodSelect}
         // Если ученик ещё не выбрал — нельзя закрыть. Если открыли через
         // switcher (answerMethod !== null) — даём Cancel.
@@ -1686,7 +1760,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           </section>
 
           <div className="space-y-4">
-            {answerMethod === 'blank' && <BlankModeBanner mode="blank" showPdfLink={isPhysicsEgeVariant} />}
+            {answerMethod === 'blank' && <BlankModeBanner mode="blank" blankPdfUrl={blankPdfUrl} />}
             {isPhysicsEgeVariant ? <ReferencesPanel /> : <GenericAnswerInstructionsPanel />}
           </div>
 
@@ -1758,11 +1832,19 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             {/* P0-1 ревью 5.6: шапка блока рендерится в ОБОИХ режимах ответа.
                 В режиме бланка цифровые поля скрыты, но материал блока (статья,
                 документ, аудиотрек) — это условие: без него ученик решает
-                вслепую. Скрывать можно поля ввода, не условие. */}
+                вслепую. Скрывать можно поля ввода, не условие.
+
+                2026-08-02 (репорт Ульяны): то же правило распространено на САМИ
+                задачи. Раньше карточки Части 1 рендерились только при
+                `answerMethod === 'form'`, то есть в режиме бланка исчезал и
+                текст условия с картинками. У физики это маскировал печатный КИМ
+                (чип «Скачать задачи (PDF)»), но у репетиторских вариантов
+                `variant_pdf_url` нет НИКОГДА — ученик по химии видел пустую
+                Часть 1 и спрашивал «где первая часть?». */}
             {part1Groups.map((group) => (
               <div key={group.key} className="space-y-3">
                 {group.block ? <TaskBlockHeader block={group.block} /> : null}
-                {answerMethod === 'form' && group.tasks.map((task) => (
+                {group.tasks.map((task) => (
                   <Part1TaskCard
                     key={task.id}
                     task={task}
@@ -1772,13 +1854,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                     onAnswer={autosave.setAnswer}
                     disabled={isFinal}
                     isPhysics={isPhysicsEgeVariant}
+                    showAnswerInput={answerMethod === 'form'}
                   />
                 ))}
               </div>
             ))}
-            {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') цифровые поля СКРЫТЫ —
-                ученик пишет ответы на распечатанном бланке и загружает фото в
-                PhotoUploadBox выше. После Phase 6 (2026-05-15) AI auto-OCR
+            {/* В режиме «Бланк ФИПИ» (answerMethod==='blank') скрыты ТОЛЬКО поля
+                ввода — ученик пишет ответы на распечатанном бланке и загружает
+                фото в PhotoUploadBox выше. После Phase 6 (2026-05-15) AI auto-OCR
                 Часть 1 запускается в `mock-exam-grade::runPart1OCR` на canonical
                 `attempts.blank_photo_url` и pre-fills `mock_exam_attempt_part1_answers`.
                 Tutor видит OCR результаты в `Part1BlankReviewPanel` с amber border
@@ -1791,7 +1874,8 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Часть 2</h2>
                 <p className="text-sm text-slate-500">
-                  Прочитай условия задач № 21–26 ниже и реши их на бумаге. Затем
+                  Прочитай условия задач {part2NumbersLabel ? `${part2NumbersLabel} ` : ''}ниже
+                  и реши их на бумаге. Затем
                   загрузи фото решений одним пакетом (до {MAX_BULK_PART2_PHOTOS} фото).
                   AI и репетитор сами разберут, где какая задача.
                 </p>
@@ -1832,7 +1916,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
-                      Фото решений Части 2 (задачи № 21–26)
+                      Фото решений Части 2{part2NumbersLabel ? ` (задачи ${part2NumbersLabel})` : ''}
                     </p>
                     <p className="text-xs text-slate-500">
                       До {MAX_BULK_PART2_PHOTOS} фото. JPG / PNG / WebP / HEIC, до 10 МБ каждое.
@@ -2008,8 +2092,14 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
         {/* AC-P10 Phase 2 (PAUSE-4, 2026-05-25): start modal с mode picker.
             Open при первом open пробника. Pre-selected = tutor recommendation,
             student override allowed (приоритет student wins). */}
+        {/* ⚠️ Диалоги показываем ПОСЛЕДОВАТЕЛЬНО (P1 внешнего ревью).
+            У свежей попытки `started_at` и `answer_method` пусты одновременно
+            (с 2026-08-02 анонимная попытка тоже создаётся без `started_at`),
+            и раньше оба диалога монтировались разом: два focus-trap друг над
+            другом, а верхний уже запускал таймер. Сначала способ ответа —
+            потом режим таймера. */}
         <Dialog
-          open={startModalOpen}
+          open={startModalOpen && !methodModalOpen}
           onOpenChange={(open) => {
             // Защита от close без выбора — modal модальный по дизайну.
             if (!isStartingAttempt && open) setStartModalOpen(open);
@@ -2098,6 +2188,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
               </label>
             </div>
 
+            {startError && (
+              <div
+                className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800"
+                role="alert"
+              >
+                {startError}
+              </div>
+            )}
+
             <DialogFooter>
               <Button
                 type="button"
@@ -2106,7 +2205,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 disabled={isStartingAttempt}
               >
                 {isStartingAttempt && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Начать пробник
+                {startError ? 'Повторить' : 'Начать пробник'}
               </Button>
             </DialogFooter>
           </DialogContent>

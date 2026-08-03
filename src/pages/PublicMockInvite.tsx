@@ -46,11 +46,13 @@ import {
 import { UserAvatar } from '@/components/common/UserAvatar';
 import {
   fetchPublicMockInvite,
+  persistPendingMockInviteClaim,
   startPublicMockInvite,
   type ContactType,
   type PublicMockInviteData,
 } from '@/lib/mockExamPublicApi';
 import { detectContactType } from '@/lib/mockExamContactType';
+import { cn } from '@/lib/utils';
 import { getExamProfile, normalizeExamType } from '@/lib/examProfiles';
 import { getSubjectDative } from '@/lib/subjectHelpers';
 
@@ -174,10 +176,11 @@ function ReadyToStartPanel({
             Готово, {leadName}! Можно начинать.
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Заявка сохранена. Когда нажмёшь «Начать пробник», запустится
-            таймер
+            Заявка сохранена, репетитор её уже видит. Дальше — вход или быстрая
+            регистрация: в аккаунте сохранятся твои ответы, если придётся
+            прерваться. Таймер
             {meta.durationLabel === '—' ? null : <> на&nbsp;{meta.durationLabel}</>}
-            {' '}— сразу откроется первая задача.
+            {' '}запустится уже на&nbsp;странице пробника.
           </p>
         </div>
       </div>
@@ -230,12 +233,14 @@ function ConfirmStartDialog({
         <DialogHeader>
           <DialogTitle>Готов начать?</DialogTitle>
           <DialogDescription className="text-slate-600">
+            Сейчас попросим войти или создать аккаунт — это быстро, и в нём
+            сохранятся твои ответы.{' '}
             {durationLabel === '—' ? (
-              <>Таймер пробника запустится сразу</>
+              <>Таймер запустится уже на странице пробника</>
             ) : (
               <>
-                Тебе будет дано <strong>{durationLabel}</strong> на прохождение
-                пробника. Таймер запустится сразу
+                Дальше выберешь режим, и запустится таймер на{' '}
+                <strong>{durationLabel}</strong>
               </>
             )}{' '}
             — лучше начинать в спокойной обстановке.
@@ -546,9 +551,26 @@ function LeadForm({ slug, onSuccess }: LeadFormProps) {
           )}
         </div>
 
+        {/* Согласие — единственный гейт между лидом и пробником, поэтому
+            элемент должен быть заметен и попадаем пальцем безусловно (репорт
+            2026-08-02: ученица «не могла поставить галочку»).
+            - `h-5 w-5` + рамка вместо 16px по умолчанию: на белой карточке
+              нативный чекбокс без состояния почти не читается;
+            - красная рамка при ошибке — иначе сообщение внизу есть, а куда
+              смотреть, непонятно;
+            - `stopPropagation` на ссылке: тап по «Политике» открывал вкладку
+              И считался тапом по label, то есть незаметно переключал галочку
+              обратно. */}
         <label
           htmlFor={consentId}
-          className="flex min-h-[44px] cursor-pointer items-start gap-2.5 py-1 text-xs text-slate-700"
+          className={cn(
+            'flex min-h-[44px] cursor-pointer items-start gap-2.5 rounded-md px-2 py-2 text-xs text-slate-700',
+            // Подсветку ошибки вешаем на СТРОКУ, а не на сам input: у нативного
+            // чекбокса (`appearance: auto`) CSS-рамка не рисуется вовсе, и
+            // красный border на нём был бы невидимым — ровно та же ловушка,
+            // что породила исходный баг.
+            errors.consent ? 'border border-red-300 bg-red-50' : null,
+          )}
         >
           <input
             id={consentId}
@@ -563,7 +585,7 @@ function LeadForm({ slug, onSuccess }: LeadFormProps) {
             disabled={submitting}
             aria-invalid={errors.consent ? 'true' : undefined}
             aria-describedby={errors.consent ? `${consentId}-error` : undefined}
-            className="mt-0.5 h-4 w-4 cursor-pointer accent-accent"
+            className="mt-0.5 h-5 w-5 flex-none cursor-pointer accent-accent"
             style={{ touchAction: 'manipulation' }}
           />
           <span>
@@ -572,6 +594,7 @@ function LeadForm({ slug, onSuccess }: LeadFormProps) {
               href="/privacy-policy"
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               className="text-accent underline hover:text-accent/80"
             >
               Политика конфиденциальности
@@ -633,6 +656,8 @@ export default function PublicMockInvite() {
   const navigate = useNavigate();
   const [success, setSuccess] = useState<SuccessSnapshot | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  /** Хранилище недоступно — заявка не переживёт перезагрузку/переход в браузер. */
+  const [storageWarning, setStorageWarning] = useState(false);
 
   const query = useQuery({
     queryKey: ['public-mock-invite', slug],
@@ -643,24 +668,28 @@ export default function PublicMockInvite() {
 
   // Olympiad flow (TASK-7, AC-P8): после успешного POST лид уже сохранён в
   // mock_exam_anonymous_leads (AC-6) → НЕ показываем «ждите репетитора»,
-  // сразу открываем confirm dialog «Готов начать? 4 часа». Подтверждение →
-  // navigate на taking surface (`/student/mock-exams/:assignment_id`).
-  // Credentials в sessionStorage остаются как hook для будущего anonymous
-  // taking flow (TASK-12), сейчас authenticated AuthGuard перехватит
-  // anonymous и проведёт через login → возврат на тот же URL.
-  const handleStartSuccess = (data: SuccessSnapshot) => {
-    try {
-      sessionStorage.setItem(
-        `mock-exam-anon:${data.attempt_id}`,
-        JSON.stringify({
-          anonymous_id: data.anonymous_id,
-          slug,
-          started_at: new Date().toISOString(),
-        }),
-      );
-    } catch {
-      // sessionStorage может быть недоступен (Safari private mode) — игнор.
-    }
+  // сразу открываем confirm dialog. Подтверждение → шаг привязки попытки к
+  // аккаунту (`/p/mock-invite/:slug/start`), оттуда — сам пробник.
+  //
+  // 2026-08-02 (вариант «б»). Раньше отсюда шли ПРЯМО на
+  // `/student/mock-exams/:assignment_id`, а тот эндпоинт ищет попытку по
+  // `student_id = auth.uid()` — у анонимной попытки он NULL, поэтому каждый,
+  // кто заполнил форму, видел «Пробник не найден или не назначен этому
+  // ученику». `anonymous_id` теперь кладём в localStorage (а не в
+  // sessionStorage): вход через Yandex/VK уводит браузер на внешний домен, и
+  // sessionStorage переживает это не везде.
+  const handleStartSuccess = (data: SuccessSnapshot, assignmentId: string) => {
+    // `persist…` возвращает false, если запись не переживёт перезагрузку
+    // (приватный режим, урезанный WebView). Молчать тут нельзя: лид и попытка
+    // на сервере уже созданы, и после редиректа на вход ученик упёрся бы в
+    // «Заявка не найдена» без единой подсказки (P0 внешнего ревью).
+    const durable = persistPendingMockInviteClaim({
+      slug,
+      assignment_id: assignmentId,
+      attempt_id: data.attempt_id,
+      anonymous_id: data.anonymous_id,
+    });
+    setStorageWarning(!durable);
     setSuccess(data);
     setConfirmOpen(true);
     if (typeof window !== 'undefined') {
@@ -668,9 +697,9 @@ export default function PublicMockInvite() {
     }
   };
 
-  const handleStartNow = (assignmentId: string) => {
+  const handleStartNow = () => {
     setConfirmOpen(false);
-    navigate(`/student/mock-exams/${encodeURIComponent(assignmentId)}`);
+    navigate(`/p/mock-invite/${encodeURIComponent(slug)}/start`);
   };
 
   if (query.isLoading) {
@@ -742,7 +771,21 @@ export default function PublicMockInvite() {
         <TutorCard tutor={result.tutor} />
 
         {success ? (
-          <div className="mt-5 sm:mt-6">
+          <div className="mt-5 space-y-3 sm:mt-6">
+            {storageWarning && (
+              <div
+                className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900"
+                role="alert"
+              >
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
+                <span>
+                  Браузер не даёт сохранить заявку (частный режим или встроенный
+                  браузер приложения). Не закрывай и не перезагружай эту вкладку —
+                  жми «Начать пробник» прямо сейчас. Если что-то пойдёт не так,
+                  открой ссылку в обычном браузере.
+                </span>
+              </div>
+            )}
             <ReadyToStartPanel
               leadName={success.leadName}
               onStart={() => setConfirmOpen(true)}
@@ -753,7 +796,10 @@ export default function PublicMockInvite() {
           <div className="mt-5 rounded-lg border border-slate-200 bg-white p-5 sm:mt-6 sm:p-6">
             <OfferBlock data={result} />
             <div className="mt-5">
-              <LeadForm slug={slug} onSuccess={handleStartSuccess} />
+              <LeadForm
+                slug={slug}
+                onSuccess={(data) => handleStartSuccess(data, result.assignment.id)}
+              />
             </div>
           </div>
         )}
@@ -764,7 +810,7 @@ export default function PublicMockInvite() {
       <ConfirmStartDialog
         open={confirmOpen && success !== null}
         onOpenChange={setConfirmOpen}
-        onConfirm={() => handleStartNow(result.assignment.id)}
+        onConfirm={handleStartNow}
         durationLabel={buildInviteExamMeta(result).durationLabel}
       />
     </div>

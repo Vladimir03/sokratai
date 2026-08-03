@@ -12,6 +12,7 @@ import { installChunkReloadGuards, markChunkReloadResolved } from "./lib/chunkRe
 import { reportClientError } from "./lib/clientErrorReport";
 import { installGlobalErrorReporter } from "./lib/globalErrorReporter";
 import { installWebVitals } from "./lib/webVitals";
+import { ensurePendingMockInviteClaimed } from "./lib/mockExamPublicApi";
 
 // Авто-восстановление при «Failed to fetch dynamically imported module» — ДО
 // всего остального: стейл-чанк после деплоя / DPI-обрыв → тихая перезагрузка,
@@ -37,6 +38,11 @@ listenForSubscriptionChanges();
 // Self-heal: браузерная push-подписка есть, а на бэкенде потерялась (сбой
 // сохранения в прошлом) → тихо досохраняем (идемпотентный upsert)
 void ensurePushSubscriptionSaved();
+
+// Self-heal: анонимная попытка пробника из публичного приглашения ждёт
+// привязки к аккаунту, а возврат после подтверждения email / OAuth прошёл мимо
+// экрана `/p/mock-invite/:slug/start`. Идемпотентно и тихо (2026-08-02).
+ensurePendingMockInviteClaimed();
 
 // Захват beforeinstallprompt ДО рендера — событие фаерится раньше маунта React
 initPwaInstallCapture();

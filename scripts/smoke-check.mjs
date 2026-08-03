@@ -1294,5 +1294,50 @@ if (taskOptionsResult.status !== 0) {
 }
 ok("task options mirror parity pass (зеркала + anti-leak + капы + сериализация)");
 
+// ─── 25. Глобальный appearance-reset не съедает checkbox/radio (2026-08-02) ──
+// Инцидент: `input, textarea { appearance: none }` в @layer base стирал
+// нативный виджет у ВСЕХ 14 сырых checkbox/radio проекта. Галочка согласия на
+// публичной странице пробника стала прозрачным квадратом без рамки — ученица
+// Ульяны физически не могла её поставить и не понимала почему. `accent-color`
+// после `appearance:none` не рисует ничего.
+// Баг живучий: его уже обходили ЛОКАЛЬНО дважды (`.rtc-consent-checkbox`,
+// `.tst-checkbox`) вместо починки корня, и он вернулся на третьей поверхности.
+console.log("");
+console.log("25. Глобальный appearance-reset щадит checkbox/radio...");
+const indexCssPath = path.join(rootDir, "src", "index.css");
+if (!fs.existsSync(indexCssPath)) {
+  fail("src/index.css missing");
+}
+const indexCss = fs.readFileSync(indexCssPath, "utf8");
+// Ищем селекторы, которые задают appearance:none и при этом матчат голый
+// `input` без исключения checkbox/radio. Комментарии вырезаем, чтобы
+// пояснительный текст не считался кодом.
+const cssNoComments = indexCss.replace(/\/\*[\s\S]*?\*\//g, "");
+const appearanceBlocks = [...cssNoComments.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(
+  ([, , body]) => /(^|[\s;])(-webkit-|-moz-)?appearance\s*:\s*none/.test(body),
+);
+const offenders = appearanceBlocks
+  .map(([, selector]) => selector.trim())
+  .filter((selector) =>
+    selector
+      .split(",")
+      .map((s) => s.trim())
+      .some(
+        (s) =>
+          /(^|[\s>+~])input$/.test(s) &&
+          !/not\(\[type=['"]?checkbox/.test(s) &&
+          !/not\(\[type=['"]?radio/.test(s),
+      ),
+  );
+if (offenders.length > 0) {
+  fail(
+    "src/index.css: `appearance: none` применён к голому `input` — это стирает " +
+      "нативные checkbox/radio во всём приложении (прозрачный квадрат без рамки).\n" +
+      offenders.map((s) => `  селектор: ${s}`).join("\n") +
+      "\n  Починить: input:not([type='checkbox']):not([type='radio'])",
+  );
+}
+ok("appearance-reset исключает checkbox/radio (нативные виджеты живы)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

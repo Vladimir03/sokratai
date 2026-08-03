@@ -11,6 +11,7 @@ import { z } from "zod";
 import YandexAuthButton from "@/components/YandexAuthButton";
 import VkAuthButton from "@/components/VkAuthButton";
 import { claimPendingInvite } from "@/lib/inviteApi";
+import { resolveSafeNextPath, withSafeNext } from "@/lib/safeNextPath";
 import { applyPendingConsent } from "@/lib/consent";
 import { requestStudentOtp } from "@/lib/studentClaimApi";
 import { InAppBrowserNudge } from "@/components/InAppBrowserNudge";
@@ -89,9 +90,11 @@ const Login = () => {
     const checkSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        const nextParam = searchParams.get("next");
-        if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
-          window.location.replace(nextParam);
+        // Валидация только через resolveSafeNextPath: префиксный гард
+        // пропускал `/\evil.example` → open redirect (P0 внешнего ревью).
+        const safeNext = resolveSafeNextPath(searchParams.get("next"));
+        if (safeNext) {
+          window.location.replace(safeNext);
           return;
         }
         const { data: isTutor } = await supabase.rpc("is_tutor", { _user_id: session.user.id });
@@ -152,10 +155,10 @@ const Login = () => {
 
       // Check if user is a tutor and redirect accordingly
       if (data.user) {
-        const nextParam = searchParams.get("next");
-        if (nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")) {
+        const safeNext = resolveSafeNextPath(searchParams.get("next"));
+        if (safeNext) {
           toast.success("Успешный вход!");
-          window.location.replace(nextParam);
+          window.location.replace(safeNext);
           return;
         }
         const userId = data.user.id;
@@ -290,7 +293,12 @@ const Login = () => {
             </Button>
             <p className="text-center text-sm text-muted-foreground">
               Нет аккаунта?{" "}
-              <Link to="/signup" className="text-primary hover:underline">
+              {/* `next` переносим на регистрацию — зеркало Signup.tsx: ученик
+                  с публичной ссылки пробника не должен терять точку возврата. */}
+              <Link
+                to={withSafeNext("/signup", searchParams.get("next"))}
+                className="text-primary hover:underline"
+              >
                 Зарегистрироваться
               </Link>
             </p>

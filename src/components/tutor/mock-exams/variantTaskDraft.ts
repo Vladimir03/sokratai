@@ -4,7 +4,7 @@
 // корзина Базы («Создать пробник» в HWDrawer → prefill через sessionStorage).
 
 import { generateUUID } from '@/components/tutor/homework-create/types';
-import { getExamProfile } from '@/lib/examProfiles';
+import { getExamProfile, type ExamProfileExam } from '@/lib/examProfiles';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
 import { serializeAttachmentUrls } from '@/lib/attachmentRefs';
@@ -102,17 +102,21 @@ export function inferPart1CheckMode(
   kimNumber: number | null,
 ): string {
   if (kimNumber === null) return 'strict';
-  // Физика: лояльна к пустому exam (исторически '' трактуется как ЕГЭ);
-  // ОГЭ-карты режимов нет → strict.
-  if (subject === 'physics' && exam !== 'oge') {
-    return getExamProfile('physics', 'ege')?.part1CheckModes?.[kimNumber] ?? 'strict';
-  }
-  // Строго ЕГЭ (симметрично getKimPrimaryScoreForSubject, ревью 5.6 P1): при
-  // неуказанном/ОГЭ exam → strict + обычный балл, а не критерии чужого экзамена.
-  if (subject === 'social' && exam === 'ege') {
-    return getExamProfile('social', 'ege')?.part1CheckModes?.[kimNumber] ?? 'strict';
-  }
-  return 'strict';
+  // Гейтинг exam-семантики живёт ЗДЕСЬ, карты — в registry (rule 45).
+  // Физика лояльна к пустому exam (исторически '' трактуется как ЕГЭ);
+  // остальные предметы — строго по указанному экзамену, иначе достался бы
+  // режим чужого экзамена (ревью 5.6 P1, симметрия с getKimPrimaryScoreForSubject).
+  //
+  // ⚠️ Раньше здесь был per-subject if-каскад (физика + обществознание), и
+  // профиль нового предмета в registry МОЛЧА не применялся: у химии карта
+  // появилась, а Часть 1 продолжала бы инфериться в strict. Теперь ветвление
+  // только по exam-семантике, карта берётся у любого заведённого профиля.
+  const resolvedExam: ExamProfileExam | null = subject === 'physics'
+    ? (exam === 'oge' ? 'oge' : 'ege')
+    : (exam || null);
+  const profile = getExamProfile(subject, resolvedExam);
+  if (!profile) return 'strict';
+  return profile.part1CheckModes?.[kimNumber] ?? profile.defaultPart1CheckMode;
 }
 
 /**
