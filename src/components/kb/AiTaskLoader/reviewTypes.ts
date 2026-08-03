@@ -1,4 +1,5 @@
 import type { ExtractedTask, ImageBbox } from '@/lib/kbAiExtractApi';
+import type { GradingCriterion } from '@/lib/tutorHomeworkApi';
 import type { ExamType, KBFolderTreeNode } from '@/types/kb';
 
 /** Flatten folder tree into { id, name, depth } for <select> options (mirror
@@ -72,6 +73,15 @@ export interface ReviewOverrides {
    * null = папка пачки (folderId Flow). Только KB-назначение.
    */
   folderId: string | null;
+  /**
+   * ВОЛНА 9: критерии оценивания развёрнутого ответа (`grading_criteria_json`).
+   * Пустой массив = не заданы. Раньше AI-путь писал сюда NULL всегда, поэтому
+   * AI-задача в ДЗ грейдилась «на глазок», а ручная — по структурным критериям
+   * (репорт Егора о неполноте AI-загрузки). Заполняет тутор в ревью тем же
+   * `CriteriaEditor`, что в ручной форме и конструкторе ДЗ; у модели критерии
+   * НЕ просим (массив объектов на каждую задачу заметно растит output).
+   */
+  criteria: GradingCriterion[];
 }
 
 /**

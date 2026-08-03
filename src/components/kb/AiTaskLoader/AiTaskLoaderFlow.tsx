@@ -29,6 +29,7 @@ import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { refineDraft, type ExtractStats, type ExtractedTask } from '@/lib/kbAiExtractApi';
 import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type ExamType, type KBSubtopic } from '@/types/kb';
 import { pluralizeRu } from '@/lib/pluralizeRu';
+import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import { reportClientError } from '@/lib/clientErrorReport';
 import { isNetworkError, withJitter } from '@/lib/queryResilience';
 import { cn } from '@/lib/utils';
@@ -169,9 +170,17 @@ function draftToCreateInput(
   // difficultyNum`, поле балла там вообще заменено подсказкой). Ручной override
   // при олимпиаде игнорируем, поэтому карточка его и не показывает.
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
+  // ВОЛНА 9: непустые критерии задают балл суммой AI-оцениваемых max — зеркало
+  // реконсиляции ручной формы (CreateTaskModal.handleCriteriaChange), иначе
+  // балл задачи и сумма критериев разъезжаются уже в момент создания.
+  const criteriaScore =
+    ov.criteria.length > 0 ? sumAiGradableCriteriaMax(ov.criteria) || null : null;
   const primaryScore = isOlympiad
     ? difficultyNum
-    : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
+    : criteriaScore ??
+      manualScore ??
+      getKimPrimaryScoreForSubject(subject, exam, kimNum) ??
+      draft.primary_score;
   return {
     folder_id: ov.folderId || batchFolderId,
     text: draft.text,
@@ -184,6 +193,9 @@ function draftToCreateInput(
     ...(primaryScore !== null && !Number.isNaN(primaryScore) ? { primary_score: primaryScore } : {}),
     ...(difficultyNum !== null && !Number.isNaN(difficultyNum) ? { difficulty: difficultyNum } : {}),
     ...(draft.rubric_text?.trim() ? { rubric_text: draft.rubric_text } : {}),
+    // ВОЛНА 9: критерии оценивания — паритет с ручной формой (без них AI-задача
+    // приезжала в ДЗ с grading_criteria_json = NULL и грейдилась «на глазок»).
+    ...(ov.criteria.length > 0 ? { grading_criteria_json: ov.criteria } : {}),
     ...(ov.topicId ? { topic_id: ov.topicId } : {}),
     ...(ov.subtopicId ? { subtopic_id: ov.subtopicId } : {}),
     ...(attachmentUrl ? { attachment_url: attachmentUrl } : {}),
@@ -356,6 +368,8 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
           difficulty: isOlympiad ? DEFAULT_OLYMPIAD_DIFFICULTY : '',
           checkFormat: '' as const,
           folderId: null,
+          // ВОЛНА 9: критерии заполняет тутор в ревью (у модели не просим).
+          criteria: [],
           kimNumber: isOlympiad ? '' : d.kim_number !== null ? String(d.kim_number) : '',
           // Provenance КИМ (техдолг 5.6): маркер файла ('Тип N'/вариант) vs
           // догадка AI — чип в таблице ревью; ручная правка выставит 'manual'.

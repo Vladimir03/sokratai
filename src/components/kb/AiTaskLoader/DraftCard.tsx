@@ -14,7 +14,10 @@ import { MathText } from '@/components/kb/ui/MathText';
 import { BboxEditor } from '@/components/kb/AiTaskLoader/BboxEditor';
 import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { CropState, ReviewOverrides } from '@/components/kb/AiTaskLoader/reviewTypes';
+import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
+import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { resolveCheckFormatForLoader } from '@/lib/checkFormatHelpers';
+import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { useKbSources, useSubtopics } from '@/hooks/useKnowledgeBase';
 import { compressForUpload } from '@/lib/imageCompression';
@@ -438,21 +441,41 @@ function DraftCardComponent({
         </div>
       ) : null}
 
-      {/* Ответ — raw edit, amber when empty/needs-review */}
+      {/* Ответ. ВОЛНА 9 (репорт Егора «в ручной форме есть несколько ответов и
+          диапазон, в AI-загрузке нет»): тот же AnswerAlternativesField, что в
+          CreateTaskModal, и тот же гейт — у развёрнутого решения ответ свободный
+          текст, чипы не нужны. Формат сериализации канонический
+          (answerAlternatives.ts) → грейдинг ДЗ засчитывает любой из вариантов. */}
       <label className="mb-1 mt-3 block text-xs font-semibold text-slate-500">Ответ</label>
-      <input
-        type="text"
-        value={draft.answer ?? ''}
-        onChange={(e) => onChange(index, { answer: e.target.value })}
-        disabled={disabled}
-        className={cn(
-          'w-full rounded-lg border px-3 py-2 text-[16px] transition-colors focus:outline-none [touch-action:manipulation]',
-          answerEmpty || answerNeedsReview
-            ? 'border-amber-300 bg-amber-50/40 focus:border-amber-400'
-            : 'border-socrat-border focus:border-socrat-primary/50',
-        )}
-        placeholder={answerEmpty ? 'AI не уверен — впишите/поправьте ответ' : 'Ответ'}
-      />
+      {effCheckFormat === 'detailed_solution' ? (
+        <input
+          type="text"
+          value={draft.answer ?? ''}
+          onChange={(e) => onChange(index, { answer: e.target.value })}
+          disabled={disabled}
+          className={cn(
+            'w-full rounded-lg border px-3 py-2 text-[16px] transition-colors focus:outline-none [touch-action:manipulation]',
+            answerEmpty || answerNeedsReview
+              ? 'border-amber-300 bg-amber-50/40 focus:border-amber-400'
+              : 'border-socrat-border focus:border-socrat-primary/50',
+          )}
+          placeholder={answerEmpty ? 'AI не уверен — впишите/поправьте ответ' : 'Ответ'}
+        />
+      ) : (
+        <div
+          className={cn(
+            answerEmpty || answerNeedsReview
+              ? 'rounded-lg border border-amber-300 bg-amber-50/40 p-2'
+              : undefined,
+          )}
+        >
+          <AnswerAlternativesField
+            value={draft.answer ?? ''}
+            onChange={(v) => onChange(index, { answer: v })}
+            disabled={disabled}
+          />
+        </div>
+      )}
       {(answerEmpty || answerNeedsReview) ? (
         <p className="mt-1 text-[11px] text-amber-700">
           AI оставил поле для проверки — впишите верный ответ, чтобы авто-проверка ДЗ работала.
@@ -548,6 +571,24 @@ function DraftCardComponent({
         className="w-full resize-y rounded-lg border border-socrat-primary/20 bg-socrat-primary-light/40 px-3 py-2 text-[16px] leading-relaxed transition-colors focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]"
         placeholder="Как начислять баллы (используется AI при проверке ДЗ)"
       />
+
+      {/* ВОЛНА 9: структурные критерии (grading_criteria_json) — тот же редактор,
+          что в ручной форме и конструкторе ДЗ. Без них AI-задача приезжала в ДЗ
+          с NULL и грейдилась только текстовой рубрикой. Балл задачи считается
+          суммой AI-оцениваемых max при commit (зеркало CreateTaskModal). */}
+      {hasOverride ? (
+        <div className="mt-3">
+          <CriteriaEditor
+            criteria={override.criteria}
+            taskMaxScore={
+              sumAiGradableCriteriaMax(override.criteria) ||
+              (override.primaryScore.trim() ? parseInt(override.primaryScore.trim(), 10) : 0) ||
+              1
+            }
+            onChange={(next) => onOverrideChange(index, { criteria: next })}
+          />
+        </div>
+      ) : null}
 
       {/* ── Классификация (волна 2, #54): тутор правит ДО сохранения ── */}
       {hasOverride ? (

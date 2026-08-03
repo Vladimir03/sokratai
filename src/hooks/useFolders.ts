@@ -340,6 +340,10 @@ async function copyTaskToFolder(params: { taskId: string; folderId: string }): P
       // поле личной базы; в Каталог не утечёт (publish-триггеры её не копируют).
       rubric_text: original.rubric_text,
       rubric_image_urls: original.rubric_image_urls,
+      // ВОЛНА 9: варианты структурного теста. Пропуск делал base→base копию
+      // НЕ-lossless: у скопированной задачи исчезали варианты выбора, и в ДЗ
+      // она уезжала обычным текстовым вводом (rule 40 field-parity).
+      options_json: original.options_json,
     })
     .select()
     .single();

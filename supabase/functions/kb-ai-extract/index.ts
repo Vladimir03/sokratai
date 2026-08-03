@@ -91,6 +91,12 @@ const KB_EXTRACT_SYSTEM_PROMPT = String.raw`Ты — ассистент репе
 3. Ответ (поле answer): впиши ТОЛЬКО если он явно есть в материале или однозначно
    следует из условия и ты уверен. Если ответа нет или есть сомнение —
    answer = null, answer_confidence = "low". НИКОГДА не выдумывай число.
+   ФОРМАТ (важно, система разбирает его автоматически): если верных вариантов
+   ответа НЕСКОЛЬКО (с единицей и без, «5 м/с» и «5», синонимы) — перечисли их
+   через « или »: «5 м/с или 5». Если ответ — числовой ДИАПАЗОН («от 2,1 до
+   2,3», «2,1…2,3») — пиши «2,1 – 2,3» (тире ОБЯЗАТЕЛЬНО с пробелами по бокам).
+   Компактную запись без пробелов («1941-1945») диапазоном НЕ считай — это
+   обычный текст ответа. Единственный ответ пиши как есть, без « или ».
 4. Решение (поле solution): впиши ход решения, ТОЛЬКО если он есть в материале.
    Иначе null.
 5. Критерии (поле rubric_text): впиши, ТОЛЬКО если в материале есть схема
@@ -109,8 +115,13 @@ const KB_EXTRACT_SYSTEM_PROMPT = String.raw`Ты — ассистент репе
    задачи, без текста условия) в формате [ymin, xmin, ymax, xmax]: целые 0..1000
    относительно высоты и ширины изображения. Рамка ОБЯЗАНА полностью включать
    подписи осей, числовые значения на осях и единицы измерения (например «t, с»,
-   «v, м/с») — лучше захватить чуть больше поля вокруг рисунка, чем отрезать
-   подписи. Рамка работает и когда на изображении
+   «v, м/с»). Для оптических схем рамка ОБЯЗАНА включать линзу целиком, все лучи
+   до точек их пересечения, главную оптическую ось с отметками F и 2F по ОБЕ
+   стороны линзы и буквенные подписи точек (A, Б, В, S, S′). Для электрических
+   цепей — все элементы, узлы и подписи приборов. ВСЕГДА бери поле с ЗАПАСОМ:
+   лучше захватить лишнее пустое место вокруг рисунка, чем отрезать хоть одну
+   подпись — обрезанную рамку репетитор не восстановит, а лишнее поле ужимает
+   одним движением. Рамка работает и когда на изображении
    НЕСКОЛЬКО задач — система вырежет нужный фрагмент. Если в задаче нет рисунка
    (чисто текстовая задача) — image_index = null, image_bbox = null. Если
    сомневаешься, нужен ли рисунок — оба null и добавь "image" в needs_review_fields.
@@ -145,7 +156,7 @@ const KB_EXTRACT_SCHEMA_BLOCK = String.raw`СХЕМА ВЫХОДА — верн�
   "tasks": [
     {
       "text": "string (LaTeX в $…$)",
-      "answer": "string | null",
+      "answer": "string | null (несколько верных вариантов — через « или »; числовой диапазон — «2,1 – 2,3», тире с пробелами)",
       "answer_confidence": "high | medium | low",
       "solution": "string | null",
       "answer_format": "number | text | detailed | matching | choice | null",
@@ -171,9 +182,12 @@ const KB_EXTRACT_SCHEMA_BLOCK = String.raw`СХЕМА ВЫХОДА — верн�
 
 ПРИМЕР. Вход: «ЕГЭ-2026. 1. Тело движется равноускоренно со скоростью v0 = 2 м/с
 с ускорением a = 0,5 м/с². Какова скорость через t = 6 с? Ответ: 5 м/с.
-2. Камень свободно падает с высоты h = 20 м (g = 10 м/с²). Найдите время падения.»
+2. Камень свободно падает с высоты h = 20 м (g = 10 м/с²). Найдите время падения.
+3. (изображение 0, в верхней половине — график v(t) с подписанными осями «v, м/с»
+и «t, с»; ниже на том же изображении идёт текст задачи 4) По графику определите
+ускорение тела. Ответ: 2 м/с² или 2.»
 Выход:
-{"tasks":[{"text":"Тело движется равноускоренно со скоростью $v_0 = 2\\ \\text{м/с}$ с ускорением $a = 0{,}5\\ \\text{м/с}^2$. Какова скорость через $t = 6\\ \\text{с}$?","answer":"5 м/с","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null},{"text":"Камень свободно падает с высоты $h = 20\\ \\text{м}$ ($g = 10\\ \\text{м/с}^2$). Найдите время падения.","answer":null,"answer_confidence":"low","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Свободное падение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":["answer"],"notes":"Ответ в материале не указан — оставлено пустым"}],"stats":{"found":2,"low_confidence_answers":1,"unreadable_images":0}}`;
+{"tasks":[{"text":"Тело движется равноускоренно со скоростью $v_0 = 2\\ \\text{м/с}$ с ускорением $a = 0{,}5\\ \\text{м/с}^2$. Какова скорость через $t = 6\\ \\text{с}$?","answer":"5 м/с","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null},{"text":"Камень свободно падает с высоты $h = 20\\ \\text{м}$ ($g = 10\\ \\text{м/с}^2$). Найдите время падения.","answer":null,"answer_confidence":"low","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Свободное падение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":["answer"],"notes":"Ответ в материале не указан — оставлено пустым"},{"text":"По графику зависимости скорости от времени определите ускорение тела.","answer":"2 м/с² или 2","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":0,"image_bbox":[40,60,520,700],"source_image_index":0,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":3,"low_confidence_answers":1,"unreadable_images":0}}`;
 
 // ─── System prompt (обществознание) — мультипредметный каталог (2026-07-06) ───
 // Мираж физического промпта под обществознание: НЕТ формул/LaTeX; типы заданий —
@@ -205,7 +219,9 @@ const KB_EXTRACT_SYSTEM_PROMPT_SOCIAL = String.raw`Ты — ассистент �
 3. Ответ (поле answer): впиши ТОЛЬКО если он явно есть в материале или однозначно
    следует из условия и ты уверен. Для «выбора верных суждений» ответ — цифры
    выбранных вариантов подряд (например «235»); для «соответствия» —
-   последовательность цифр (например «21212»). Если ответа нет или есть сомнение —
+   последовательность цифр (например «21212»). Если верных вариантов записи
+   НЕСКОЛЬКО — перечисли через « или » (система разбирает этот формат
+   автоматически). Если ответа нет или есть сомнение —
    answer = null, answer_confidence = "low". НИКОГДА не выдумывай ответ.
 4. Решение/пояснение (поле solution): впиши, ТОЛЬКО если оно есть в материале.
    Иначе null.
@@ -230,7 +246,8 @@ const KB_EXTRACT_SYSTEM_PROMPT_SOCIAL = String.raw`Ты — ассистент �
    изображения) И image_bbox — рамку ИМЕННО ИЛЛЮСТРАЦИИ (не всего задания) в
    формате [ymin, xmin, ymax, xmax]: целые 0..1000 относительно высоты и ширины
    изображения. Рамка ОБЯЗАНА полностью включать подписи осей, значения и
-   легенду диаграммы — лучше захватить чуть больше поля, чем отрезать подписи.
+   легенду диаграммы. ВСЕГДА бери поле с ЗАПАСОМ: лучше захватить лишнее пустое
+   место вокруг иллюстрации, чем отрезать хоть одну подпись.
    Рамка работает и когда на изображении НЕСКОЛЬКО заданий. Таблицу
    с данными по возможности переписывай текстом. Нет иллюстрации → image_index =
    null, image_bbox = null. Сомневаешься → оба null и добавь "image" в
@@ -262,7 +279,7 @@ const KB_EXTRACT_SCHEMA_BLOCK_SOCIAL = String.raw`СХЕМА ВЫХОДА — в
   "tasks": [
     {
       "text": "string (обычный текст; каждый вариант/пункт с новой строки — \n)",
-      "answer": "string | null",
+      "answer": "string | null (несколько верных вариантов — через « или »; числовой диапазон — «2,1 – 2,3», тире с пробелами)",
       "answer_confidence": "high | medium | low",
       "solution": "string | null",
       "answer_format": "number | text | detailed | matching | choice | null",
@@ -352,6 +369,9 @@ function buildGenericExtractPrompt(subjectId: string): string {
 3. Ответ (поле answer): впиши ТОЛЬКО если он явно есть в материале или однозначно
    следует из условия и ты уверен. Если ответа нет или есть сомнение —
    answer = null, answer_confidence = "low". НИКОГДА не выдумывай ответ.
+   ФОРМАТ (система разбирает автоматически): несколько верных вариантов — через
+   « или » («5 м/с или 5»); числовой диапазон — «2,1 – 2,3» (тире ОБЯЗАТЕЛЬНО с
+   пробелами). Компактную запись «1941-1945» диапазоном НЕ считай.
 4. Решение/пояснение (поле solution): впиши, ТОЛЬКО если оно есть в материале.
    Иначе null.
 5. Критерии (поле rubric_text): впиши схему оценивания, ТОЛЬКО если она есть в
@@ -374,7 +394,9 @@ function buildGenericExtractPrompt(subjectId: string): string {
    image_bbox — рамку ИМЕННО РИСУНКА (не всего задания) в формате
    [ymin, xmin, ymax, xmax]: целые 0..1000 относительно высоты и ширины
    изображения. Рамка ОБЯЗАНА полностью включать подписи осей, значения и
-   единицы измерения — лучше захватить чуть больше поля, чем отрезать подписи.
+   единицы измерения; для схем (оптика, цепи, чертежи) — все элементы, лучи до
+   точек пересечения и буквенные подписи (F, 2F, A, Б, В). ВСЕГДА бери поле с
+   ЗАПАСОМ: лучше захватить лишнее пустое место, чем отрезать хоть одну подпись.
    Рамка работает и когда на изображении НЕСКОЛЬКО заданий. Нет
    рисунка → image_index = null, image_bbox = null. Сомневаешься → оба null и
    добавь "image" в needs_review_fields. НЕ перерисовывай рисунок; image_action =
@@ -406,7 +428,7 @@ const KB_EXTRACT_SCHEMA_BLOCK_GENERIC = String.raw`СХЕМА ВЫХОДА — �
   "tasks": [
     {
       "text": "string (каждый вариант/пункт с новой строки — \n)",
-      "answer": "string | null",
+      "answer": "string | null (несколько верных вариантов — через « или »; числовой диапазон — «2,1 – 2,3», тире с пробелами)",
       "answer_confidence": "high | medium | low",
       "solution": "string | null",
       "answer_format": "number | text | detailed | matching | choice | null",
@@ -633,16 +655,37 @@ function asNonNegativeNumber(value: unknown): number | null {
 /** Минимальная сторона рамки рисунка — доля 0..1 (отсев вырожденных bbox). */
 const MIN_BBOX_SIDE = 0.03;
 /**
- * Паддинг рамки (ВОЛНА 8, 2026-07-23, фидбэк владельца «зарезает подписи осей»):
- * модель систематически обводит только «тело» графика без подписей осей и единиц
- * измерения. Расширяем каждую сторону на max(2.5% изображения, 8% стороны рамки)
- * — «лучше ошибка в большую сторону»; лишнее репетитор ужимает в BboxEditor.
+ * Паддинг рамки. Модель систематически обводит только «тело» графика без подписей
+ * осей и единиц измерения — расширяем каждую сторону сами.
+ *
+ * ВОЛНА 9 (2026-08-02): 2.5%/8% → 6%/20%, репетитор-физик после ВОЛНЫ 8: «стало
+ * лучше, но нужно резать ПРЯМ С ЗАПАСОМ» + «границы оптических схем не угадывает».
+ * Почему прежних значений не хватало: у типичного графика рамка широкая и низкая
+ * (h ≈ 0.10), поэтому `h * 8%` уступало полу 2.5% высоты страницы — а подписи оси X
+ * лежат ровно ПОД рамкой.
+ *
+ * СНИЗУ и СЛЕВА паддинг ДВОЙНОЙ: там ось X с единицами измерения и ось Y с
+ * делениями/подписями — асимметрия вместо равномерного раздувания даёт запас
+ * именно там, где модель режет, и не тянет лишнее вправо/вверх (на плотной
+ * странице PDF это соседнее условие).
+ *
  * Применяется ПОСЛЕ отсева вырожденных рамок (MIN_BBOX_SIDE — на сырой рамке),
  * с clamp в [0,1]. Единственная точка входа bbox → покрывает extract И refine;
  * клиент видит уже расширенную рамку (WYSIWYG превью/редактора сохраняется).
  */
-const BBOX_PAD_MIN_FRACTION = 0.025;
-const BBOX_PAD_SIDE_RATIO = 0.08;
+const BBOX_PAD_MIN_FRACTION = 0.06;
+const BBOX_PAD_SIDE_RATIO = 0.20;
+/** Множитель низа/лева — там оси с подписями (ВОЛНА 9). */
+const BBOX_PAD_AXIS_MULTIPLIER = 2;
+/**
+ * Потолок абсолютного паддинга (доля изображения). Без него доля-от-стороны
+ * раздувает КРУПНЫЙ рисунок непропорционально: рамка 0.6×0.3 превращалась в
+ * 0.92×0.48, то есть почти во всю страницу — на плотной странице сборника это
+ * затянуло бы соседние задачи. Мелкие рисунки (где модель и режет подписи) под
+ * кап не попадают и получают полный запас.
+ */
+const BBOX_PAD_MAX_FRACTION = 0.12;
+const BBOX_PAD_AXIS_MAX_FRACTION = 0.18;
 
 /**
  * Валидация bbox от модели (Gemini-конвенция [ymin, xmin, ymax, xmax], целые
@@ -668,12 +711,21 @@ function normalizeImageBbox(value: unknown): ImageBbox | null {
   // `w + pad*2` с clamp по ширине переносило обрезанный у границы паддинг на
   // противоположную сторону (x=0, w=0.10 → w=0.15 вместо 0.125) и на плотной
   // странице тянуло в рамку соседнее условие.
-  const padX = Math.max(BBOX_PAD_MIN_FRACTION, w * BBOX_PAD_SIDE_RATIO);
-  const padY = Math.max(BBOX_PAD_MIN_FRACTION, h * BBOX_PAD_SIDE_RATIO);
-  const left = Math.max(0, x - padX);
+  const padX = Math.min(
+    BBOX_PAD_MAX_FRACTION,
+    Math.max(BBOX_PAD_MIN_FRACTION, w * BBOX_PAD_SIDE_RATIO),
+  );
+  const padY = Math.min(
+    BBOX_PAD_MAX_FRACTION,
+    Math.max(BBOX_PAD_MIN_FRACTION, h * BBOX_PAD_SIDE_RATIO),
+  );
+  // Асимметрия (ВОЛНА 9): низ и лево — там оси с подписями и единицами.
+  const padLeft = Math.min(BBOX_PAD_AXIS_MAX_FRACTION, padX * BBOX_PAD_AXIS_MULTIPLIER);
+  const padBottom = Math.min(BBOX_PAD_AXIS_MAX_FRACTION, padY * BBOX_PAD_AXIS_MULTIPLIER);
+  const left = Math.max(0, x - padLeft);
   const right = Math.min(1, x + w + padX);
   const top = Math.max(0, y - padY);
-  const bottom = Math.min(1, y + h + padY);
+  const bottom = Math.min(1, y + h + padBottom);
   return { x: left, y: top, w: right - left, h: bottom - top };
 }
 

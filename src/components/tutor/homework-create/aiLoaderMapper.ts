@@ -79,6 +79,8 @@ export function aiExtractToDraftTask(item: AiLoaderCommitItem, subject: string):
     topic_id: ov.topicId ?? null,
     subtopic_id: ov.subtopicId ?? null,
     source_label: ov.sourceLabel.trim() || null,
-    grading_criteria_json: null,
+    // ВОЛНА 9: критерии из ревью едут в конструктор ДЗ (раньше жёсткий null —
+    // задача из AI-загрузки грейдилась без структурных критериев).
+    grading_criteria_json: ov.criteria.length > 0 ? ov.criteria : null,
   };
 }

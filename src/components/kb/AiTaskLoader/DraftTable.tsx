@@ -1,8 +1,10 @@
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { AlertTriangle, Check, ChevronDown, Image as ImageIcon, Trash2, X } from 'lucide-react';
 import { stripLatex } from '@/components/kb/ui/stripLatex';
 import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
+import { parseAnswerSpec } from '@/lib/answerAlternatives';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
+import { pluralizeRu } from '@/lib/pluralizeRu';
 import { cn } from '@/lib/utils';
 import type { ExtractedTask } from '@/lib/kbAiExtractApi';
 import type { KBTopicWithCounts } from '@/types/kb';
@@ -63,6 +65,14 @@ const DraftRow = memo(function DraftRow({
   onChangeOverride,
 }: DraftRowProps) {
   const answerEmpty = !draft.answer || draft.answer.trim() === '';
+  // ВОЛНА 9: бейдж вместо сырой строки, когда ответ — набор вариантов/диапазон.
+  const answerSpecBadge = useMemo(() => {
+    const spec = parseAnswerSpec(draft.answer);
+    if (!spec?.isMulti) return null;
+    const ranges = spec.alternatives.filter((a) => a.type === 'range').length;
+    if (ranges > 0 && spec.alternatives.length === 1) return 'диапазон';
+    return `${spec.alternatives.length} ${pluralizeRu(spec.alternatives.length, ['вариант', 'варианта', 'вариантов'])}`;
+  }, [draft.answer]);
   const isOlympiad = override.exam === 'olympiad';
   const kimNum =
     !isOlympiad && override.kimNumber.trim() ? parseInt(override.kimNumber.trim(), 10) : null;
@@ -111,20 +121,34 @@ const DraftRow = memo(function DraftRow({
             {stripLatex(draft.text) || '—'}
           </span>
         </td>
-        {/* Ответ */}
+        {/* Ответ. ВОЛНА 9: если ответ несёт несколько вариантов или диапазон
+            (канонический формат answerAlternatives) — показываем бейдж вместо
+            сырой строки: в узкой ячейке «5 м/с или 5» не читается, а случайная
+            правка сломала бы формат. Полное редактирование чипами — в карточке. */}
         <td className="px-1.5 py-2">
-          <input
-            type="text"
-            value={draft.answer ?? ''}
-            disabled={disabled}
-            onChange={(e) => onChangeDraft(index, { answer: e.target.value })}
-            placeholder={answerEmpty ? '—' : ''}
-            className={cn(
-              CELL_INPUT_CLASS,
-              answerEmpty && 'border-amber-300 bg-amber-50/40',
-            )}
-            aria-label={`Ответ задачи ${index + 1}`}
-          />
+          {answerSpecBadge ? (
+            <button
+              type="button"
+              onClick={() => onToggleExpand(index)}
+              title={draft.answer ?? ''}
+              className="inline-flex max-w-full items-center gap-1 truncate rounded-md border border-socrat-border bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600 [touch-action:manipulation] hover:border-socrat-primary/40 hover:text-socrat-primary"
+            >
+              {answerSpecBadge}
+            </button>
+          ) : (
+            <input
+              type="text"
+              value={draft.answer ?? ''}
+              disabled={disabled}
+              onChange={(e) => onChangeDraft(index, { answer: e.target.value })}
+              placeholder={answerEmpty ? '—' : ''}
+              className={cn(
+                CELL_INPUT_CLASS,
+                answerEmpty && 'border-amber-300 bg-amber-50/40',
+              )}
+              aria-label={`Ответ задачи ${index + 1}`}
+            />
+          )}
         </td>
         {/* Экзамен */}
         <td className="px-1.5 py-2">
