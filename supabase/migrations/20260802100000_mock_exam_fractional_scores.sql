@@ -26,6 +26,19 @@
 BEGIN;
 
 -- ============================================================
+-- 0. RLS-политики, зависящие от earned_score (урок применения 03.08)
+-- ============================================================
+-- Postgres запрещает ALTER TYPE колонки, на которую ссылается политика:
+--   ERROR 0A000: cannot alter type of a column used in a policy definition
+-- Обе student-политики Части 1 несут `earned_score IS NULL` в WITH CHECK
+-- (анти-spoofing балла, rule 45) — снимаем и пересоздаём ДОСЛОВНО после
+-- смены типов. В прод применено именно так (Lovable, 03.08); этот блок
+-- держит файл воспроизводимым на чистой базе.
+
+DROP POLICY IF EXISTS "Mock part1 student insert own in progress" ON public.mock_exam_attempt_part1_answers;
+DROP POLICY IF EXISTS "Mock part1 student update own in progress" ON public.mock_exam_attempt_part1_answers;
+
+-- ============================================================
 -- 1. Колонки
 -- ============================================================
 
@@ -60,6 +73,43 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- Пересоздание политик — дословно прежние определения (source: pg_policies прода).
+CREATE POLICY "Mock part1 student insert own in progress"
+ON public.mock_exam_attempt_part1_answers
+FOR INSERT TO authenticated
+WITH CHECK (
+  (EXISTS (
+    SELECT 1 FROM public.mock_exam_attempts a
+     WHERE a.id = mock_exam_attempt_part1_answers.attempt_id
+       AND a.student_id = auth.uid()
+       AND a.status = 'in_progress'::text
+  ))
+  AND (earned_score IS NULL)
+  AND (score_source = 'student_form'::text)
+);
+
+CREATE POLICY "Mock part1 student update own in progress"
+ON public.mock_exam_attempt_part1_answers
+FOR UPDATE TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM public.mock_exam_attempts a
+     WHERE a.id = mock_exam_attempt_part1_answers.attempt_id
+       AND a.student_id = auth.uid()
+       AND a.status = 'in_progress'::text
+  )
+)
+WITH CHECK (
+  (EXISTS (
+    SELECT 1 FROM public.mock_exam_attempts a
+     WHERE a.id = mock_exam_attempt_part1_answers.attempt_id
+       AND a.student_id = auth.uid()
+       AND a.status = 'in_progress'::text
+  ))
+  AND (earned_score IS NULL)
+  AND (score_source = 'student_form'::text)
+);
 
 COMMENT ON COLUMN public.mock_exam_variant_tasks.max_score IS
   'Максимальный балл задачи. numeric(6,2) с 2026-08-02 (DELF: 0,5 и 1,5 за вопрос). Шаг ВВОДА валидирует edge (0.5) — в БД запас до 0.01.';
