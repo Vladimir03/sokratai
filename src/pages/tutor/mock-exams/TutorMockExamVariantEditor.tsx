@@ -45,7 +45,7 @@ import {
   type MockExamVariantTaskInput,
 } from '@/lib/mockExamApi';
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
-import { parseAttachmentUrls } from '@/lib/attachmentRefs';
+import { parseAttachmentUrls, serializeAttachmentUrls } from '@/lib/attachmentRefs';
 import {
   createEmptyVariantTask,
   readAndClearVariantPrefill,
@@ -85,6 +85,9 @@ const CHECK_MODE_OPTIONS: { value: string; label: string }[] = [
   { value: 'pair', label: 'Пара «значение + единица»' },
 ];
 
+// Кап зеркалит серверный validateVariantImageField(..., 5) в mock-exam-tutor-api.
+const MAX_TASK_IMAGES = 5;
+
 const INPUT_CLASS =
   'w-full rounded-lg border border-slate-200 px-3 py-2 text-[16px] transition-colors focus:border-accent/50 focus:outline-none [touch-action:manipulation]';
 
@@ -95,47 +98,71 @@ function TaskImageAttachment({
   disabled,
   onChange,
 }: {
+  /** Dual-format: один storage:// ref ИЛИ JSON-массив (до MAX_TASK_IMAGES). */
   imageUrl: string | null;
   disabled: boolean;
   onChange: (ref: string | null) => void;
 }) {
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
-  // Ревью 5.6 P2 #10: явное failed-состояние вместо вечного skeleton/битого
-  // <img> (реально при shared-blob debt: KB-задачу удалили — blob исчез).
-  const [imageFailed, setImageFailed] = useState(false);
+  // Несколько фото на задание (2026-08-02, запрос Анастасии: «очень актуально
+  // для чтения» — скан статьи на 2–3 страницы). Бэкенд это УЖЕ умел: edge
+  // валидирует до 5 refs, колонка dual-format, ученик рендерит массив через
+  // parseTaskImageRefs. Заперто было только здесь — компонент показывал одно
+  // фото и заменял его при новой загрузке.
+  const refs = useMemo(() => parseAttachmentUrls(imageUrl), [imageUrl]);
+  const [signedUrls, setSignedUrls] = useState<Record<string, string | null>>({});
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const firstRef = useMemo(() => parseAttachmentUrls(imageUrl)[0] ?? null, [imageUrl]);
 
   useEffect(() => {
-    setImageFailed(false);
-    setSignedUrl(null);
-    if (!firstRef) return;
+    if (refs.length === 0) {
+      setSignedUrls({});
+      return;
+    }
     let cancelled = false;
-    void getKBImageSignedUrl(firstRef).then((url) => {
+    // Параллельно: 5 последовательных подписей — это 5 RTT в московский прокси
+    // на каждое открытие карточки.
+    void Promise.all(
+      refs.map(async (ref) => [ref, await getKBImageSignedUrl(ref)] as const),
+    ).then((pairs) => {
       if (cancelled) return;
-      if (url) setSignedUrl(url);
-      else setImageFailed(true);
+      setSignedUrls(Object.fromEntries(pairs));
     });
     return () => {
       cancelled = true;
     };
-  }, [firstRef]);
+  }, [refs]);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = '';
-    if (!file) return;
-    const validationError = validateImageFile(file);
-    if (validationError) {
-      toast.error(validationError);
+    if (files.length === 0) return;
+    const room = MAX_TASK_IMAGES - refs.length;
+    if (room <= 0) {
+      toast.error(`Максимум ${MAX_TASK_IMAGES} фото на задание`);
       return;
+    }
+    // Кап серверный (validateVariantImageField, 5 refs) — режем ЗДЕСЬ и
+    // говорим об этом, иначе сохранение упало бы валидацией уже после
+    // загрузки файлов в Storage.
+    const accepted = files.slice(0, room);
+    if (files.length > room) {
+      toast.warning(`Добавлено ${room} из ${files.length}: лимит ${MAX_TASK_IMAGES} фото`);
     }
     setUploading(true);
     try {
-      const res = await uploadKBTaskImage(file);
-      onChange(res.storageRef);
-      toast.success('Фото прикреплено');
+      const uploaded: string[] = [];
+      for (const file of accepted) {
+        const validationError = validateImageFile(file);
+        if (validationError) {
+          toast.error(validationError);
+          continue;
+        }
+        const res = await uploadKBTaskImage(file);
+        uploaded.push(res.storageRef);
+      }
+      if (uploaded.length === 0) return;
+      onChange(serializeAttachmentUrls([...refs, ...uploaded]));
+      toast.success(uploaded.length === 1 ? 'Фото прикреплено' : `Прикреплено фото: ${uploaded.length}`);
     } catch {
       toast.error('Не удалось загрузить фото');
     } finally {
@@ -143,54 +170,82 @@ function TaskImageAttachment({
     }
   };
 
+  const removeAt = (ref: string) => {
+    const next = refs.filter((r) => r !== ref);
+    onChange(next.length === 0 ? null : serializeAttachmentUrls(next));
+  };
+
   return (
-    <div className="flex items-center gap-2">
-      {firstRef ? (
-        imageFailed ? (
-          <div
-            className="flex h-16 w-24 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-1 text-center text-[10px] font-medium leading-tight text-amber-700"
-            title="Файл изображения недоступен — замените или уберите"
-          >
-            Фото недоступно
-          </div>
-        ) : signedUrl ? (
-          <img
-            loading="lazy"
-            src={signedUrl}
-            alt="Фото условия"
-            onError={() => setImageFailed(true)}
-            className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
-          />
-        ) : (
-          <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
-            <ImagePlus className="h-4 w-4 animate-pulse text-slate-300" aria-hidden="true" />
-          </div>
-        )
+    <div className="space-y-2">
+      {refs.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {refs.map((ref, i) => {
+            const url = signedUrls[ref];
+            return (
+              <div key={ref} className="relative">
+                {url === undefined ? (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+                    <ImagePlus className="h-4 w-4 animate-pulse text-slate-300" aria-hidden="true" />
+                  </div>
+                ) : url === null ? (
+                  <div
+                    className="flex h-16 w-24 items-center justify-center rounded-lg border border-amber-200 bg-amber-50 px-1 text-center text-[10px] font-medium leading-tight text-amber-700"
+                    title="Файл изображения недоступен — замените или уберите"
+                  >
+                    Фото недоступно
+                  </div>
+                ) : (
+                  <img
+                    loading="lazy"
+                    src={url}
+                    alt={`Фото условия ${i + 1}`}
+                    className="h-16 w-16 rounded-lg border border-slate-200 object-cover"
+                  />
+                )}
+                {/* Крестик всегда видим, не по hover: на тач-устройствах
+                    hover-контрола не существует (rule 80). */}
+                <button
+                  type="button"
+                  disabled={disabled || uploading}
+                  onClick={() => removeAt(ref)}
+                  aria-label={`Убрать фото ${i + 1}`}
+                  className="absolute -right-1.5 -top-1.5 rounded-full border border-slate-200 bg-white p-0.5 text-slate-500 shadow-sm transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-40 [touch-action:manipulation]"
+                >
+                  <Trash2 className="h-3 w-3" aria-hidden="true" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
       ) : null}
-      <button
-        type="button"
-        disabled={disabled || uploading}
-        onClick={() => fileInputRef.current?.click()}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 [touch-action:manipulation]"
-      >
-        {uploading ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-        ) : (
-          <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
-        )}
-        {firstRef ? 'Заменить фото' : 'Фото условия'}
-      </button>
-      {firstRef ? (
+      <div className="flex items-center gap-2">
         <button
           type="button"
-          disabled={disabled || uploading}
-          onClick={() => onChange(null)}
-          className="rounded-lg px-2 py-1.5 text-xs font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 [touch-action:manipulation]"
+          disabled={disabled || uploading || refs.length >= MAX_TASK_IMAGES}
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:border-accent/40 hover:text-accent disabled:opacity-50 [touch-action:manipulation]"
         >
-          Убрать
+          {uploading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          {refs.length > 0 ? 'Добавить фото' : 'Фото условия'}
         </button>
-      ) : null}
-      <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+        {refs.length > 0 ? (
+          <span className="text-xs text-slate-400 tabular-nums">
+            {refs.length} / {MAX_TASK_IMAGES}
+          </span>
+        ) : null}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={handleFile}
+          className="hidden"
+        />
+      </div>
     </div>
   );
 }
@@ -205,6 +260,7 @@ const VariantTaskCard = memo(function VariantTaskCard({
   blockLabel,
   onUpdate,
   onRemove,
+  onChangePart,
 }: {
   draft: VariantTaskDraft;
   index: number;
@@ -215,6 +271,9 @@ const VariantTaskCard = memo(function VariantTaskCard({
   blockLabel: string | null;
   onUpdate: (localId: string, patch: Partial<VariantTaskDraft>) => void;
   onRemove: (localId: string) => void;
+  /** Смена типа ответа = смена части. Перенос делает родитель (задача живёт
+   *  в массиве своей части), контент при этом сохраняется целиком. */
+  onChangePart: (localId: string, part: 1 | 2) => void;
 }) {
   const isPart1 = draft.part === 1;
   return (
@@ -231,6 +290,25 @@ const VariantTaskCard = memo(function VariantTaskCard({
             className={cn(INPUT_CLASS, duplicateKim && 'border-red-300 bg-red-50/40')}
             aria-label={`№ КИМ задачи ${index + 1}`}
           />
+        </div>
+        {/* Тип ответа = часть работы (2026-08-02, запрос Анастасии «было бы
+            удобно в моменте изменить тип задания, с краткого ответа на
+            развёрнутый»). Раньше часть выбиралась НАВСЕГДА кнопкой «+ Часть
+            1»/«+ Часть 2», и передумать значило удалить задачу и завести
+            заново — с текстом, фото и ответом. В аудировании DELF выше
+            уровнем это норма: часть вопросов — выбор, часть — вписать фразу. */}
+        <div className="min-w-[170px]">
+          <Label className="mb-1 block text-xs font-semibold text-slate-500">Тип ответа</Label>
+          <select
+            value={draft.part}
+            disabled={disabled}
+            onChange={(e) => onChangePart(draft.localId, Number(e.target.value) === 2 ? 2 : 1)}
+            className={INPUT_CLASS}
+            aria-label={`Тип ответа задачи ${index + 1}`}
+          >
+            <option value={1}>Краткий — проверит система</option>
+            <option value={2}>Развёрнутый — проверит AI и вы</option>
+          </select>
         </div>
         <div className="w-20">
           <Label className="mb-1 block text-xs font-semibold text-slate-500">Балл</Label>
@@ -687,6 +765,29 @@ function VariantEditorContent() {
     return index < 0 ? null : blockDisplayTitle(blocks[index], index);
   }, [blocks]);
 
+  // Смена типа ответа переносит задачу между массивами частей, сохраняя ВЕСЬ
+  // контент. Часть остаётся техническим хранилищем (part1_answers vs
+  // part2_solutions, разные чекеры и тоталы) — меняется только то, как
+  // репетитор её называет и куда она попадёт при сохранении.
+  const handleChangeTaskPart = useCallback((localId: string, part: 1 | 2) => {
+    let moved: VariantTaskDraft | null = null;
+    const take = (list: VariantTaskDraft[]) => {
+      const hit = list.find((t) => t.localId === localId);
+      if (hit) moved = { ...hit, part };
+      return list.filter((t) => t.localId !== localId);
+    };
+    const nextP1 = take(part1Tasks);
+    const nextP2 = take(part2Tasks);
+    if (!moved) return;
+    // Часть 2 проверяется вручную/AI — режим чекера Части 1 к ней неприменим,
+    // и наоборот: вернувшись в Часть 1, задача не должна остаться с 'manual'.
+    const normalized: VariantTaskDraft = part === 2
+      ? { ...moved, checkMode: 'strict' }
+      : moved;
+    setPart1Tasks(part === 1 ? [...nextP1, normalized] : nextP1);
+    setPart2Tasks(part === 2 ? [...nextP2, normalized] : nextP2);
+  }, [part1Tasks, part2Tasks]);
+
   const handleBindTaskToBlock = useCallback((taskLocalId: string, blockId: string | null) => {
     const patch = (list: VariantTaskDraft[]) =>
       list.map((t) => (t.localId === taskLocalId ? { ...t, blockId } : t));
@@ -1124,6 +1225,7 @@ function VariantEditorContent() {
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
+              onChangePart={handleChangeTaskPart}
             />
           ))}
           <Button variant="outline" onClick={addPart1} disabled={contentLocked || isSubmitting} className="gap-2 w-full">
@@ -1149,6 +1251,7 @@ function VariantEditorContent() {
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
+              onChangePart={handleChangeTaskPart}
             />
           ))}
           <Button variant="outline" onClick={addPart2} disabled={contentLocked || isSubmitting} className="gap-2 w-full">
