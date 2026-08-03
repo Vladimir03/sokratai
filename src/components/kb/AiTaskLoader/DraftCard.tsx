@@ -15,6 +15,7 @@ import { BboxEditor } from '@/components/kb/AiTaskLoader/BboxEditor';
 import { overrideExamToDb } from '@/components/kb/AiTaskLoader/reviewTypes';
 import type { CropState, ReviewOverrides } from '@/components/kb/AiTaskLoader/reviewTypes';
 import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
+import { parseAnswerSpec } from '@/lib/answerAlternatives';
 import { CriteriaEditor } from '@/components/task-editor/CriteriaEditor';
 import { resolveCheckFormatForLoader } from '@/lib/checkFormatHelpers';
 import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
@@ -59,6 +60,15 @@ interface DraftCardProps {
    * Балл остаются: едут в снимок и авто-балл ФИПИ).
    */
   showTaxonomy?: boolean;
+  /**
+   * Назначение — вариант пробника (ВОЛНА 9, ревью P1). Модель данных пробника
+   * НЕ поддерживает ни критерии (`VariantTaskDraft` не имеет такого поля —
+   * маппер молча их отбрасывал), ни мульти-ответ/диапазон (чекеры Части 1
+   * сравнивают строку буквально: `2 м/с² или 2` не совпадёт с ответом `2`).
+   * Поэтому в этом режиме прячем оба контрола и предупреждаем, если формат
+   * альтернатив всё же пришёл от модели.
+   */
+  isMockVariant?: boolean;
   /**
    * ВОЛНА 8: скриншоты решения (refs kb-attachments; состояние живёт в Flow).
    * Сеттер ФУНКЦИОНАЛЬНЫЙ (ревью P1-4) — параллельные вставки Ctrl+V не должны
@@ -175,6 +185,7 @@ function DraftCardComponent({
   hideSelect,
   onRemove,
   showTaxonomy = true,
+  isMockVariant = false,
   solutionRefs,
   onSolutionRefsChange,
   folders,
@@ -214,6 +225,10 @@ function DraftCardComponent({
   const confidence = CONFIDENCE_META[draft.answer_confidence];
   const answerEmpty = !draft.answer || draft.answer.trim() === '';
   const answerNeedsReview = draft.needs_review_fields.includes('answer');
+  // Ревью P1: в пробнике мульти-ответ/диапазон не поддерживается чекерами.
+  const mockMultiAnswerWarning = isMockVariant
+    ? (parseAnswerSpec(draft.answer)?.isMulti ?? false)
+    : false;
   const effKim = hasOverride
     ? (override.kimNumber.trim() ? parseInt(override.kimNumber.trim(), 10) : null)
     : draft.kim_number;
@@ -447,7 +462,7 @@ function DraftCardComponent({
           текст, чипы не нужны. Формат сериализации канонический
           (answerAlternatives.ts) → грейдинг ДЗ засчитывает любой из вариантов. */}
       <label className="mb-1 mt-3 block text-xs font-semibold text-slate-500">Ответ</label>
-      {effCheckFormat === 'detailed_solution' ? (
+      {effCheckFormat === 'detailed_solution' || isMockVariant ? (
         <input
           type="text"
           value={draft.answer ?? ''}
@@ -479,6 +494,15 @@ function DraftCardComponent({
       {(answerEmpty || answerNeedsReview) ? (
         <p className="mt-1 text-[11px] text-amber-700">
           AI оставил поле для проверки — впишите верный ответ, чтобы авто-проверка ДЗ работала.
+        </p>
+      ) : null}
+      {/* Ревью P1: промпт учит модель каноническому формату для ВСЕХ назначений,
+          а чекеры Части 1 пробника сравнивают строку буквально — предупреждаем
+          явно, иначе ученик с верным «2» получил бы 0. */}
+      {isMockVariant && mockMultiAnswerWarning ? (
+        <p className="mt-1 text-[11px] text-amber-700">
+          В пробнике засчитывается один вариант ответа — оставьте только его
+          (сейчас записано несколько или диапазон).
         </p>
       ) : null}
 
@@ -574,18 +598,35 @@ function DraftCardComponent({
 
       {/* ВОЛНА 9: структурные критерии (grading_criteria_json) — тот же редактор,
           что в ручной форме и конструкторе ДЗ. Без них AI-задача приезжала в ДЗ
-          с NULL и грейдилась только текстовой рубрикой. Балл задачи считается
-          суммой AI-оцениваемых max при commit (зеркало CreateTaskModal). */}
-      {hasOverride ? (
+          с NULL и грейдилась только текстовой рубрикой.
+          Ревью: скрыт для пробника — у `VariantTaskDraft` поля критериев НЕТ,
+          маппер молча их отбрасывал (не показываем то, что не сохранится). */}
+      {hasOverride && !isMockVariant ? (
         <div className="mt-3">
           <CriteriaEditor
             criteria={override.criteria}
+            // Ревью: балл в поле ведущий (он синхронизируется при правке
+            // критериев ниже) — иначе сумма критериев маскировала расхождение
+            // с тем, что репетитор видит в «Балле».
             taskMaxScore={
-              sumAiGradableCriteriaMax(override.criteria) ||
               (override.primaryScore.trim() ? parseInt(override.primaryScore.trim(), 10) : 0) ||
+              sumAiGradableCriteriaMax(override.criteria) ||
               1
             }
-            onChange={(next) => onOverrideChange(index, { criteria: next })}
+            disabled={disabled}
+            // Реконсиляция как в CreateTaskModal.handleCriteriaChange: правка
+            // критериев АТОМАРНО пишет сумму в поле балла. Тогда commit может
+            // держать прежний приоритет (ручной балл побеждает), и «вижу 5 —
+            // сохранилось 3» невозможно.
+            onChange={(next) => {
+              const total = sumAiGradableCriteriaMax(next);
+              onOverrideChange(index, {
+                criteria: next,
+                ...(next.length > 0 && total > 0
+                  ? { primaryScore: String(Math.round(total)) }
+                  : {}),
+              });
+            }}
           />
         </div>
       ) : null}

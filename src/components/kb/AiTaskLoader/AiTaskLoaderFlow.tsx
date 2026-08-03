@@ -29,7 +29,6 @@ import { trackKbAiLoaderEvent } from '@/lib/kbAiLoaderTelemetry';
 import { refineDraft, type ExtractStats, type ExtractedTask } from '@/lib/kbAiExtractApi';
 import { DEFAULT_KB_SUBJECT, type CreateKBTaskInput, type ExamType, type KBSubtopic } from '@/types/kb';
 import { pluralizeRu } from '@/lib/pluralizeRu';
-import { sumAiGradableCriteriaMax } from '@/lib/gradingCriteriaPresets';
 import { reportClientError } from '@/lib/clientErrorReport';
 import { isNetworkError, withJitter } from '@/lib/queryResilience';
 import { cn } from '@/lib/utils';
@@ -170,17 +169,14 @@ function draftToCreateInput(
   // difficultyNum`, поле балла там вообще заменено подсказкой). Ручной override
   // при олимпиаде игнорируем, поэтому карточка его и не показывает.
   const manualScore = ov.primaryScore.trim() ? parseInt(ov.primaryScore.trim(), 10) : null;
-  // ВОЛНА 9: непустые критерии задают балл суммой AI-оцениваемых max — зеркало
-  // реконсиляции ручной формы (CreateTaskModal.handleCriteriaChange), иначе
-  // балл задачи и сумма критериев разъезжаются уже в момент создания.
-  const criteriaScore =
-    ov.criteria.length > 0 ? sumAiGradableCriteriaMax(ov.criteria) || null : null;
+  // ВОЛНА 9 + ревью: критерии НЕ побеждают ручной балл на commit. Реконсиляция
+  // живёт в UI (правка критериев сразу пишет сумму в поле балла — зеркало
+  // CreateTaskModal.handleCriteriaChange), поэтому здесь порядок прежний и
+  // последняя ручная правка выигрывает. Прежний вариант (`criteriaScore ??
+  // manualScore`) давал регресс: репетитор видел в поле 5, а сохранялось 3.
   const primaryScore = isOlympiad
     ? difficultyNum
-    : criteriaScore ??
-      manualScore ??
-      getKimPrimaryScoreForSubject(subject, exam, kimNum) ??
-      draft.primary_score;
+    : manualScore ?? getKimPrimaryScoreForSubject(subject, exam, kimNum) ?? draft.primary_score;
   return {
     folder_id: ov.folderId || batchFolderId,
     text: draft.text,
@@ -216,6 +212,10 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
   // «Внешнее» назначение (hw_draft | mock_variant): commit уходит колбэком,
   // KB-таксономия скрыта, предмет форсится, дубли default-выбраны.
   const isExternal = destination.kind !== 'kb_folder';
+  // Ревью P1: у варианта пробника нет ни критериев, ни мульти-ответа — карточка
+  // ревью прячет оба контрола (примитив, а не выражение с destination, чтобы
+  // не тянуть объект в зависимости колбэков).
+  const isMockVariant = destination.kind === 'mock_variant';
 
   const { topics } = useTopics();
   const createTasksBulk = useCreateTasksBulk();
@@ -853,6 +853,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
         refining={refiningIndex === index}
         hideSelect={hideSelect}
         showTaxonomy={!isExternal}
+        isMockVariant={isMockVariant}
         solutionRefs={solutionRefs[index] ?? []}
         onSolutionRefsChange={updateSolutionRefs}
         folders={isExternal ? undefined : flatFolders}
@@ -877,6 +878,7 @@ export function AiTaskLoaderFlow({ destination, onGuardStateChange }: AiTaskLoad
       rowStatus,
       removeDraft,
       isExternal,
+      isMockVariant,
       solutionRefs,
       updateSolutionRefs,
       flatFolders,

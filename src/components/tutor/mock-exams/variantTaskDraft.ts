@@ -4,6 +4,7 @@
 // корзина Базы («Создать пробник» в HWDrawer → prefill через sessionStorage).
 
 import { generateUUID } from '@/components/tutor/homework-create/types';
+import { parseAnswerSpec } from '@/lib/answerAlternatives';
 import { getExamProfile, type ExamProfileExam } from '@/lib/examProfiles';
 import { getKimPrimaryScoreForSubject } from '@/lib/kbKimScores';
 import { resolveCheckFormatFromKb } from '@/lib/checkFormatHelpers';
@@ -162,6 +163,22 @@ export function reclassifyDraftsForSubjectExam(
 
 // ─── Маппер: AI-загрузчик → черновик варианта ────────────────────────────────
 
+/**
+ * Ответ для варианта пробника: ОДНА строка, которую чекер сравнит буквально.
+ * Канонический мульти-формат Банка/ДЗ (`« или »`, диапазон `2,1 – 2,3`) здесь
+ * не поддержан ни одним `check_mode`, поэтому берём первую ТОЧНУЮ альтернативу.
+ * Диапазон без точных альтернатив оставляем как есть — молча подменять его
+ * границей значило бы выдумать ответ; репетитор увидит строку в редакторе.
+ */
+function firstExactAnswer(raw: string | null | undefined): string {
+  const trimmed = raw?.trim() ?? '';
+  if (!trimmed) return '';
+  const spec = parseAnswerSpec(trimmed);
+  if (!spec?.isMulti) return trimmed;
+  const exact = spec.alternatives.find((a) => a.type === 'exact');
+  return exact && exact.type === 'exact' ? exact.value : trimmed;
+}
+
 export function aiExtractToVariantTaskDraft(
   item: AiLoaderCommitItem,
   subject: string,
@@ -207,7 +224,13 @@ export function aiExtractToVariantTaskDraft(
     maxScore: String(maxScore),
     taskText: draft.text,
     taskImageUrl: attachmentRef ? serializeAttachmentUrls([attachmentRef]) : null,
-    correctAnswer: draft.answer?.trim() ?? '',
+    // ВОЛНА 9 (ревью P1): чекеры Части 1 сравнивают строку БУКВАЛЬНО, поэтому
+    // канонический мульти-формат («2 м/с² или 2», «2,1 – 2,3») здесь ядовит:
+    // ученик с верным «2» получил бы 0. Промпт учит модель этому формату для
+    // всех назначений, значит гейта в UI мало — нормализуем и на входе в
+    // вариант: берём первую ТОЧНУЮ альтернативу (диапазон оставляем как есть —
+    // репетитор увидит его в редакторе варианта и задаст значение сам).
+    correctAnswer: firstExactAnswer(draft.answer),
     checkMode: part === 1 ? inferPart1CheckMode(subject, exam ?? '', kimNum) : 'strict',
     solutionText: draft.solution ?? '',
     // ВОЛНА 8: скриншоты решения из ревью загрузчика.

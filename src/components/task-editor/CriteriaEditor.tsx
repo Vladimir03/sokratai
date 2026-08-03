@@ -149,6 +149,14 @@ export interface CriteriaEditorProps {
   taskMaxScore: number;
   /** Reconciles grading_criteria_json + max_score on the parent task. */
   onChange: (next: GradingCriterion[]) => void;
+  /**
+   * Заморозка на время сохранения (ВОЛНА 9, ревью P2). Без неё правка критерия
+   * во время commit принималась в UI, а сохранялся прежний snapshot overrides —
+   * репетитор видел одно, в БД уезжало другое. Гейт двойной: нативный
+   * `fieldset[disabled]` (отключает все вложенные контролы разом) + отсечка
+   * `onChange` на случай программных вызовов.
+   */
+  disabled?: boolean;
 }
 
 /**
@@ -156,7 +164,20 @@ export interface CriteriaEditorProps {
  * живой Σ-бейдж. Свободный текст рубрики остаётся ниже как доп. заметки.
  * Гейтится non-numeric задачами (criteriaEditorEnabled в HWTaskCard).
  */
-export function CriteriaEditor({ criteria, taskMaxScore, onChange }: CriteriaEditorProps) {
+export function CriteriaEditor({
+  criteria,
+  taskMaxScore,
+  onChange: onChangeRaw,
+  disabled = false,
+}: CriteriaEditorProps) {
+  // Все мутации идут через этот гейт — при disabled правки не покидают компонент.
+  const onChange = useCallback(
+    (next: GradingCriterion[]) => {
+      if (disabled) return;
+      onChangeRaw(next);
+    },
+    [disabled, onChangeRaw],
+  );
   const [open, setOpen] = useState<boolean>(criteria.length > 0);
   // Σ = AI-gradable max (excl. tutor_only) — это и есть шкала, на которой AI
   // ставит балл (= taskMaxScore после авто-reconcile). tutor_only-критерии
@@ -202,7 +223,10 @@ export function CriteriaEditor({ criteria, taskMaxScore, onChange }: CriteriaEdi
   );
 
   return (
-    <div className="space-y-2">
+    // fieldset[disabled] нативно гасит ВСЕ вложенные контролы (в т.ч. в строках
+    // критериев) — сбрасываем его дефолтные border/padding/margin, чтобы вёрстка
+    // осталась прежней.
+    <fieldset disabled={disabled} className="m-0 min-w-0 space-y-2 border-0 p-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -285,6 +309,6 @@ export function CriteriaEditor({ criteria, taskMaxScore, onChange }: CriteriaEdi
           ) : null}
         </div>
       ) : null}
-    </div>
+    </fieldset>
   );
 }
