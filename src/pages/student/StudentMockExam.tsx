@@ -1323,6 +1323,30 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
   // (статья, по которой пишут эссе), а не украшение Части 1.
   const part2Groups = useMemo(() => groupTasksByBlock(part2Tasks), [groupTasksByBlock, part2Tasks]);
 
+  // Сквозной порядок (2026-08-03, репорт Анастасии/DELF): «смешанный» =
+  // при сортировке по № задачи Части 2 НЕ образуют сплошной хвост. У всех
+  // существующих предметов Часть 2 — хвост (физика 21–26, обществознание
+  // 17–25) → предикат false → секции «Часть 1/2» рендерятся байт-в-байт
+  // прежние. Единый список включают ДАННЫЕ варианта, не предмет: у DELF
+  // V/F-с-цитатой и сетка стоят посреди чтения, и отдельная секция внизу
+  // ломала экзаменационный порядок («сократ говорит, что будет отображаться
+  // тот порядок, какой вы делаете» — жалоба куратора). Хранение, чекеры,
+  // тоталы и bulk-фото Части 2 не тронуты — меняется только раскладка.
+  const isInterleaved = useMemo(() => {
+    const byKim = [...tasks].sort((a, b) => a.kim_number - b.kim_number);
+    const firstP2 = byKim.findIndex((t) => t.part === 2);
+    if (firstP2 < 0) return false;
+    return byKim.slice(firstP2).some((t) => t.part === 1);
+  }, [tasks]);
+
+  const mixedGroups = useMemo(
+    () =>
+      isInterleaved
+        ? groupTasksByBlock([...tasks].sort((a, b) => a.kim_number - b.kim_number))
+        : [],
+    [isInterleaved, groupTasksByBlock, tasks],
+  );
+
   // Блоки БЕЗ привязанных задач = общий материал на всю работу (её ответ
   // «и один файлом, и несколько»: цельный integral-трек привязывать не к чему).
   //
@@ -1796,11 +1820,15 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             ))}
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Часть 1</h2>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  {isInterleaved ? 'Задания' : 'Часть 1'}
+                </h2>
                 <p className="text-sm text-slate-500">
-                  {answerMethod === 'blank'
-                    ? 'Заполняй на ФИПИ-бланке от руки и загрузи фото бланка ниже. Цифровые поля скрыты — репетитор проверит ответы Часть 1 по фото.'
-                    : 'Вводи ответы сразу. Каждое изменение сохраняется автоматически.'}
+                  {isInterleaved
+                    ? 'Задания идут в экзаменационном порядке. Короткие ответы вводи сразу — они сохраняются автоматически; развёрнутые решай на бумаге и загрузи фото внизу.'
+                    : answerMethod === 'blank'
+                      ? 'Заполняй на ФИПИ-бланке от руки и загрузи фото бланка ниже. Цифровые поля скрыты — репетитор проверит ответы Часть 1 по фото.'
+                      : 'Вводи ответы сразу. Каждое изменение сохраняется автоматически.'}
                 </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
@@ -1841,21 +1869,33 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 (чип «Скачать задачи (PDF)»), но у репетиторских вариантов
                 `variant_pdf_url` нет НИКОГДА — ученик по химии видел пустую
                 Часть 1 и спрашивал «где первая часть?». */}
-            {part1Groups.map((group) => (
+            {/* Сквозной порядок: смешанный вариант рендерит ОДИН список по №,
+                краткие и развёрнутые вперемежку. Несмешанный — прежние группы
+                Части 1 байт-в-байт. Карточка Части 2 здесь read-only превью
+                (фото решений — общим пакетом внизу, как и раньше). */}
+            {(isInterleaved ? mixedGroups : part1Groups).map((group) => (
               <div key={group.key} className="space-y-3">
                 {group.block ? <TaskBlockHeader block={group.block} /> : null}
                 {group.tasks.map((task) => (
-                  <Part1TaskCard
-                    key={task.id}
-                    task={task}
-                    answer={autosave.answers[task.kim_number] ?? ''}
-                    status={autosave.statusByKim[task.kim_number]}
-                    imageUrls={imagesByKim[task.kim_number] ?? []}
-                    onAnswer={autosave.setAnswer}
-                    disabled={isFinal}
-                    isPhysics={isPhysicsEgeVariant}
-                    showAnswerInput={answerMethod === 'form'}
-                  />
+                  task.part === 2 ? (
+                    <Part2TaskPreviewCard
+                      key={task.id}
+                      task={task}
+                      imageUrls={imagesByKim[task.kim_number] ?? []}
+                    />
+                  ) : (
+                    <Part1TaskCard
+                      key={task.id}
+                      task={task}
+                      answer={autosave.answers[task.kim_number] ?? ''}
+                      status={autosave.statusByKim[task.kim_number]}
+                      imageUrls={imagesByKim[task.kim_number] ?? []}
+                      onAnswer={autosave.setAnswer}
+                      disabled={isFinal}
+                      isPhysics={isPhysicsEgeVariant}
+                      showAnswerInput={answerMethod === 'form'}
+                    />
+                  )
                 ))}
               </div>
             ))}
@@ -1872,12 +1912,16 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
           <section className="mt-8 space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Часть 2</h2>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  {isInterleaved ? 'Фото решений развёрнутых заданий' : 'Часть 2'}
+                </h2>
                 <p className="text-sm text-slate-500">
-                  Прочитай условия задач {part2NumbersLabel ? `${part2NumbersLabel} ` : ''}ниже
+                  {isInterleaved
+                    ? `Развёрнутые задания ${part2NumbersLabel ? `${part2NumbersLabel} ` : ''}ты уже видел выше, в общем списке. Реши их на бумаге и загрузи фото одним пакетом (до ${MAX_BULK_PART2_PHOTOS} фото) — AI и репетитор сами разберут, где какое.`
+                    : <>Прочитай условия задач {part2NumbersLabel ? `${part2NumbersLabel} ` : ''}ниже
                   и реши их на бумаге. Затем
                   загрузи фото решений одним пакетом (до {MAX_BULK_PART2_PHOTOS} фото).
-                  AI и репетитор сами разберут, где какая задача.
+                  AI и репетитор сами разберут, где какая задача.</>}
                 </p>
               </div>
               <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-medium text-slate-700">
@@ -1892,6 +1936,9 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
             {/* P0-1 ревью 5.6: материал блока и во Части 2 — эссе пишут ПО
                 прочитанному тексту, он должен стоять рядом с заданием, а не
                 всплывать над Частью 1. */}
+            {/* В сквозном режиме условия Части 2 уже показаны в общем списке —
+                дублировать их здесь значит заставить ученика читать всё дважды. */}
+            {!isInterleaved && (
             <div className="space-y-3">
               {part2Groups.map((group) => (
                 <div key={group.key} className="space-y-3">
@@ -1906,6 +1953,7 @@ function StudentMockExamWorkspace({ data }: { data: StudentMockExamAssignmentVie
                 </div>
               ))}
             </div>
+            )}
 
             {/* Phase 5 (2026-05-15): ОДНО bulk-поле Часть 2 — замена 6 per-kim слотов
                 + старого "общего пакета". Backend AI grader получает все фото одним
