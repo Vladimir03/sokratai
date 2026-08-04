@@ -270,6 +270,17 @@ export interface MockExamAssignmentDetail extends MockExamAssignment {
    * фронт и edge деплоятся врозь (rule 95).
    */
   subject?: string | null;
+  /**
+   * Задачи варианта — АВТОРИТЕТНАЯ раскладка теплокарты (номера обеих частей +
+   * реальные `max_score`). Без неё раскладка выводилась из строк ответов, и до
+   * первой сдачи Часть 1 предмета без карты баллов (химия) не отрисовывалась
+   * вовсе, а цвет ячейки считался от фолбэка 1/2. Опционально — deploy-skew.
+   */
+  variant_tasks?: Array<{
+    kim_number: number;
+    part: number;
+    max_score: number | null;
+  }> | null;
   duration_minutes: number | null;
   total_max_score: number | null;
   attempts: MockExamAttemptListItem[];

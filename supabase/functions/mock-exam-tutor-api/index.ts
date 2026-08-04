@@ -1099,6 +1099,32 @@ async function handleGetAssignment(
   // не нужно tutor heatmap'у) и НЕ возвращаем ai_draft_json (tutor-only
   // artifact, в heatmap нужен только final tutor_score).
   const attemptIdList = (attemptRows ?? []).map((a) => a.id as string);
+
+  // Раскладка КИМ теплокарты — ИЗ ЗАДАЧ ВАРИАНТА, а не из строк ответов.
+  // Иначе до первой сдачи показывать нечего: у химии `kimPrimaryScores` в
+  // реестре null (баллы предметник не подтверждал), и фолбэк по профилю давал
+  // ПУСТУЮ Часть 1. Плюс без реальных `max_score` цвет ячейки считался от
+  // фолбэка 1/2 — задание на 4 балла с результатом 2 выглядело полностью
+  // решённым (ревью 5.6 P1 по волнам 1–3).
+  let variantTasksForHeatmap:
+    | Array<{ kim_number: number; part: number; max_score: number | null }>
+    | null = null;
+  if (assignment.variant_id) {
+    const { data: vTasks, error: vTasksErr } = await db
+      .from("mock_exam_variant_tasks")
+      .select("kim_number, part, max_score")
+      .eq("variant_id", assignment.variant_id as string)
+      .order("kim_number", { ascending: true });
+    if (vTasksErr) {
+      // Не роняем весь эндпоинт: теплокарта деградирует к прежнему поведению.
+      console.error("[mock-exam-tutor-api] heatmap variant tasks failed:", vTasksErr.message);
+    } else {
+      variantTasksForHeatmap = (vTasks ?? []) as Array<
+        { kim_number: number; part: number; max_score: number | null }
+      >;
+    }
+  }
+
   const part1ByAttempt = new Map<
     string,
     Array<{ kim_number: number; earned_score: number | null }>
@@ -1211,6 +1237,9 @@ async function handleGetAssignment(
     display_title: (assignment.variant_title as string | null) ?? variant?.title ?? (assignment.title as string),
     exam_type: variant?.exam_type ?? null,
     subject: (variant as { subject?: string | null } | null)?.subject ?? null,
+    // Опционально (deploy-skew): старый фронт поле игнорирует, новый —
+    // строит по нему обе части теплокарты и реальные max_score.
+    variant_tasks: variantTasksForHeatmap,
     duration_minutes: variant?.duration_minutes ?? null,
     total_max_score: variant?.total_max_score ?? null,
     attempts,

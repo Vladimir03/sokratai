@@ -36,6 +36,7 @@ import {
   type MockCellKind,
 } from './mockHeatmapStyles';
 import type {
+  MockExamAssignmentDetail,
   MockExamAttemptListItem,
   MockExamAttemptStatus,
 } from '@/types/mockExam';
@@ -72,8 +73,24 @@ function useHeatmapKimLayout(
   attempts: MockExamAttemptListItem[],
   subject: string | null | undefined,
   examType: string | null | undefined,
+  variantTasks: MockExamAssignmentDetail['variant_tasks'],
 ) {
   return useMemo(() => {
+    // Приоритет — ЗАДАЧИ ВАРИАНТА: они есть до того, как кто-то приступил, и
+    // несут реальные max_score. Раньше раскладка выводилась из строк ответов,
+    // и у химии (в реестре `kimPrimaryScores: null`) Часть 1 не отрисовывалась
+    // вовсе, пока никто не сдал, а цвет считался от фолбэка 1/2 — задание на 4
+    // балла с результатом 2 выглядело решённым полностью.
+    if (variantTasks && variantTasks.length > 0) {
+      const layout = resolveVariantKimLayout({ subject, examType, variantTasks });
+      return {
+        part1Kims: layout.part1,
+        part2Kims: layout.part2,
+        maxByKim: layout.maxByKim,
+      };
+    }
+
+    // Старый edge (deploy-skew) — прежнее поведение по наблюдаемым ответам.
     const p1 = new Set<number>();
     const p2 = new Set<number>();
     for (const a of attempts) {
@@ -94,7 +111,7 @@ function useHeatmapKimLayout(
       part1Kims = fallback.part1.filter((k) => !part2Set.has(k));
     }
     return { part1Kims, part2Kims, maxByKim: fallback.maxByKim };
-  }, [attempts, subject, examType]);
+  }, [attempts, subject, examType, variantTasks]);
 }
 
 // ─── Status helper for student name column ───────────────────────────────────
@@ -431,6 +448,8 @@ interface MockExamHeatmapProps {
    */
   subject?: string | null;
   examType?: string | null;
+  /** Задачи варианта — авторитетная раскладка (см. useHeatmapKimLayout). */
+  variantTasks?: MockExamAssignmentDetail['variant_tasks'];
   /**
    * Click row → drill-down. Caller обычно делает navigate
    * `/tutor/mock-exams/:id/review/:studentId`.
@@ -450,6 +469,7 @@ export function MockExamHeatmap({
   totalMax,
   subject,
   examType,
+  variantTasks,
   onSelectAttempt,
   onRemoveAttempt,
 }: MockExamHeatmapProps) {
@@ -457,6 +477,7 @@ export function MockExamHeatmap({
     attempts,
     subject,
     examType,
+    variantTasks,
   );
   const sortedAttempts = useMemo(() => {
     // Order: in-progress first (нужно действие), then awaiting_review,

@@ -217,3 +217,33 @@ test("АВТОРИТЕТНО пустая Часть 2 ≠ отсутствие 
     "orphan solution переживает авторитетный []",
   );
 });
+
+test("химия ДО первой сдачи: задачи варианта дают обе части и реальные баллы", () => {
+  // Регресс, который чуть не уехал в прод: у химии `kimPrimaryScores: null`,
+  // поэтому фолбэк по профилю давал ПУСТУЮ Часть 1 — репетитор открывал
+  // теплокарту только что созданного пробника и не видел ни одной колонки.
+  const noProfileFallback = m.resolveVariantKimLayout({
+    subject: "chemistry",
+    examType: "oge",
+  });
+  assert.deepEqual(noProfileFallback.part1, [], "профиль химии Часть 1 не знает");
+
+  // С задачами варианта — всё на месте, включая max_score для цвета ячейки.
+  const layout = m.resolveVariantKimLayout({
+    subject: "chemistry",
+    examType: "oge",
+    variantTasks: [
+      { kim_number: 1, part: 1, max_score: 2 },
+      { kim_number: 19, part: 1, max_score: 1 },
+      { kim_number: 20, part: 2, max_score: 4 },
+      { kim_number: 23, part: 2, max_score: 3 },
+    ],
+  });
+  assert.deepEqual(layout.part1, [1, 19], "Часть 1 видна ДО первой сдачи");
+  assert.deepEqual(layout.part2, [20, 23]);
+  assert.equal(
+    layout.maxByKim[20],
+    4,
+    "реальный max_score, а не фолбэк 2 — иначе «2 из 4» покажется полным баллом",
+  );
+});
