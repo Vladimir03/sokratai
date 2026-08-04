@@ -12266,7 +12266,14 @@ async function handleRequestHint(
     available_score: newAvailableScore,
     max_score: task.max_score ?? 1,
     hint_count: newHintCount,
-    wrong_answer_count: newWrongCount,
+    // Подсказка инкрементит hint_count, а НЕ счётчик неверных ответов — отдаём
+    // его неизменным (то же выражение, что в промпт-контексте выше по функции).
+    // ⚠️ P0 2026-08-04: здесь стояло имя из ДРУГОГО хендлера
+    // (`newWrongCount` объявлен в handleStudentSubmission, сюда не доезжает) →
+    // ReferenceError → 500 на КАЖДОЕ нажатие «Подсказка». Найдено гардом
+    // no-undef (smoke-check §26), заведённым в тот же день по следам такой же
+    // опечатки в mock-exam-student-api.
+    wrong_answer_count: (activeState.wrong_answer_count as number) ?? 0,
     thread: updatedThread,
   });
 }

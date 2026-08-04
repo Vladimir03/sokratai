@@ -704,6 +704,17 @@ async function handleGetResult(
     }
   }
 
+  // Зеркало `hasTaskBlocks` таking-поверхности (см. выше по файлу): подавляем
+  // легаси variant-level трек, когда у варианта есть блоки, иначе результат
+  // показывает две одинаковые карточки транскрипта (rule 45).
+  // ⚠️ P0 2026-08-04: переменная РАНЬШЕ НЕ ОБЪЯВЛЯЛАСЬ, хотя читалась ниже в
+  // payload → ReferenceError → верхний catch → 500 «Internal server error» на
+  // КАЖДОМ результате, где вариант успешно загрузился (репорт Ульяны). Deno-код
+  // не покрыт ни vite-сборкой, ни `tsc -p tsconfig.app.json` (оба — только src/),
+  // а esbuild необъявленные идентификаторы не ловит принципиально.
+  const resultHasBlocks = Array.isArray(variant?.task_blocks_json)
+    && (variant?.task_blocks_json as unknown[]).length > 0;
+
   // Part 1 — reveal post-submit. Manual_entered не имеет per-task records.
   // AC-P11 (2026-05-26): + tutor_comment в SELECT + response payload. Visible
   // post-submit (когда part1 уже scored). Ученик видит «Комментарий репетитора»

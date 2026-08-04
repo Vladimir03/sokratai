@@ -1339,5 +1339,69 @@ if (offenders.length > 0) {
 }
 ok("appearance-reset исключает checkbox/radio (нативные виджеты живы)");
 
+// ─── 26. Deno edge-функции: необъявленные идентификаторы (2026-08-04) ────────
+// Deno-код НЕ ПРОВЕРЯЕТСЯ НИЧЕМ ИНЫМ: `npm run build` — vite (только src/),
+// `npx tsc -p tsconfig.app.json` — тоже только src/, а esbuild необъявленные
+// идентификаторы не ловит принципиально (бандлер, не тайп-чекер).
+// Цена пробела — два P0 в один день (репорт Ульяны):
+//   • mock-exam-student-api: чтение необъявленной `resultHasBlocks` роняло
+//     страницу результата пробника в 500 у ВСЕХ учеников по всем предметам;
+//   • homework-api: `newWrongCount` в ответе `handleRequestHint` — 500 на
+//     КАЖДОЕ нажатие «Подсказка».
+// Оба — один класс: identifier, которого нет ни в scope, ни среди глобалей.
+// Гейт живёт ЗДЕСЬ, а не в `npm run lint`: lint числится информационным
+// (AGENTS.md), его падение никого не останавливает.
+console.log("");
+console.log("26. Deno edge-функции: нет необъявленных идентификаторов...");
+// Зовём JS-точку входа через node, а не `.bin/eslint(.cmd)`: shim под Windows
+// требует shell:true, а это DeprecationWarning [DEP0190] и лишний слой цитирования.
+const eslintEntry = path.join(rootDir, "node_modules", "eslint", "bin", "eslint.js");
+if (!fs.existsSync(eslintEntry)) {
+  fail("eslint не установлен — гард no-undef для supabase/functions не может быть выполнен");
+}
+const noUndefResult = spawnSync(
+  process.execPath,
+  [eslintEntry, "supabase/functions", "--ext", ".ts", "-f", "json"],
+  {
+    cwd: rootDir,
+    encoding: "utf8",
+    // JSON-отчёт по edge-функциям ~1 МБ и РАСТЁТ с кодовой базой, а дефолтный
+    // maxBuffer spawnSync ровно 1 МБ: при переполнении процесс убивается,
+    // stdout молча обрезается и JSON.parse падает. Ровно это и случилось при
+    // первой проверке гарда — он «сработал», но с враньём про битый JSON
+    // вместо имени файла с ошибкой. Гард, который не может назвать причину,
+    // бесполезен, поэтому запас 64 МБ.
+    maxBuffer: 64 * 1024 * 1024,
+  },
+);
+if (noUndefResult.error) {
+  fail(`eslint не отработал по supabase/functions: ${noUndefResult.error.message}`);
+}
+if (!noUndefResult.stdout) {
+  console.error(noUndefResult.stderr ?? "");
+  fail("eslint не вернул JSON-отчёт по supabase/functions");
+}
+let noUndefHits = [];
+try {
+  for (const file of JSON.parse(noUndefResult.stdout)) {
+    for (const m of file.messages) {
+      if (m.ruleId === "no-undef") {
+        noUndefHits.push(`  ${path.relative(rootDir, file.filePath)}:${m.line} — ${m.message}`);
+      }
+    }
+  }
+} catch {
+  fail("не удалось разобрать JSON-отчёт eslint для supabase/functions");
+}
+if (noUndefHits.length > 0) {
+  fail(
+    "supabase/functions: обращение к НЕОБЪЯВЛЕННЫМ идентификаторам — в рантайме это " +
+      "ReferenceError, то есть 500 на живом эндпоинте:\n" +
+      noUndefHits.join("\n") +
+      "\n  Объявить переменную либо добавить глобаль в eslint.config.js (блок supabase/functions).",
+  );
+}
+ok("edge-функции: 0 необъявленных идентификаторов (no-undef)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");
