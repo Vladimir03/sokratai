@@ -100,6 +100,20 @@ from hw_ai_check_events e cross join params p
 order by e.occurred_at;
 ```
 
+## ⚠ Известный пробел покрытия (2026-08-04): `tutor_correction` НЕДОСЧИТЫВАЕТ
+
+Инструментирован только **одиночный** путь правки (`handleSetTutorScoreOverride`). Мимо логирования
+идут: массовое закрытие (`hw_tutor_force_complete_all_tasks`), «проверено» одиночное и массовое
+(`hw_tutor_review_task` / `hw_tutor_review_all_ai`), reopen.
+
+Замер с 01.07 по 04.08: в БД **29** правок / **51** force-complete / **538** «проверено» →
+в телеметрии **4** / **3** / **0**.
+
+**Следствие для аналитики:** `check_completed` (вердикт/уверенность/тип ошибки/причина сбоя) —
+надёжен; `tutor_correction` — **НЕ** использовать для override-rate и review-coverage, эти метрики
+считать по ретроспективной выгрузке (Файл 1), где поля персистентны. Починка = инструментировать
+bulk/review-хендлеры + редеплой `homework-api`.
+
 ## Как связать два файла
 
 | | Файл 1 — выгрузка задач (`export-hw-check-anonymized.sql`) | Файл 2 — телеметрия (этот экспорт) |
