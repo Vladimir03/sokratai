@@ -191,3 +191,29 @@ test("formatKimNumbersLabel", () => {
   assert.equal(m.formatKimNumbersLabel([]), null, "пусто → не подписывать");
   assert.equal(m.formatKimNumbersLabel([21, 22], { prefix: "" }), "21–22");
 });
+
+test("АВТОРИТЕТНО пустая Часть 2 ≠ отсутствие поля (ревью 5.6 P1)", () => {
+  // Старый edge поля не прислал → добираем из профиля.
+  assert.deepEqual(
+    m.resolvePart2KimNumbers({ subject: "chemistry", examType: "oge" }),
+    CHEM_OGE,
+    "undefined → профиль (deploy-skew)",
+  );
+  // Новый edge сказал «Части 2 нет» → показывать ФАНТОМНЫЕ задания нельзя:
+  // бэкенд на привязку фото ответит NO_PART2_TASKS.
+  assert.deepEqual(
+    m.resolvePart2KimNumbers({
+      variantPart2Kims: [],
+      subject: "chemistry",
+      examType: "oge",
+    }),
+    [],
+    "[] → авторитетно пусто, профиль НЕ подставляем",
+  );
+  // Но осиротевшая строка решения всё равно обязана остаться видимой.
+  assert.deepEqual(
+    m.resolvePart2KimNumbers({ variantPart2Kims: [], solutionKims: [20] }),
+    [20],
+    "orphan solution переживает авторитетный []",
+  );
+});

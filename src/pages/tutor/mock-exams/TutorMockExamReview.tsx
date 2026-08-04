@@ -604,7 +604,9 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
           </div>
           <p className="text-xs text-amber-800 dark:text-amber-300/90 leading-relaxed">
             {isOcrMode
-              ? 'Ученик заполнял бланк от руки. Сверь ответы с фото ниже и при необходимости поправь баллы 1–20.'
+              // Без номеров: они были физическими («1–20») и у химии ЕГЭ
+              // (Ч1 = 1–28) прямо подсказывали не проверять 21–28.
+              ? 'Ученик заполнял бланк от руки. Сверь ответы с фото ниже и при необходимости поправь баллы.'
               : 'Ученик вводил ответы цифрой — авто-проверены по ФИПИ 2026. Проверь и при необходимости поправь баллы.'}
           </p>
           <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
@@ -964,7 +966,7 @@ function Part1ReviewPanel({ attempt, variantPart1Tasks }: {
           <AlertDialogHeader>
             <AlertDialogTitle>Подтвердить баллы Часть 1</AlertDialogTitle>
             <AlertDialogDescription>
-              Проверь баллы по каждой задаче 1–20. Где ничего не введено —
+              Проверь баллы по каждой задаче Части 1. Где ничего не введено —
               автоматически поставится <strong>0 баллов</strong>. После сохранения
               ученик и родители увидят результат Части 1.
             </AlertDialogDescription>

@@ -88,6 +88,12 @@ export function resolvePart2KimNumbers(input: {
     ...normalizeKims(input.solutionKims),
   ]);
   if (fromData.length > 0) return fromData;
+  // ⚠️ Отличаем «поля нет» (старый edge, deploy-skew) от «edge авторитетно
+  // сказал: Части 2 нет». Раньше оба случая падали в профиль, и вариант, у
+  // которого все задачи намеренно оставлены в Части 1, показывал ФАНТОМНЫЕ
+  // задания из карты предмета — при том что бэкенд на привязку фото отвечал
+  // `NO_PART2_TASKS` (ревью 5.6 P1 по волнам 1–3).
+  if (input.variantPart2Kims != null) return [];
   return profilePart2(input.subject, input.examType);
 }
 

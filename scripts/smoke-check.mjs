@@ -1428,16 +1428,30 @@ if (part2TestResult.status !== 0) {
 // ТОЛЬКО по названным файлам и ТОЛЬКО по коду — в этих файлах есть законные
 // прозаические упоминания «21–26» в комментариях (в т.ч. мои пояснения к этому
 // самому фиксу), и без вырезания комментариев гард ловил бы сам себя.
-const part2ScanFiles = [
-  "src/pages/tutor/mock-exams/TutorMockExamReview.tsx",
-  "src/components/tutor/mock-exams/MockExamHeatmap.tsx",
-  "src/pages/tutor/mock-exams/TutorMockExamVariantEditor.tsx",
-  "src/pages/student/StudentMockExam.tsx",
-  "src/pages/PublicMockInvite.tsx",
-  "supabase/functions/mock-exam-tutor-api/index.ts",
-  "supabase/functions/mock-exam-grade/index.ts",
-  "supabase/functions/mock-exam-student-api/index.ts",
-];
+// Список СОБИРАЕТСЯ, а не задан руками: фиксированный перечень пропустил
+// `_shared/mock-exam-part1-ocr.ts` с `kimNum > 20`, и из-за этого химия ЕГЭ
+// молча получала нули за задания 21–28 — гард был зелёный (ревью 5.6 P1 #7).
+// Берём ВСЁ, что относится к пробникам, по обоим деревьям.
+const part2ScanFiles = [];
+const collectMockExamFiles = (dir, matcher) => {
+  const abs = path.join(rootDir, dir);
+  if (!fs.existsSync(abs)) return;
+  for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) collectMockExamFiles(rel, matcher);
+    else if (matcher(entry.name, rel)) part2ScanFiles.push(rel);
+  }
+};
+const isMockExamFile = (name, rel) =>
+  /\.(ts|tsx)$/.test(name) && /mock.?exam/i.test(rel);
+collectMockExamFiles("src", isMockExamFile);
+collectMockExamFiles("supabase/functions", isMockExamFile);
+if (part2ScanFiles.length < 10) {
+  fail(
+    `§27: найдено всего ${part2ScanFiles.length} файлов пробников — сканер, похоже, ` +
+      "перестал их находить (переименование каталога?). Гард без файлов бесполезен.",
+  );
+}
 // Комментарии ГАСИМ пустой строкой, а не выбрасываем: иначе нумерация уезжает
 // и гард показывает чужую строку (поймал сам себя на первом же прогоне —
 // ссылался на 845 вместо реальной 861).

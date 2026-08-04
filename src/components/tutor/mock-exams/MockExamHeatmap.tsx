@@ -39,7 +39,11 @@ import type {
   MockExamAttemptListItem,
   MockExamAttemptStatus,
 } from '@/types/mockExam';
-import { resolvePart2KimNumbers, resolveVariantKimLayout } from '@/lib/mockExamPart2';
+import {
+  formatKimNumbersLabel,
+  resolvePart2KimNumbers,
+  resolveVariantKimLayout,
+} from '@/lib/mockExamPart2';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 
@@ -494,7 +498,7 @@ export function MockExamHeatmap({
           <CardTitle className="text-lg flex items-center gap-2">
             Результаты по ученикам
             <Badge variant="outline" className="font-medium tabular-nums">
-              {attempts.length} × 26
+              {attempts.length} × {part1Kims.length + part2Kims.length}
             </Badge>
           </CardTitle>
           {/* Legend chips — same colors as cells. Wraps on narrow screens. */}
@@ -554,7 +558,7 @@ export function MockExamHeatmap({
                   colSpan={part1Kims.length}
                   className="bg-slate-50 border-b border-slate-200 px-2 py-1.5 text-center text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
                 >
-                  Часть 1 (1–20) · авто
+                  Часть 1 ({formatKimNumbersLabel(part1Kims, { prefix: '' }) ?? '—'}) · авто
                 </th>
                 <th className="bg-white border-b border-slate-200" aria-hidden="true" />
                 <th
@@ -562,7 +566,7 @@ export function MockExamHeatmap({
                   colSpan={part2Kims.length}
                   className="bg-slate-50 border-b border-slate-200 px-2 py-1.5 text-center text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
                 >
-                  Часть 2 (21–26) · AI-черновик
+                  Часть 2 ({formatKimNumbersLabel(part2Kims, { prefix: '' }) ?? '—'}) · AI-черновик
                 </th>
                 <th
                   scope="col"

@@ -122,12 +122,27 @@ function sanitizeCellValue(value: unknown): string | null {
  * @param blankPhotoDataUrl inline `data:image/jpeg;base64,...` бланк ФИПИ
  * @returns LovableMessage[] для callLovableJson
  */
+/**
+ * Подпись номеров Части 2 варианта для промпта: «1-20», «1-28», «3, 7, 11».
+ * Захардкоженное «1-20» просило модель распознать чужой набор клеток — у химии
+ * ЕГЭ (Ч1 = 1–28) задания 21–28 не распознавались вовсе (ревью 5.6 P0).
+ */
+function kimListLabel(tasks: Part1OCRTaskMeta[]): string {
+  const kims = [...new Set(tasks.map((t) => t.kim_number))]
+    .filter((n) => Number.isInteger(n))
+    .sort((a, b) => a - b);
+  if (kims.length === 0) return "1-20";
+  const contiguous = kims[kims.length - 1] - kims[0] === kims.length - 1;
+  return contiguous ? `${kims[0]}-${kims[kims.length - 1]}` : kims.join(", ");
+}
+
 export function buildPart1BlankOCRPrompt(
   tasksMeta: Part1OCRTaskMeta[],
   blankPhotoDataUrl: string,
 ): LovableMessage[] {
   // Filter только Часть 1 (check_mode !== 'manual')
   const part1Tasks = tasksMeta.filter((t) => t.check_mode !== "manual");
+  const kimLabel = kimListLabel(part1Tasks);
 
   const tasksSummary = part1Tasks
     .map((task) => {
@@ -156,8 +171,8 @@ export function buildPart1BlankOCRPrompt(
     .join("\n");
 
   const systemContent = [
-    "Ты распознаёшь рукописные ответы ученика на бланке № 1 ФИПИ ЕГЭ по физике.",
-    "На бланке — клетки с номерами задач 1-20. В каждой клетке ученик написал свой ответ от руки.",
+    "Ты распознаёшь рукописные ответы ученика на бланке № 1 ФИПИ.",
+    `На бланке — клетки с номерами задач ${kimLabel}. В каждой клетке ученик написал свой ответ от руки.`,
     "Твоя задача: внимательно прочитать каждую клетку и вернуть распознанный текст + уверенность.",
     "",
     "ФОРМАТЫ ОТВЕТОВ ПО ЗАДАЧАМ:",
@@ -188,7 +203,7 @@ export function buildPart1BlankOCRPrompt(
   const userContent: Array<LovableTextPart | LovableImagePart> = [
     {
       type: "text",
-      text: "Изображение бланка № 1 ФИПИ с ответами ученика. Распознай клетки 1-20.",
+      text: `Изображение бланка № 1 ФИПИ с ответами ученика. Распознай клетки ${kimLabel}.`,
     },
     { type: "image_url", image_url: { url: blankPhotoDataUrl } },
     {
@@ -225,6 +240,7 @@ export function buildPart1FreeformOCRPrompt(
   photoDataUrl: string,
 ): LovableMessage[] {
   const part1Tasks = tasksMeta.filter((t) => t.check_mode !== "manual");
+  const kimLabel = kimListLabel(part1Tasks);
 
   const tasksSummary = part1Tasks
     .map((task) => {
@@ -292,7 +308,7 @@ export function buildPart1FreeformOCRPrompt(
   const userContent: Array<LovableTextPart | LovableImagePart> = [
     {
       type: "text",
-      text: "Фото с ответами ученика на Часть 1 (произвольный формат, не бланк ФИПИ). Распознай ответы по задачам 1-20.",
+      text: `Фото с ответами ученика на Часть 1 (произвольный формат, не бланк ФИПИ). Распознай ответы по задачам ${kimLabel}.`,
     },
     { type: "image_url", image_url: { url: photoDataUrl } },
     {
@@ -309,12 +325,29 @@ export function buildPart1FreeformOCRPrompt(
 
 /**
  * Sanitize raw AI OCR JSON → strict Part1OCRResult.
- * Defensive: invalid keys / values drop'аются, defaulting на
- * `{value: null, confidence: 'low'}` для отсутствующих kim 1-20.
+ *
+ * ⚠️ `allowedKims` — РЕАЛЬНЫЕ номера Части 1 варианта. Раньше здесь было
+ * жёсткое `1..20` (физика ЕГЭ), и у химии ЕГЭ (Часть 1 = 1–28) ключи 21–28
+ * ВЫБРАСЫВАЛИСЬ, даже если модель их вернула. Дальше грейдер видел `null`,
+ * `checkPart1` давал 0 — и правильно решённые задания молча получали ноль
+ * (ревью 5.6 P0 по волнам 1–3; тот же класс, что потерянное задание 20).
+ * Отсутствие списка = легаси-поведение `1..20`, чтобы старые вызовы не
+ * изменились байт-в-байт.
  */
-export function sanitizePart1OCRResult(parsed: unknown): Part1OCRResult {
+export function sanitizePart1OCRResult(
+  parsed: unknown,
+  allowedKims?: Iterable<number>,
+): Part1OCRResult {
+  const allowed = new Set<number>();
+  for (const k of allowedKims ?? []) {
+    if (Number.isInteger(k) && k >= 1 && k <= 99) allowed.add(k);
+  }
+  if (allowed.size === 0) {
+    for (let kim = 1; kim <= 20; kim++) allowed.add(kim); // smoke-allow: kim-window легаси-дефолт без allowedKims
+  }
+
   const result: Part1OCRResult = {};
-  for (let kim = 1; kim <= 20; kim++) {
+  for (const kim of allowed) {
     result[kim] = { value: null, confidence: "low" };
   }
 
@@ -322,7 +355,7 @@ export function sanitizePart1OCRResult(parsed: unknown): Part1OCRResult {
 
   for (const [rawKey, rawValue] of Object.entries(parsed)) {
     const kimNum = Number.parseInt(rawKey.trim(), 10);
-    if (!Number.isFinite(kimNum) || kimNum < 1 || kimNum > 20) continue;
+    if (!Number.isInteger(kimNum) || !allowed.has(kimNum)) continue;
     if (!isRecord(rawValue)) continue;
 
     result[kimNum] = {

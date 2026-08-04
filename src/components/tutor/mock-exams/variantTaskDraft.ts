@@ -90,7 +90,12 @@ function resolvePart2Range(
   subject: string,
   exam?: '' | 'ege' | 'oge' | null,
 ): readonly [number, number] | null {
-  const resolvedExam = subject === 'physics' ? 'ege' : exam || null;
+  // Зеркалит `inferPart1CheckMode` ТОЧНО: физика лояльна к ПУСТОМУ exam
+  // (исторически '' = ЕГЭ), но ОГЭ у неё — свой профиль. Раньше здесь было
+  // `subject === 'physics' ? 'ege' : …`, из-за чего физика-ОГЭ получала
+  // ЕГЭ-диапазон [21,26] (у `physics:oge` он null), а баллы при этом брались
+  // из ОГЭ-карты — смесь двух экзаменов в одном варианте (ревью 5.6 P1).
+  const resolvedExam = subject === 'physics' ? (exam === 'oge' ? 'oge' : 'ege') : exam || null;
   if (!resolvedExam) return null;
   return getExamProfile(subject, resolvedExam)?.part2KimRange ?? null;
 }

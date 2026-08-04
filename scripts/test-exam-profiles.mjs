@@ -284,9 +284,26 @@ test("обёртка inferPart1CheckMode: exam-гейтинг сохранён",
 test("обёртка inferVariantTaskPart + inferCheckFormatFromKim: граница Ч2 [21,26]", () => {
   assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer"), 2);
   assert.equal(variantDraft.inferVariantTaskPart("physics", 20, "short_answer"), 1);
-  // Физика байт-в-байт: лояльна к пустому/любому exam (её карта = ЕГЭ).
+  // Физика байт-в-байт: лояльна к ПУСТОМУ exam (исторически '' = ЕГЭ).
   assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer", ""), 2);
-  assert.equal(variantDraft.inferVariantTaskPart("physics", 21, "short_answer", "oge"), 2);
+  // ⚠️ Ревью 5.6 P1 (2026-08-04): физика-ОГЭ БОЛЬШЕ НЕ получает ЕГЭ-диапазон.
+  // Раньше здесь ожидалась `2` — применялся ЕГЭ [21,26], хотя `physics:oge`
+  // имеет `part2KimRange: null` («граница неизвестна»). Это давало ровно баг
+  // Ульяны, но в физике: задание 20 ОГЭ (по карте баллов 3 балла, т.е.
+  // развёрнутое) уезжало в Часть 1, а несуществующие 23–26 считались Частью 2.
+  // Теперь при неизвестной границе решает формат проверки — честно, а не
+  // «по чужому экзамену». Диапазон ОГЭ-физики в реестр не вписан намеренно:
+  // значения подтверждает предметник (вероятно [20,22] — судя по 3/3/3).
+  assert.equal(
+    variantDraft.inferVariantTaskPart("physics", 21, "short_answer", "oge"),
+    1,
+    "граница ОГЭ неизвестна → решает checkFormat, а не ЕГЭ-окно",
+  );
+  assert.equal(
+    variantDraft.inferVariantTaskPart("physics", 21, "detailed_solution", "oge"),
+    2,
+    "развёрнутое ОГЭ-задание всё равно попадает в Часть 2",
+  );
   // Ревью 5.6 P1 #2: обществознание получило свою границу Ч2 [17,25], но
   // строго по указанному экзамену (зеркало inferPart1CheckMode).
   assert.equal(variantDraft.inferVariantTaskPart("social", 17, "short_answer", "ege"), 2);

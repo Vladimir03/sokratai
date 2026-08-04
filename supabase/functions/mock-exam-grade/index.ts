@@ -937,7 +937,13 @@ async function runPart1OCR(
       });
       return null;
     }
-    const ocrResult = sanitizePart1OCRResult(parsed);
+    // Allow-set — РЕАЛЬНЫЕ номера Части 1 варианта, а не окно 1..20: у химии
+    // ЕГЭ Часть 1 = 1–28, и ключи 21–28 иначе выбрасываются санитайзером, а
+    // грейдер записывает за верно решённые задания 0 (ревью 5.6 P0).
+    const ocrResult = sanitizePart1OCRResult(
+      parsed,
+      tasksMeta.map((t) => t.kim_number),
+    );
     // PII-free telemetry: подсчитать сколько cells AI распознал с high confidence.
     const recognizedCount = Object.values(ocrResult).filter(
       (c) => c && typeof c.value === "string" && c.value.length > 0,
