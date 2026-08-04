@@ -5198,23 +5198,10 @@ async function handleSetTutorScoreOverride(
       task_id: taskId,
       action: "force_complete",
     });
-    // Analytics telemetry (2026-06-30): force-complete is a tutor correction
-    // (closed without an AI verdict). Best-effort, never blocks the response.
-    await recordHwCheckEvent(db, {
-      event_type: "tutor_correction",
-      tutor_id: tutorUserId,
-      assignment_id: assignmentId,
-      student_id: studentId,
-      task_id: taskId,
-      task_state_id: (result.task_state_id as string) ?? (existing.id as string),
-      max_score: maxScore,
-      correction_kind: "force_complete",
-      tutor_score_override: overrideValue,
-      ai_score_at_correction: existing.ai_score == null ? null : Number(existing.ai_score),
-      override_delta: (overrideValue != null && existing.ai_score != null)
-        ? overrideValue - Number(existing.ai_score)
-        : null,
-    });
+    // Analytics telemetry: `tutor_correction` теперь пишет DB-триггер
+    // `trg_hw_log_tutor_correction` (миграция 20260804120000) — он ловит ВСЕ
+    // write-path'ы, включая массовое закрытие и «проверено» из tutor-progress-api.
+    // Здесь НЕ логируем: иначе одиночная правка задвоится.
     return jsonOk(cors, {
       ok: true,
       task_state: {
@@ -5273,24 +5260,8 @@ async function handleSetTutorScoreOverride(
     return jsonError(cors, 500, "DB_ERROR", "Failed to update task state");
   }
 
-  // Analytics telemetry (2026-06-30): tutor correction of the AI grade.
-  // override_delta = override − ai_score is the core false-accept/false-reject
-  // signal for the AI-quality project. Best-effort, never blocks the response.
-  await recordHwCheckEvent(db, {
-    event_type: "tutor_correction",
-    tutor_id: tutorUserId,
-    assignment_id: assignmentId,
-    student_id: studentId,
-    task_id: taskId,
-    task_state_id: existing.id as string,
-    max_score: maxScore,
-    correction_kind: forceComplete === "active" ? "reopen" : (overrideValue === null ? "reset" : "override"),
-    tutor_score_override: overrideValue,
-    ai_score_at_correction: existing.ai_score == null ? null : Number(existing.ai_score),
-    override_delta: (overrideValue != null && existing.ai_score != null)
-      ? overrideValue - Number(existing.ai_score)
-      : null,
-  });
+  // Analytics telemetry: см. выше — `tutor_correction` пишет DB-триггер
+  // (write-path-agnostic), здесь логирование намеренно убрано.
 
   let finalStatus = updated.status as string;
   let finalForceCompletedAt: string | null = (updated as Record<string, unknown>).tutor_force_completed_at as string | null;
