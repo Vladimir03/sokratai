@@ -739,20 +739,19 @@ function VariantEditorContent() {
   const applySplitPlan = useCallback(() => {
     if (!splitPrompt) return;
     const { plan, subject: s, exam: e } = splitPrompt;
-    setPart1Tasks((p1) => {
-      // Оба массива нужны одновременно — считаем один раз, второй берём из
-      // замыкания результата (функциональные апдейтеры вызываются подряд).
-      const next = applyPartSplitPlan(p1, part2Tasks, plan, s, e);
-      setPart2Tasks(next.part2);
-      return next.part1;
-    });
+    // Считаем ОБА массива один раз из текущего состояния. Апдейтер `setState`
+    // обязан быть чистым: под StrictMode React вызывает его дважды, и вложенный
+    // `setPart2Tasks` внутри него выполнился бы два раза.
+    const next = applyPartSplitPlan(part1Tasks, part2Tasks, plan, s, e);
+    setPart1Tasks(next.part1);
+    setPart2Tasks(next.part2);
     const up = plan.moves.filter((m) => m.to === 2).length;
     const down = plan.moves.length - up;
     toast.success(
       `Разбивка обновлена: ${up ? `в Часть 2 — ${up}` : ''}${up && down ? ', ' : ''}${down ? `в Часть 1 — ${down}` : ''}`,
     );
     setSplitPrompt(null);
-  }, [splitPrompt, part2Tasks]);
+  }, [splitPrompt, part1Tasks, part2Tasks]);
 
   const totalMax = useMemo(
     () =>

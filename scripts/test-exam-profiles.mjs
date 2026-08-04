@@ -374,3 +374,79 @@ test("reclassifyDraftsForSubjectExam: смена предмета пересчи
   assert.equal(r6.drafts[0].checkMode, "manual", "Ч2 режим не трогаем");
   assert.equal(r6.drafts[0].maxScore, "3", "Ч2 балл по карте физики КИМ 21 = 3");
 });
+
+test("planPartSplitForSubjectExam: молчит там, где предлагать нечего", () => {
+  const mk = (over) => ({
+    localId: over.localId ?? "x", part: 1, kimNumber: "1", maxScore: "1", taskText: "",
+    taskImageUrl: null, correctAnswer: "", checkMode: "strict",
+    solutionText: "", solutionImageUrls: null, topic: "", ...over,
+  });
+  const f = variantDraft.planPartSplitForSubjectExam;
+  // Физика ЕГЭ, задачи уже разложены верно → диалога быть не должно.
+  const p1 = [mk({ localId: "a", kimNumber: "20", part: 1 })];
+  const p2 = [mk({ localId: "b", kimNumber: "21", part: 2 })];
+  assert.equal(f(p1, p2, "physics", "ege"), null, "нечего переносить → null");
+  // Профиля нет / границы нет → null (лучше молчать, чем врать).
+  assert.equal(f(p1, p2, "chemistry", ""), null, "нет экзамена → null");
+  assert.equal(f(p1, p2, "physics", "oge"), null, "physics:oge part2KimRange=null");
+  assert.equal(f(p1, p2, "french", "ege"), null, "профиля нет → null");
+});
+
+test("planPartSplitForSubjectExam + applyPartSplitPlan: кейс Ульяны физика→химия ОГЭ", () => {
+  const mk = (over) => ({
+    localId: over.localId, part: over.part, kimNumber: over.kimNumber,
+    maxScore: over.maxScore ?? "1", taskText: `условие ${over.kimNumber}`,
+    taskImageUrl: "storage://img", correctAnswer: "42", checkMode: "strict",
+    solutionText: "решение", solutionImageUrls: null, topic: "тема",
+  });
+  // Физический вариант: Ч1 = 19,20; Ч2 = 21,24.
+  const p1 = [mk({ localId: "k19", part: 1, kimNumber: "19" }), mk({ localId: "k20", part: 1, kimNumber: "20" })];
+  const p2 = [mk({ localId: "k21", part: 2, kimNumber: "21" }), mk({ localId: "k24", part: 2, kimNumber: "24" })];
+
+  // Химия ОГЭ: Ч2 = 20–23 → 20 вверх, 24 вниз, 21 остаётся.
+  const plan = variantDraft.planPartSplitForSubjectExam(p1, p2, "chemistry", "oge");
+  assert.ok(plan, "план обязан появиться");
+  assert.deepEqual(plan.range, [20, 23]);
+  assert.deepEqual(
+    plan.moves.map((m) => `${m.kim}:${m.from}->${m.to}`).sort(),
+    ["20:1->2", "24:2->1"],
+  );
+
+  const out = variantDraft.applyPartSplitPlan(p1, p2, plan, "chemistry", "oge");
+
+  // ГЛАВНОЕ: ни одна задача не потеряна и не задвоена.
+  const ids = [...out.part1, ...out.part2].map((t) => t.localId).sort();
+  assert.deepEqual(ids, ["k19", "k20", "k21", "k24"], "все 4 задачи на месте, без дублей");
+  assert.equal(new Set(ids).size, 4, "localId уникальны");
+
+  assert.deepEqual(out.part2.map((t) => t.kimNumber).sort(), ["20", "21"]);
+  assert.deepEqual(out.part1.map((t) => t.kimNumber).sort(), ["19", "24"]);
+  assert.equal(out.part1.every((t) => t.part === 1), true, "part проставлен");
+  assert.equal(out.part2.every((t) => t.part === 2), true);
+
+  // Контент НЕ тронут — переносится только классификация.
+  const moved = out.part2.find((t) => t.localId === "k20");
+  assert.equal(moved.taskText, "условие 20");
+  assert.equal(moved.taskImageUrl, "storage://img");
+  assert.equal(moved.solutionText, "решение");
+  assert.equal(moved.correctAnswer, "42");
+  assert.equal(moved.topic, "тема");
+});
+
+test("applyPartSplitPlan: идемпотентен — повторный прогон ничего не меняет", () => {
+  const mk = (over) => ({
+    localId: over.localId, part: over.part, kimNumber: over.kimNumber,
+    maxScore: "1", taskText: "t", taskImageUrl: null, correctAnswer: "",
+    checkMode: "strict", solutionText: "", solutionImageUrls: null, topic: "",
+  });
+  const p1 = [mk({ localId: "a", part: 1, kimNumber: "20" })];
+  const p2 = [];
+  const plan = variantDraft.planPartSplitForSubjectExam(p1, p2, "chemistry", "oge");
+  const once = variantDraft.applyPartSplitPlan(p1, p2, plan, "chemistry", "oge");
+  // После применения плана переносить больше нечего.
+  assert.equal(
+    variantDraft.planPartSplitForSubjectExam(once.part1, once.part2, "chemistry", "oge"),
+    null,
+    "второй раз диалог не предлагается",
+  );
+});
