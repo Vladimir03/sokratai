@@ -815,8 +815,18 @@ async function handleCreateAssignment(
   if (b.deadline !== undefined && b.deadline !== null && !isISODate(b.deadline)) {
     return jsonError(cors, 400, "VALIDATION", "deadline must be null or ISO timestamp");
   }
-  if (!Array.isArray(b.student_ids) || b.student_ids.length === 0) {
-    return jsonError(cors, 400, "VALIDATION", "student_ids is required and non-empty for blank/form");
+  // Пустой список учеников легален ТОЛЬКО для лид-ссылки (репорт Ульяны
+  // 2026-08-04): смысл публичной ссылки — люди, которые ещё НЕ ученики, а
+  // требование «выбери хотя бы одного» делало этот сценарий недостижимым.
+  // Клиент присылает `lead_link_only: true`, когда галочка включена.
+  const leadLinkOnly = b.lead_link_only === true;
+  if (!Array.isArray(b.student_ids) || (b.student_ids.length === 0 && !leadLinkOnly)) {
+    return jsonError(
+      cors,
+      400,
+      "VALIDATION",
+      "Выберите хотя бы одного ученика — или включите публичную ссылку для лидов",
+    );
   }
   const studentIds = Array.from(new Set(b.student_ids as string[]));
   const invalidIds = studentIds.filter((id) => !isUUID(id));

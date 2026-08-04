@@ -64,6 +64,82 @@ function normalizeBlockPairs(text: string): string {
   return result;
 }
 
+/** Строка целиком = одна формула (допускается хвостовой знак препинания). */
+function isMathOnlyLine(trimmed: string): boolean {
+  if (trimmed.length === 0) return false;
+  // Блочная `$$…$$` либо инлайн `$…$`, опционально с `.`/`,`/`;`/`:`/`!`/`?`.
+  // Хвостовой знак допускается НАМЕРЕННО: репетиторы уже написали формулы с
+  // точкой (обходной приём «поставь точку после доллара»), и после этой правки
+  // их контент обязан продолжать рисоваться столбиком — без миграции данных.
+  return /^\$\$[^$]*\$\$[.,;:!?]?$/.test(trimmed) || /^\$[^$]*\$[.,;:!?]?$/.test(trimmed);
+}
+
+/** Начало строки — маркер списка: `1)` `2.` `а)` `б.` `-` `–` `•`. */
+function startsListItem(trimmed: string): boolean {
+  return /^(?:[0-9]{1,2}[).]|[a-zA-Zа-яА-ЯёЁ][).]|[-–—•])\s/u.test(trimmed);
+}
+
+const STARTS_INLINE_MATH = /^\$[^$\n]+\$/;
+const ENDS_INLINE_MATH = /\$[^$\n]+\$$/;
+
+/**
+ * Втягивает одиночную формулу обратно в предложение, НО не склеивает формулы
+ * между собой.
+ *
+ * Зачем: правило существует, чтобы «С крыши высотой\n$H=45$\nметров» читалось
+ * одним предложением. Раньше оно было двумя глобальными регэкспами через
+ * `\n`, поэтому срабатывало без разбора и склеивало ЛЮБЫЕ две формулы на
+ * соседних строках в строчку. Химик пишет уравнения столбиком — и получал
+ * строчку; обходились точкой после `$` (совет по цепочке от репетитора к
+ * репетитору). Теперь решение принимается на границе строк:
+ *   - обе строки — формулы  → перенос СОХРАНЯЕТСЯ (столбик);
+ *   - следующая строка начинает пункт списка → перенос сохраняется;
+ *   - иначе — прежнее поведение байт-в-байт.
+ */
+function collapseMathHuggingNewlines(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+
+  for (const raw of lines) {
+    if (out.length === 0) {
+      out.push(raw);
+      continue;
+    }
+    const curTrim = raw.trim();
+    // Пустую строку копим: решение примет следующая непустая (прежние правила
+    // поглощали пустые строки через `\n+`).
+    if (curTrim.length === 0) {
+      out.push(raw);
+      continue;
+    }
+    // Последняя непустая строка — «якорь» для склейки.
+    let anchor = out.length - 1;
+    while (anchor >= 0 && out[anchor].trim().length === 0) anchor -= 1;
+    if (anchor < 0) {
+      out.push(raw);
+      continue;
+    }
+    const anchorTrim = out[anchor].trim();
+
+    const keepBreak =
+      (isMathOnlyLine(anchorTrim) && isMathOnlyLine(curTrim)) || startsListItem(curTrim);
+    if (!keepBreak) {
+      const joinBecauseNextIsMath =
+        /\S$/.test(anchorTrim) && STARTS_INLINE_MATH.test(curTrim);
+      const joinBecausePrevIsMath =
+        ENDS_INLINE_MATH.test(anchorTrim) && /^\S/.test(curTrim);
+      if (joinBecauseNextIsMath || joinBecausePrevIsMath) {
+        out.length = anchor + 1; // поглощаем накопленные пустые строки
+        out[anchor] = `${out[anchor].replace(/[ \t]+$/, "")} ${curTrim}`;
+        continue;
+      }
+    }
+    out.push(raw);
+  }
+
+  return out.join("\n");
+}
+
 export function preprocessLatex(text: string): string {
   // Convert LaTeX display mode \[...\] to $$...$$
   // '$$$$' needed because $$ is a special replacement pattern in String.replace
@@ -78,12 +154,9 @@ export function preprocessLatex(text: string): string {
   // Pair-aware normalization — see normalizeBlockPairs comment.
   text = normalizeBlockPairs(text);
 
-  // Collapse newlines that hug the now-inline math so the variable flows
-  // back into the surrounding sentence:
-  //   "высотой\n$H = 45$\nметров" → "высотой $H = 45$ метров"
-  // Only touches inline `$...$` (no `$$`), so block math layout is preserved.
-  text = text.replace(/(\S)[ \t]*\n+[ \t]*(\$[^$\n]+\$)/g, "$1 $2");
-  text = text.replace(/(\$[^$\n]+\$)[ \t]*\n+[ \t]*(\S)/g, "$1 $2");
+  // Втягиваем одиночную формулу в предложение, но НЕ склеиваем формулы между
+  // собой (см. collapseMathHuggingNewlines — там же история про «точку»).
+  text = collapseMathHuggingNewlines(text);
 
   return text;
 }

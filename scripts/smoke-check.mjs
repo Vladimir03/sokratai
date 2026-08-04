@@ -1480,5 +1480,27 @@ if (part2Offenders.length > 0) {
 }
 ok("Часть 2: номера из данных варианта (0 хардкодов 21–26)");
 
+// ─── 28. Формулы столбиком (preprocessLatex) — 2026-08-04 ───────────────────
+// Репорт Ульяны: уравнения химии вставали строчкой, обходились точкой после
+// `$`. Правила втягивания формулы в предложение срабатывали без разбора и
+// склеивали ЛЮБЫЕ две формулы на соседних строках. Тест держит обе стороны:
+// столбик работает И прежнее втягивание (физика) не сломано.
+console.log("");
+console.log("28. preprocessLatex: формулы столбиком, предложение не разорвано...");
+const latexTestPath = path.join(rootDir, "scripts", "test-preprocess-latex.mjs");
+if (!fs.existsSync(latexTestPath)) {
+  fail("scripts/test-preprocess-latex.mjs missing — вёрстка формул без гарда");
+}
+const latexTestResult = spawnSync(process.execPath, [latexTestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (latexTestResult.status !== 0) {
+  console.error(latexTestResult.stdout ?? "");
+  console.error(latexTestResult.stderr ?? "");
+  fail("preprocessLatex tests FAILED — see node:test output above");
+}
+ok("preprocessLatex pass (столбик + регресс-замок предложения + идемпотентность)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

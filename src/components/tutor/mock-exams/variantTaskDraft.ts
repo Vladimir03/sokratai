@@ -76,6 +76,25 @@ export function rowToDraft(row: MockExamVariantTaskRow): VariantTaskDraft {
  * (`src/lib/examProfiles.ts`, техдолг 5.6); гейтинг exam-семантики остаётся
  * здесь (физика лояльна к пустому exam, social строг — ревью 5.6 P1).
  */
+/**
+ * Диапазон Части 2 для (предмет × экзамен) с той же exam-семантикой, что у
+ * `inferPart1CheckMode` / `getKimPrimaryScoreForSubject`: физика лояльна к
+ * пустому exam (её карта = ЕГЭ, поведение байт-в-байт), остальные предметы —
+ * строго по указанному экзамену.
+ *
+ * ⚠️ ЕДИНСТВЕННОЕ место этого гейта: авто-инференс части и диалог пересчёта
+ * разбивки обязаны видеть одно и то же. Разъехавшиеся копии этого правила —
+ * ровно тот класс дрейфа, который и породил историю с потерянным заданием 20.
+ */
+function resolvePart2Range(
+  subject: string,
+  exam?: '' | 'ege' | 'oge' | null,
+): readonly [number, number] | null {
+  const resolvedExam = subject === 'physics' ? 'ege' : exam || null;
+  if (!resolvedExam) return null;
+  return getExamProfile(subject, resolvedExam)?.part2KimRange ?? null;
+}
+
 export function inferVariantTaskPart(
   subject: string,
   kimNumber: number | null,
@@ -83,18 +102,120 @@ export function inferVariantTaskPart(
   exam?: '' | 'ege' | 'oge' | null,
 ): 1 | 2 {
   if (kimNumber !== null) {
-    // Гейтинг зеркалит inferPart1CheckMode / getKimPrimaryScoreForSubject:
-    // физика лояльна к пустому exam (её карта = ЕГЭ, прежнее поведение
-    // байт-в-байт), остальные предметы — строго по указанному экзамену.
-    // Ревью 5.6 P1 #2: раньше диапазон был захардкожен физикой, поэтому
-    // задачи 17-25 обществознания молча уезжали в Часть 1.
-    const resolvedExam = subject === 'physics' ? 'ege' : exam || null;
-    const range = resolvedExam
-      ? getExamProfile(subject, resolvedExam)?.part2KimRange
-      : null;
+    const range = resolvePart2Range(subject, exam);
     if (range && kimNumber >= range[0] && kimNumber <= range[1]) return 2;
   }
   return checkFormat === 'detailed_solution' ? 2 : 1;
+}
+
+export interface PartSplitMove {
+  localId: string;
+  kim: number;
+  from: 1 | 2;
+  to: 1 | 2;
+}
+
+export interface PartSplitPlan {
+  range: readonly [number, number];
+  moves: PartSplitMove[];
+  /** Текущие номера Части 2 — для честной формулировки «сейчас в варианте …». */
+  currentPart2Kims: number[];
+}
+
+/**
+ * План пересчёта разбивки по частям при смене предмета/экзамена
+ * (решение владельца 2026-08-04: предлагать ДЕЙСТВИЕМ, не молча).
+ *
+ * Кейс Ульяны: вариант собрали по физике (Часть 2 = 21–26), потом поменяли
+ * предмет на химию (ОГЭ: Часть 2 = 20–23). Баллы и формат проверки
+ * пересчитывались, а РАЗБИВКА — нет, поэтому письменное задание 20 осталось в
+ * Части 1 и «потерялось».
+ *
+ * `null` = диалог не показывать: профиля нет, границы у предмета нет, либо
+ * переносить нечего. Лучше молчать, чем предлагать пустое действие.
+ */
+export function planPartSplitForSubjectExam(
+  part1: VariantTaskDraft[],
+  part2: VariantTaskDraft[],
+  subject: string,
+  exam: '' | 'ege' | 'oge' | null,
+): PartSplitPlan | null {
+  const range = resolvePart2Range(subject, exam);
+  if (!range) return null;
+
+  const kimOf = (t: VariantTaskDraft): number | null => {
+    const raw = t.kimNumber.trim();
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isInteger(n) ? n : null;
+  };
+
+  const moves: PartSplitMove[] = [];
+  for (const t of part1) {
+    const kim = kimOf(t);
+    if (kim !== null && kim >= range[0] && kim <= range[1]) {
+      moves.push({ localId: t.localId, kim, from: 1, to: 2 });
+    }
+  }
+  for (const t of part2) {
+    const kim = kimOf(t);
+    if (kim !== null && (kim < range[0] || kim > range[1])) {
+      moves.push({ localId: t.localId, kim, from: 2, to: 1 });
+    }
+  }
+  if (moves.length === 0) return null;
+
+  const currentPart2Kims = part2
+    .map(kimOf)
+    .filter((n): n is number => n !== null)
+    .sort((a, b) => a - b);
+
+  return { range, moves, currentPart2Kims };
+}
+
+/**
+ * Применяет план: переносит задачи между массивами частей и нормализует поля
+ * ровно так же, как это делают существующие пути (смена части руками и
+ * `reclassifyDraftsForSubjectExam`) — новых правил не заводим.
+ */
+export function applyPartSplitPlan(
+  part1: VariantTaskDraft[],
+  part2: VariantTaskDraft[],
+  plan: PartSplitPlan,
+  subject: string,
+  exam: '' | 'ege' | 'oge' | null,
+): { part1: VariantTaskDraft[]; part2: VariantTaskDraft[] } {
+  const toPart2 = new Set(plan.moves.filter((m) => m.to === 2).map((m) => m.localId));
+  const toPart1 = new Set(plan.moves.filter((m) => m.to === 1).map((m) => m.localId));
+
+  const normalize = (t: VariantTaskDraft, target: 1 | 2): VariantTaskDraft => {
+    const kim = t.kimNumber.trim() ? Number.parseInt(t.kimNumber.trim(), 10) : null;
+    const validKim = Number.isInteger(kim) ? (kim as number) : null;
+    const next: VariantTaskDraft = { ...t, part: target };
+    if (target === 2) {
+      // Ч2 проверяет человек/AI — режим Части 1 там не применяется.
+      next.checkMode = 'strict';
+    } else {
+      next.checkMode = inferPart1CheckMode(subject, exam, validKim);
+    }
+    const score = getKimPrimaryScoreForSubject(subject, exam || null, validKim);
+    // Балл трогаем ТОЛЬКО когда карта предмета его знает — не выдумываем.
+    if (score != null) next.maxScore = String(score);
+    return next;
+  };
+
+  const nextPart1 = [
+    ...part1.filter((t) => !toPart2.has(t.localId)),
+    ...part2.filter((t) => toPart1.has(t.localId)).map((t) => normalize(t, 1)),
+  ];
+  const nextPart2 = [
+    ...part2.filter((t) => !toPart1.has(t.localId)),
+    ...part1.filter((t) => toPart2.has(t.localId)).map((t) => normalize(t, 2)),
+  ];
+
+  const byKim = (a: VariantTaskDraft, b: VariantTaskDraft) =>
+    (Number.parseInt(a.kimNumber, 10) || 0) - (Number.parseInt(b.kimNumber, 10) || 0);
+  return { part1: nextPart1.sort(byKim), part2: nextPart2.sort(byKim) };
 }
 
 export function inferPart1CheckMode(

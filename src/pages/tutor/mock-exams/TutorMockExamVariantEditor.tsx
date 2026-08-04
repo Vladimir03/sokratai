@@ -26,7 +26,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { MathText } from '@/components/kb/ui/MathText';
+import { EquationButton } from '@/components/kb/ui/EquationButton';
+import { useInsertAtCursor } from '@/components/kb/ui/useInsertAtCursor';
 import { MockExamFeatureGate } from './MockExamFeatureGate';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -47,10 +59,13 @@ import {
 import { getKBImageSignedUrl, uploadKBTaskImage, validateImageFile } from '@/lib/kbApi';
 import { parseAttachmentUrls, serializeAttachmentUrls } from '@/lib/attachmentRefs';
 import {
+  applyPartSplitPlan,
   createEmptyVariantTask,
+  planPartSplitForSubjectExam,
   readAndClearVariantPrefill,
   reclassifyDraftsForSubjectExam,
   rowToDraft,
+  type PartSplitPlan,
   type VariantTaskDraft,
 } from '@/components/tutor/mock-exams/variantTaskDraft';
 import { MockExamAiLoaderSheet } from '@/components/tutor/mock-exams/MockExamAiLoaderSheet';
@@ -258,6 +273,7 @@ const VariantTaskCard = memo(function VariantTaskCard({
   disabled,
   duplicateKim,
   blockLabel,
+  subject,
   onUpdate,
   onRemove,
   onChangePart,
@@ -269,6 +285,8 @@ const VariantTaskCard = memo(function VariantTaskCard({
   duplicateKim: boolean;
   /** Read-only бейдж блока; правится чипами в секции блоков (один источник). */
   blockLabel: string | null;
+  /** Только для порядка шаблонов в «Уравнении» — не гейт. */
+  subject: string;
   onUpdate: (localId: string, patch: Partial<VariantTaskDraft>) => void;
   onRemove: (localId: string) => void;
   /** Смена типа ответа = смена части. Перенос делает родитель (задача живёт
@@ -276,6 +294,14 @@ const VariantTaskCard = memo(function VariantTaskCard({
   onChangePart: (localId: string, part: 1 | 2) => void;
 }) {
   const isPart1 = draft.part === 1;
+  const taskTextRef = useRef<HTMLTextAreaElement>(null);
+  const insertAtCursor = useInsertAtCursor(taskTextRef);
+  // Вставка идёт СВОЕЙ строкой — тогда несколько уравнений встают столбиком
+  // (перенос между формулами сохраняет preprocessLatex).
+  const insertIntoTaskText = useCallback(
+    (snippet: string, caretFromEnd?: number) => insertAtCursor(snippet, caretFromEnd, true),
+    [insertAtCursor],
+  );
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
       <div className="flex flex-wrap items-end gap-2">
@@ -367,8 +393,16 @@ const VariantTaskCard = memo(function VariantTaskCard({
       ) : null}
 
       <div>
-        <Label className="mb-1 block text-xs font-semibold text-slate-500">Условие</Label>
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <Label className="block text-xs font-semibold text-slate-500">Условие</Label>
+          <EquationButton
+            subject={subject}
+            disabled={disabled}
+            onInsert={insertIntoTaskText}
+          />
+        </div>
         <textarea
+          ref={taskTextRef}
           value={draft.taskText}
           disabled={disabled}
           onChange={(e) => onUpdate(draft.localId, { taskText: e.target.value })}
@@ -508,6 +542,10 @@ function VariantEditorContent() {
   // 3ч55м (репорт Милады), и read-side фолбэк на профиль не срабатывал никогда —
   // в БД лежало «валидное» чужое значение. `durationTouchedRef` фиксирует ручную
   // правку: после неё смена предмета/экзамена поле не трогает.
+  // Предложение пересчитать разбивку по частям после смены предмета/экзамена.
+  const [splitPrompt, setSplitPrompt] = useState<
+    { subject: string; exam: '' | 'ege' | 'oge'; plan: PartSplitPlan } | null
+  >(null);
   const durationTouchedRef = useRef(false);
   const [durationText, setDurationText] = useState(() => {
     const s = cartPrefill?.subject ?? resolveTutorDefaultSubject(tutorProfile?.subjects, null);
@@ -682,15 +720,39 @@ function VariantEditorContent() {
       const r1 = reclassifyDraftsForSubjectExam(part1Tasks, nextSubject, nextExam);
       const r2 = reclassifyDraftsForSubjectExam(part2Tasks, nextSubject, nextExam);
       const changed = r1.changed + r2.changed;
-      if (changed === 0) return;
-      setPart1Tasks(r1.drafts);
-      setPart2Tasks(r2.drafts);
-      toast.info(
-        `Обновили формат проверки и баллы у ${changed} задан${changed === 1 ? 'ия' : 'ий'} под «${getSubjectLabel(nextSubject)}» — критерии ФИПИ у предметов отличаются. Проверьте перед сохранением.`,
-      );
+      if (changed > 0) {
+        setPart1Tasks(r1.drafts);
+        setPart2Tasks(r2.drafts);
+        toast.info(
+          `Обновили формат проверки и баллы у ${changed} задан${changed === 1 ? 'ия' : 'ий'} под «${getSubjectLabel(nextSubject)}» — критерии ФИПИ у предметов отличаются. Проверьте перед сохранением.`,
+        );
+      }
+      // Разбивку по частям НЕ меняем молча — предлагаем действием (решение
+      // владельца). План считаем по ТОЛЬКО ЧТО пересчитанным массивам, а не по
+      // устаревшему замыканию.
+      const plan = planPartSplitForSubjectExam(r1.drafts, r2.drafts, nextSubject, nextExam);
+      setSplitPrompt(plan ? { subject: nextSubject, exam: nextExam, plan } : null);
     },
     [part1Tasks, part2Tasks],
   );
+
+  const applySplitPlan = useCallback(() => {
+    if (!splitPrompt) return;
+    const { plan, subject: s, exam: e } = splitPrompt;
+    setPart1Tasks((p1) => {
+      // Оба массива нужны одновременно — считаем один раз, второй берём из
+      // замыкания результата (функциональные апдейтеры вызываются подряд).
+      const next = applyPartSplitPlan(p1, part2Tasks, plan, s, e);
+      setPart2Tasks(next.part2);
+      return next.part1;
+    });
+    const up = plan.moves.filter((m) => m.to === 2).length;
+    const down = plan.moves.length - up;
+    toast.success(
+      `Разбивка обновлена: ${up ? `в Часть 2 — ${up}` : ''}${up && down ? ', ' : ''}${down ? `в Часть 1 — ${down}` : ''}`,
+    );
+    setSplitPrompt(null);
+  }, [splitPrompt, part2Tasks]);
 
   const totalMax = useMemo(
     () =>
@@ -1222,6 +1284,7 @@ function VariantEditorContent() {
               index={i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
+              subject={subject}
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
@@ -1248,6 +1311,7 @@ function VariantEditorContent() {
               index={part1Tasks.length + i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
+              subject={subject}
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
@@ -1290,6 +1354,57 @@ function VariantEditorContent() {
           </div>
         </div>
       </div>
+
+      {/* Пересчёт разбивки по частям после смены предмета/экзамена. Только
+          предложение: молча двигать задачи между частями = сюрприз для
+          репетитора, который мог разложить их руками. */}
+      <AlertDialog
+        open={splitPrompt !== null}
+        onOpenChange={(open) => {
+          if (!open) setSplitPrompt(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Пересчитать разбивку по частям?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-slate-600">
+                <p>
+                  У «{getSubjectLabel(splitPrompt?.subject ?? '')}»
+                  {splitPrompt?.exam === 'oge' ? ' (ОГЭ)' : splitPrompt?.exam === 'ege' ? ' (ЕГЭ)' : ''}
+                  {' '}Часть 2 — задания {splitPrompt?.plan.range[0]}–{splitPrompt?.plan.range[1]}
+                  {splitPrompt && splitPrompt.plan.currentPart2Kims.length > 0
+                    ? `, сейчас в варианте ${splitPrompt.plan.currentPart2Kims.join(', ')}`
+                    : ''}
+                  .
+                </p>
+                {splitPrompt && splitPrompt.plan.moves.some((m) => m.to === 2) ? (
+                  <p>
+                    В Часть 2 переедут:{' '}
+                    <strong>
+                      №{splitPrompt.plan.moves.filter((m) => m.to === 2).map((m) => m.kim).join(', №')}
+                    </strong>
+                  </p>
+                ) : null}
+                {splitPrompt && splitPrompt.plan.moves.some((m) => m.to === 1) ? (
+                  <p>
+                    В Часть 1 переедут:{' '}
+                    <strong>
+                      №{splitPrompt.plan.moves.filter((m) => m.to === 1).map((m) => m.kim).join(', №')}
+                    </strong>{' '}
+                    — там обязателен правильный ответ.
+                  </p>
+                ) : null}
+                <p className="text-slate-500">Текст, фото и решения задач не изменятся.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Оставить как есть</AlertDialogCancel>
+            <AlertDialogAction onClick={applySplitPlan}>Пересчитать разбивку</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -496,6 +496,13 @@ export interface CreateMockExamAssignmentPayload {
   deadline?: string | null;
   /** Student ids (auth.users.id) to assign — required for blank/form. */
   student_ids?: string[];
+  /**
+   * Разрешает ПУСТОЙ `student_ids` — сценарий лидогенерации: публичная ссылка
+   * существует ради тех, кто ещё НЕ ученик, а требование «выбери хотя бы
+   * одного» делало его недостижимым (репорт Ульяны 2026-08-04). Сервер
+   * ослабляет валидацию только под этим флагом.
+   */
+  lead_link_only?: boolean;
   /** For mode='manual_entry' only: single student_id + the prefilled result. */
   manual_entry?: MockExamManualEntryPayload | null;
   /**

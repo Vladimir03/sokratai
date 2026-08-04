@@ -174,7 +174,15 @@ function pluralStudents(count: number): string {
   return 'ученикам';
 }
 
-async function tryCopyLink(url: string): Promise<void> {
+/**
+ * Возвращает `true`, если ссылка реально попала в буфер. Раньше функция
+ * возвращала `void` и глотала оба отказа, хотя галочка обещает «Ссылка
+ * скопируется в буфер обмена». Вызов идёт ПОСЛЕ двух сетевых await'ов, поэтому
+ * на Safari/iOS транзиентная активация уже истекла и `writeText` отклоняется —
+ * репетитор шёл вставлять и вставлял пустоту. Модалка ссылку показывает, так
+ * что достаточно честно сказать, что скопировать не вышло.
+ */
+async function tryCopyLink(url: string): Promise<boolean> {
   // Primary: Async Clipboard API (requires secure context — HTTPS or localhost).
   // Fallback: legacy document.execCommand('copy') через скрытый textarea —
   // нужен для http preview и Safari < 15.4. См. .claude/rules/80-cross-browser.md.
@@ -185,7 +193,7 @@ async function tryCopyLink(url: string): Promise<void> {
   ) {
     try {
       await navigator.clipboard.writeText(url);
-      return;
+      return true;
     } catch {
       // fall through to legacy fallback
     }
@@ -198,10 +206,11 @@ async function tryCopyLink(url: string): Promise<void> {
     textarea.style.left = '-9999px';
     document.body.appendChild(textarea);
     textarea.select();
-    document.execCommand('copy');
+    const ok = document.execCommand('copy');
     document.body.removeChild(textarea);
+    return ok;
   } catch {
-    // best-effort — user can copy from toast description manually
+    return false;
   }
 }
 
@@ -645,10 +654,14 @@ function TutorMockExamCreateContent() {
   const trimmedTitle = title.trim();
   const studentIds = useMemo(() => Array.from(selectedStudentIds), [selectedStudentIds]);
 
+  // Без учеников создавать можно ТОЛЬКО ради лид-ссылки: она и существует для
+  // тех, кто ещё не ученик (репорт Ульяны 2026-08-04 — до этого фикса кнопка
+  // навсегда залипала на «Выбери учеников», и сценарий лидогенерации был
+  // недостижим). Сервер зеркалит это правило через `lead_link_only`.
   const isValidForSubmit =
     !isSubmitting &&
     trimmedTitle.length > 0 &&
-    studentIds.length > 0 &&
+    (studentIds.length > 0 || createLeadLink) &&
     Boolean(variantId);
 
   const handleSubmit = useCallback(async () => {
@@ -670,6 +683,8 @@ function TutorMockExamCreateContent() {
         mode,
         deadline: deadlineIso,
         student_ids: studentIds,
+        // Разрешает пустой список на сервере — только под галочкой лид-ссылки.
+        lead_link_only: studentIds.length === 0 && createLeadLink,
         // AC-P10 Phase 2 (PAUSE-7): tutor recommendation для start modal.
         default_exam_mode: defaultExamMode,
       });
@@ -677,8 +692,12 @@ function TutorMockExamCreateContent() {
       const assignmentId = created.assignment_id;
       const studentCount = created.attempts_created ?? studentIds.length;
 
+      // Без учеников «назначен 0 ученикам» звучит как сбой — говорим правду о
+      // том, что реально произошло.
       toast.success(
-        `Пробник назначен ${studentCount} ${pluralStudents(studentCount)}`,
+        studentCount === 0
+          ? 'Пробник создан — ссылку для лидов покажем ниже'
+          : `Пробник назначен ${studentCount} ${pluralStudents(studentCount)}`,
       );
 
       // Optional lead-link. При успехе вместо toast'а показываем модалку с
@@ -688,9 +707,12 @@ function TutorMockExamCreateContent() {
       if (createLeadLink) {
         try {
           const link = await createMockExamInviteLink(assignmentId, {});
-          // Best-effort copy в буфер: модалка всё равно показывает ссылку,
-          // если writeText заблокирован браузером.
-          void tryCopyLink(link.url);
+          // Модалка ссылку показывает в любом случае, но если буфер отказал —
+          // говорим об этом, иначе репетитор идёт вставлять пустоту.
+          const copied = await tryCopyLink(link.url);
+          if (!copied) {
+            toast.info('Скопируйте ссылку кнопкой в окне — буфер обмена недоступен');
+          }
           setLeadLink({ url: link.url, assignmentId, studentCount });
           // НЕ navigate — это сделает onClose модалки.
           return;
@@ -1093,6 +1115,11 @@ function TutorMockExamCreateContent() {
             ? 'Назначаем…'
             : studentIds.length > 0
             ? `Назначить пробник ${studentIds.length} ${pluralStudents(studentIds.length)}`
+            : createLeadLink
+            // Галочка лид-ссылки включена → учеников выбирать не нужно, и
+            // кнопка обязана это показывать (раньше висела «Выбери учеников»
+            // и выглядела сломанной — репорт Ульяны).
+            ? 'Создать ссылку для лидов'
             : 'Выбери учеников'}
         </Button>
       </div>
