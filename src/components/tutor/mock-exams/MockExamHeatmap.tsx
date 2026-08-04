@@ -39,13 +39,16 @@ import type {
   MockExamAttemptListItem,
   MockExamAttemptStatus,
 } from '@/types/mockExam';
+import { resolvePart2KimNumbers, resolveVariantKimLayout } from '@/lib/mockExamPart2';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 
-const PART1_KIM_NUMBERS = [
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
-] as const;
-const PART2_KIM_NUMBERS = [21, 22, 23, 24, 25, 26] as const;
+// ⚠️ Номера КИМ здесь БОЛЬШЕ НЕ КОНСТАНТЫ (репорт Ульяны 2026-08-04). Раньше
+// были захардкожены `1..20` / `21..26` — физика ЕГЭ. У химии ОГЭ Часть 2 =
+// 20–23, у химии ЕГЭ Часть 1 = 1–28, у обществознания Ч2 = 17–25. Со старыми
+// константами КИМ 20 химии рисовался в Части 1 (чужая колонка), а задания
+// 21–28 химии ЕГЭ не рисовались вовсе. Обе части резолвятся вместе — иначе
+// один номер попал бы в обе и отрисовался дважды.
 
 const NAME_COL_WIDTH = 220;
 const PART1_CELL_WIDTH = 34;
@@ -54,21 +57,41 @@ const PART2_CELL_WIDTH = 46;
 const TOTALS_COL_WIDTH = 80;
 
 /**
- * Per-KIM max score lookup для ЕГЭ физики 2026.
- * Сумма: Часть 1 = 28 баллов (kim 1-20), Часть 2 = 17 баллов (kim 21-26).
+ * Раскладка КИМ для теплокарты: номера обеих частей + баллы.
  *
- * Источник: ФИПИ 2026 «Изменения в КИМ ЕГЭ» (структура 2025 = 2026).
- * Не дублировать — для других контекстов (StudentMockExam etc.) используются
- * `task.max_score` напрямую из `mock_exam_variant_tasks`. Этот lookup нужен
- * только в heatmap, где per-task `max_score` не входит в payload роллапа.
+ * Истина — данные попыток (`part1_answers` / `part2_solutions` уже несут
+ * `kim_number`), фолбэк — карта ФИПИ из `ExamProfile` по предмету×экзамену.
+ * Для физики ЕГЭ значения совпадают с прежним хардкодом байт-в-байт
+ * (`PHYSICS_EGE_SCORES` в examProfiles = тот же список), поэтому регресса нет.
  */
-const KIM_MAX_SCORE: Record<number, number> = {
-  // Часть 1 (28 баллов)
-  1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 2, 7: 1, 8: 1, 9: 2, 10: 2,
-  11: 1, 12: 1, 13: 1, 14: 2, 15: 2, 16: 1, 17: 2, 18: 2, 19: 1, 20: 1,
-  // Часть 2 (17 баллов)
-  21: 3, 22: 2, 23: 2, 24: 3, 25: 3, 26: 4,
-};
+function useHeatmapKimLayout(
+  attempts: MockExamAttemptListItem[],
+  subject: string | null | undefined,
+  examType: string | null | undefined,
+) {
+  return useMemo(() => {
+    const p1 = new Set<number>();
+    const p2 = new Set<number>();
+    for (const a of attempts) {
+      for (const r of a.part1_answers ?? []) p1.add(r.kim_number);
+      for (const r of a.part2_solutions ?? []) p2.add(r.kim_number);
+    }
+    const part2Kims = resolvePart2KimNumbers({
+      solutionKims: p2,
+      subject,
+      examType,
+    });
+    const part2Set = new Set(part2Kims);
+    // Часть 1 = номера из ответов минус всё, что оказалось Частью 2 (номер не
+    // может принадлежать обеим — иначе колонка отрисуется дважды).
+    let part1Kims = [...p1].filter((k) => !part2Set.has(k)).sort((a, b) => a - b);
+    const fallback = resolveVariantKimLayout({ subject, examType });
+    if (part1Kims.length === 0) {
+      part1Kims = fallback.part1.filter((k) => !part2Set.has(k));
+    }
+    return { part1Kims, part2Kims, maxByKim: fallback.maxByKim };
+  }, [attempts, subject, examType]);
+}
 
 // ─── Status helper for student name column ───────────────────────────────────
 
@@ -176,6 +199,10 @@ interface HeatmapRowProps {
   part1Max: number;
   part2Max: number;
   totalMax: number;
+  /** Реальные номера КИМ варианта (см. useHeatmapKimLayout). */
+  part1Cells: number[];
+  part2Cells: number[];
+  maxByKim: Record<number, number>;
   onSelect: (attempt: MockExamAttemptListItem) => void;
   /**
    * TASK-17 (2026-05-17): optional callback для удаления ученика из пробника.
@@ -189,14 +216,14 @@ const HeatmapRow = memo(function HeatmapRow({
   part1Max,
   part2Max,
   totalMax,
+  part1Cells,
+  part2Cells,
+  maxByKim,
   onSelect,
   onRemoveAttempt,
 }: HeatmapRowProps) {
   const display = deriveDisplayStatus(attempt.status, attempt.started_at);
   const chip = STATUS_CHIP[display];
-
-  const part1Cells = PART1_KIM_NUMBERS;
-  const part2Cells = PART2_KIM_NUMBERS;
 
   // TASK-16: per-task hydration. Lookup map kim → earned_score / tutor_score.
   const part1Map = useMemo(() => {
@@ -300,7 +327,7 @@ const HeatmapRow = memo(function HeatmapRow({
 
       {/* Часть 1 — 20 cells. Per-kim earned_score из part1_answers. */}
       {part1Cells.map((kim) => {
-        const max = KIM_MAX_SCORE[kim] ?? 1;
+        const max = maxByKim[kim] ?? 1;
         const earnedScore = part1Map.has(kim) ? part1Map.get(kim) ?? null : null;
         return (
           <HeatmapCell
@@ -317,7 +344,7 @@ const HeatmapRow = memo(function HeatmapRow({
 
       {/* Часть 2 — 6 cells (KIM 21–26). */}
       {part2Cells.map((kim) => {
-        const max = KIM_MAX_SCORE[kim] ?? 2;
+        const max = maxByKim[kim] ?? 2;
         const row = part2Map.get(kim);
 
         // Финальный балл tutor'а или AI-черновик пометка:
@@ -395,6 +422,12 @@ interface MockExamHeatmapProps {
   part2Max: number;
   totalMax: number;
   /**
+   * Предмет и экзамен варианта — фолбэк раскладки КИМ, когда попытки ещё
+   * пустые (никто не приступал) и вывести номера из ответов неоткуда.
+   */
+  subject?: string | null;
+  examType?: string | null;
+  /**
    * Click row → drill-down. Caller обычно делает navigate
    * `/tutor/mock-exams/:id/review/:studentId`.
    */
@@ -411,9 +444,16 @@ export function MockExamHeatmap({
   part1Max,
   part2Max,
   totalMax,
+  subject,
+  examType,
   onSelectAttempt,
   onRemoveAttempt,
 }: MockExamHeatmapProps) {
+  const { part1Kims, part2Kims, maxByKim } = useHeatmapKimLayout(
+    attempts,
+    subject,
+    examType,
+  );
   const sortedAttempts = useMemo(() => {
     // Order: in-progress first (нужно действие), then awaiting_review,
     // then approved, then manually_entered, then not_started.
@@ -488,11 +528,11 @@ export function MockExamHeatmap({
           >
             <colgroup>
               <col style={{ width: `${NAME_COL_WIDTH}px` }} />
-              {PART1_KIM_NUMBERS.map((kim) => (
+              {part1Kims.map((kim) => (
                 <col key={`p1-${kim}`} style={{ width: `${PART1_CELL_WIDTH}px` }} />
               ))}
               <col style={{ width: `${SPACER_WIDTH}px` }} />
-              {PART2_KIM_NUMBERS.map((kim) => (
+              {part2Kims.map((kim) => (
                 <col key={`p2-${kim}`} style={{ width: `${PART2_CELL_WIDTH}px` }} />
               ))}
               <col style={{ width: `${TOTALS_COL_WIDTH}px` }} />
@@ -511,7 +551,7 @@ export function MockExamHeatmap({
                 </th>
                 <th
                   scope="colgroup"
-                  colSpan={PART1_KIM_NUMBERS.length}
+                  colSpan={part1Kims.length}
                   className="bg-slate-50 border-b border-slate-200 px-2 py-1.5 text-center text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
                 >
                   Часть 1 (1–20) · авто
@@ -519,7 +559,7 @@ export function MockExamHeatmap({
                 <th className="bg-white border-b border-slate-200" aria-hidden="true" />
                 <th
                   scope="colgroup"
-                  colSpan={PART2_KIM_NUMBERS.length}
+                  colSpan={part2Kims.length}
                   className="bg-slate-50 border-b border-slate-200 px-2 py-1.5 text-center text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
                 >
                   Часть 2 (21–26) · AI-черновик
@@ -548,7 +588,7 @@ export function MockExamHeatmap({
               </tr>
               {/* Row 2: KIM numbers. */}
               <tr>
-                {PART1_KIM_NUMBERS.map((kim) => (
+                {part1Kims.map((kim) => (
                   <th
                     key={`h-p1-${kim}`}
                     scope="col"
@@ -558,7 +598,7 @@ export function MockExamHeatmap({
                   </th>
                 ))}
                 <th className="bg-white border-b border-slate-200" aria-hidden="true" />
-                {PART2_KIM_NUMBERS.map((kim) => (
+                {part2Kims.map((kim) => (
                   <th
                     key={`h-p2-${kim}`}
                     scope="col"
@@ -577,6 +617,9 @@ export function MockExamHeatmap({
                   part1Max={part1Max}
                   part2Max={part2Max}
                   totalMax={totalMax}
+                  part1Cells={part1Kims}
+                  part2Cells={part2Kims}
+                  maxByKim={maxByKim}
                   onSelect={onSelectAttempt}
                   onRemoveAttempt={onRemoveAttempt}
                 />

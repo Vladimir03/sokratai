@@ -1403,5 +1403,82 @@ if (noUndefHits.length > 0) {
 }
 ok("edge-функции: 0 необъявленных идентификаторов (no-undef)");
 
+// ─── 27. Разбивка Части 2 пробника не захардкожена физикой (2026-08-04) ──────
+// Репорт Ульяны (химия): письменное задание 20 пропадало из ленты привязки фото
+// на экране проверки — там перебиралось окно [21..26] (физика ЕГЭ), а у химии
+// ОГЭ Часть 2 = 20–23. Фото невозможно прикрепить → AI задание не проверял.
+// Истина — `mock_exam_variant_tasks.part`; резолвер — src/lib/mockExamPart2.ts.
+console.log("");
+console.log("27. Части 2 пробника: номера из данных, а не хардкод 21–26...");
+const part2TestPath = path.join(rootDir, "scripts", "test-mockexam-part2.mjs");
+if (!fs.existsSync(part2TestPath)) {
+  fail("scripts/test-mockexam-part2.mjs missing — резолвер Части 2 без гарда");
+}
+const part2TestResult = spawnSync(process.execPath, [part2TestPath], {
+  cwd: rootDir,
+  encoding: "utf8",
+});
+if (part2TestResult.status !== 0) {
+  console.error(part2TestResult.stdout ?? "");
+  console.error(part2TestResult.stderr ?? "");
+  fail("part2 resolver tests FAILED — see node:test output above");
+}
+
+// Статический скан: литерал физического окна и сравнения № КИМ с границей.
+// ТОЛЬКО по названным файлам и ТОЛЬКО по коду — в этих файлах есть законные
+// прозаические упоминания «21–26» в комментариях (в т.ч. мои пояснения к этому
+// самому фиксу), и без вырезания комментариев гард ловил бы сам себя.
+const part2ScanFiles = [
+  "src/pages/tutor/mock-exams/TutorMockExamReview.tsx",
+  "src/components/tutor/mock-exams/MockExamHeatmap.tsx",
+  "src/pages/tutor/mock-exams/TutorMockExamVariantEditor.tsx",
+  "src/pages/student/StudentMockExam.tsx",
+  "src/pages/PublicMockInvite.tsx",
+  "supabase/functions/mock-exam-tutor-api/index.ts",
+  "supabase/functions/mock-exam-grade/index.ts",
+  "supabase/functions/mock-exam-student-api/index.ts",
+];
+// Комментарии ГАСИМ пустой строкой, а не выбрасываем: иначе нумерация уезжает
+// и гард показывает чужую строку (поймал сам себя на первом же прогоне —
+// ссылался на 845 вместо реальной 861).
+const stripCode = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ""))
+    .split("\n")
+    .map((l) => {
+      const t = l.trim();
+      return t.startsWith("//") || t.startsWith("*") ? "" : l;
+    })
+    .join("\n");
+const PHYS_WINDOW_RE = /\b21\s*,\s*22\s*,\s*23\s*,\s*24\s*,\s*25\s*,\s*26\b/;
+// № КИМ, сравниваемый с литералом-границей частей (15..39). Санити-границы
+// вроде `< 1` / `> 99` в этот диапазон не попадают и остаются законными.
+const KIM_WINDOW_RE = /\b(kim|kimNumber|kim_number)\s*[<>]=?\s*(1[5-9]|2\d|3\d)\b/i;
+const part2Offenders = [];
+for (const rel of part2ScanFiles) {
+  const abs = path.join(rootDir, rel);
+  if (!fs.existsSync(abs)) continue; // файл мог быть переименован — не падаем
+  const raw = fs.readFileSync(abs, "utf8");
+  const code = stripCode(raw);
+  code.split("\n").forEach((line, i) => {
+    if (line.includes("smoke-allow: kim-window")) return;
+    if (PHYS_WINDOW_RE.test(line)) {
+      part2Offenders.push(`  ${rel}:${i + 1} — литерал окна 21–26: ${line.trim().slice(0, 90)}`);
+    } else if (KIM_WINDOW_RE.test(line)) {
+      part2Offenders.push(`  ${rel}:${i + 1} — № КИМ сравнивается с границей: ${line.trim().slice(0, 90)}`);
+    }
+  });
+}
+if (part2Offenders.length > 0) {
+  fail(
+    "разбивка Части 2 пробника снова захардкожена физикой — у химии/обществознания " +
+      "другие границы, задания вне окна молча пропадут:\n" +
+      part2Offenders.join("\n") +
+      "\n  Использовать resolvePart2KimNumbers (src/lib/mockExamPart2.ts) или " +
+      "`.eq('part', 2)`.\n  Осознанное исключение — комментарий `// smoke-allow: kim-window <причина>`.",
+  );
+}
+ok("Часть 2: номера из данных варианта (0 хардкодов 21–26)");
+
 console.log("");
 console.log("=== Smoke Check Complete ===");

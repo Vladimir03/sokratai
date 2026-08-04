@@ -1055,7 +1055,9 @@ async function handleGetAssignment(
   if (assignment.variant_id) {
     const { data } = await db
       .from("mock_exam_variants")
-      .select("id, title, exam_type, duration_minutes, total_max_score, part1_max, part2_max, task_count")
+      // `subject` — теплокарте нужна раскладка КИМ по предмету (химия ОГЭ:
+      // Часть 2 = 20–23, а не физические 21–26).
+      .select("id, title, exam_type, subject, duration_minutes, total_max_score, part1_max, part2_max, task_count")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     if (data) variant = data as VariantRow;
@@ -1198,6 +1200,7 @@ async function handleGetAssignment(
     created_at: assignment.created_at,
     display_title: (assignment.variant_title as string | null) ?? variant?.title ?? (assignment.title as string),
     exam_type: variant?.exam_type ?? null,
+    subject: (variant as { subject?: string | null } | null)?.subject ?? null,
     duration_minutes: variant?.duration_minutes ?? null,
     total_max_score: variant?.total_max_score ?? null,
     attempts,
@@ -1329,6 +1332,7 @@ async function handleGetAttempt(
     part: number;
   }> = {};
   let examType: string | null = null;
+  let variantSubject: string | null = null;
   let totalMaxScore: number | null = null;
 
   if (assignment.variant_id) {
@@ -1350,11 +1354,14 @@ async function handleGetAttempt(
     }
     const { data: variant } = await db
       .from("mock_exam_variants")
-      .select("exam_type, total_max_score")
+      // `subject` — репетиторский экран проверки обязан знать предмет, чтобы
+      // резолвить номера Части 2 по профилю (у химии ОГЭ это 20–23, а не 21–26).
+      .select("exam_type, subject, total_max_score")
       .eq("id", assignment.variant_id as string)
       .maybeSingle();
     if (variant) {
       examType = variant.exam_type as string;
+      variantSubject = (variant.subject as string | null) ?? null;
       totalMaxScore = variant.total_max_score as number;
     }
   }
@@ -1397,6 +1404,12 @@ async function handleGetAttempt(
     .filter(([, t]) => t.part === 1)
     .map(([kimStr, t]) => ({ kim: Number(kimStr), variant: t }))
     .sort((a, b) => a.kim - b.kim);
+  // Симметрично Части 1: номера Части 2 — из данных варианта, а не из
+  // захардкоженного окна на клиенте (репорт Ульяны — задание 20 пропадало).
+  const part2VariantKims = Object.entries(variantTasks)
+    .filter(([, t]) => t.part === 2)
+    .map(([kimStr]) => Number(kimStr))
+    .sort((a, b) => a - b);
 
   // Derive-on-read fallback (2026-06-06): для blank/OCR-попыток, оценённых до
   // редеплоя per-KIM персистинга, строки могут не иметь earned_score, хотя
@@ -1534,6 +1547,10 @@ async function handleGetAttempt(
     assignment_title: assignment.title,
     variant_id: assignment.variant_id,
     exam_type: examType,
+    subject: variantSubject,
+    // Номера заданий Части 2 из САМОГО варианта. Клиент раньше перебирал
+    // жёсткое окно 21–26 (физика ЕГЭ) и терял задание 20 химии ОГЭ.
+    part2_kim_numbers: part2VariantKims,
     mode: assignment.mode,
     student_id: attempt.student_id,
     anonymous_id: attempt.anonymous_id,
@@ -2742,7 +2759,8 @@ async function handleAssignPart2Photos(
 ): Promise<Response> {
   const ownedOrErr = await getOwnedAttemptOrThrow(db, attemptId, tutorUserId, cors);
   if (ownedOrErr instanceof Response) return ownedOrErr;
-  const { attempt } = ownedOrErr;
+  // `assignment` нужен для variant_id → допустимые номера Части 2 (ниже).
+  const { attempt, assignment } = ownedOrErr;
 
   if (attempt.status === "approved") {
     return jsonError(cors, 409, "ALREADY_APPROVED", "Attempt is already approved");
@@ -2776,11 +2794,47 @@ async function handleAssignPart2Photos(
     return jsonError(cors, 400, "NO_BULK_PHOTOS", "Attempt has no bulk Часть 2 photos to assign");
   }
 
+  // Допустимые номера Части 2 — ИЗ ВАРИАНТА, а не из окна 21–26 (физика ЕГЭ).
+  // Жёсткое окно молча отбрасывало задание 20 химии ОГЭ: репетитор привязывал
+  // фото, запрос уходил, номер отфильтровывался здесь, и AI никогда не получал
+  // решение (репорт Ульяны 2026-08-04).
+  // Fail-closed: сбой чтения → 500, НИКОГДА не откатываемся на окно.
+  const allowedKims = new Set<number>();
+  if (assignment.variant_id) {
+    const { data: p2Tasks, error: p2Err } = await db
+      .from("mock_exam_variant_tasks")
+      .select("kim_number")
+      .eq("variant_id", assignment.variant_id as string)
+      .eq("part", 2);
+    if (p2Err) {
+      console.error("[mock-exam-tutor-api] part2 tasks select failed:", p2Err.message);
+      return jsonError(cors, 500, "DB_ERROR", "Не удалось прочитать задания Части 2 варианта");
+    }
+    for (const t of p2Tasks ?? []) allowedKims.add(t.kim_number as number);
+  }
+  // Плюс уже существующие строки решений: вариант могли отредактировать ПОСЛЕ
+  // проверки, и осиротевшая строка обязана остаться привязываемой, иначе её
+  // балл теряется молча. Переиспользуем ТОТ ЖЕ запрос, что нужен ниже для
+  // обновления ai_draft_json — второй round-trip тут не нужен.
+  const { data: solutions, error: solutionsErr } = await db
+    .from("mock_exam_attempt_part2_solutions")
+    .select("kim_number, ai_draft_json, status")
+    .eq("attempt_id", attemptId);
+  if (solutionsErr) {
+    return jsonError(cors, 500, "DB_ERROR", "Failed to load part2 solutions");
+  }
+  for (const r of solutions ?? []) allowedKims.add(r.kim_number as number);
+
+  if (allowedKims.size === 0) {
+    return jsonError(cors, 400, "NO_PART2_TASKS", "У варианта нет заданий Части 2");
+  }
+
   // Validate + sanitize assignments map.
   const cleanAssignments = new Map<number, number[]>();
   for (const [rawKey, rawValue] of Object.entries(assignmentsRaw as Record<string, unknown>)) {
     const kim = Number.parseInt(rawKey.trim(), 10);
-    if (!Number.isFinite(kim) || kim < 21 || kim > 26) continue;
+    // `Number.isInteger` уже отсекает NaN/Infinity/дробные; множество — граница.
+    if (!Number.isInteger(kim) || !allowedKims.has(kim)) continue;
     if (!Array.isArray(rawValue)) continue;
     const seen = new Set<number>();
     const indices: number[] = [];
@@ -2803,15 +2857,8 @@ async function handleAssignPart2Photos(
     return jsonError(cors, 400, "VALIDATION", "No valid kim numbers in `assignments`");
   }
 
-  // Load existing solutions для обновления ai_draft_json в-place.
-  const { data: solutions, error: solutionsErr } = await db
-    .from("mock_exam_attempt_part2_solutions")
-    .select("kim_number, ai_draft_json, status")
-    .eq("attempt_id", attemptId);
-  if (solutionsErr) {
-    return jsonError(cors, 500, "DB_ERROR", "Failed to load part2 solutions");
-  }
-
+  // `solutions` уже загружены выше (нужны были для allowedKims) — повторный
+  // запрос убран.
   const solutionsByKim = new Map<number, { ai_draft_json: unknown; status: string }>();
   for (const s of (solutions ?? []) as Array<{
     kim_number: number;

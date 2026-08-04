@@ -593,6 +593,8 @@ function TutorMockExamDetailContent() {
         part1Max={part1Max}
         part2Max={part2Max}
         totalMax={totalMax}
+        subject={detail.subject ?? null}
+        examType={detail.exam_type ?? null}
         onSelectAttempt={handleSelectAttempt}
         onRemoveAttempt={handleRequestRemoveStudent}
       />

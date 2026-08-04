@@ -90,6 +90,7 @@ import {
   MockExamApiError,
 } from '@/lib/mockExamApi';
 import { Input } from '@/components/ui/input';
+import { resolvePart2KimNumbers } from '@/lib/mockExamPart2';
 import { cn } from '@/lib/utils';
 import type {
   MockExamAttemptDetail,
@@ -105,8 +106,13 @@ const MathText = lazy(() =>
 );
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const PART2_KIM_NUMBERS = [21, 22, 23, 24, 25, 26] as const;
+//
+// ⚠️ Номера заданий Части 2 ЗДЕСЬ НЕ ХАРДКОДЯТСЯ. Раньше тут жил
+// `[21,22,23,24,25,26]` (физика ЕГЭ) и фильтровал всё остальное: у химии ОГЭ
+// Часть 2 = 20–23, поэтому письменное задание 20 пропадало из ленты привязки
+// фото, его нельзя было прикрепить, и AI его никогда не проверял (репорт
+// Ульяны 2026-08-04). Истина — `mock_exam_variant_tasks.part`, резолвер —
+// `resolvePart2KimNumbers` (src/lib/mockExamPart2.ts). Гард — smoke-check §27.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1759,17 +1765,18 @@ function Part2TaskCard({ attemptId, solution, attemptStatus }: Part2TaskCardProp
 // → debounce save → click «Перепроверить AI» → mock-exam-grade::handleGrade
 // запускается с новой привязкой.
 
-const PART2_KIMS = [21, 22, 23, 24, 25, 26] as const;
-
 function BulkPhotosAssignmentGallery({
   attemptId,
   photoUrls,
   part2Solutions,
+  kimNumbers,
   isReadOnly,
 }: {
   attemptId: string;
   photoUrls: string[];
   part2Solutions: MockExamAttemptPart2Solution[];
+  /** Реальные номера Части 2 варианта (см. resolvePart2KimNumbers). */
+  kimNumbers: number[];
   isReadOnly: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -1832,8 +1839,12 @@ function BulkPhotosAssignmentGallery({
     mutationFn: async (newAssignments: Map<number, Set<number>>) => {
       // Сгруппировать фото-индексы по kim_number (server format).
       // Multi-select: одно фото может быть в нескольких kim arrays.
+      // Пресид пустыми массивами ОБЯЗАТЕЛЕН и обязан идти по тому же набору
+      // номеров, что и лента чипов: «снять привязку» работает только потому,
+      // что в payload уезжает явный `{22: []}`. Без номера в пресиде сервер
+      // просто не увидит, что у задачи больше нет фото.
       const grouped: Record<number, number[]> = {};
-      for (const kim of PART2_KIMS) grouped[kim] = [];
+      for (const kim of kimNumbers) grouped[kim] = [];
       for (const [idx, kims] of newAssignments.entries()) {
         for (const kim of kims) {
           if (grouped[kim]) grouped[kim].push(idx);
@@ -1996,7 +2007,7 @@ function BulkPhotosAssignmentGallery({
                     role="group"
                     aria-label={`Привязка фото ${idx + 1} к задачам`}
                   >
-                    {PART2_KIMS.map((kim) => {
+                    {kimNumbers.map((kim) => {
                       const active = currentSet.has(kim);
                       return (
                         <button
@@ -2215,11 +2226,24 @@ function TutorMockExamReviewContent() {
   // conditional early returns to keep hook order stable.
   const part2Solutions = useMemo<MockExamAttemptPart2Solution[]>(() => {
     if (!attempt) return [];
-    const allowedSet = new Set<number>(PART2_KIM_NUMBERS);
-    return [...attempt.part2_solutions]
-      .filter((s) => allowedSet.has(s.kim_number))
-      .sort((a, b) => a.kim_number - b.kim_number);
+    // Фильтра по номерам БОЛЬШЕ НЕТ: он отбрасывал реальные строки решений вне
+    // физического окна 21–26 (задание 20 химии ОГЭ — репорт Ульяны). Что
+    // бэкенд вернул, то и показываем; он уже отдаёт только Часть 2.
+    return [...attempt.part2_solutions].sort((a, b) => a.kim_number - b.kim_number);
   }, [attempt]);
+
+  // Номера Части 2: данные варианта ∪ строки решений → профиль предмета.
+  // Выше ранних return'ов — порядок хуков обязан быть стабильным.
+  const part2KimNumbers = useMemo(
+    () =>
+      resolvePart2KimNumbers({
+        variantPart2Kims: attempt?.part2_kim_numbers ?? null,
+        solutionKims: attempt?.part2_solutions.map((s) => s.kim_number) ?? null,
+        subject: attempt?.subject ?? null,
+        examType: attempt?.exam_type ?? null,
+      }),
+    [attempt],
+  );
 
   // 2026-06-11: bulk «скрыть/показать AI разбор по всем задачам Части 2».
   const allAiHidden =
@@ -2544,6 +2568,7 @@ function TutorMockExamReviewContent() {
           attemptId={attempt.id}
           photoUrls={attempt.part2_bulk_photo_urls ?? []}
           part2Solutions={part2Solutions}
+          kimNumbers={part2KimNumbers}
           isReadOnly={isAlreadyApproved}
         />
       )}

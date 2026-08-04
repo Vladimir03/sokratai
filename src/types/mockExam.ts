@@ -264,6 +264,12 @@ export interface MockExamAssignmentListItem extends MockExamAssignment {
 export interface MockExamAssignmentDetail extends MockExamAssignment {
   display_title: string;
   exam_type: MockExamType | null;
+  /**
+   * Предмет варианта — нужен теплокарте, чтобы взять правильную раскладку КИМ
+   * (у химии ОГЭ Часть 2 = 20–23, а не физические 21–26). Опционально:
+   * фронт и edge деплоятся врозь (rule 95).
+   */
+  subject?: string | null;
   duration_minutes: number | null;
   total_max_score: number | null;
   attempts: MockExamAttemptListItem[];
@@ -407,6 +413,17 @@ export interface MockExamAttemptDetail {
   assignment_title: string;
   variant_id: string | null;
   exam_type: MockExamType | null;
+  /**
+   * Предмет варианта. Опционально — фронт и edge деплоятся врозь (rule 95):
+   * старый бандл функции поля не отдаёт, клиент обязан пережить его отсутствие.
+   */
+  subject?: string | null;
+  /**
+   * Номера заданий Части 2 ИЗ ВАРИАНТА (`mock_exam_variant_tasks.part = 2`).
+   * Опционально по той же причине deploy-skew; при отсутствии клиент добирает
+   * номера из строк решений (см. `resolvePart2KimNumbers`).
+   */
+  part2_kim_numbers?: number[];
   mode: MockExamMode;
   student_id: string | null;
   anonymous_id: string | null;

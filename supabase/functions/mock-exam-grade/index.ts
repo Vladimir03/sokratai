@@ -1008,7 +1008,13 @@ async function runPart1OCR(
       updated_at: string;
     }> = [];
 
-    for (let kim = 1; kim <= 20; kim++) {
+    // Идём по РЕАЛЬНЫМ задачам Части 1 варианта (`tasksByKim` собран из
+    // `.eq("part", 1)`), а не по окну 1..20 — это физика ЕГЭ. У химии ЕГЭ
+    // Часть 1 = 1..28, и задания 21–28 НИКОГДА не получали бы OCR-балл;
+    // у обществознания (1..16) окно, наоборот, крутило пустые номера.
+    // Тот же класс, что потерянное задание 20 на экране проверки.
+    const part1KimsToPersist = [...tasksByKim.keys()].sort((a, b) => a - b);
+    for (const kim of part1KimsToPersist) {
       if (tutorScoredKims.has(kim)) continue; // Preserve manual tutor edits only.
       const task = tasksByKim.get(kim);
       if (!task) continue;
