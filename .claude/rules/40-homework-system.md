@@ -46,7 +46,11 @@
 
 **Image-only гейт:** если `solution_text.trim().length < 20` — `solution_image_urls` ДРОПАЮТСЯ на всех 3 AI-путях (leak-детектор работает по тексту; image-only эталон извлекается через «transcribe image» jailbreak).
 
+**Гарды (2026-08-05):** слой 1 держит smoke **§29** — скан student-хендлеров homework-api (`handle\w*Student` без `Tutor`) на tutor-only колонки в `.select()`; серверный грейдинг, читающий эталон без отдачи ученику, помечается на строке SELECT'а маркером `// smoke-allow: tutor-only-select <причина>`. Стрипы треда — `homework-api/student_strip.ts` (+ тесты): **новое tutor-only поле в `THREAD_SELECT` → добавить и в стрип, и в `student_strip.test.ts`**, иначе оно уедет ученику при полном reveal.
+
 Контраст с пробниками: там reveal **state-aware** (rule 45). Здесь — tutor-only **навсегда**.
+
+**Самостоятельная работа и метрика «Самост.»:** при `work_mode='independent'` колонку **НЕ скрывать** — показывать пометку «без AI» + легенду (тихое скрытие читается как поломка — репорт Елены 2026-08-05). Список с `ai_help_events` в SELECT'е ОБЯЗАН нести `hint_count`/`wrong_answer_count`/`attempts` (входы legacy-оценки «≈») — гард smoke §22; и НАОБОРОТ: не тянуть счётчики туда, где метрика не считается (`handleListAssignments` — вся история без пагинации, лишние ключи = мегабайты).
 
 ## Шаги баллов — два разных поля, НЕ путать
 
