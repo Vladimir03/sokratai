@@ -142,6 +142,12 @@ export function ReportBody({ data }: { data: PublicStudentReportData }) {
   if (metrics.hw_success && summary.hw_success_pct != null) {
     stats.push({ value: `${summary.hw_success_pct}%`, label: 'Верных ответов' });
   }
+  // Агрегат самостоятельности (2026-08-05): нейтральная подача, только точные
+  // значения (сервер уже срезал legacy-«≈» и самостоятельные работы).
+  const independencePct = data.independence?.pct ?? null;
+  if (independencePct != null) {
+    stats.push({ value: `${independencePct}%`, label: 'Самостоятельность', sub: 'решено без подсказок Сократа' });
+  }
   // Фолбэк ТОЛЬКО для старого edge (нет поля metrics) — иначе уважаем выбор тренера
   // (снял все галочки → чисел нет). Новый edge всегда шлёт metrics.
   if (stats.length === 0 && data.metrics == null && summary.total > 0) {
@@ -191,11 +197,19 @@ export function ReportBody({ data }: { data: PublicStudentReportData }) {
         </section>
       )}
 
-      {/* Числа сверху */}
+      {/* Числа сверху. 4 карточки → 2×2 (три в ряд + одна сироткой — хуже). */}
       {stats.length > 0 && (
-        <div className={cn('grid gap-2', stats.length === 1 ? 'grid-cols-1' : stats.length === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
+        <div className={cn('grid gap-2', stats.length === 1 ? 'grid-cols-1' : stats.length === 2 || stats.length === 4 ? 'grid-cols-2' : 'grid-cols-3')}>
           {stats.map((st, i) => <StatCard key={i} {...st} />)}
         </div>
+      )}
+      {/* Пояснение к самостоятельности (решение владельца 2026-08-05: нейтрально
+          + пояснение) — низкий % не должен читаться как «списывает». */}
+      {independencePct != null && (
+        <p className="-mt-2 text-[11px] leading-snug text-muted-foreground">
+          Подсказки Сократа — часть обучения: невысокая самостоятельность на новой
+          теме — это нормально и обычно растёт от работы к работе.
+        </p>
       )}
 
       {/* Что требует внимания (авто-факты) / всё ок */}

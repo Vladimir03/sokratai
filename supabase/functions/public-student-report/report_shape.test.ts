@@ -30,7 +30,9 @@ const MOCK_ATTEMPT_UUID = "12121212-3434-4565-8787-909090909090";
 const MOCK_ASSIGNMENT_UUID = "fefefefe-dcdc-4aba-9898-767676767676";
 const LEDGER_ROW_UUID = "0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b";
 
-/** Публичный контракт работы — ровно эти поля и ни одним больше. */
+/** Публичный контракт работы — ровно эти поля и ни одним больше.
+ * 2026-08-05 (решение владельца): + work_mode и independence_pct — фронт
+ * PublicStudentReport их рендерил с 27.07, но whitelist срезал (разрыв фичи). */
 const PUBLIC_WORK_KEYS = [
   "kind",
   "title",
@@ -42,6 +44,8 @@ const PUBLIC_WORK_KEYS = [
   "cells",
   "reviewed",
   "status",
+  "work_mode",
+  "independence_pct",
 ].sort();
 
 function makeHwWork(n: number): Record<string, unknown> {
@@ -274,16 +278,84 @@ describe("buildPublicReportBody — работы (works)", () => {
     expect(out).toHaveLength(2);
     for (const w of out) {
       expect(Object.keys(w).sort()).toEqual(PUBLIC_WORK_KEYS);
-      // Явно: ни id (attempt/assignment), ни счётчиков ревью, ни вида работы.
+      // Явно: ни id (attempt/assignment), ни счётчиков ревью, ни флага оценки.
       expect(w).not.toHaveProperty("id");
       expect(w).not.toHaveProperty("assignment_id");
       expect(w).not.toHaveProperty("pending_review_count");
-      expect(w).not.toHaveProperty("work_mode");
-      expect(w).not.toHaveProperty("independence_pct");
+      expect(w).not.toHaveProperty("independence_is_estimate");
       expect(w).not.toHaveProperty("created_at");
       expect(w).not.toHaveProperty("deadline");
       expect(w).not.toHaveProperty("overdue");
     }
+  });
+
+  it("точная самостоятельность проходит; legacy-«≈» → null (родителю прочерк); mock → work_mode null", () => {
+    const works = [
+      makeHwWork(1), // exact 80
+      { ...makeHwWork(2), independence_pct: 55, independence_is_estimate: true }, // legacy «≈»
+      makeMockWork(), // без work_mode/independence
+    ];
+    const body = buildPublicReportBody(makeInput({ progress: makeProgress({ works }) }));
+    const out = body.works as Record<string, unknown>[];
+    expect(out[0].work_mode).toBe("homework");
+    expect(out[0].independence_pct).toBe(80);
+    // Решение владельца 2026-08-05: приближения — только репетитору.
+    expect(out[1].independence_pct).toBeNull();
+    expect(out[2].work_mode).toBeNull();
+    expect(out[2].independence_pct).toBeNull();
+  });
+});
+
+describe("buildPublicReportBody — агрегат independence", () => {
+  it("среднее ТОЛЬКО точных значений обычных домашек; legacy-«≈», самостоятельные и пробники не в счёте", () => {
+    const works = [
+      makeHwWork(1), // exact 80
+      { ...makeHwWork(2), independence_pct: 60, independence_is_estimate: false }, // exact 60
+      { ...makeHwWork(3), independence_pct: 10, independence_is_estimate: true }, // legacy — мимо
+      { ...makeHwWork(4), work_mode: "independent", independence_pct: null }, // СР — мимо
+      makeMockWork(), // пробник — мимо
+    ];
+    const body = buildPublicReportBody(makeInput({ progress: makeProgress({ works }) }));
+    expect(body.independence).toEqual({ pct: 70, works: 2 });
+  });
+
+  it("агрегат считается по ПОЛНОМУ списку периода, а не по capу 10 работ", () => {
+    // 15 работ: 12 точных по 100% за пределами капа не должны потеряться.
+    const works = Array.from({ length: 15 }, (_, i) => ({
+      ...makeHwWork(i + 1),
+      independence_pct: i < 3 ? 40 : 100,
+    }));
+    const body = buildPublicReportBody(makeInput({ progress: makeProgress({ works }) }));
+    expect((body.independence as { works: number }).works).toBe(15);
+    expect((body.independence as { pct: number }).pct).toBe(Math.round((3 * 40 + 12 * 100) / 15));
+  });
+
+  it("нет ни одного точного значения → pct null (карточка на фронте не рендерится)", () => {
+    const works = [
+      { ...makeHwWork(1), independence_pct: 50, independence_is_estimate: true },
+      makeMockWork(),
+    ];
+    const body = buildPublicReportBody(makeInput({ progress: makeProgress({ works }) }));
+    expect(body.independence).toEqual({ pct: null, works: 0 });
+  });
+});
+
+describe("buildPublicReportBody — whitelist summary/target (ревью 5.6)", () => {
+  it("новое внутреннее поле в summary/target НЕ становится публичным автоматически", () => {
+    const progress = makeProgress();
+    (progress.summary as Record<string, unknown>).internal_debug_field = "секрет";
+    (progress.target as unknown as Record<string, unknown>).internal_note = "секрет";
+    const body = buildPublicReportBody(makeInput({ progress }));
+    expect(body.summary).not.toHaveProperty("internal_debug_field");
+    expect(body.target).not.toHaveProperty("internal_note");
+    // Текущий публичный состав зафиксирован явно.
+    expect(Object.keys(body.summary as Record<string, unknown>).sort()).toEqual([
+      "current_level", "done", "hw_done", "hw_overdue", "hw_success_pct",
+      "hw_total", "needs_attention", "reviewed_pct", "target", "total", "trend",
+    ]);
+    expect(Object.keys(body.target as Record<string, unknown>).sort()).toEqual([
+      "scale_year", "target_score", "track",
+    ]);
   });
 });
 
@@ -427,8 +499,9 @@ describe("канарейка анти-утечки", () => {
       "avatar",
       "cdn.example", // сам URL аватара, не только имя поля
       "pending_review",
-      "independence",
-      "work_mode",
+      // work_mode и independence_pct с 2026-08-05 ПУБЛИЧНЫ (решение владельца);
+      // приватным остаётся флаг legacy-оценки — сервер решает «≈»-вопрос сам.
+      "independence_is_estimate",
       "note",
       "Пропустил", // текст приватной заметки тутора
       "created_at",

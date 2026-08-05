@@ -136,8 +136,29 @@ export function buildPublicReportBody(input: PublicReportInput): Record<string, 
     attention.push(`Невысокий процент верных ответов: ${s.hw_success_pct}%`);
   }
 
+  // «% самостоятельности» родителю (решения владельца 2026-08-05):
+  //  - агрегат за период — в основных метриках; per-work — в детальном списке;
+  //  - ТОЛЬКО точные значения: legacy-оценка «≈» остаётся репетитору, родитель
+  //    видит прочерк (is_estimate → null, решение принимается ЗДЕСЬ, на сервере);
+  //  - самостоятельные работы (work_mode='independent'): pct всегда null —
+  //    фронт показывает бейдж «без AI».
+  // Агрегат считается по ПОЛНОМУ списку работ периода (до capа WORKS_LIMIT).
+  const allWorks = progress.works as Record<string, unknown>[];
+  const exactPcts = allWorks
+    .filter((w) =>
+      w.kind === "homework" && w.work_mode !== "independent" &&
+      w.independence_is_estimate !== true && typeof w.independence_pct === "number"
+    )
+    .map((w) => w.independence_pct as number);
+  const independence = exactPcts.length > 0
+    ? {
+      pct: Math.round(exactPcts.reduce((a, b) => a + b, 0) / exactPcts.length),
+      works: exactPcts.length,
+    }
+    : { pct: null, works: 0 };
+
   // PUBLIC REMAP — наружу только безопасные поля (никаких uuid/avatar/comments).
-  const works = (progress.works as Record<string, unknown>[])
+  const works = allWorks
     .slice(0, WORKS_LIMIT)
     .map((w) => ({
       kind: w.kind,
@@ -150,6 +171,11 @@ export function buildPublicReportBody(input: PublicReportInput): Record<string, 
       cells: w.cells,
       reviewed: w.reviewed,
       status: w.status,
+      // Т8: вид работы + точная самостоятельность (см. блок independence выше).
+      work_mode: (w.work_mode as string | null) ?? null,
+      independence_pct: w.independence_is_estimate === true
+        ? null
+        : ((w.independence_pct as number | null) ?? null),
     }));
 
   return {
@@ -160,8 +186,28 @@ export function buildPublicReportBody(input: PublicReportInput): Record<string, 
       subject: (input.studentSubject as string | null) ?? null,
     },
     tutor: { name: (input.tutorName as string | null) ?? null },
-    target: progress.target,
-    summary: progress.summary,
+    // Явные whitelist'ы (ревью 5.6, 2026-08-05): раньше target/summary уходили
+    // наружу ЦЕЛЫМИ объектами — новое внутреннее поле в StudentProgressPayload
+    // становилось публичным автоматически. Новое поле → добавлять сюда осознанно.
+    target: {
+      track: progress.target.track,
+      target_score: progress.target.target_score,
+      scale_year: progress.target.scale_year,
+    },
+    summary: {
+      done: s.done,
+      total: s.total,
+      reviewed_pct: s.reviewed_pct,
+      needs_attention: s.needs_attention,
+      current_level: s.current_level,
+      target: s.target,
+      trend: s.trend,
+      hw_done: s.hw_done,
+      hw_total: s.hw_total,
+      hw_overdue: s.hw_overdue,
+      hw_success_pct: s.hw_success_pct,
+    },
+    independence,
     works,
     // Конфиг отчёта (ОС Елены): вердикт-чип, комментарий тренера, метрики-галочки, период.
     verdict: (link.verdict as string | null) ?? null,

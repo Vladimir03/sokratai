@@ -76,6 +76,11 @@ export interface PublicStudentReportData {
   attention?: string[];
   period?: { kind: string; start: string | null; end: string | null } | null;
   show_debt_line?: boolean;
+  // Агрегат «% самостоятельности» за период (2026-08-05, решение владельца):
+  // среднее ТОЧНЫХ per-work значений по обычным домашкам (без самостоятельных
+  // и без legacy-оценок «≈» — те остаются только у репетитора). optional —
+  // старый edge не шлёт → карточка не рендерится.
+  independence?: { pct: number | null; works: number } | null;
 }
 
 export type PublicStudentReportResult =
