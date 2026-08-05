@@ -65,6 +65,27 @@ const LOVABLE_MODEL = "google/gemini-3-flash-preview";
 const REQUEST_TIMEOUT_MS = 35_000;
 const MAX_RETRIES = 1;
 
+/**
+ * P5 (`docs/delivery/features/ai-request-optimization/research.md`): потолок
+ * вывода по умолчанию. Output стоит в 6 раз дороже input за токен, и без капа
+ * одна выродившаяся генерация уходит в разнос — рекорд по логам 31 814
+ * completion-токенов в одном ответе чата при медиане ~500.
+ *
+ * 4000 выбраны по данным, а не на глаз: у всех JSON-путей этой функции
+ * наблюдаемый максимум ≤ 959 токенов (p99 ≤ 209 у проверки ДЗ). Кап ниже
+ * ОБРЕЗАЛ БЫ JSON на полуслове и превратил бы дорогой вызов в `invalid_json`,
+ * поэтому запас намеренно кратный. Путям с заведомо длинным выводом
+ * (`kb-ai-extract` — 16 000) кап передаётся явно и перекрывает дефолт.
+ */
+const DEFAULT_MAX_TOKENS = 4000;
+
+/**
+ * P4: шлюз Lovable — посредник, и поддерживает ли он `response_format`,
+ * документации нет. Пробуем один раз за жизнь isolate: отверг — выключаем и
+ * дальше шлём как раньше. Fail-open: в худшем случае теряем режим, а не вызов.
+ */
+let jsonModeDisabled = false;
+
 /** Max bytes for an inlined prompt image (mirror guided_ai.ts). Gemini chokes above ~5MB. */
 export const MAX_PROMPT_IMAGE_BYTES = 5 * 1024 * 1024;
 
@@ -184,15 +205,30 @@ export async function callLovableJson(
   // `timeoutMs` — per-call ceiling (инцидент 2026-07-17: дефолт 35с валил
   // extract-вызовы с крупным выводом ~15 задач — все плотные чанки таймаутились).
   // Optional — existing callers keep the gateway default.
-  opts?: { maxTokens?: number; model?: string; fallbackModel?: string; timeoutMs?: number },
+  // `jsonMode` (P4) — просить у шлюза строгий JSON параметром, а не только
+  // словами промпта. По умолчанию ВКЛЮЧЕН: функция называется callLovableJson,
+  // все её вызовы парсят ответ как JSON, и `invalid_json` — самый частый отказ
+  // шлюза в логах (9 из 10 за месяц). `false` — для вызовов, где нужен текст.
+  opts?: {
+    maxTokens?: number;
+    model?: string;
+    fallbackModel?: string;
+    timeoutMs?: number;
+    jsonMode?: boolean;
+  },
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
   let currentModel = opts?.model ?? LOVABLE_MODEL;
   const timeoutMs = opts?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const jsonModeRequested = opts?.jsonMode !== false;
+  // Проба `response_format` не должна съедать бюджет ретраев: иначе у вызова с
+  // `fallbackModel` первый 400 уходил бы на смену модели, второй — на отказ от
+  // json-режима, и попытки кончились бы ДО успешного запроса.
+  let extraAttempts = 0;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= MAX_RETRIES + extraAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -208,7 +244,10 @@ export async function callLovableJson(
           messages,
           temperature: 0.2,
           stream: false,
-          ...(opts?.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+          max_tokens: opts?.maxTokens ?? DEFAULT_MAX_TOKENS,
+          ...(jsonModeRequested && !jsonModeDisabled
+            ? { response_format: { type: "json_object" } }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -239,7 +278,22 @@ export async function callLovableJson(
         currentModel = opts.fallbackModel;
         continue;
       }
-      const canRetry = shouldRetry(error) && attempt < MAX_RETRIES;
+      // P4: шлюз отверг `response_format` → выключаем режим на весь isolate и
+      // повторяем БЕЗ него. Проверка идёт ПОСЛЕ model-fallback, чтобы не
+      // перехватывать чужой 400 (отказ по неизвестной модели). Ложное
+      // срабатывание безопасно: теряем режим, запрос всё равно уходит повторно.
+      if (
+        error instanceof HttpStatusError &&
+        [400, 404, 422].includes(error.status) &&
+        jsonModeRequested &&
+        !jsonModeDisabled
+      ) {
+        jsonModeDisabled = true;
+        extraAttempts += 1;
+        console.warn(`${telemetryTag}_json_mode_unsupported`, { status: error.status });
+        continue;
+      }
+      const canRetry = shouldRetry(error) && attempt < MAX_RETRIES + extraAttempts;
       if (error instanceof HttpStatusError) {
         // Log only the status — the gateway error body may echo prompt fragments,
         // task text, or model output (rule 40: no PII / task content in logs).

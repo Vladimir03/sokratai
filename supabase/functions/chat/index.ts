@@ -1950,6 +1950,18 @@ async function processAIRequest(
   //   headers["X-Title"] = "Sokratai - AI Tutor";
   // }
 
+  // P5 (docs/delivery/features/ai-request-optimization/research.md): страховка
+  // от выродившейся генерации. Здесь она не гипотетическая — рекорд по логам
+  // 31 814 completion-токенов в ОДНОМ ответе при медиане ~500 и p99 = 7353.
+  // Это не длинное объяснение, а зацикливание: ~110 тысяч знаков, которые никто
+  // не читает, но за которые платим по самому дорогому тарифу (output ×6 к
+  // input) и которые ученик всё это время смотрит, как они ползут по экрану.
+  //
+  // 10 000, а не p99: путь СТРИМИНГОВЫЙ и текстовый, обрезка видна ученику как
+  // оборванная на полуслове фраза. Кап должен резать патологию и не задевать
+  // длинный, но живой разбор — поэтому берём с запасом к 99-му перцентилю.
+  const CHAT_MAX_OUTPUT_TOKENS = 10_000;
+
   // Формируем тело запроса
   const requestBody: Record<string, unknown> = {
     model: modelId,
@@ -1961,6 +1973,7 @@ async function processAIRequest(
       ...transformedMessages,
     ],
     stream: true,
+    max_tokens: CHAT_MAX_OUTPUT_TOKENS,
   };
 
   // ЗАКОММЕНТИРОВАНО: Дополнительные параметры для OpenRouter + Gemini 3 Flash

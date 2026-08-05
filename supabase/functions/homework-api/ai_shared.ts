@@ -67,6 +67,19 @@ const LOVABLE_MODEL = "google/gemini-3-flash-preview";
 const REQUEST_TIMEOUT_MS = 35_000;
 const MAX_RETRIES = 1;
 
+/**
+ * P5 (`docs/delivery/features/ai-request-optimization/research.md`): потолок
+ * вывода. Зеркало `_shared/ai-lovable.ts`. По логам у путей этого файла
+ * (`guided_check` / `guided_hint` / физ-блок-схема) максимум 704 completion-
+ * токена при p99 = 209 — 4000 дают почти шестикратный запас. Меньше ставить
+ * НЕЛЬЗЯ: обрезанный JSON превращается в `invalid_json`, т.е. в потерянную
+ * проверку ответа ученика.
+ */
+const DEFAULT_MAX_TOKENS = 4000;
+
+/** P4: зеркало `_shared/ai-lovable.ts` — проба `response_format` раз на isolate. */
+let jsonModeDisabled = false;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -203,7 +216,10 @@ export async function callLovableJson(
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  // Проба json-режима не тратит бюджет ретраев (зеркало `_shared/ai-lovable.ts`).
+  let extraAttempts = 0;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES + extraAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
@@ -219,6 +235,8 @@ export async function callLovableJson(
           messages,
           temperature: 0.2,
           stream: false,
+          max_tokens: DEFAULT_MAX_TOKENS,
+          ...(jsonModeDisabled ? {} : { response_format: { type: "json_object" } }),
         }),
         signal: controller.signal,
       });
@@ -236,7 +254,19 @@ export async function callLovableJson(
       if (!rawContent) throw new Error("Model response is empty");
       return extractJsonObject(rawContent);
     } catch (error) {
-      const canRetry = shouldRetry(error) && attempt < MAX_RETRIES;
+      // P4: шлюз отверг `response_format` → выключаем на isolate и повторяем
+      // без него. Fail-open: теряем режим, а не проверку ответа ученика.
+      if (
+        error instanceof HttpStatusError &&
+        [400, 404, 422].includes(error.status) &&
+        !jsonModeDisabled
+      ) {
+        jsonModeDisabled = true;
+        extraAttempts += 1;
+        console.warn(`${telemetryTag}_json_mode_unsupported`, { status: error.status });
+        continue;
+      }
+      const canRetry = shouldRetry(error) && attempt < MAX_RETRIES + extraAttempts;
       if (error instanceof HttpStatusError) {
         // Surface gateway error body so multimodal failures (e.g. SVG rejection,
         // model-side validation errors) become diagnosable in telemetry.

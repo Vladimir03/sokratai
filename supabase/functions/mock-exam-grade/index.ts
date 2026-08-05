@@ -94,6 +94,19 @@ const LOVABLE_MODEL_OCR = "google/gemini-2.5-pro";
 const LOVABLE_REQUEST_TIMEOUT_MS = 35_000;
 const LOVABLE_MAX_RETRIES = 1;
 
+/**
+ * P5 (`docs/delivery/features/ai-request-optimization/research.md`): потолок
+ * вывода. Выше, чем 4000 у остальных путей, намеренно: грейдинг Части 2 по
+ * логам укладывается в 487 токенов, но OCR бланка возвращает по строке на
+ * задание (наблюдалось 2559 при 20 заданиях, а у химии ЕГЭ их 28 — rule 45).
+ * Обрезанный JSON здесь = потерянные баллы Части 1 у ученика, поэтому запас
+ * трёхкратный к худшему известному случаю.
+ */
+const MOCK_MAX_OUTPUT_TOKENS = 8000;
+
+/** P4: зеркало `_shared/ai-lovable.ts` — проба `response_format` раз на isolate. */
+let jsonModeDisabled = false;
+
 const SIGNED_URL_TTL_SEC = 1800;
 // TASK-OCR-3 (2026-05-21): bump from 5MB → 8MB. Upload cap is 10MB
 // (mock-exam-student-api::MAX_PHOTO_BYTES). New frontend uses
@@ -457,8 +470,10 @@ async function callLovableJson(
   if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
   const model = options?.modelOverride ?? LOVABLE_MODEL;
+  // Проба json-режима не тратит бюджет ретраев (зеркало `_shared/ai-lovable.ts`).
+  let extraAttempts = 0;
 
-  for (let attempt = 0; attempt <= LOVABLE_MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= LOVABLE_MAX_RETRIES + extraAttempts; attempt += 1) {
     const controller = new AbortController();
     const timeoutId = setTimeout(
       () => controller.abort(),
@@ -477,6 +492,8 @@ async function callLovableJson(
           messages,
           temperature: 0.2,
           stream: false,
+          max_tokens: MOCK_MAX_OUTPUT_TOKENS,
+          ...(jsonModeDisabled ? {} : { response_format: { type: "json_object" } }),
         }),
         signal: controller.signal,
       });
@@ -516,7 +533,19 @@ async function callLovableJson(
       }
       return extractJsonObject(rawContent);
     } catch (error) {
-      const canRetry = shouldRetry(error) && attempt < LOVABLE_MAX_RETRIES;
+      // P4: шлюз отверг `response_format` → выключаем на isolate и повторяем
+      // без него. Fail-open: теряем режим, а не проверку работы ученика.
+      if (
+        error instanceof LovableHttpError &&
+        [400, 404, 422].includes(error.status) &&
+        !jsonModeDisabled
+      ) {
+        jsonModeDisabled = true;
+        extraAttempts += 1;
+        console.warn(`${telemetryTag}_json_mode_unsupported`, { status: error.status });
+        continue;
+      }
+      const canRetry = shouldRetry(error) && attempt < LOVABLE_MAX_RETRIES + extraAttempts;
       if (error instanceof LovableHttpError) {
         console.warn(`${telemetryTag}_http_error`, {
           status: error.status,
