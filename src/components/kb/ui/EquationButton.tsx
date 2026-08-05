@@ -34,11 +34,18 @@ interface EquationTemplate {
   label: string;
   /** Тело формулы БЕЗ обрамляющих `$`. */
   tex: string;
-  /** Смещение каретки от конца вставки (чтобы попасть внутрь скобок). */
-  caretFromEnd?: number;
+  /**
+   * Что выделить после вставки — координаты в ГОТОВОМ сниппете `$tex$`
+   * (0 = открывающий `$`). Равные значения = просто каретка. Не задано —
+   * каретка в конец. Считать по строке целиком, не «от конца»: перенос,
+   * который хук может дописать перед вставкой, отсчёт от конца ломал.
+   */
+  selectStart?: number;
+  selectEnd?: number;
   chemistry?: boolean;
 }
 
+// `$` + tex + `$`. Индексы ниже посчитаны по этой строке.
 const TEMPLATES: EquationTemplate[] = [
   { label: 'Реакция', tex: '2H_2 + O_2 \\rightarrow 2H_2O', chemistry: true },
   { label: 'Обратимая', tex: 'N_2 + 3H_2 \\rightleftarrows 2NH_3', chemistry: true },
@@ -53,9 +60,12 @@ const TEMPLATES: EquationTemplate[] = [
     chemistry: true,
   },
   { label: 'Ион / заряд', tex: 'SO_4^{2-}', chemistry: true },
-  { label: 'Дробь', tex: '\\frac{}{}', caretFromEnd: 3 },
-  { label: 'Степень', tex: 'x^{2}', caretFromEnd: 1 },
-  { label: 'Индекс', tex: 'H_{2}', caretFromEnd: 1 },
+  // `$\frac{}{}$` → каретка ВНУТРЬ первых скобок (индекс 7).
+  { label: 'Дробь', tex: '\\frac{}{}', selectStart: 7 },
+  // `$x^{2}$` → выделяем «2», чтобы ввод сразу его заменил (4..5).
+  { label: 'Степень', tex: 'x^{2}', selectStart: 4, selectEnd: 5 },
+  // `$H_{2}$` → то же.
+  { label: 'Индекс', tex: 'H_{2}', selectStart: 4, selectEnd: 5 },
 ];
 
 export function EquationButton({
@@ -68,7 +78,10 @@ export function EquationButton({
    * Вставка готового текста. Компонент НЕ знает про textarea — вызывающая
    * сторона использует `useInsertAtCursor`.
    */
-  onInsert: (snippet: string, caretFromEnd?: number) => void;
+  onInsert: (
+    snippet: string,
+    opts?: { selectStart?: number; selectEnd?: number },
+  ) => void;
   /** Предмет — только для ПОРЯДКА шаблонов, не для гейта (см. ниже). */
   subject?: string | null;
   disabled?: boolean;
@@ -103,6 +116,9 @@ export function EquationButton({
         // Без этого Radix забирает фокус себе, и вставка уезжает в позицию 0
         // (прецедент — MathQuickPicker).
         onOpenAutoFocus={(e) => e.preventDefault()}
+        // А без этого на закрытии фокус возвращается на кнопку-триггер и
+        // сбивает только что выставленное выделение в textarea (ревью 5.6 P2).
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <p className="px-1 pb-1.5 text-[11px] leading-snug text-slate-500">
           Каждое уравнение — с новой строки, они встанут столбиком.
@@ -113,7 +129,10 @@ export function EquationButton({
               key={t.label}
               type="button"
               onClick={() => {
-                onInsert(`$${t.tex}$`, t.caretFromEnd);
+                onInsert(`$${t.tex}$`, {
+                  selectStart: t.selectStart,
+                  selectEnd: t.selectEnd,
+                });
                 setOpen(false);
               }}
               className="flex min-h-9 items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"

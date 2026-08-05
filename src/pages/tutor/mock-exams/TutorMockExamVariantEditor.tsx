@@ -299,7 +299,8 @@ const VariantTaskCard = memo(function VariantTaskCard({
   // Вставка идёт СВОЕЙ строкой — тогда несколько уравнений встают столбиком
   // (перенос между формулами сохраняет preprocessLatex).
   const insertIntoTaskText = useCallback(
-    (snippet: string, caretFromEnd?: number) => insertAtCursor(snippet, caretFromEnd, true),
+    (snippet: string, opts?: { selectStart?: number; selectEnd?: number }) =>
+      insertAtCursor(snippet, { ...opts, asBlock: true }),
     [insertAtCursor],
   );
   return (
