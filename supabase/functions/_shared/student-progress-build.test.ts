@@ -442,9 +442,18 @@ describe("buildStudentProgress — пробники", () => {
     expect(w.cells).toEqual([]); // part1/part2 max = 0 → мини-карты нет
     expect(p!.summary.trend).toEqual([]); // шкалы для предмета нет → тренда нет
     expect(p!.summary.current_level).toBeNull();
-    // Странность кода, фиксируем как есть: subject у mock-работы захардкожен
-    // "physics" (variantSubject вычисляется, но в payload не попадает).
-    expect(w.subject).toBe("physics");
+    // Фикс 2026-08-05: subject у mock-работы — предмет варианта (раньше был
+    // захардкожен "physics", и пробник по обществознанию уходил родителю
+    // как физика). Легаси-фолбэк NULL→"physics" проверяется отдельным тестом.
+    expect(w.subject).toBe("social");
+  });
+
+  it("легаси-вариант с subject NULL → фолбэк \"physics\" (старые строки забэкфилены физикой)", async () => {
+    const p = await build(mockFixtures(
+      [{ id: "at5b", assignment_id: "m1", student_id: STUDENT, status: "approved", total_score: 10, total_part1_score: null, total_part2_score: null, submitted_at: "2026-07-10T12:00:00Z", manual_entered_date: null, created_at: "2026-07-06T00:00:00Z" }],
+      [{ id: "v1", exam_type: "ege_physics", subject: null, total_max_score: 45, part1_max: 0, part2_max: 0 }],
+    ));
+    expect(p!.works[0].subject).toBe("physics");
   });
 
   it("низкий подтверждённый балл против цели → behindGoal → needs_attention без всякого backlog", async () => {

@@ -489,7 +489,11 @@ export async function buildStudentProgress(
         assignment_id: at.assignment_id,
         kind: "mock",
         title: meta.title,
-        subject: "physics",
+        // Предмет варианта, НЕ хардкод: пробник по химии/обществознанию
+        // отображался в прогрессе и отчёте родителям как «физика»
+        // (найдено ревью тестов 2026-08-05). Фолбэк "physics" внутри
+        // variantSubject — только для легаси-строк с subject NULL.
+        subject: variantSubject,
         date: dateStr ?? meta.created_at,
         created_at: meta.created_at,
         deadline: meta.deadline,
