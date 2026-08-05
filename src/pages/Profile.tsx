@@ -396,7 +396,9 @@ const Profile = () => {
   };
 
   const handleUpdatePassword = async () => {
-    const passwordSchema = z.string().min(4, { message: "Минимум 4 символа" }).max(72, {
+    // 6, не 4: edge `student-account/update-password` требует ≥6 — UI, обещавший
+    // 4, вёл ученика в тупик «ввёл как написано → сервер отказал» (2026-08-05).
+    const passwordSchema = z.string().min(6, { message: "Минимум 6 символов" }).max(72, {
       message: "Максимум 72 символа",
     });
 
@@ -720,7 +722,7 @@ const Profile = () => {
                   <div>
                     <h3 className="font-medium text-foreground">Изменить пароль</h3>
                     <p className="text-sm text-muted-foreground">
-                      Новый пароль должен содержать минимум 4 символа.
+                      Новый пароль должен содержать минимум 6 символов.
                     </p>
                   </div>
                   <div className="space-y-2">

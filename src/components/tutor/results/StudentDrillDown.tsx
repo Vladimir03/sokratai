@@ -324,9 +324,12 @@ export function StudentDrillDown({
     [taskMeta],
   );
 
-  // Строка «Самостоятельность …» под мини-карточками (2026-07-25). Скрыта в
-  // самостоятельной работе: там AI выключен и метрика всегда 100%.
-  const showIndependence = workMode !== 'independent';
+  // Строка «Самостоятельность …» под мини-карточками (2026-07-25). В
+  // самостоятельной работе процент не считается (AI выключен сервером), но
+  // строка НЕ исчезает — тихое скрытие читалось как поломка (репорт Елены
+  // 2026-08-05): вместо процента — явная фраза про отключённый AI.
+  const isIndependentWork = workMode === 'independent';
+  const showIndependence = !isIndependentWork;
   const independenceLine = useMemo(() => {
     if (selectedTaskId !== null) {
       const task = taskMeta.find((t) => t.id === selectedTaskId);
@@ -499,7 +502,12 @@ export function StudentDrillDown({
           (балл / подсказки / правка / «проверено»). При выбранной задаче
           показываем её метрику, при «Все задачи» — агрегат по работе
           (взвешенный по max_score задач, считает бэкенд). */}
-      {showIndependence && independenceLine ? (
+      {isIndependentWork ? (
+        <p className="-mt-1 text-xs text-slate-500">
+          Самостоятельная работа: Сократ был отключён — ученик решал полностью
+          сам, процент самостоятельности не считается.
+        </p>
+      ) : independenceLine ? (
         <p
           className="-mt-1 text-xs text-slate-600"
           title={INDEPENDENCE_TOOLTIP}

@@ -18,6 +18,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // Deno-спецификатор → npm-пакет (волна 2, 2026-08-05): `import type`
+      // стирается esbuild'ом и алиас не нужен, но RUNTIME-импорт supabase-js
+      // в edge-модуле без этого алиаса делает модуль неимпортируемым в vitest.
+      "npm:@supabase/supabase-js@2": "@supabase/supabase-js",
     },
   },
   test: {

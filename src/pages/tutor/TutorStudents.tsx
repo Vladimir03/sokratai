@@ -3,6 +3,16 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Pagination, 
   PaginationContent, 
   PaginationItem, 
@@ -441,7 +451,20 @@ function TutorStudentsContent() {
     }
   }, []);
 
-  const handleResetStudentPassword = useCallback(
+  // «Данные для входа» — это НЕ «показать сохранённый пароль», а СБРОС:
+  // генерится новый пароль, старый умирает, GoTrue убивает все сессии ученика
+  // (без mintFreshSession — задокументированный follow-up rule 96 #13).
+  // Раньше кнопка делала это МОЛЧА — вероятный триггер инцидента Никиты
+  // 2026-08-05: репетитор «просто посмотрел данные», ученика разлогинило,
+  // старый пароль перестал подходить. Теперь — явное подтверждение.
+  const [pendingResetStudent, setPendingResetStudent] = useState<StudentWithExtras | null>(null);
+
+  const handleResetStudentPassword = useCallback((student: StudentWithExtras) => {
+    if (resettingStudentId) return;
+    setPendingResetStudent(student);
+  }, [resettingStudentId]);
+
+  const confirmResetStudentPassword = useCallback(
     async (student: StudentWithExtras) => {
       if (resettingStudentId) {
         return;
@@ -801,6 +824,42 @@ function TutorStudentsContent() {
           plainPassword={credentialsData.plainPassword}
         />
       )}
+
+      {/* Подтверждение сброса пароля — кнопка «Данные для входа» раньше
+          делала сброс МОЛЧА (см. комментарий у handleResetStudentPassword). */}
+      <AlertDialog
+        open={pendingResetStudent !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingResetStudent(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Создать новый пароль для входа?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Будет создан новый пароль
+              {pendingResetStudent?.profiles?.username
+                ? ` для ученика «${pendingResetStudent.profiles.username}»`
+                : ''}
+              . Старый пароль перестанет работать, и ученик выйдет из аккаунта
+              на всех устройствах — передайте ему новые данные сразу. Если
+              ученик сейчас занимается, лучше подождать конца занятия.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Отмена</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const student = pendingResetStudent;
+                setPendingResetStudent(null);
+                if (student) void confirmResetStudentPassword(student);
+              }}
+            >
+              Создать пароль
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ConnectStudentSheet
         open={connectOpen}

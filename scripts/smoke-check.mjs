@@ -1202,13 +1202,42 @@ for (const relPath of scoreSelectFiles) {
     // Только column-list'ы (перечисление), а не одиночные имена в других контекстах.
     if (!columns.includes(",")) continue;
     if (SCORE_SELECT_ALLOWLIST.includes(columns.trim())) continue;
-    if (columns.includes("best_earned_score")) continue;
+    if (!columns.includes("best_earned_score")) {
+      scoreSelectViolations += 1;
+      fail(
+        `${relPath}: column-list с \`earned_score\` без \`best_earned_score\` → ` +
+          `балл на этой поверхности разойдётся с остальными (цепочка computeFinalScore: ` +
+          `override → best_earned_score → earned_score). Список: "${columns.slice(0, 120)}"`,
+      );
+    }
+    // Ревью 2026-08-05: заголовок §22 обещал гардить и `ai_help_events`, а чек
+    // смотрел только best_earned_score — «гард, который не гардит». Правило:
+    // список, тянущий ai_help_events (кормит «% самостоятельности»), ОБЯЗАН
+    // тянуть и входы legacy-оценки «≈» (resolveIndependencePct): hint_count,
+    // wrong_answer_count, attempts. Потеря любого из них молча превращает
+    // «≈60%» старых работ в «—».
+    if (columns.includes("ai_help_events")) {
+      for (const dep of ["hint_count", "wrong_answer_count", "attempts"]) {
+        if (!columns.includes(dep)) {
+          scoreSelectViolations += 1;
+          fail(
+            `${relPath}: column-list с \`ai_help_events\` без \`${dep}\` — ` +
+              `legacy-оценка самостоятельности («≈») на этой поверхности молча станет «—». ` +
+              `Список: "${columns.slice(0, 120)}"`,
+          );
+        }
+      }
+    }
+  }
+  // Метрика не должна ВЫПАСТЬ из файла целиком: у этих двух поверхностей
+  // независимость — часть контракта ответа (results репетитора + отчёт).
+  if (
+    (relPath.endsWith("homework-api/index.ts") ||
+      relPath.endsWith("student-progress-build.ts")) &&
+    !source.includes("ai_help_events")
+  ) {
     scoreSelectViolations += 1;
-    fail(
-      `${relPath}: column-list с \`earned_score\` без \`best_earned_score\` → ` +
-        `балл на этой поверхности разойдётся с остальными (цепочка computeFinalScore: ` +
-        `override → best_earned_score → earned_score). Список: "${columns.slice(0, 120)}"`,
-    );
+    fail(`${relPath}: \`ai_help_events\` исчез из файла — метрика самостоятельности выпала из SELECT'ов`);
   }
 }
 if (scoreSelectViolations === 0) {
@@ -1515,6 +1544,103 @@ if (latexTestResult.status !== 0) {
   fail("preprocessLatex tests FAILED — see node:test output above");
 }
 ok("preprocessLatex pass (столбик + регресс-замок предложения + идемпотентность)");
+
+// ─── 29. Anti-leak: student-SELECT'ы homework-api без tutor-only колонок ─────
+//
+// Rule 40, слой 1 (edge column-whitelist) до 2026-08-05 не гардился НИЧЕМ:
+// одна строка в SELECT'е student-хендлера — и solution_text уезжает ученику.
+// Сканируем тела функций `handleStudent*` / `handleGetStudent*` в homework-api:
+// ни один строковый column-list там не должен содержать tutor-only колонку.
+// Плюс: стрипы треда (student_strip.ts, слой 2) обязаны остаться подключёнными.
+console.log("");
+console.log("29. Anti-leak: student-SELECT'ы homework-api...");
+{
+  const hwApiPath = path.join(rootDir, "supabase", "functions", "homework-api", "index.ts");
+  const hwApiSource = fs.readFileSync(hwApiPath, "utf8");
+
+  // Тела функций: от `async function handleXxx(` до следующего `async function `.
+  const chunks = hwApiSource.split(/(?=^async function handle)/m);
+  const studentChunks = chunks.filter((c) => /^async function handle(Get)?Student/.test(c));
+  if (studentChunks.length < 3) {
+    // Гард-на-гард (урок §27): сканер, который никого не нашёл, — зелёная ложь.
+    fail(
+      `homework-api: найдено только ${studentChunks.length} student-хендлеров ` +
+        `(ожидалось ≥3) — паттерн /handle(Get)?Student/ устарел, §29 ослеп`,
+    );
+  }
+
+  const TUTOR_ONLY_COLUMNS =
+    /\b(solution_text|solution_image_urls|rubric_[a-z_]+|ai_reference_solution|grading_criteria_json|ai_score_comment|correct_answer|ocr_text|tutor_[a-z_]+_by)\b/;
+
+  // Исключение: server-side грейдинг ЧИТАЕТ эталон (submit-хендлеры), но не
+  // отдаёт его в ответ. Такой SELECT помечается на СВОЕЙ строке маркером
+  // `// smoke-allow: tutor-only-select <причина>` (конвенция §27) — каждое
+  // исключение видно и обосновано на месте, а не в глобальном списке.
+  let leakViolations = 0;
+  for (const chunk of studentChunks) {
+    const fnName = chunk.match(/^async function (\w+)/)?.[1] ?? "<unknown>";
+    // Строковые литералы column-list'ов внутри .select(...): двойные кавычки.
+    const selectRe = /\.select\(\s*\n?\s*"([^"]*)"/g;
+    let m;
+    while ((m = selectRe.exec(chunk)) !== null) {
+      const columns = m[1];
+      const hit = columns.match(TUTOR_ONLY_COLUMNS);
+      if (!hit) continue;
+      // Маркер ищем на строке литерала и на строке перед ней.
+      const lineStart = chunk.lastIndexOf("\n", m.index) + 1;
+      const prevLineStart = chunk.lastIndexOf("\n", Math.max(0, lineStart - 2)) + 1;
+      const lineEnd = chunk.indexOf("\n", selectRe.lastIndex);
+      const context = chunk.slice(prevLineStart, lineEnd === -1 ? chunk.length : lineEnd);
+      if (context.includes("smoke-allow: tutor-only-select")) continue;
+      leakViolations += 1;
+      fail(
+        `homework-api ${fnName}: student-SELECT содержит tutor-only колонку ` +
+          `\`${hit[0]}\` — утечка эталона/черновика ученику (или серверный грейдинг ` +
+          `без маркера \`// smoke-allow: tutor-only-select <причина>\`). ` +
+          `Список: "${columns.slice(0, 100)}"`,
+      );
+    }
+  }
+
+  // Слой 2: стрипы вынесены в student_strip.ts — проверяем, что index.ts их
+  // импортирует и зовёт (случайное удаление call-site = полный reveal).
+  for (const stripFn of ["stripHiddenMessages", "stripStudentSensitiveTaskStateFields", "stripIndependentPreRevealFields"]) {
+    const calls = hwApiSource.match(new RegExp(`${stripFn}\\(`, "g")) ?? [];
+    if (calls.length < 1 || !hwApiSource.includes("./student_strip.ts")) {
+      leakViolations += 1;
+      fail(`homework-api: ${stripFn} не вызывается или student_strip.ts не импортирован — слой 2 анти-утечки отвалился`);
+    }
+  }
+
+  if (leakViolations === 0) {
+    ok(`anti-leak pass (${studentChunks.length} student-хендлеров без tutor-only колонок, стрипы подключены)`);
+  }
+}
+
+// ─── 30. Mock-exam unit-тесты (чекер Ч1 + contact-type) — осиротевшие ────────
+//
+// Скрипты существовали с mock-exams v1, но НИКТО их не запускал: `npm test` =
+// smoke-check, а секции под них не было (найдено 2026-08-05 при аудите
+// тест-покрытия). 30+ векторов чекера Части 1 и контракт `detectContactType`
+// (регресс «@username = email» ловился только вручную) теперь в каждом прогоне.
+console.log("");
+console.log("30. Mock-exam unit-тесты (чекер Части 1 + contact-type)...");
+for (const scriptName of ["test-mockexam-checker.mjs", "test-mockexam-contact-type.mjs"]) {
+  const scriptPath = path.join(rootDir, "scripts", scriptName);
+  if (!fs.existsSync(scriptPath)) {
+    fail(`scripts/${scriptName} missing — юнит-набор пробников выпал из гейта`);
+  }
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd: rootDir,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    console.error(result.stdout ?? "");
+    console.error(result.stderr ?? "");
+    fail(`${scriptName} FAILED — see node:test output above`);
+  }
+}
+ok("mock-exam unit-тесты pass (checker Ч1 + detectContactType)");
 
 console.log("");
 console.log("=== Smoke Check Complete ===");

@@ -210,13 +210,19 @@ interface HeatmapRowProps {
   /**
    * «% самостоятельности» по работе (взвешенно по max_score задач). `null` =
    * нет данных → «—». `undefined`-случай не возникает: родитель нормализует.
-   * Колонка скрыта целиком в самостоятельной работе (`showIndependence=false`).
    */
   independencePct: number | null;
   /** true = агрегат содержит оценочные задачи (legacy) → показывать «≈». */
   independenceIsEstimate: boolean;
   aiHelpTotal: number;
+  /** false = per-task вторая строка с процентом не рисуется. */
   showIndependence: boolean;
+  /**
+   * Самостоятельная работа: в колонке «Самост.» вместо процента — пометка
+   * «без AI» (тихое скрытие колонки читалось как поломка, репорт Елены
+   * 2026-08-05). Скаляр — для shallow-сравнения React.memo.
+   */
+  independentWork: boolean;
   displayStatus: StudentDisplayStatus;
   /** Все задачи ученика подтверждены (tutor_reviewed_at). Запрос Елены 2026-06-18. */
   fullyReviewed: boolean;
@@ -239,6 +245,7 @@ const HeatmapRow = memo(function HeatmapRow({
   independenceIsEstimate,
   aiHelpTotal,
   showIndependence,
+  independentWork,
   displayStatus,
   fullyReviewed,
   onToggle,
@@ -363,8 +370,18 @@ const HeatmapRow = memo(function HeatmapRow({
       </td>
 
       {/* Самостоятельность (2026-07-25) — сразу после балла: репетитор читает
-          пару «что решил / насколько сам». Скрыта в самостоятельной работе. */}
-      {showIndependence && (
+          пару «что решил / насколько сам». В самостоятельной работе — пометка
+          «без AI» вместо процента (2026-08-05). */}
+      {independentWork ? (
+        <td className="border-b border-slate-200 px-2 py-2 align-middle text-right">
+          <span
+            title="В самостоятельной работе Сократ отключён — ученик решал полностью сам"
+            className="text-[11px] font-medium text-slate-500 whitespace-nowrap"
+          >
+            без AI
+          </span>
+        </td>
+      ) : (
         <td className="border-b border-slate-200 px-2 py-2 align-middle text-right text-sm">
           {(displayStatus === 'completed' || displayStatus === 'in_progress') &&
           independencePct != null ? (
@@ -475,10 +492,15 @@ export function HeatmapGrid({
 }: HeatmapGridProps) {
   const { tasks, assigned_students } = details;
   const { per_student } = results;
-  // Колонку «Сам-но» скрываем в самостоятельной работе: AI там выключен, метрика
-  // по определению 100% — показывать её значит утверждать, будто что-то измерили.
-  // `work_mode` отсутствует у старого edge → считаем обычной домашкой.
-  const showIndependence = results.work_mode !== 'independent';
+  // Самостоятельная работа: AI выключен СЕРВЕРОМ, метрика по определению 100% —
+  // процент не показываем. Но колонка ОСТАЁТСЯ с пометкой «без AI»: тихое
+  // скрытие читалось как поломка (репорт Елены 2026-08-05 «Самостоятельность
+  // сломалась» — а это была её первая самостоятельная). Решение владельца:
+  // видимая пометка вместо исчезновения. Вторая строка в ячейках задач при
+  // этом не рисуется («без AI» ×N в каждой строке — шум, смысл несёт итоговая
+  // колонка + легенда). `work_mode` отсутствует у старого edge → обычная домашка.
+  const isIndependentWork = results.work_mode === 'independent';
+  const showIndependence = !isIndependentWork;
 
   // Precompute lookups once per results/details update. These are shallow and
   // cheap but memoizing keeps HeatmapRow memo stable across re-renders.
@@ -556,7 +578,13 @@ export function HeatmapGrid({
         {/* Видимая легенда метрики (ревью-фикс P1, 2026-07-25): формула жила
             только в `title` заголовка колонки, а на планшете его не показать.
             Здесь же объясняется «—», иначе оно читается как «ноль». */}
-        {showIndependence ? (
+        {isIndependentWork ? (
+          <p className="text-xs leading-relaxed text-slate-500">
+            <b>Самост.</b> — в самостоятельной работе Сократ полностью отключён:
+            подсказки, разбор ошибок и чат недоступны, ученики решают целиком
+            сами. Поэтому процент не считается — в колонке стоит пометка «без AI».
+          </p>
+        ) : (
           <p className="text-xs leading-relaxed text-slate-500">
             <b>Самост.</b> — самостоятельность: 100% минус 10% за каждое обращение
             ученика к помощи AI (разбор ошибки, подсказка, ответ в обсуждении).
@@ -567,7 +595,7 @@ export function HeatmapGrid({
             цифра может быть завышена. <b>«—»</b> — ученик не отправлял ответов или
             задачи закрыты массово.
           </p>
-        ) : null}
+        )}
       </CardHeader>
       <CardContent className="p-0">
         {/* `touch-pan-x` allows native horizontal swipe on iOS Safari even
@@ -591,7 +619,7 @@ export function HeatmapGrid({
               ))}
               {/* homework-student-totals TASK-2 — Балл / [Сам-но] / Подсказки / Время */}
               <col style={{ width: '90px' }} />
-              {showIndependence && <col style={{ width: '72px' }} />}
+              <col style={{ width: '72px' }} />
               <col style={{ width: '60px' }} />
               <col style={{ width: '90px' }} />
             </colgroup>
@@ -626,15 +654,17 @@ export function HeatmapGrid({
                 >
                   Балл
                 </th>
-                {showIndependence && (
-                  <th
-                    scope="col"
-                    title={INDEPENDENCE_TOOLTIP}
-                    className="border-b border-slate-200 text-right px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
-                  >
-                    Самост.
-                  </th>
-                )}
+                <th
+                  scope="col"
+                  title={
+                    isIndependentWork
+                      ? 'В самостоятельной работе AI отключён — ученики решают полностью сами'
+                      : INDEPENDENCE_TOOLTIP
+                  }
+                  className="border-b border-slate-200 text-right px-2 py-2 text-[11px] font-semibold text-slate-600 uppercase tracking-wider"
+                >
+                  Самост.
+                </th>
                 <th
                   scope="col"
                   aria-label="Подсказки"
@@ -698,6 +728,7 @@ export function HeatmapGrid({
                     independenceIsEstimate={summary?.independence_is_estimate ?? false}
                     aiHelpTotal={summary?.ai_help_total ?? 0}
                     showIndependence={showIndependence}
+                    independentWork={isIndependentWork}
                     displayStatus={displayStatus}
                     fullyReviewed={fullyReviewed}
                     onToggle={onToggleExpand}

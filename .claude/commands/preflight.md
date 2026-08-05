@@ -1,6 +1,6 @@
 ---
 description: SokratAI pre-merge gate — RU-bypass grep, typecheck, smoke-check, build + QA/deploy reminders. Run before any commit or merge.
-allowed-tools: Bash(git diff:*), Bash(git status:*), Bash(npm run smoke-check), Bash(npm run typecheck), Bash(npm run build), Bash(npx tsc:*)
+allowed-tools: Bash(git diff:*), Bash(git status:*), Bash(npm run smoke-check), Bash(npm run typecheck), Bash(npm run build), Bash(npm run test:unit), Bash(npx tsc:*)
 ---
 
 You are running SokratAI's **pre-merge gate**. Execute the checks below **sequentially** (never run `build` and `smoke-check` at the same time — they collide in `dist/`). Then print a compact PASS/FAIL table and a single **GO / NO-GO** verdict. This is a read-only gate: do NOT commit, push, or deploy — the human decides.
@@ -21,6 +21,9 @@ Run `npm run smoke-check` (the CI quality gate: anti-leak whitelists, dual write
 
 ## 4 · Build — HARD GATE
 Run `npm run build` (compile sanity). **FAIL** on error. Run AFTER smoke-check, never concurrently.
+
+## 4b · Unit tests — HARD GATE
+Run `npm run test:unit` (vitest: цепочка балла, чекер Части 1, anti-leak стрипы, статистика ученика, зеркала шкал). **FAIL** on non-zero exit. До 2026-08-05 CI не запускал vitest вовсе (`npm test` = smoke-check) — не полагайся на «CI поймает».
 
 ## 5 · Constructor QA — REMINDER (conditional)
 If the diff touches `TutorHomeworkCreate.tsx`, `HWTasksSection.tsx`, `HWTaskCard.tsx`, or `HWMaterialsSection.tsx`: remind that rule 40's manual homework-constructor QA checklist must be run, and the commit message must carry `Manual QA: checklist в .claude/rules/40-homework-system.md пройден`.

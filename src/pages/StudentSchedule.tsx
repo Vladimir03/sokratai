@@ -9,6 +9,7 @@ import { listStudentLessons, type StudentLesson } from '@/lib/studentScheduleApi
 import { LessonGroupHeader } from '@/components/student/schedule/LessonGroupHeader';
 import { LessonFeedItem } from '@/components/student/schedule/LessonFeedItem';
 import { InAppBrowserNudge } from '@/components/InAppBrowserNudge';
+import { WrongAccountNudge } from '@/components/student/WrongAccountNudge';
 
 type GroupKey = 'today' | 'upcoming' | 'past';
 
@@ -68,14 +69,20 @@ const StudentSchedule = () => {
               {error && <p className="text-destructive">Не удалось загрузить занятия</p>}
 
               {!isLoading && !error && !hasLessons && (
-                <div className="flex flex-col items-center gap-3 py-16 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
-                    <Calendar className="h-7 w-7 text-muted-foreground" />
+                <>
+                  {/* Свежий аккаунт + пустое расписание = возможно, ученик
+                      вошёл не в тот аккаунт (OAuth-ловушка, инцидент Никиты
+                      2026-08-05). Компонент сам гейтится возрастом аккаунта. */}
+                  <WrongAccountNudge />
+                  <div className="flex flex-col items-center gap-3 py-16 text-center">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+                      <Calendar className="h-7 w-7 text-muted-foreground" />
+                    </div>
+                    <p className="max-w-xs text-sm text-muted-foreground">
+                      Занятия появятся, когда репетитор добавит материалы
+                    </p>
                   </div>
-                  <p className="max-w-xs text-sm text-muted-foreground">
-                    Занятия появятся, когда репетитор добавит материалы
-                  </p>
-                </div>
+                </>
               )}
 
               {!isLoading && !error && hasLessons && (

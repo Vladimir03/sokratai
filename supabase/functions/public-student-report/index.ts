@@ -10,9 +10,21 @@
 //   - Выписка ledger: только активные записи (не reversed, не offsetting), БЕЗ note
 //     (заметки тутора приватны), поля {occurred_on, kind, source_kind, amount}.
 //   - Тутор-карточка: только name (rule 96 #10 — никаких telegram/booking/email).
+//
+// Чистая часть (parseRoute/slug-валидация + весь PUBLIC REMAP) живёт в
+// ./report_shape.ts и покрыта vitest'ом; здесь остаётся только I/O (db/Deno.serve).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { buildStudentProgress } from "../_shared/student-progress-build.ts";
+import {
+  buildPublicReportBody,
+  type LedgerEntryRow,
+  parseRoute,
+  REPORT_SLUG_RE,
+  resolveReportPeriod,
+  shouldShowDebtLine,
+  STATEMENT_LIMIT,
+} from "./report_shape.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -23,10 +35,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
-const REPORT_SLUG_RE = /^[a-z0-9]{8,64}$/i; // legacy 8-символьные + новые 24-символьные
-const STATEMENT_LIMIT = 60;
-const WORKS_LIMIT = 10;
-
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -36,17 +44,6 @@ function jsonResponse(body: unknown, status = 200): Response {
       "Cache-Control": "no-store, must-revalidate",
     },
   });
-}
-
-function parseRoute(req: Request): { slug: string | null } {
-  const url = new URL(req.url);
-  const parts = url.pathname.split("/").filter(Boolean);
-  const functionIdx = parts.indexOf("public-student-report");
-  const routeParts = functionIdx >= 0 ? parts.slice(functionIdx + 1) : parts;
-  if (routeParts.length === 2 && routeParts[0] === "report") {
-    return { slug: routeParts[1] };
-  }
-  return { slug: null };
 }
 
 Deno.serve(async (req) => {
@@ -108,9 +105,7 @@ Deno.serve(async (req) => {
 
     // Период отчёта (ОС Елены): конкретные даты-снимок хранятся на ссылке.
     // period_kind='all' → даты NULL → all-time (как было). Иначе фильтруем агрегат.
-    const periodStart = (link.period_start as string | null) ?? null;
-    const periodEnd = (link.period_end as string | null) ?? null;
-    const period = (periodStart || periodEnd) ? { start: periodStart, end: periodEnd } : null;
+    const { periodStart, periodEnd, period } = resolveReportPeriod(link);
 
     // Прогресс — SHARED builder (single source с тутор-вью R2), period-scoped.
     const progress = await buildStudentProgress(
@@ -127,9 +122,8 @@ Deno.serve(async (req) => {
     // Оплата (ОС Елены): тренер может ПОЛНОСТЬЮ скрыть строку баланса (часть оплат вне
     // Сократа). show_debt_line=false → НЕ грузим ledger и НЕ кладём ни баланс, ни выписку.
     // Выписка period-scoped (операции за период); баланс — текущий (ответ «должен/ок сейчас»).
-    const showDebt = link.show_debt_line !== false;
-    let balance: number | null = null;
-    let statement: { occurred_on: unknown; kind: unknown; source_kind: unknown; amount: number }[] = [];
+    const showDebt = shouldShowDebtLine(link);
+    let ledgerEntries: LedgerEntryRow[] | null = null;
     if (showDebt) {
       let ledgerQuery = db
         .from("tutor_ledger_entries")
@@ -147,47 +141,8 @@ Deno.serve(async (req) => {
         console.error("student_report_ledger_load_failed", ledgerErr.message);
         return jsonResponse({ error: "Failed to load report" }, 500);
       }
-      balance = Number(ts.balance ?? 0);
-      statement = (entries ?? []).map((e) => ({
-        occurred_on: e.occurred_on,
-        kind: e.kind,
-        source_kind: e.source_kind,
-        amount: Number(e.amount ?? 0),
-      }));
+      ledgerEntries = entries ?? [];
     }
-
-    // «Что требует внимания» — авто-факты (счётчики, anti-leak-safe). Тон/нажим тренер
-    // добавляет словами в комментарий (ОС Елены, Q3). Здесь — только факты.
-    const s = progress.summary;
-    const hwTotal = Number(s.hw_total ?? 0);
-    const hwDone = Number(s.hw_done ?? 0);
-    const overdue = Number(s.hw_overdue ?? 0);
-    const notDone = Math.max(0, hwTotal - hwDone);
-    const attention: string[] = [];
-    // overdue (срок прошёл + не завершено) ⊆ notDone → одна строка, без двойного счёта.
-    if (notDone > 0) {
-      const overduePart = overdue > 0 ? ` (из них просрочено ${overdue})` : "";
-      attention.push(`Не выполнено ${notDone} из ${hwTotal} ДЗ${overduePart} — напомните`);
-    }
-    if (s.hw_success_pct != null && s.hw_success_pct < 60 && hwDone > 0) {
-      attention.push(`Невысокий процент верных ответов: ${s.hw_success_pct}%`);
-    }
-
-    // PUBLIC REMAP — наружу только безопасные поля (никаких uuid/avatar/comments).
-    const works = (progress.works as Record<string, unknown>[])
-      .slice(0, WORKS_LIMIT)
-      .map((w) => ({
-        kind: w.kind,
-        title: w.title,
-        subject: w.subject,
-        date: w.date,
-        score_kind: w.score_kind,
-        raw: w.raw,
-        raw_max: w.raw_max,
-        cells: w.cells,
-        reviewed: w.reviewed,
-        status: w.status,
-      }));
 
     // Server-side telemetry, PII-free. slug = bearer-token → НЕ логируем его (даже в логах).
     console.warn(JSON.stringify({
@@ -195,32 +150,15 @@ Deno.serve(async (req) => {
       timestamp: new Date().toISOString(),
     }));
 
-    return jsonResponse({
-      student: {
-        name: progress.student.name,
-        track: progress.student.track,
-        grade_class: progress.student.grade_class,
-        subject: (ts.subject as string | null) ?? null,
-      },
-      tutor: { name: (tutor.name as string | null) ?? null },
-      target: progress.target,
-      summary: progress.summary,
-      works,
-      // Конфиг отчёта (ОС Елены): вердикт-чип, комментарий тренера, метрики-галочки, период.
-      verdict: (link.verdict as string | null) ?? null,
-      tutor_comment: (link.tutor_comment as string | null) ?? null,
-      metrics: {
-        mock_score: link.show_mock_score !== false,
-        hw_done: link.show_hw_done !== false,
-        hw_success: link.show_hw_success !== false,
-      },
-      attention,
-      period: { kind: (link.period_kind as string) ?? "all", start: periodStart, end: periodEnd },
-      show_debt_line: showDebt,
-      balance,
-      statement,
-      generated_at: new Date().toISOString(),
-    });
+    // PUBLIC REMAP (attention/works cap/выписка/метрики) — чистый слой ./report_shape.ts.
+    return jsonResponse(buildPublicReportBody({
+      progress,
+      link,
+      studentSubject: ts.subject,
+      studentBalance: ts.balance,
+      tutorName: tutor.name,
+      ledgerEntries,
+    }));
   } catch (e) {
     console.error("student_report_unhandled", e instanceof Error ? e.message : String(e));
     return jsonResponse({ error: "Failed to load report" }, 500);

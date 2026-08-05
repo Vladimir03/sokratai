@@ -38,8 +38,11 @@ jobs:
       - name: Smoke check
         run: npm run smoke-check
 
-      - name: Test
-        run: npm run test
+      # `npm run test` = тот же smoke-check (шаг выше) — прежний шаг «Test»
+      # гонял его ВТОРОЙ раз, а vitest не гонял никто: наборы «цепочка балла»
+      # и «чекер Части 1» никогда не исполнялись автоматически (найдено 2026-08-05).
+      - name: Unit tests (vitest)
+        run: npm run test:unit
 
       - name: Typecheck
         run: npm run typecheck
