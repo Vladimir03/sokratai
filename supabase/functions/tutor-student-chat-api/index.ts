@@ -83,7 +83,12 @@ const NOTIFY_PREVIEW_CHARS = 80;
 // @СократAI: детект БЕЗ lookbehind (единообразно с фронтом, rule 80).
 const MENTION_RE = /@\s?(сократ\s?ai|sokrat\s?ai)/iu;
 const AI_CONTEXT_MESSAGES = 15;
-const AI_MAX_IMAGES = 2;
+// Фото: из самого сообщения с упоминанием — до 2; остальное добираем из истории
+// (типовой кейс: условие прислал репетитор, решение — ученик, а упоминание идёт
+// третьим сообщением). Кэша у gateway нет — картинки уезжают base64 в КАЖДОМ
+// вызове, поэтому общий кап держим низким.
+const AI_MAX_TRIGGER_IMAGES = 2;
+const AI_MAX_IMAGES = 3;
 const TUTOR_CHAT_AI_DAILY_CAP = 30; // rule 99: свой per-tutor cap, не ученическая квота
 
 // ─── CORS (mirror tutor-progress-api) ────────────────────────────────────────
@@ -1643,6 +1648,25 @@ async function handleInternalNotify(
 
 // ─── Internal: POST /internal/ai-reply (@СократAI) ───────────────────────────
 
+interface ChatAiHistoryRow {
+  id: string;
+  sender_role: string;
+  author_user_id: string | null;
+  content: string;
+  attachment_url: string | null;
+  created_at: string;
+}
+
+/** Дописывает картинку к сообщению, сохраняя его текст первым part'ом. */
+function attachImagePart(message: LovableMessage, part: LovableImagePart): void {
+  if (typeof message.content === "string") {
+    const textPart: LovableTextPart = { type: "text", text: message.content };
+    message.content = [textPart, part];
+    return;
+  }
+  message.content = [...message.content, part];
+}
+
 function buildChatAiSystemPrompt(params: {
   kind: "direct" | "group";
   tutorName: string;
@@ -1662,6 +1686,7 @@ function buildChatAiSystemPrompt(params: {
     "Ты — Сократ AI, помощник в общем чате репетитора и ученика на платформе «Сократ AI».",
     whoLine,
     "Сообщения в истории помечены, кто их написал.",
+    "К сообщениям могут быть приложены фото — картинка идёт сразу за текстом СВОЕГО сообщения (условие обычно присылает репетитор, решение — ученик).",
     "",
     "Правила:",
     "- Отвечай по-русски, по существу и достаточно кратко (обычно до 150 слов).",
@@ -1787,14 +1812,12 @@ async function handleInternalAiReply(
   // ── Контекст: последние N сообщений (ASC) с пометкой автора ──
   const { data: historyRows } = await db
     .from("tutor_student_chat_messages")
-    .select("sender_role, author_user_id, content, created_at")
+    .select("id, sender_role, author_user_id, content, attachment_url, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(AI_CONTEXT_MESSAGES);
-  const history = ((historyRows ?? []) as Array<
-    { sender_role: string; author_user_id: string | null; content: string; created_at: string }
-  >).reverse();
+  const history = ((historyRows ?? []) as ChatAiHistoryRow[]).reverse();
 
   // Карта uid → имя (в группе различает учеников; в 1:1 — один ученик).
   const tutorName = tutor.name?.trim() || "Репетитор";
@@ -1842,45 +1865,74 @@ async function handleInternalAiReply(
       : { kind: "direct", tutorName, studentName },
   );
   const aiMessages: LovableMessage[] = [{ role: "system", content: systemPrompt }];
+  // id строки → индекс её сообщения в aiMessages: фото привязывается к СВОЕМУ
+  // автору, а не сваливается в хвост (иначе решение ученика читалось бы как
+  // приложенное к сообщению репетитора).
+  const msgIndexByRowId = new Map<string, number>();
   for (const h of history) {
-    if (!h.content?.trim()) continue;
+    const text = h.content?.trim() ?? "";
+    const refs = parseAttachmentUrls(h.attachment_url);
+    // Сообщение без подписи, но с фото, раньше выпадало из контекста ЦЕЛИКОМ —
+    // именно так присланная тетрадь становилась невидимой для AI.
+    if (!text && refs.length === 0) continue;
+    const body = text || (refs.length > 1 ? `[${refs.length} фото]` : "[фото]");
     if (h.sender_role === "assistant") {
-      aiMessages.push({ role: "assistant", content: h.content });
+      aiMessages.push({ role: "assistant", content: body });
     } else if (h.sender_role === "tutor") {
-      aiMessages.push({ role: "user", content: `Репетитор ${tutorName}: ${h.content}` });
+      aiMessages.push({ role: "user", content: `Репетитор ${tutorName}: ${body}` });
     } else {
       const name = (h.author_user_id ? nameByUid.get(h.author_user_id) : null) ??
         (isGroup ? null : studentName);
       const label = name ? `Ученик ${name}` : "Ученик";
-      aiMessages.push({ role: "user", content: `${label}: ${h.content}` });
+      aiMessages.push({ role: "user", content: `${label}: ${body}` });
+    }
+    msgIndexByRowId.set(h.id, aiMessages.length - 1);
+  }
+
+  // ── Фото: триггерное сообщение + добор из истории (условие + решение) ──
+  // Раньше уезжали ТОЛЬКО картинки триггерного сообщения, поэтому «@СократAI
+  // посмотри» под уже присланной тетрадью уходило вслепую.
+  const pickedRefs: Array<{ ref: string; rowId: string | null }> = [];
+  const seenRefs = new Set<string>();
+  const pickRef = (ref: string, rowId: string | null): void => {
+    if (pickedRefs.length >= AI_MAX_IMAGES || seenRefs.has(ref)) return;
+    seenRefs.add(ref);
+    pickedRefs.push({ ref, rowId });
+  };
+
+  // 1) Триггер — приоритетно. Строку берём из истории (там же её aiMessages-индекс);
+  //    fallback на trigger.attachment_url, если сообщение уже вышло из окна.
+  const triggerRow = history.find((h) => h.id === messageId) ?? null;
+  const triggerRefs = parseAttachmentUrls(
+    triggerRow?.attachment_url ?? (trigger.attachment_url as string | null),
+  ).slice(0, AI_MAX_TRIGGER_IMAGES);
+  for (const ref of triggerRefs) pickRef(ref, triggerRow?.id ?? null);
+
+  // 2) Добор из истории — от свежих к старым, пока не упрёмся в общий кап.
+  for (let i = history.length - 1; i >= 0 && pickedRefs.length < AI_MAX_IMAGES; i -= 1) {
+    const row = history[i];
+    if (row.id === messageId) continue;
+    for (const ref of parseAttachmentUrls(row.attachment_url)) {
+      pickRef(ref, row.id);
+      if (pickedRefs.length >= AI_MAX_IMAGES) break;
     }
   }
 
-  // Фото из ТРИГГЕРНОГО сообщения (≤2): signed URL → base64 inline.
-  const triggerRefs = parseAttachmentUrls(trigger.attachment_url as string | null)
-    .slice(0, AI_MAX_IMAGES);
-  if (triggerRefs.length > 0 && aiMessages.length > 1) {
-    const imageParts: LovableImagePart[] = [];
-    for (const ref of triggerRefs) {
-      const path = ref.replace(/^storage:\/\/tutor-chat-uploads\//, "");
-      if (path === ref) continue; // не наш bucket — пропускаем
-      try {
-        const { data: signed } = await db.storage
-          .from("tutor-chat-uploads")
-          .createSignedUrl(path, 600);
-        const inlined = await inlineImageUrlToBase64(signed?.signedUrl, "tsc_ai_inline");
-        if (inlined) imageParts.push({ type: "image_url", image_url: { url: inlined } });
-      } catch (err) {
-        console.warn("tsc_ai_image_inline_failed", { error: String(err) });
-      }
-    }
-    if (imageParts.length > 0) {
-      const last = aiMessages[aiMessages.length - 1];
-      const textPart: LovableTextPart = {
-        type: "text",
-        text: typeof last.content === "string" ? last.content : "",
-      };
-      last.content = [textPart, ...imageParts];
+  for (const { ref, rowId } of pickedRefs) {
+    const path = ref.replace(/^storage:\/\/tutor-chat-uploads\//, "");
+    if (path === ref) continue; // не наш bucket — пропускаем
+    try {
+      const { data: signed } = await db.storage
+        .from("tutor-chat-uploads")
+        .createSignedUrl(path, 600);
+      const inlined = await inlineImageUrlToBase64(signed?.signedUrl, "tsc_ai_inline");
+      if (!inlined) continue;
+      const targetIndex = rowId ? msgIndexByRowId.get(rowId) : aiMessages.length - 1;
+      // Индекс 0 — system-промпт: туда картинку не вешаем никогда.
+      if (typeof targetIndex !== "number" || targetIndex < 1) continue;
+      attachImagePart(aiMessages[targetIndex], { type: "image_url", image_url: { url: inlined } });
+    } catch (err) {
+      console.warn("tsc_ai_image_inline_failed", { error: String(err) });
     }
   }
 
