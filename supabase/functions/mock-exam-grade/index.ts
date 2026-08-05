@@ -65,7 +65,7 @@ import {
   type PushPayload,
   type PushSubscriptionData,
 } from "../_shared/push-sender.ts";
-import { makeUsageLogger, type TokenUsage } from "../_shared/token-usage.ts";
+import { makeUsageLogger, pickCachedTokens, type TokenUsage } from "../_shared/token-usage.ts";
 import {
   classifyAiGatewayError,
   logAiGatewayError,
@@ -499,6 +499,7 @@ async function callLovableJson(
                 prompt_tokens: typeof (usageRec as Record<string, unknown>).prompt_tokens === "number" ? (usageRec as Record<string, number>).prompt_tokens : null,
                 completion_tokens: typeof (usageRec as Record<string, unknown>).completion_tokens === "number" ? (usageRec as Record<string, number>).completion_tokens : null,
                 total_tokens: typeof (usageRec as Record<string, unknown>).total_tokens === "number" ? (usageRec as Record<string, number>).total_tokens : null,
+                cached_tokens: pickCachedTokens(usageRec),
                 model: typeof modelEcho === "string" ? modelEcho : (options.modelOverride ?? null),
               }
               : null,

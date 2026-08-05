@@ -16,6 +16,10 @@
 
 import { rewriteToDirect } from "./proxy-url.ts";
 import { classifyAiGatewayError, logAiGatewayError } from "./ai-gateway-errors.ts";
+// Кэш-хит вытаскиваем ОДНИМ хелпером на все пути: форм у поля четыре (см. его
+// доки), и третья копия этой логики гарантированно разъехалась бы — а разъезд
+// здесь молча превращает замер кэша в вечные NULL.
+import { pickCachedTokens } from "./token-usage.ts";
 
 // ─── Types (wire-compatible with homework-api/ai_shared.ts) ──────────────────
 
@@ -49,6 +53,8 @@ export interface LovableUsage {
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
   total_tokens?: number | null;
+  /** Кэш-хит провайдера; `null` = шлюз поля не прислал, `0` = кэш не сработал. */
+  cached_tokens?: number | null;
   model?: string | null;
 }
 
@@ -82,6 +88,7 @@ function emitUsage(payload: unknown, onUsage?: (usage: LovableUsage | null) => v
           prompt_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : null,
           completion_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : null,
           total_tokens: typeof usage.total_tokens === "number" ? usage.total_tokens : null,
+          cached_tokens: pickCachedTokens(usage),
           model,
         }
         : null,

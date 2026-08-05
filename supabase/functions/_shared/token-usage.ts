@@ -43,8 +43,47 @@ export interface TokenUsage {
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
   total_tokens?: number | null;
+  /**
+   * P0 из `docs/delivery/features/ai-request-optimization/research.md`: сколько
+   * prompt-токенов провайдер зачёл как кэш-хит.
+   *
+   * ⚠️ `null` ≠ `0`. `null` — шлюз поля не прислал (мы НЕ ЗНАЕМ, работает ли
+   * кэш); `0` — прислал и кэш не сработал. Слить их = потерять весь смысл
+   * замера: по нулям нельзя отличить «кэша нет» от «телеметрии нет».
+   */
+  cached_tokens?: number | null;
   /** Model string echoed by the gateway (`payload.model`), if available. */
   model?: string | null;
+}
+
+/**
+ * Достаёт кэш-хит из `payload.usage` любой известной формы: OpenAI
+ * (`prompt_tokens_details.cached_tokens`), Gemini native
+ * (`cachedContentTokenCount`), плоский `cached_tokens`, Anthropic-стиль
+ * (`cache_read_input_tokens`). Шлюз Lovable — посредник, и какую форму он
+ * пробрасывает, неизвестно до первого живого ответа, поэтому проверяем все.
+ * Ничего не нашли → `null` (см. контракт `cached_tokens` выше).
+ */
+export function pickCachedTokens(usage: unknown): number | null {
+  if (typeof usage !== "object" || usage === null) return null;
+  const rec = usage as Record<string, unknown>;
+  const details = rec.prompt_tokens_details;
+  if (typeof details === "object" && details !== null) {
+    const nested = (details as Record<string, unknown>).cached_tokens;
+    if (typeof nested === "number" && Number.isFinite(nested)) return nested;
+  }
+  for (
+    const key of [
+      "cached_tokens",
+      "cachedContentTokenCount",
+      "cached_content_token_count",
+      "cache_read_input_tokens",
+    ]
+  ) {
+    const value = rec[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+  }
+  return null;
 }
 
 /**
@@ -99,12 +138,23 @@ export async function logTokenUsage(
       prompt_tokens: numOrNull(usage?.prompt_tokens),
       completion_tokens: numOrNull(usage?.completion_tokens),
       total_tokens: numOrNull(usage?.total_tokens),
+      cached_tokens: numOrNull(usage?.cached_tokens),
       source: input.source,
       assignment_id: input.assignmentId ?? null,
       audio_seconds: numOrNull(input.audioSeconds),
     };
     const res = await admin.from("token_usage_logs").insert(row);
-    const err = (res as { error?: { code?: string } } | null)?.error;
+    let err = (res as { error?: { code?: string } } | null)?.error;
+    if (err && "cached_tokens" in row) {
+      // Deploy-skew: edge выкладывается ОТДЕЛЬНО от миграций (AGENTS.md), и
+      // порядок не гарантирован. Без этого ретрая функция, уехавшая раньше
+      // миграции `..._token_usage_logs_cached_tokens`, роняла бы ВСЮ строку —
+      // то есть мы потеряли бы не новое поле, а всю телеметрию токенов до
+      // применения миграции. Один ретрай без нового поля, дальше — как раньше.
+      delete row.cached_tokens;
+      const retry = await admin.from("token_usage_logs").insert(row);
+      err = (retry as { error?: { code?: string } } | null)?.error;
+    }
     if (err) {
       // PII-free: log only the source + PostgREST error code, never row content.
       console.warn("token_usage_log_insert_failed", {

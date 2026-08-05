@@ -104,6 +104,7 @@ import { buildPedagogyContextBlock, loadLearningContext } from "../_shared/learn
 // обсуждении/bootstrap — иначе AI обсуждает тест, не видя вариантов.
 import { normalizeOptionsJson, renderOptionsForPrompt } from "../_shared/task-options.ts";
 import { logAiGatewayError } from "../_shared/ai-gateway-errors.ts";
+import { logTokenUsage, pickCachedTokens } from "../_shared/token-usage.ts";
 const ALLOWED_IMAGE_DOMAINS = buildAllowedSignedUrlPrefixes([
   Deno.env.get("SUPABASE_URL") ?? "",
   SUPABASE_PROXY_URL,
@@ -2170,15 +2171,23 @@ async function processAIRequest(
         const tokenUsageSource = responseProfile === "telegram_compact"
           ? "telegram_chat"
           : "chat_discussion";
-        await adminSupabase.from("token_usage_logs").insert({
-          user_id: userId,
-          chat_id: chatId || null,
-          model: modelId,  // Динамически используемая модель
-          prompt_tokens: usageData.prompt_tokens,
-          completion_tokens: usageData.completion_tokens,
-          total_tokens: usageData.total_tokens,
+        // Через shared-хелпер, а не прямым insert'ом: у него есть ретрай без
+        // `cached_tokens` на случай, когда edge уехал раньше миграции — иначе
+        // САМАЯ дорогая строка телеметрии (≈треть всех prompt-токенов) тихо
+        // пропала бы до её применения. Прямой insert тут ещё и не проверял
+        // `.error`, т.е. сбой был бы невидим.
+        await logTokenUsage(adminSupabase, {
+          userId,
           source: tokenUsageSource,
-          assignment_id: guidedHomeworkAssignmentId ?? null,
+          usage: {
+            prompt_tokens: usageData.prompt_tokens,
+            completion_tokens: usageData.completion_tokens,
+            total_tokens: usageData.total_tokens,
+            cached_tokens: pickCachedTokens(usageData),
+          },
+          model: modelId, // Динамически используемая модель
+          chatId: chatId || null,
+          assignmentId: guidedHomeworkAssignmentId ?? null,
         });
       }
     } catch (e) {
