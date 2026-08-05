@@ -3606,6 +3606,7 @@ export type Database = {
         Row: {
           assignment_id: string | null
           audio_seconds: number | null
+          cached_tokens: number | null
           chat_id: string | null
           completion_tokens: number | null
           created_at: string
@@ -3619,6 +3620,7 @@ export type Database = {
         Insert: {
           assignment_id?: string | null
           audio_seconds?: number | null
+          cached_tokens?: number | null
           chat_id?: string | null
           completion_tokens?: number | null
           created_at?: string
@@ -3632,6 +3634,7 @@ export type Database = {
         Update: {
           assignment_id?: string | null
           audio_seconds?: number | null
+          cached_tokens?: number | null
           chat_id?: string | null
           completion_tokens?: number | null
           created_at?: string
