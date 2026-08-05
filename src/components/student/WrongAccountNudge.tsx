@@ -48,11 +48,23 @@ export function WrongAccountNudge() {
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
+    // Ревью 5.6 P1 (2026-08-05): signOut() возвращает { error }, а не бросает.
+    // Под RU DPI серверный вызов может упасть — тогда локальная сессия осталась
+    // бы жива и /login тут же вернул бы ученика на то же пустое расписание.
+    // Фолбэк scope:'local' чистит сессию без сети и не может не сработать.
     try {
-      await supabase.auth.signOut();
-    } finally {
-      navigate('/login', { replace: true });
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        await supabase.auth.signOut({ scope: 'local' });
+      }
+    } catch {
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {
+        // ignore — даже при сбое стораджа уходим на /login, дальше решает гард
+      }
     }
+    navigate('/login', { replace: true });
   };
 
   return (

@@ -1285,12 +1285,17 @@ interface TaskStateScoreFields {
   // не опасно (fail-safe: undefined → прежнее поведение), но тогда балл на
   // этой поверхности будет расходиться с остальными.
   best_earned_score: number | null;
-  ai_help_events: number | null;
   status: string | null;
   ai_score: number | null;
   tutor_score_override: number | null;
-  hint_count: number | null;
-  attempts: number | null;
+  // Счётчики метрики самостоятельности ОПЦИОНАЛЬНЫ: handleListAssignments их
+  // не селектит (см. комментарий у SELECT'а), handleGetResults — селектит.
+  // Не делать обязательными — это была тип-ложь (поля объявлены, а в rows
+  // list-хендлера их не было; вскрыто ревью 5.6, 2026-08-05).
+  ai_help_events?: number | null;
+  hint_count?: number | null;
+  wrong_answer_count?: number | null;
+  attempts?: number | null;
 }
 
 // computeFinalScore moved to `../_shared/score-compute.ts` (student-progress R2)
@@ -1464,7 +1469,11 @@ async function handleListAssignments(
       // contribute 0/max to the average, matching handleGetResults behaviour).
       const { data: taskStates } = await db
         .from("homework_tutor_task_states")
-        .select("thread_id, task_id, earned_score, best_earned_score, ai_help_events, hint_count, wrong_answer_count, attempts, ai_score, tutor_score_override, status, tutor_reviewed_at, tutor_force_completed_at")
+        // Метрика самостоятельности тут НЕ считается — счётчики (ai_help_events,
+        // hint_count, wrong_answer_count, attempts) намеренно не селектятся:
+        // список ДЗ тянет task_states по ВСЕЙ истории без пагинации, лишние
+        // ключи = мегабайты на большом классе (ревью 5.6 P1, 2026-08-05).
+        .select("thread_id, task_id, earned_score, best_earned_score, ai_score, tutor_score_override, status, tutor_reviewed_at, tutor_force_completed_at")
         .in("thread_id", threadIds);
 
       // Fetch max_score from tasks for guided assignments

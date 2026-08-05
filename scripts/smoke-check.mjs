@@ -1194,15 +1194,27 @@ for (const relPath of scoreSelectFiles) {
     continue;
   }
   const source = fs.readFileSync(fullPath, "utf8");
-  // Ищем строковые литералы column-list'ов: они всегда содержат earned_score и
-  // перечисление через запятую. UPDATE-вызовы сюда не попадают (там объект, не строка).
-  const literals = source.match(/"[^"\n]*\bearned_score\b[^"\n]*"/g) ?? [];
+  // Ищем строковые литералы column-list'ов ВО ВСЕХ ТРЁХ формах — "..." / '...' /
+  // `...` (ревью 5.6, 2026-08-05: прежний скан видел только однострочные двойные
+  // кавычки, и THREAD_SELECT — template literal — проходил мимо гарда). Триггер —
+  // earned_score ИЛИ ai_help_events: список «только с ai_help_events» без балла
+  // тоже обязан нести входы legacy-оценки. UPDATE-вызовы сюда не попадают
+  // (там объект, не строка).
+  const literals = [
+    ...(source.match(/"[^"\n]*\b(?:earned_score|ai_help_events)\b[^"\n]*"/g) ?? []),
+    ...(source.match(/'[^'\n]*\b(?:earned_score|ai_help_events)\b[^'\n]*'/g) ?? []),
+    ...(source.match(/`[^`]*\b(?:earned_score|ai_help_events)\b[^`]*`/g) ?? []),
+  ];
   for (const literal of literals) {
     const columns = literal.slice(1, -1);
     // Только column-list'ы (перечисление), а не одиночные имена в других контекстах.
     if (!columns.includes(",")) continue;
+    // Shape-фильтр: column-list состоит из идентификаторов/запятых/скобок.
+    // Отсекает случайные span'ы «от бэктика до бэктика» через код и русские
+    // комментарии (\w без флага u = только ASCII — кириллица не проходит).
+    if (!/^[\w\s,():.!*-]+$/.test(columns)) continue;
     if (SCORE_SELECT_ALLOWLIST.includes(columns.trim())) continue;
-    if (!columns.includes("best_earned_score")) {
+    if (columns.includes("earned_score") && !columns.includes("best_earned_score")) {
       scoreSelectViolations += 1;
       fail(
         `${relPath}: column-list с \`earned_score\` без \`best_earned_score\` → ` +
@@ -1215,7 +1227,9 @@ for (const relPath of scoreSelectFiles) {
     // список, тянущий ai_help_events (кормит «% самостоятельности»), ОБЯЗАН
     // тянуть и входы legacy-оценки «≈» (resolveIndependencePct): hint_count,
     // wrong_answer_count, attempts. Потеря любого из них молча превращает
-    // «≈60%» старых работ в «—».
+    // «≈60%» старых работ в «—». Обратное НЕ требуется: список без
+    // ai_help_events не обязан тянуть счётчики (handleListAssignments метрику
+    // не считает — лишние ключи там стоили бы мегабайты, ревью 5.6 P1).
     if (columns.includes("ai_help_events")) {
       for (const dep of ["hint_count", "wrong_answer_count", "attempts"]) {
         if (!columns.includes(dep)) {
@@ -1559,18 +1573,26 @@ console.log("29. Anti-leak: student-SELECT'ы homework-api...");
   const hwApiSource = fs.readFileSync(hwApiPath, "utf8");
 
   // Тела функций: от `async function handleXxx(` до следующего `async function `.
+  // Паттерн — `Student` В ЛЮБОМ месте имени (ревью 5.6: префиксный
+  // /handle(Get)?Student/ пропустил бы будущий handleFooStudentBar), но БЕЗ
+  // `Tutor`: handleGetTutorStudentThread и подобные — тьюторские поверхности,
+  // репетитору эталон положен.
   const chunks = hwApiSource.split(/(?=^async function handle)/m);
-  const studentChunks = chunks.filter((c) => /^async function handle(Get)?Student/.test(c));
+  const studentChunks = chunks.filter((c) => /^async function handle(?!\w*Tutor)\w*Student/.test(c));
   if (studentChunks.length < 3) {
     // Гард-на-гард (урок §27): сканер, который никого не нашёл, — зелёная ложь.
     fail(
       `homework-api: найдено только ${studentChunks.length} student-хендлеров ` +
-        `(ожидалось ≥3) — паттерн /handle(Get)?Student/ устарел, §29 ослеп`,
+        `(ожидалось ≥3) — паттерн /handle\\w*Student/ устарел, §29 ослеп`,
     );
   }
 
+  // Известные ограничения сканера (осознанные, ревью 5.6): helper-функции вне
+  // student-чанков и `.select(КОНСТАНТА)` не сканируются ЗДЕСЬ — константы-листы
+  // (THREAD_SELECT и т.п.) ловит §22 (все формы литералов), применение стрипов
+  // к треду держат unit-тесты student_strip.test.ts + проверка call-site ниже.
   const TUTOR_ONLY_COLUMNS =
-    /\b(solution_text|solution_image_urls|rubric_[a-z_]+|ai_reference_solution|grading_criteria_json|ai_score_comment|correct_answer|ocr_text|tutor_[a-z_]+_by)\b/;
+    /\b(solution_text|solution_image_urls|rubric_[a-z_]+|ai_reference_solution|grading_criteria_json|ai_score_comment|correct_answer|ocr_text|student_opened_at|tutor_[a-z_]+_by)\b/;
 
   // Исключение: server-side грейдинг ЧИТАЕТ эталон (submit-хендлеры), но не
   // отдаёт его в ответ. Такой SELECT помечается на СВОЕЙ строке маркером
@@ -1579,11 +1601,12 @@ console.log("29. Anti-leak: student-SELECT'ы homework-api...");
   let leakViolations = 0;
   for (const chunk of studentChunks) {
     const fnName = chunk.match(/^async function (\w+)/)?.[1] ?? "<unknown>";
-    // Строковые литералы column-list'ов внутри .select(...): двойные кавычки.
-    const selectRe = /\.select\(\s*\n?\s*"([^"]*)"/g;
+    // Строковые литералы column-list'ов внутри .select(...): все три формы
+    // кавычек (ревью 5.6: скан только "..." пропускал бы '...' и `...`).
+    const selectRe = /\.select\(\s*\n?\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
     let m;
     while ((m = selectRe.exec(chunk)) !== null) {
-      const columns = m[1];
+      const columns = m[1] ?? m[2] ?? m[3] ?? "";
       const hit = columns.match(TUTOR_ONLY_COLUMNS);
       if (!hit) continue;
       // Маркер ищем на строке литерала и на строке перед ней.
