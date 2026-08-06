@@ -7,6 +7,7 @@ import { Tag, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { createTutorGroup } from '@/lib/tutors';
 import { invalidateGroupEditorCaches } from '@/components/tutor/groups/groupCaches';
+import { ColorSwatchPicker } from '@/components/tutor/ColorSwatchPicker';
 import { cn } from '@/lib/utils';
 
 interface CreateGroupModalProps {
@@ -21,6 +22,7 @@ export function CreateGroupModal({ initialType, onClose, onCreated }: CreateGrou
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [type, setType] = useState<'group' | 'tag'>(initialType);
+  const [color, setColor] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
   const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -51,6 +53,7 @@ export function CreateGroupModal({ initialType, onClose, onCreated }: CreateGrou
       const created = await createTutorGroup({
         name: name.trim(),
         is_primary: type === 'group',
+        color,
       });
       if (!created) {
         toast.error(type === 'group' ? 'Не удалось создать группу' : 'Не удалось создать метку');
@@ -144,6 +147,16 @@ export function CreateGroupModal({ initialType, onClose, onCreated }: CreateGrou
               className="w-full rounded-lg border border-socrat-border px-3 py-2.5 text-[16px] transition-colors duration-200 placeholder:text-socrat-muted focus:border-socrat-primary/50 focus:outline-none"
               style={{ touchAction: 'manipulation' }}
             />
+          </fieldset>
+
+          <fieldset>
+            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Цвет</legend>
+            <ColorSwatchPicker value={color} onChange={setColor} />
+            <p className="mt-1.5 text-xs text-slate-500">
+              {type === 'group'
+                ? 'Занятия группы будут этого цвета в расписании — «глянул и понял, кто сегодня».'
+                : 'Цвет чипа метки в списках.'}
+            </p>
           </fieldset>
         </div>
 

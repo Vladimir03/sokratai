@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
+import { generateSeriesDates, type RecurrenceRule } from '@/lib/recurrenceDates';
 import type { TutorCalendarEvent, TutorLessonWithStudent } from '@/types/tutor';
 
 // types.ts (generated) ещё НЕ содержит tutor_calendar_events / новых RPC —
@@ -86,12 +87,12 @@ export async function createCalendarEvent(
   return data as TutorCalendarEvent;
 }
 
-/** Еженедельная серия личных дел. Зеркалит createLessonSeries (MAX 60, calendar-day +7, DST-safe). */
+/** Серия личных дел. Зеркалит createLessonSeries (единый генератор recurrenceDates, DST-safe). */
 export async function createCalendarEventSeries(
   input: CreateCalendarEventInput,
   repeatUntil: string,
+  rule: RecurrenceRule = 'weekly',
 ): Promise<{ root: TutorCalendarEvent | null; count: number }> {
-  const MAX_INSTANCES = 60;
   const startDate = new Date(input.start_at);
   const untilDate = new Date(new Date(repeatUntil).setHours(23, 59, 59, 999));
 
@@ -105,13 +106,7 @@ export async function createCalendarEventSeries(
     tutorId = tutor.id;
   }
 
-  const dates: Date[] = [];
-  for (let week = 0; dates.length < MAX_INSTANCES; week++) {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + week * 7);
-    if (d > untilDate) break;
-    dates.push(d);
-  }
+  const dates = generateSeriesDates(startDate, untilDate, rule);
 
   if (dates.length === 0) {
     return { root: null, count: 0 };
@@ -135,7 +130,7 @@ export async function createCalendarEventSeries(
     tutor_id: tutorId,
     start_at: dates[0].toISOString(),
     is_recurring: true,
-    recurrence_rule: 'weekly',
+    recurrence_rule: rule,
     parent_event_id: null,
   });
   if (!root) {
@@ -149,7 +144,7 @@ export async function createCalendarEventSeries(
     title: input.title,
     notes: input.notes ?? null,
     is_recurring: true,
-    recurrence_rule: 'weekly',
+    recurrence_rule: rule,
     parent_event_id: root.id,
   }));
 

@@ -71,6 +71,10 @@ export const LessonFeedItem = memo(function LessonFeedItem({ lesson }: LessonFee
       </div>
       <div className="min-w-0 flex-1 space-y-1.5">
         <p className="truncate text-sm font-semibold text-slate-900">{title}</p>
+        {/* Тема урока (Волна 1): ученик видит программу занятий */}
+        {lesson.topic?.trim() && (
+          <p className="truncate text-xs text-slate-600">{lesson.topic}</p>
+        )}
         {meta && <p className="truncate text-xs text-muted-foreground">{meta}</p>}
         <MaterialChips
           materials={lesson.materials}

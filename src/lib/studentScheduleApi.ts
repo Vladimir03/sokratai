@@ -107,6 +107,8 @@ export interface StudentLesson {
   start_at: string;
   duration_min: number | null;
   subject: string | null;
+  /** Тема урока (Волна 1 расписания). Optional defensively — старый edge поля не отдаёт. */
+  topic?: string | null;
   status: string;
   lesson_type: string | null;
   group_session_id: string | null;

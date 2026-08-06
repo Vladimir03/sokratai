@@ -138,6 +138,10 @@ const LessonDetail = () => {
                 <>
                   <div>
                     <h1 className="text-2xl font-bold">{title}</h1>
+                    {/* Тема урока (Волна 1) */}
+                    {lesson.topic?.trim() && (
+                      <p className="mt-1 text-sm text-slate-700">Тема: {lesson.topic}</p>
+                    )}
                     {meta && <p className="mt-1 text-sm text-muted-foreground">{meta}</p>}
                   </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useQuery, type InfiniteData } from '@tanstack/react-query';
 import {
   getCurrentTutor,
   getTutorGroupMemberships,
@@ -69,6 +69,11 @@ type UseTutorQueryParams<TData> = {
   errorMessage: string;
   enabled?: boolean;
   hasData?: (data: TData | undefined) => boolean;
+  /**
+   * Держать данные прошлого ключа, пока грузится новый (react-query keepPreviousData).
+   * Для окно-зависимых ключей (неделя расписания) — иначе смена недели даёт белую сетку.
+   */
+  keepPrevious?: boolean;
 };
 
 type UseTutorQueryResult<TData> = {
@@ -82,6 +87,7 @@ function useTutorQuery<TData>({
   errorMessage,
   enabled = true,
   hasData,
+  keepPrevious = false,
 }: UseTutorQueryParams<TData>): UseTutorQueryResult<TData> {
   const queryKeyText = useMemo(() => tutorQueryKeyToString(queryKey), [queryKey]);
 
@@ -95,6 +101,7 @@ function useTutorQuery<TData>({
     retryDelay: tutorRetryDelay,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+    ...(keepPrevious ? { placeholderData: keepPreviousData } : null),
     refetchInterval: (currentQuery) => {
       const data = currentQuery.state.data as TData | undefined;
       const hasQueryData = hasData ? hasData(data) : data !== undefined && data !== null;
@@ -482,21 +489,29 @@ export function useTutorWeeklySlots() {
 }
 
 /**
+ * Диапазон недели → ISO-границы [start, end). ЕДИНСТВЕННЫЙ источник ключей
+ * `['tutor','lessons'|'calendar-events', startISO, endISO]` — префетч соседних
+ * недель в TutorSchedule ОБЯЗАН строить ключи этим же хелпером (байт-в-байт),
+ * иначе вместо экономии будут двойные запросы.
+ */
+export function weekRangeISO(weekStartDate: Date): { startDate: string; endDate: string } {
+  const start = new Date(weekStartDate);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+
+  return {
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
+  };
+}
+
+/**
  * Хук для получения занятий за указанную неделю
  */
 export function useTutorLessons(weekStartDate: Date) {
-  const { startDate, endDate } = useMemo(() => {
-    const start = new Date(weekStartDate);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
-
-    return {
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
-    };
-  }, [weekStartDate]);
+  const { startDate, endDate } = useMemo(() => weekRangeISO(weekStartDate), [weekStartDate]);
 
   const queryKey = useMemo(() => ['tutor', 'lessons', startDate, endDate] as const, [startDate, endDate]);
   const result = useTutorQuery<TutorLessonWithStudent[]>({
@@ -505,6 +520,8 @@ export function useTutorLessons(weekStartDate: Date) {
     defaultValue: [],
     errorMessage: 'Не удалось загрузить занятия',
     hasData: (data) => data !== undefined,
+    // Смена недели не должна давать белую сетку (Волна 1, перф).
+    keepPrevious: true,
   });
 
   return {
@@ -522,18 +539,7 @@ export function useTutorLessons(weekStartDate: Date) {
  * Хук для личных дел репетитора (busy blocks) той же недели.
  */
 export function useTutorCalendarEvents(weekStartDate: Date) {
-  const { startDate, endDate } = useMemo(() => {
-    const start = new Date(weekStartDate);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
-
-    return {
-      startDate: start.toISOString(),
-      endDate: end.toISOString(),
-    };
-  }, [weekStartDate]);
+  const { startDate, endDate } = useMemo(() => weekRangeISO(weekStartDate), [weekStartDate]);
 
   const queryKey = useMemo(() => ['tutor', 'calendar-events', startDate, endDate] as const, [startDate, endDate]);
   const result = useTutorQuery<TutorCalendarEvent[]>({
@@ -542,6 +548,7 @@ export function useTutorCalendarEvents(weekStartDate: Date) {
     defaultValue: [],
     errorMessage: 'Не удалось загрузить личные дела',
     hasData: (data) => data !== undefined,
+    keepPrevious: true,
   });
 
   return {

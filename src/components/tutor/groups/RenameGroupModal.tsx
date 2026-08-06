@@ -1,21 +1,24 @@
-// Переименование группы/метки (глобальное — новое имя видят все носители).
-// Клон RenameHomeworkFolderModal на updateTutorGroup. Запрос Егора #39.
+// Переименование группы/метки (глобальное — новое имя видят все носители)
+// + выбор цвета (Волна 1 расписания). Клон RenameHomeworkFolderModal на
+// updateTutorGroup. Запрос Егора #39.
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { updateTutorGroup } from '@/lib/tutors';
 import { invalidateGroupEditorCaches } from '@/components/tutor/groups/groupCaches';
+import { ColorSwatchPicker } from '@/components/tutor/ColorSwatchPicker';
 import { cn } from '@/lib/utils';
 
 interface RenameGroupModalProps {
-  group: { id: string; name: string; is_primary: boolean };
+  group: { id: string; name: string; is_primary: boolean; color?: string | null };
   onClose: () => void;
 }
 
 export function RenameGroupModal({ group, onClose }: RenameGroupModalProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState(group.name);
+  const [color, setColor] = useState<string | null>(group.color ?? null);
   const [isPending, setIsPending] = useState(false);
   const busyRef = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,23 +39,28 @@ export function RenameGroupModal({ group, onClose }: RenameGroupModalProps) {
     inputRef.current?.select();
   }, []);
 
-  const canSave = name.trim().length > 0 && name.trim() !== group.name;
+  const nameChanged = name.trim().length > 0 && name.trim() !== group.name;
+  const colorChanged = color !== (group.color ?? null);
+  const canSave = name.trim().length > 0 && (nameChanged || colorChanged);
 
   const handleSave = async () => {
     if (!canSave || busyRef.current) return;
     busyRef.current = true;
     setIsPending(true);
     try {
-      const updated = await updateTutorGroup(group.id, { name: name.trim() });
+      const updated = await updateTutorGroup(group.id, {
+        ...(nameChanged ? { name: name.trim() } : null),
+        ...(colorChanged ? { color } : null),
+      });
       if (!updated) {
-        toast.error('Не удалось переименовать');
+        toast.error('Не удалось сохранить');
         return;
       }
       await invalidateGroupEditorCaches(queryClient);
-      toast.success(group.is_primary ? 'Группа переименована' : 'Метка переименована');
+      toast.success(group.is_primary ? 'Группа обновлена' : 'Метка обновлена');
       onClose();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Не удалось переименовать');
+      toast.error(error instanceof Error ? error.message : 'Не удалось сохранить');
     } finally {
       busyRef.current = false;
       setIsPending(false);
@@ -105,6 +113,16 @@ export function RenameGroupModal({ group, onClose }: RenameGroupModalProps) {
           <p className="mt-2 text-xs text-slate-500">
             Название обновится везде: в списке учеников, фильтрах и назначении ДЗ.
           </p>
+
+          <fieldset className="mt-4">
+            <legend className="mb-1.5 text-xs font-semibold text-slate-500">Цвет</legend>
+            <ColorSwatchPicker value={color} onChange={setColor} />
+            {group.is_primary && (
+              <p className="mt-1.5 text-xs text-slate-500">
+                Занятия группы будут этого цвета в расписании.
+              </p>
+            )}
+          </fieldset>
         </div>
 
         <div className="flex justify-end gap-2 border-t border-socrat-border px-5 py-3.5">

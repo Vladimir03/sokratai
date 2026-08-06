@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet, Ban, PenLine } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
@@ -26,7 +26,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
-import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorCalendarEvents, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, useTutorGroupMemberships } from '@/hooks/useTutor';
+import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorCalendarEvents, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, weekRangeISO } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
 import { syncMyDueDebits, setLessonCost, setParticipantCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
@@ -36,33 +36,30 @@ import {
   updateCalendarEvent,
   updateCalendarEventSeries,
   deleteCalendarEventsScoped,
-  findConflicts,
+  getTutorCalendarEvents,
   type DeleteCalendarEventScope,
 } from '@/lib/tutorCalendarEvents';
+import { TUTOR_STALE_TIME_MS } from '@/hooks/tutorQueryOptions';
 import {
   createWeeklySlot,
   toggleSlotAvailability,
   deleteWeeklySlot,
-  createLesson,
+  getTutorLessons,
   cancelLesson,
   upsertReminderSettings,
   upsertCalendarSettings,
   createAvailabilityException,
   deleteAvailabilityException,
   syncWorkHoursToSlots,
-  createLessonSeries,
   updateLesson,
   completeLessonAndCreatePayment,
   getLessonSeriesCount,
   updateLessonSeries,
   cancelLessonSeries,
   deleteLessonsScoped,
-  getLastLessonPriceForStudent,
   type DeleteLessonScope
 } from '@/lib/tutorSchedule';
 import {
-  createMiniGroupLesson,
-  createMiniGroupLessonSeries,
   getLessonParticipants,
   addLessonParticipant,
   removeLessonParticipant,
@@ -92,6 +89,22 @@ import type {
   TutorWeeklySlot,
 } from '@/types/tutor';
 import MonthIncomeStrip from '@/components/tutor/schedule/MonthIncomeStrip';
+import {
+  LessonBlock,
+  GroupLessonBlock,
+  CalendarEventBlock,
+  DragPreviewLayer,
+  getLessonStudentName,
+  PIXELS_PER_MINUTE,
+  HOUR_HEIGHT,
+  type DragPreviewHandle,
+  type GroupLessonBucket,
+  type GroupLessonStatusCounts,
+  type DayLessonRenderItem,
+} from '@/components/tutor/schedule/LessonBlocks';
+import { LESSON_TYPES, getLessonTypeLabel } from '@/components/tutor/schedule/scheduleColors';
+import { useLessonMaterialFlags } from '@/hooks/useLessonMaterialFlags';
+import { QuickAddMenu, type QuickAddMenuState } from '@/components/tutor/schedule/QuickAddMenu';
 
 // schedule-materials: drawer to attach recording/PDF/homework to a lesson.
 // Lazy — keeps this large page's chunk lean (performance.md); only loads on first open.
@@ -107,13 +120,19 @@ const PostLessonSheet = lazy(() =>
   })),
 );
 
+// Форма создания занятия — извлечена из монолита (Волна 1, rule 10), lazy:
+// грузится при первом открытии, основной чанк страницы худеет.
+const AddLessonDialog = lazy(() =>
+  import('@/components/tutor/schedule/AddLessonDialog').then((m) => ({
+    default: m.AddLessonDialog,
+  })),
+);
+
 // =============================================
 // Constants & Utils
 // =============================================
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-const PIXELS_PER_MINUTE = 1;
-const HOUR_HEIGHT = 60;
 
 const SETTINGS_KEY = 'tutor-schedule-settings';
 
@@ -121,13 +140,6 @@ interface ScheduleSettings {
   workDayStart: number;
   workDayEnd: number;
   workDays: number[];
-}
-
-interface DragPreviewState {
-  dayIndex: number;
-  topPx: number;
-  durationMin: number;
-  visible: boolean;
 }
 
 const defaultSettings: ScheduleSettings = {
@@ -178,53 +190,6 @@ function getDateForDayOfWeek(weekStart: Date, dayOfWeek: number): Date {
   return d;
 }
 
-const LESSON_TYPES: { value: LessonType; label: string; shortLabel: string; color: string }[] = [
-  { value: 'regular', label: 'Обычный урок', shortLabel: 'Урок', color: 'bg-primary' },
-  { value: 'trial', label: 'Пробное занятие', shortLabel: 'Пробное', color: 'bg-amber-500' },
-  { value: 'mock_exam', label: 'Пробный экзамен', shortLabel: 'Пробник', color: 'bg-purple-500' },
-  { value: 'consultation', label: 'Консультация', shortLabel: 'Консультация', color: 'bg-teal-500' },
-];
-
-function getLessonTypeColor(type: LessonType | string): string {
-  return LESSON_TYPES.find(t => t.value === type)?.color || 'bg-primary';
-}
-
-function getLessonTypeLabel(type: LessonType | string): string {
-  return LESSON_TYPES.find(t => t.value === type)?.label || 'Урок';
-}
-
-function getLessonStudentName(lesson: TutorLessonWithStudent): string {
-  return lesson.tutor_students?.profiles?.username
-    || lesson.profiles?.username
-    || 'Ученик';
-}
-
-interface GroupLessonStatusCounts {
-  booked: number;
-  completed: number;
-  cancelled: number;
-}
-
-interface GroupLessonBucket {
-  key: string;
-  groupSessionId: string | null;
-  groupId: string | null;
-  groupSourceTutorGroupId: string | null;
-  groupTitleSnapshot: string | null;
-  groupSizeSnapshot: number | null;
-  isLegacyFallback: boolean;
-  groupName: string;
-  startAt: string;
-  durationMin: number;
-  lessons: TutorLessonWithStudent[];
-  memberNames: string[];
-  statusCounts: GroupLessonStatusCounts;
-}
-
-type DayLessonRenderItem =
-  | { kind: 'single'; lesson: TutorLessonWithStudent }
-  | { kind: 'group'; bucket: GroupLessonBucket };
-
 function getLessonStatusLabel(status: TutorLessonWithStudent['status']): string {
   switch (status) {
     case 'booked':
@@ -238,15 +203,8 @@ function getLessonStatusLabel(status: TutorLessonWithStudent['status']): string 
   }
 }
 
-function generateGroupSessionId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-
-  // Fallback UUIDv4-like string for older environments.
-  const randomHex = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
-  return `${randomHex()}${randomHex()}-${randomHex()}-4${randomHex().slice(1)}-${((8 + Math.floor(Math.random() * 4)).toString(16))}${randomHex().slice(1)}-${randomHex()}${randomHex()}${randomHex()}`;
-}
+// generateGroupSessionId переехал в @/lib/tutorScheduleGroupCreate (Волна 1,
+// вместе с извлечением AddLessonDialog).
 
 function toDateTimeLocalValue(isoString: string): string {
   const date = new Date(isoString);
@@ -263,252 +221,6 @@ function fromDateTimeLocalValue(value: string): string | null {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString();
-}
-
-// =============================================
-// LessonBlock
-// =============================================
-
-interface LessonBlockProps {
-  lesson: TutorLessonWithStudent;
-  workDayStart: number;
-  onClick: () => void;
-  onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
-}
-
-function LessonBlock({
-  lesson,
-  workDayStart,
-  onClick,
-  onDragStart,
-  onDragEnd,
-}: LessonBlockProps) {
-  const startDate = new Date(lesson.start_at);
-  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
-  const offsetMinutes = startMinutes - (workDayStart * 60);
-
-  const top = offsetMinutes * PIXELS_PER_MINUTE;
-  const height = Math.max(lesson.duration_min * PIXELS_PER_MINUTE, 20);
-
-  const studentName = getLessonStudentName(lesson);
-
-  const endDate = addMinutes(startDate, lesson.duration_min);
-  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
-
-  const lessonType = lesson.lesson_type || 'regular';
-  const typeColor = getLessonTypeColor(lessonType);
-  const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents;
-
-  const isPast = endDate.getTime() < Date.now();
-  const isCancelled = lesson.status === 'cancelled';
-  // Phase 2b: деньги решает ЦЕНА, не статус. Эффективная стоимость = override ∥ ставка×длительность.
-  const effectiveCost = lesson.payment_amount ?? calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
-
-  // Visual state classes (без платёжной окраски — только отменённое приглушаем).
-  const statusClasses = cn(isCancelled && "opacity-40 grayscale");
-
-  // Прошедшие занятия не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
-  const isDraggable = lesson.status === 'booked' && !isPast;
-
-  return (
-    <div
-      className={cn(
-        "absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm",
-        typeColor,
-        statusClasses,
-      )}
-      style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
-      draggable={isDraggable}
-      onDragStart={isDraggable ? onDragStart : undefined}
-      onDragEnd={isDraggable ? onDragEnd : undefined}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-    >
-      <div className="flex flex-col h-full justify-center">
-        <span className={cn(
-          "text-xs font-medium truncate leading-tight",
-          isCancelled && "line-through opacity-70"
-        )}>
-          {studentName}
-        </span>
-        {height >= 35 && (
-          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
-        )}
-
-        {/* Phase 2b: прошедшее → списанная стоимость (решает цена, не статус); будущее → ставка/предмет */}
-        {height >= 35 && (isPast || isCancelled) && (
-          <span className="text-[10px] leading-tight mt-0.5 truncate">
-            {isCancelled
-              ? (isPast && effectiveCost && effectiveCost > 0 ? `Отменено · −${effectiveCost} ₽` : 'Отменено')
-              : (effectiveCost === 0 ? 'Бесплатно' : effectiveCost ? `−${effectiveCost} ₽` : 'Проведено')}
-          </span>
-        )}
-
-        {/* Будущее занятие — ставка/предмет */}
-        {!isPast && !isCancelled && (
-          <>
-            {height >= 50 && hourlyRateCents != null && (
-              <span className="text-[10px] opacity-90 truncate font-semibold leading-tight">{hourlyRateCents / 100} ₽/ч</span>
-            )}
-            {height >= 50 && lesson.subject && (
-              <span className="text-[10px] opacity-70 truncate leading-tight">{lesson.subject}</span>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// =============================================
-// CalendarEventBlock — личное дело (busy block) на сетке
-// =============================================
-
-interface CalendarEventBlockProps {
-  event: TutorCalendarEvent;
-  workDayStart: number;
-  onClick: () => void;
-  onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd: () => void;
-}
-
-function CalendarEventBlock({ event, workDayStart, onClick, onDragStart, onDragEnd }: CalendarEventBlockProps) {
-  const startDate = new Date(event.start_at);
-  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
-  const offsetMinutes = startMinutes - (workDayStart * 60);
-  const top = offsetMinutes * PIXELS_PER_MINUTE;
-  const height = Math.max(event.duration_min * PIXELS_PER_MINUTE, 20);
-  const endDate = addMinutes(startDate, event.duration_min);
-  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
-
-  return (
-    <div
-      // z-0: под занятиями (наложение лесона на дело = разрешённое мягкое предупреждение).
-      className="absolute left-0.5 right-0.5 z-0 rounded-md px-1.5 py-0.5 cursor-pointer overflow-hidden border border-dashed border-slate-400 bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
-      style={{
-        top: `${top}px`,
-        height: `${height}px`,
-        minHeight: '20px',
-        backgroundImage:
-          'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(100,116,139,0.12) 6px, rgba(100,116,139,0.12) 12px)',
-        touchAction: 'manipulation',
-      }}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-    >
-      <div className="flex flex-col h-full justify-center">
-        <span className="flex items-center gap-1 text-xs font-medium truncate leading-tight">
-          <Ban className="h-3 w-3 shrink-0 opacity-70" />
-          {/* notes НЕ показываем на блоке (приватно) — только в диалоге */}
-          {event.title}
-        </span>
-        {height >= 35 && (
-          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface GroupLessonBlockProps {
-  bucket: GroupLessonBucket;
-  workDayStart: number;
-  onClick: () => void;
-  onDragStart?: (event: React.DragEvent<HTMLDivElement>) => void;
-  onDragEnd?: () => void;
-}
-
-function GroupLessonBlock({
-  bucket,
-  workDayStart,
-  onClick,
-  onDragStart,
-  onDragEnd,
-}: GroupLessonBlockProps) {
-  // Draggable only for a unified group (single tutor_lessons row + group_session_id)
-  // that is still booked — moving that one row carries all participants. Legacy
-  // multi-row groups stay click-only (would need N row moves).
-  const isDraggable = !bucket.isLegacyFallback
-    && !!bucket.groupSessionId
-    && bucket.lessons.length === 1
-    && bucket.lessons[0].status === 'booked'
-    // Прошедшую группу не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
-    && (new Date(bucket.startAt).getTime() + bucket.durationMin * 60000) >= Date.now();
-  const startDate = new Date(bucket.startAt);
-  const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
-  const offsetMinutes = startMinutes - (workDayStart * 60);
-  const top = offsetMinutes * PIXELS_PER_MINUTE;
-  const height = Math.max(bucket.durationMin * PIXELS_PER_MINUTE, 20);
-  const endDate = addMinutes(startDate, bucket.durationMin);
-  const timeStr = `${format(startDate, 'HH:mm')} - ${format(endDate, 'HH:mm')}`;
-
-  const firstLesson = bucket.lessons[0];
-  const typeColor = getLessonTypeColor(firstLesson?.lesson_type || 'regular');
-
-  const isAllCompleted = bucket.statusCounts.completed === bucket.lessons.length;
-  const isAllCancelled = bucket.statusCounts.cancelled === bucket.lessons.length;
-  const isMixedStatuses = !isAllCompleted && !isAllCancelled && (
-    bucket.statusCounts.completed > 0 || bucket.statusCounts.cancelled > 0
-  );
-
-  // Phase 2b: «требует действия» (amber ring для прошедших booked) убран — авто-debit списывает по стоимости.
-  const statusClasses = cn(
-    isAllCompleted && 'opacity-70',
-    isAllCancelled && 'opacity-40 grayscale',
-  );
-
-  const statusLabel = isAllCompleted
-    ? 'Все проведены'
-    : isAllCancelled
-      ? 'Все отменены'
-      : isMixedStatuses
-        ? 'Смешанные статусы'
-        : 'Запланировано';
-
-  return (
-    <div
-      className={cn(
-        'absolute left-0.5 right-0.5 text-white rounded-md px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity overflow-hidden shadow-sm',
-        typeColor,
-        statusClasses,
-      )}
-      style={{ top: `${top}px`, height: `${height}px`, minHeight: '20px' }}
-      draggable={isDraggable}
-      onDragStart={isDraggable ? onDragStart : undefined}
-      onDragEnd={isDraggable ? onDragEnd : undefined}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-    >
-      <div className="flex flex-col h-full justify-center">
-        <span className={cn(
-          'text-xs font-medium truncate leading-tight',
-          isAllCancelled && 'line-through opacity-70',
-        )}>
-          {bucket.groupName} • {bucket.groupSizeSnapshot ?? bucket.lessons.length}
-        </span>
-        {height >= 35 && (
-          <span className="text-[10px] opacity-80 truncate leading-tight">{timeStr}</span>
-        )}
-        {height >= 35 && (
-          <span className="text-[10px] leading-tight mt-0.5 truncate">
-            {statusLabel}{bucket.isLegacyFallback ? ' • legacy' : ''}
-          </span>
-        )}
-      </div>
-    </div>
-  );
 }
 
 interface GroupDetailsDialogProps {
@@ -1696,825 +1408,6 @@ function WorkHoursSettings({ settings, onChange }: WorkHoursSettingsProps) {
   );
 }
 
-/**
- * Парсинг поля «Стоимость занятия» при создании.
- * Пусто/мусор/отрицательное → null (= цена выводится из ставки×длительности при списании).
- * «0» → 0 (waive, не списывать). «1700» → 1700. РУБЛИ.
- * Отличается от `parseRubleAmount` (тот отбрасывает 0) — здесь 0 значим.
- */
-function parseLessonPriceInput(raw: string): number | null {
-  const s = (raw ?? '').trim().replace(/\s+/g, '');
-  if (s === '') return null;
-  if (!/^\d{1,7}$/.test(s)) return null;
-  const n = parseInt(s, 10);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-// =============================================
-// AddLessonDialog
-// =============================================
-
-interface AddLessonDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  miniGroupsEnabled: boolean;
-  groups: TutorGroup[];
-  memberships: TutorGroupMembership[];
-  groupsLoading: boolean;
-  membershipsLoading: boolean;
-  groupsError: string | null;
-  membershipsError: string | null;
-  students: TutorStudentWithProfile[];
-  initialDate: Date | null;
-  initialHour: number | null;
-  initialMinute?: number;
-  /** Занятия + личные дела видимой недели — для мягкого предупреждения о наложении. */
-  weekLessons: TutorLessonWithStudent[];
-  weekEvents: TutorCalendarEvent[];
-  onSuccess: () => void;
-}
-
-type LessonMode = 'individual' | 'mini_group';
-
-function AddLessonDialog({
-  open,
-  onOpenChange,
-  miniGroupsEnabled,
-  groups,
-  memberships,
-  groupsLoading,
-  membershipsLoading,
-  groupsError,
-  membershipsError,
-  students,
-  initialDate,
-  initialHour,
-  initialMinute = 0,
-  weekLessons,
-  weekEvents,
-  onSuccess
-}: AddLessonDialogProps) {
-  const [date, setDate] = useState<Date | undefined>(initialDate || new Date());
-  const [hour, setHour] = useState(initialHour?.toString() || new Date().getHours().toString());
-  const [minute, setMinute] = useState(initialMinute.toString().padStart(2, '0'));
-  const [lessonMode, setLessonMode] = useState<LessonMode>('individual');
-  const [studentId, setStudentId] = useState('');
-  const [groupId, setGroupId] = useState('');
-  const [notes, setNotes] = useState('');
-  const [duration, setDuration] = useState('60');
-  const [lessonType, setLessonType] = useState<LessonType>('regular');
-  const [subject, setSubject] = useState('');
-  const [isRecurring, setIsRecurring] = useState(false);
-  const [repeatUntil, setRepeatUntil] = useState<Date | undefined>();
-  const [isSaving, setIsSaving] = useState(false);
-  // Ручная цена занятия (РУБЛИ). Индивидуальное — строка; группа — по участнику (key=tutor_student_id).
-  // Предзаполняется последней ценой ученика (UX-решение владельца), редактируемо.
-  const [priceText, setPriceText] = useState('');
-  const [memberPrices, setMemberPrices] = useState<Record<string, string>>({});
-  // Тутор уже трогал поле цены? Тогда поздний async-prefill не должен затирать ввод (review fix).
-  const priceTouchedRef = useRef(false);
-
-  useEffect(() => {
-    if (open) {
-      setDate(initialDate || new Date());
-      setHour(initialHour?.toString() || new Date().getHours().toString());
-      setMinute(initialMinute.toString().padStart(2, '0'));
-      setLessonMode('individual');
-      setStudentId('');
-      setGroupId('');
-      setNotes('');
-      setDuration('60');
-      setLessonType('regular');
-      setSubject('');
-      setIsRecurring(false);
-      setRepeatUntil(undefined);
-      setPriceText('');
-      setMemberPrices({});
-      priceTouchedRef.current = false;
-    }
-  }, [open, initialDate, initialHour, initialMinute]);
-
-  useEffect(() => {
-    if (lessonMode === 'mini_group') {
-      setIsRecurring(false);
-      setRepeatUntil(undefined);
-      setStudentId('');
-      setPriceText('');
-      priceTouchedRef.current = false;
-    }
-  }, [lessonMode]);
-
-  // Сброс цен участников при смене группы (новый состав → свежий предзаполнённый прайс).
-  useEffect(() => {
-    setMemberPrices({});
-  }, [groupId]);
-
-  // Auto-fill subject from student profile
-  useEffect(() => {
-    if (studentId) {
-      const student = students.find(s => s.student_id === studentId);
-      if (student?.subject) {
-        setSubject(student.subject);
-      }
-    }
-  }, [studentId, students]);
-
-  const studentsByTutorStudentId = useMemo(() => {
-    const map = new Map<string, TutorStudentWithProfile>();
-    students.forEach((student) => {
-      map.set(student.id, student);
-    });
-    return map;
-  }, [students]);
-
-  const selectedGroupMemberships = useMemo(
-    () =>
-      memberships.filter(
-        (membership) =>
-          membership.is_active && groupId !== '' && membership.tutor_group_id === groupId
-      ),
-    [groupId, memberships]
-  );
-
-  const selectedGroupMembers = useMemo(
-    () =>
-      selectedGroupMemberships.map((membership) => ({
-        membership,
-        student: studentsByTutorStudentId.get(membership.tutor_student_id) ?? null,
-      })),
-    [selectedGroupMemberships, studentsByTutorStudentId]
-  );
-
-  const resolvedGroupMembers = useMemo(
-    () => selectedGroupMembers.filter((member) => member.student !== null),
-    [selectedGroupMembers]
-  );
-
-  const unresolvedGroupMembers = useMemo(
-    () => selectedGroupMembers.filter((member) => member.student === null),
-    [selectedGroupMembers]
-  );
-
-  const membersWithoutRate = useMemo(
-    () =>
-      resolvedGroupMembers.filter(
-        (member) => member.student?.hourly_rate_cents == null
-      ),
-    [resolvedGroupMembers]
-  );
-
-  const miniGroupDataError = groupsError || membershipsError;
-  const canUseMiniGroupMode = miniGroupsEnabled;
-  const isMiniGroupMode = canUseMiniGroupMode && lessonMode === 'mini_group';
-  const isMiniGroupDataLoading = isMiniGroupMode && (groupsLoading || membershipsLoading);
-
-  const selectedGroup = useMemo(
-    () => groups.find((group) => group.id === groupId) ?? null,
-    [groupId, groups]
-  );
-
-  const miniGroupMembersForCreate = useMemo(
-    () =>
-      resolvedGroupMembers.map((member) => ({
-        tutorStudentId: member.student!.id,
-        studentId: member.student!.student_id,
-        studentName: member.student?.profiles?.username || 'Без имени',
-      })),
-    [resolvedGroupMembers]
-  );
-
-  // Предзаполнение цены индивидуального занятия последней ценой ученика (fallback — ставка×длит).
-  useEffect(() => {
-    if (isMiniGroupMode || !studentId) return;
-    const tutorStudent = students.find((s) => s.student_id === studentId);
-    if (!tutorStudent) return;
-    priceTouchedRef.current = false; // новый ученик → можно предзаполнить заново
-    let cancelled = false;
-    void (async () => {
-      const last = await getLastLessonPriceForStudent(tutorStudent.id);
-      // Не затираем, если тутор уже ввёл цену пока шёл запрос (review fix #3).
-      if (cancelled || priceTouchedRef.current) return;
-      const derived = calculateLessonPaymentAmount(
-        parseInt(duration) || 60,
-        tutorStudent.hourly_rate_cents ?? null,
-      );
-      const prefill = last ?? derived;
-      setPriceText(prefill != null ? String(prefill) : '');
-    })();
-    return () => { cancelled = true; };
-    // duration намеренно вне deps — иначе смена длительности затёрла бы ручную правку цены.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [studentId, isMiniGroupMode, students]);
-
-  // Предзаполнение цены каждого участника группы (последняя цена ученика → ставка×длит).
-  // Guard: уже введённые цены не затираем (эффект может перезапуститься при рефетче состава).
-  useEffect(() => {
-    if (!isMiniGroupMode || resolvedGroupMembers.length === 0) return;
-    let cancelled = false;
-    void (async () => {
-      const entries = await Promise.all(
-        resolvedGroupMembers.map(async (m) => {
-          const ts = m.student!;
-          const last = await getLastLessonPriceForStudent(ts.id);
-          const derived = calculateLessonPaymentAmount(
-            parseInt(duration) || 60,
-            ts.hourly_rate_cents ?? null,
-          );
-          const prefill = last ?? derived;
-          return [ts.id, prefill != null ? String(prefill) : ''] as const;
-        }),
-      );
-      if (cancelled) return;
-      setMemberPrices((prev) => {
-        const next = { ...prev };
-        for (const [id, val] of entries) {
-          if (next[id] === undefined) next[id] = val;
-        }
-        return next;
-      });
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isMiniGroupMode, resolvedGroupMembers]);
-
-  // Мягкое предупреждение о наложении на личное дело ИЛИ другое занятие (не блокирует создание).
-  const conflictInfo = useMemo(() => {
-    if (!date) return null;
-    const start = new Date(date);
-    start.setHours(parseInt(hour), parseInt(minute), 0, 0);
-    const dur = parseInt(duration) || 60;
-    const end = new Date(start.getTime() + dur * 60000);
-    const { lessons: lc, events: ec } = findConflicts(start, end, weekLessons, weekEvents);
-    if (lc.length === 0 && ec.length === 0) return null;
-    return { lessons: lc, events: ec };
-  }, [date, hour, minute, duration, weekLessons, weekEvents]);
-
-  const handleSubmit = async () => {
-    if (!date) {
-      toast.error('Выберите дату');
-      return;
-    }
-    const startAt = new Date(date);
-    startAt.setHours(parseInt(hour), parseInt(minute), 0, 0);
-    const baseLessonInput = {
-      start_at: startAt.toISOString(),
-      duration_min: parseInt(duration),
-      lesson_type: lessonType,
-      subject: subject || undefined,
-      notes: notes || undefined,
-    };
-
-    if (isMiniGroupMode) {
-      if (isMiniGroupDataLoading) {
-        toast.error('Подождите, идет загрузка состава мини-группы');
-        return;
-      }
-      if (miniGroupDataError) {
-        toast.error('Не удалось загрузить данные мини-групп');
-        return;
-      }
-      if (!groupId) {
-        toast.error('Выберите мини-группу');
-        return;
-      }
-      if (miniGroupMembersForCreate.length === 0) {
-        toast.error('В выбранной группе нет активных участников');
-        return;
-      }
-      if (unresolvedGroupMembers.length > 0) {
-        toast.error('Часть участников группы не найдена в списке учеников');
-        return;
-      }
-      if (isRecurring && !repeatUntil) {
-        toast.error('Выберите дату окончания повторений');
-        return;
-      }
-
-      const sessionId = generateGroupSessionId();
-
-      const groupLessonInput = {
-        ...baseLessonInput,
-        group_session_id: sessionId,
-        group_source_tutor_group_id: selectedGroup?.id,
-        group_title_snapshot: selectedGroup?.short_name || selectedGroup?.name || 'Мини-группа',
-        group_size_snapshot: miniGroupMembersForCreate.length,
-      };
-
-      const groupMembers = miniGroupMembersForCreate.map((m) => ({
-        ...m,
-        hourlyRateCents: resolvedGroupMembers.find(
-          (rm) => rm.student?.id === m.tutorStudentId
-        )?.student?.hourly_rate_cents ?? null,
-        // Ручная цена участника (null = derived из ставки, 0 = waive). Применится ко всей серии.
-        overrideAmount: parseLessonPriceInput(memberPrices[m.tutorStudentId] ?? ''),
-      }));
-
-      setIsSaving(true);
-      try {
-        if (isRecurring && repeatUntil) {
-          const result = await createMiniGroupLessonSeries({
-            members: groupMembers,
-            lessonInput: groupLessonInput,
-            repeatUntil: repeatUntil.toISOString(),
-            makeGroupSessionId: generateGroupSessionId,
-          });
-          if (result.ok && result.root) {
-            if (result.failedCount > 0) {
-              // Частичный успех: часть повторов не создалась — НЕ скрываем это.
-              toast.warning(
-                `Создано ${result.count} из ${result.expected} занятий. ${result.failedCount} не удалось — проверьте расписание и при необходимости добавьте вручную.`,
-              );
-            } else {
-              toast.success(`Создано ${result.count} занятий для мини-группы (еженедельно)`);
-            }
-            onSuccess();
-            onOpenChange(false);
-          } else {
-            toast.error(result.errorMessage || 'Не удалось создать серию занятий');
-          }
-        } else {
-          const result = await createMiniGroupLesson({
-            members: groupMembers,
-            lessonInput: groupLessonInput,
-          });
-          if (result.ok) {
-            toast.success(`Занятие для мини-группы создано (${result.participantsInserted} уч.)`);
-            onSuccess();
-            onOpenChange(false);
-          } else {
-            toast.error(result.errorMessage || 'Не удалось создать занятие');
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        toast.error('Ошибка при создании занятия для мини-группы');
-      } finally {
-        setIsSaving(false);
-      }
-      return;
-    }
-
-    if (!studentId) {
-      toast.error('Выберите ученика');
-      return;
-    }
-    if (isRecurring && !repeatUntil) {
-      toast.error('Выберите дату окончания повторений');
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      const tutorStudent = students.find(s => s.student_id === studentId);
-
-      const individualPrice = parseLessonPriceInput(priceText);
-
-      if (isRecurring && repeatUntil) {
-        const { root, count } = await createLessonSeries(
-          {
-            tutor_student_id: tutorStudent?.id,
-            student_id: studentId,
-            payment_amount: individualPrice,
-            ...baseLessonInput,
-          },
-          repeatUntil.toISOString()
-        );
-
-        if (root) {
-          toast.success(`Создано ${count} занятий (еженедельно)`);
-          onSuccess();
-          onOpenChange(false);
-        } else {
-          toast.error('Не удалось создать серию занятий');
-        }
-      } else {
-        const result = await createLesson({
-          tutor_student_id: tutorStudent?.id,
-          student_id: studentId,
-          payment_amount: individualPrice,
-          ...baseLessonInput,
-        });
-
-        if (result) {
-          toast.success('Занятие создано');
-          onSuccess();
-          onOpenChange(false);
-        } else {
-          toast.error('Не удалось создать занятие');
-        }
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Ошибка при создании');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Добавить занятие</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-          {/* Date and Time */}
-          <div className="space-y-2">
-            <Label>Дата и время *</Label>
-            <div className="flex flex-wrap gap-2">
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-[160px] justify-start text-left font-normal",
-                      !date && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {date ? format(date, 'dd.MM.yyyy') : 'Выберите дату'}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={date}
-                    onSelect={setDate}
-                    locale={ru}
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
-
-              <div className="flex items-center gap-1">
-                <Select value={hour} onValueChange={setHour}>
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <SelectItem key={i} value={i.toString()}>
-                        {i.toString().padStart(2, '0')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <span className="text-muted-foreground">:</span>
-                <Select value={minute} onValueChange={setMinute}>
-                  <SelectTrigger className="w-[70px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {['00', '15', '30', '45'].map(m => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          {conflictInfo && (
-            <Alert className="border-amber-300 bg-amber-50 text-amber-900">
-              <AlertDescription className="text-sm">
-                <div className="font-medium">⚠️ В это время уже есть записи:</div>
-                <ul className="mt-1 list-disc pl-4 space-y-0.5">
-                  {conflictInfo.events.map((ev) => (
-                    <li key={ev.id}>Занято: {ev.title} ({format(new Date(ev.start_at), 'HH:mm')})</li>
-                  ))}
-                  {conflictInfo.lessons.map((l) => (
-                    <li key={l.id}>Занятие: {getLessonStudentName(l)} ({format(new Date(l.start_at), 'HH:mm')})</li>
-                  ))}
-                </ul>
-                <div className="mt-1 text-xs opacity-80">Создать занятие всё равно можно.</div>
-              </AlertDescription>
-            </Alert>
-          )}
-
-          {canUseMiniGroupMode && (
-            <div className="space-y-2">
-              <Label>Формат занятия</Label>
-              <Select
-                value={lessonMode}
-                onValueChange={(value) => setLessonMode(value as LessonMode)}
-                disabled={isSaving}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="individual">Индивидуально</SelectItem>
-                  <SelectItem value="mini_group">Мини-группа</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                {lessonMode === 'individual'
-                  ? 'Формат занятия: Индивидуально'
-                  : 'Формат занятия: Мини-группа'}
-              </p>
-            </div>
-          )}
-
-          {!isMiniGroupMode && (
-            <div className="space-y-2">
-              <Label>Ученик *</Label>
-              <Select value={studentId} onValueChange={setStudentId} disabled={isSaving}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Выберите ученика" />
-                </SelectTrigger>
-                <SelectContent>
-                  {students.map(s => (
-                    <SelectItem key={s.student_id} value={s.student_id}>
-                      {s.profiles?.username || 'Без имени'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
-          {isMiniGroupMode && (
-            <div className="space-y-3 rounded-md border p-3">
-              <div className="space-y-2">
-                <Label>Мини-группа *</Label>
-                <Select
-                  value={groupId}
-                  onValueChange={setGroupId}
-                  disabled={isSaving || isMiniGroupDataLoading || groups.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите мини-группу" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {groups.map((group) => (
-                      <SelectItem key={group.id} value={group.id}>
-                        {group.short_name || group.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Будет создано одно групповое занятие с участниками выбранной мини-группы.
-                </p>
-              </div>
-
-              {isMiniGroupDataLoading && (
-                <p className="text-xs text-muted-foreground">
-                  Загружаем состав мини-групп...
-                </p>
-              )}
-
-              {!isMiniGroupDataLoading && miniGroupDataError && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    Не удалось загрузить мини-группы. Попробуйте закрыть и открыть форму снова.
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {!isMiniGroupDataLoading && !miniGroupDataError && groups.length === 0 && (
-                <Alert>
-                  <AlertDescription>
-                    Нет активных мини-групп. Создайте группу во вкладке "Ученики".
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {!isMiniGroupDataLoading && !miniGroupDataError && groupId && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">
-                      Состав группы {selectedGroup ? `"${selectedGroup.short_name || selectedGroup.name}"` : ''}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Участников: {resolvedGroupMembers.length}
-                    </p>
-                  </div>
-
-                  {resolvedGroupMembers.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="max-h-60 overflow-auto rounded border bg-muted/20 p-2 text-sm">
-                        <ul className="space-y-2">
-                          {resolvedGroupMembers.map((member) => (
-                            <li key={member.student!.id} className="space-y-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="min-w-0 truncate">{member.student?.profiles?.username || 'Без имени'}</span>
-                                <span className="shrink-0 text-xs text-muted-foreground">
-                                  {member.student?.hourly_rate_cents != null
-                                    ? `${member.student.hourly_rate_cents / 100} ₽/ч`
-                                    : 'Ставка не указана'}
-                                </span>
-                              </div>
-                              <Input
-                                type="text"
-                                inputMode="decimal"
-                                value={memberPrices[member.student!.id] ?? ''}
-                                onChange={(e) =>
-                                  setMemberPrices((prev) => ({ ...prev, [member.student!.id]: e.target.value }))
-                                }
-                                placeholder="Стоимость, ₽"
-                                className="h-9 text-base"
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Цена за занятие для каждого ученика спишется с баланса после занятия. 0 — не списывать. Пусто — из ставки. Применится ко всей серии.
-                      </p>
-                    </div>
-                  )}
-
-                  {resolvedGroupMembers.length === 0 && (
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        В выбранной группе нет активных участников.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {resolvedGroupMembers.length === 1 && (
-                    <Alert>
-                      <AlertDescription>
-                        В группе только 1 участник. Будет создано 1 занятие.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {membersWithoutRate.length > 0 && (
-                    <Alert>
-                      <AlertDescription>
-                        У части участников не указана ставка ({membersWithoutRate.length}).
-                        Оплаты останутся per-student.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {unresolvedGroupMembers.length > 0 && (
-                    <Alert variant="destructive">
-                      <AlertDescription>
-                        Часть участников не найдена в списке учеников ({unresolvedGroupMembers.length}).
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label>Длительность</Label>
-              <Select value={duration} onValueChange={setDuration}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">30 мин</SelectItem>
-                  <SelectItem value="45">45 мин</SelectItem>
-                  <SelectItem value="60">60 мин</SelectItem>
-                  <SelectItem value="90">90 мин</SelectItem>
-                  <SelectItem value="120">120 мин</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Тип занятия</Label>
-              <Select value={lessonType} onValueChange={(v) => setLessonType(v as LessonType)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LESSON_TYPES.map(t => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {!isMiniGroupMode && (
-            <div className="space-y-2">
-              <Label>Стоимость занятия, ₽</Label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                value={priceText}
-                onChange={(e) => { priceTouchedRef.current = true; setPriceText(e.target.value); }}
-                placeholder="напр. 1700"
-                className="text-base"
-              />
-              <p className="text-xs text-muted-foreground">
-                Спишется с баланса ученика после занятия. 0 — не списывать. Пусто — посчитать из ставки. Применится ко всей серии.
-              </p>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label>Предмет</Label>
-            <Input
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="Математика, Физика..."
-            />
-          </div>
-
-          {/* Recurring lesson — individual + mini-group (2026-06-07) */}
-          <div className="space-y-3 border-t pt-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm">Повторять еженедельно</Label>
-                  <p className="text-xs text-muted-foreground">
-                    {isMiniGroupMode
-                      ? 'Создать серию занятий для группы каждую неделю'
-                      : 'Создать серию занятий каждую неделю'}
-                  </p>
-                </div>
-                <Switch checked={isRecurring} onCheckedChange={setIsRecurring} />
-              </div>
-
-              {isRecurring && (
-                <div className="space-y-2">
-                  <Label>Повторять до *</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn(
-                          "w-full justify-start text-left font-normal",
-                          !repeatUntil && "text-muted-foreground"
-                        )}
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {repeatUntil ? format(repeatUntil, 'dd.MM.yyyy') : 'Выберите дату окончания'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={repeatUntil}
-                        onSelect={setRepeatUntil}
-                        locale={ru}
-                        disabled={(d) => d < (date || new Date())}
-                        className="pointer-events-auto"
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  {repeatUntil && date && (
-                    <p className="text-xs text-muted-foreground">
-                      Будет создано ~{Math.min(60, Math.floor((repeatUntil.getTime() - date.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1)} занятий
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-          <div className="space-y-2">
-            <Label>Заметка (опц.)</Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Примечание к занятию..."
-              rows={2}
-            />
-          </div>
-
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Отмена
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={
-              isSaving ||
-              (isMiniGroupMode &&
-                (
-                  isMiniGroupDataLoading ||
-                  Boolean(miniGroupDataError) ||
-                  !groupId ||
-                  miniGroupMembersForCreate.length === 0 ||
-                  unresolvedGroupMembers.length > 0
-                ))
-            }
-          >
-            {isSaving
-              ? (isMiniGroupMode
-                  ? (isRecurring ? 'Создаем серию для группы...' : 'Создаем занятие для группы...')
-                  : 'Сохранение...')
-              : isMiniGroupMode
-                ? (isRecurring ? 'Создать серию для группы' : 'Создать занятие')
-                : (isRecurring ? 'Создать серию' : 'Создать')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // =============================================
 // AddEventDialog — создание личного дела
 // =============================================
@@ -2973,6 +1866,7 @@ function LessonDetailsDialog({
   const [editStudentId, setEditStudentId] = useState<string>('');
   const [editLessonType, setEditLessonType] = useState<LessonType>('regular');
   const [editSubject, setEditSubject] = useState('');
+  const [editTopic, setEditTopic] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editDate, setEditDate] = useState<Date | undefined>();
   const [editHour, setEditHour] = useState('');
@@ -2980,8 +1874,6 @@ function LessonDetailsDialog({
   const [editDuration, setEditDuration] = useState('60');
   // Series confirmation state
   const [seriesAction, setSeriesAction] = useState<'save' | 'cancel' | null>(null);
-  const [isActualSeries, setIsActualSeries] = useState(false);
-  const [isSeriesCheckLoading, setIsSeriesCheckLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // Phase 2b cost-driven billing: editable cost + cancel-with-charge
@@ -2999,6 +1891,7 @@ function LessonDetailsDialog({
       setEditStudentId(lesson.student_id || '__none__');
       setEditLessonType((lesson.lesson_type as LessonType) || 'regular');
       setEditSubject(lesson.subject || '');
+      setEditTopic(lesson.topic || '');
       setEditNotes(lesson.notes || '');
       setEditDate(lessonStart);
       setEditHour(lessonStart.getHours().toString());
@@ -3010,36 +1903,20 @@ function LessonDetailsDialog({
     }
   }, [open, lesson]);
 
-  useEffect(() => {
-    let isActive = true;
-
-    if (!open || !lesson || !lesson.is_recurring) {
-      setIsActualSeries(false);
-      setIsSeriesCheckLoading(false);
-      return;
-    }
-
-    setIsSeriesCheckLoading(true);
-    getLessonSeriesCount(lesson)
-      .then((count) => {
-        if (!isActive) return;
-        setIsActualSeries(count > 1);
-      })
-      .catch((error) => {
-        console.error('Error resolving lesson series state:', error);
-        if (!isActive) return;
-        setIsActualSeries(false);
-      })
-      .finally(() => {
-        if (isActive) {
-          setIsSeriesCheckLoading(false);
-        }
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [open, lesson]);
+  // Проверка «это правда серия» — кэшируемый useQuery вместо запроса на КАЖДОЕ
+  // открытие карточки (Волна 1, перф). refetchOnWindowFocus:false — write-форма
+  // (smoke §8). Инвалидация ключа — после удаления части серии (doDelete).
+  const seriesQueryClient = useQueryClient();
+  const seriesCheckEnabled = open && !!lesson?.is_recurring;
+  const seriesRootId = lesson ? (lesson.parent_lesson_id || lesson.id) : null;
+  const { data: seriesCount, isLoading: isSeriesCheckLoading } = useQuery({
+    queryKey: ['tutor', 'lesson-series-count', seriesRootId],
+    enabled: seriesCheckEnabled,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    queryFn: () => getLessonSeriesCount(lesson!),
+  });
+  const isActualSeries = seriesCheckEnabled && (seriesCount ?? 0) > 1;
 
   useEffect(() => {
     if (!isActualSeries && seriesAction !== null) {
@@ -3218,6 +2095,10 @@ function LessonDetailsDialog({
           shiftMinutes,
           scope,
         });
+        // Тема — у КОНКРЕТНОГО занятия (в серию намеренно не копируется; RPC её не знает).
+        if (result.ok && (editTopic.trim() || '') !== (lesson.topic ?? '')) {
+          await updateLesson(lesson.id, { topic: editTopic.trim() || null });
+        }
         if (result.ok) {
           toast.success(`Серия обновлена (${result.updatedCount})`);
           setIsEditing(false);
@@ -3238,6 +2119,7 @@ function LessonDetailsDialog({
           tutor_student_id: tutorStudent?.id || undefined,
           lesson_type: editLessonType,
           subject: editSubject || undefined,
+          topic: editTopic.trim() || null,
           notes: editNotes || undefined,
         });
         if (result) {
@@ -3270,6 +2152,8 @@ function LessonDetailsDialog({
               ? 'Занятия удалены'
               : 'Занятие удалено',
         );
+        // Состав серии изменился — кэш «это правда серия» больше не валиден.
+        void seriesQueryClient.invalidateQueries({ queryKey: ['tutor', 'lesson-series-count'] });
         onCancel();
         onOpenChange(false);
       } else {
@@ -3493,6 +2377,15 @@ function LessonDetailsDialog({
                   value={editSubject}
                   onChange={e => setEditSubject(e.target.value)}
                   placeholder="Предмет"
+                  className="text-base"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Тема занятия</Label>
+                <Input
+                  value={editTopic}
+                  onChange={e => setEditTopic(e.target.value)}
+                  placeholder="Тема (видна на ячейке и ученику)"
                   className="text-base"
                 />
               </div>
@@ -4324,7 +3217,11 @@ function TutorScheduleContent() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
-  const [dragPreview, setDragPreview] = useState<DragPreviewState | null>(null);
+  // Меню «Занятие / Личное дело» по клику на пустую ячейку (Волна 1).
+  const [quickAdd, setQuickAdd] = useState<QuickAddMenuState | null>(null);
+  // Превью перетаскивания живёт в DragPreviewLayer со своим стейтом (через ref) —
+  // dragover больше не ререндерит страницу-монолит (performance.md).
+  const dragPreviewRef = useRef<DragPreviewHandle>(null);
   const [optimisticStartsByLessonId, setOptimisticStartsByLessonId] = useState<Record<string, string>>({});
   const draggedLessonIdRef = useRef<string | null>(null);
   const draggedLessonDurationRef = useRef<number>(60);
@@ -4353,15 +3250,49 @@ function TutorScheduleContent() {
     loading: groupsLoading,
     error: groupsError,
   } = useTutorGroups(miniGroupsEnabled);
-  const {
-    memberships,
-    loading: membershipsLoading,
-    error: membershipsError,
-  } = useTutorGroupMemberships(miniGroupsEnabled);
+  // Дедуп (Волна 1, перф): membership-данные уже есть внутри useTutorGroups
+  // (listActiveGroupsWithMembers делает тот же запрос) — отдельный
+  // useTutorGroupMemberships дублировал HTTP-запрос при каждом монтировании.
+  const memberships = useMemo<TutorGroupMembership[]>(
+    () =>
+      groups.flatMap((g) =>
+        g.members.map((m) => ({
+          id: `${g.id}:${m.tutor_student_id}`,
+          tutor_id: g.tutor_id,
+          tutor_student_id: m.tutor_student_id,
+          tutor_group_id: g.id,
+          is_active: m.is_active,
+          created_at: g.created_at,
+          updated_at: g.updated_at,
+          tutor_group: g,
+        })),
+      ),
+    [groups],
+  );
+  const membershipsLoading = groupsLoading;
+  const membershipsError = groupsError;
 
   // Гард (A6): групповое ЗАНЯТИЕ создаётся только в учебных (основных) группах —
   // метки (#интенсив) сюда не попадают (иначе «занятие для #прогульщик»).
   const primaryGroupsForLesson = useMemo(() => groups.filter((g) => g.is_primary), [groups]);
+
+  // Цвета сущностей (Волна 1, «4 группы — 4 цвета»): ячейка красится цветом группы
+  // (tutor_groups.color) или ученика (tutor_students.color); тип занятия — полоской.
+  const studentColorById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of students) {
+      if (s.color) map.set(s.id, s.color);
+    }
+    return map;
+  }, [students]);
+
+  const groupColorById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      if (g.color) map.set(g.id, g.color);
+    }
+    return map;
+  }, [groups]);
 
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
@@ -4494,6 +3425,11 @@ function TutorScheduleContent() {
     void queryClient.invalidateQueries({ queryKey: ['tutor', 'received-payments'] }); // журнал «Оплаты» (оплата за занятие)
   }, [queryClient]);
 
+  // Бейджи «МЗ»/«ДЗ» пересчитываем после работы с материалами (закрытие шторки/шита).
+  const invalidateMaterialFlags = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['tutor', 'lesson-material-flags'] });
+  }, [queryClient]);
+
   const scheduleParticipantPaymentRefresh = useCallback(() => {
     if (participantPaymentRefreshTimerRef.current) {
       clearTimeout(participantPaymentRefreshTimerRef.current);
@@ -4528,14 +3464,25 @@ function TutorScheduleContent() {
     });
   }, [weekStart, refetchLessons, invalidateBalanceCaches]);
 
-  const visibleHours = useMemo(() => {
-    return Array.from(
-      { length: scheduleSettings.workDayEnd - scheduleSettings.workDayStart },
-      (_, i) => scheduleSettings.workDayStart + i
-    );
-  }, [scheduleSettings]);
-
-  const gridHeight = visibleHours.length * HOUR_HEIGHT;
+  // Префетч соседних недель (Волна 1, перф): «Назад/Вперёд» листается из кэша.
+  // Ключи строятся ТЕМ ЖЕ weekRangeISO, что и хуки — иначе двойные запросы.
+  useEffect(() => {
+    for (const delta of [-7, 7]) {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + delta);
+      const { startDate, endDate } = weekRangeISO(d);
+      void queryClient.prefetchQuery({
+        queryKey: ['tutor', 'lessons', startDate, endDate],
+        queryFn: () => getTutorLessons(startDate, endDate),
+        staleTime: TUTOR_STALE_TIME_MS,
+      });
+      void queryClient.prefetchQuery({
+        queryKey: ['tutor', 'calendar-events', startDate, endDate],
+        queryFn: () => getTutorCalendarEvents(startDate, endDate),
+        staleTime: TUTOR_STALE_TIME_MS,
+      });
+    }
+  }, [weekStart, queryClient]);
 
   const effectiveLessons = useMemo(() => {
     if (Object.keys(optimisticStartsByLessonId).length === 0) return lessons;
@@ -4555,11 +3502,42 @@ function TutorScheduleContent() {
     ));
   }, [calendarEvents, optimisticEventStartsById]);
 
+  // Бейджи «МЗ»/«ДЗ» на ячейках: один батч-запрос по видимым занятиям недели (Волна 1).
+  const weekLessonIds = useMemo(() => effectiveLessons.map((l) => l.id), [effectiveLessons]);
+  const materialFlags = useLessonMaterialFlags(weekLessonIds);
+
+  // Диапазон часов сетки (Волна 1): рабочие часы, РАСШИРЕННЫЕ занятиями/делами вне их —
+  // раньше занятие в 08:00 при workDayStart=9 МОЛЧА не рендерилось (потеря данных).
+  const visibleRange = useMemo(() => {
+    let start = scheduleSettings.workDayStart;
+    let end = scheduleSettings.workDayEnd;
+    const widen = (startAtIso: string, durationMin: number) => {
+      const d = new Date(startAtIso);
+      const startH = d.getHours();
+      const endH = Math.ceil((d.getHours() * 60 + d.getMinutes() + (durationMin || 60)) / 60);
+      if (startH < start) start = startH;
+      if (endH > end) end = Math.min(24, endH);
+    };
+    for (const l of effectiveLessons) widen(l.start_at, l.duration_min);
+    for (const ev of effectiveEvents) widen(ev.start_at, ev.duration_min);
+    return { start, end };
+  }, [effectiveLessons, effectiveEvents, scheduleSettings]);
+
+  // Час, с которого рисуется сетка (= точка отсчёта top-позиций блоков).
+  const visibleStartHour = visibleRange.start;
+
+  const visibleHours = useMemo(
+    () => Array.from({ length: visibleRange.end - visibleRange.start }, (_, i) => visibleRange.start + i),
+    [visibleRange],
+  );
+
+  const gridHeight = visibleHours.length * HOUR_HEIGHT;
+
   useEffect(() => {
     setOptimisticStartsByLessonId({});
     setOptimisticEventStartsById({});
     draggedEventIdRef.current = null;
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
     draggedLessonIdRef.current = null;
     draggedLessonDurationRef.current = 60;
     isLessonDragInProgressRef.current = false;
@@ -4572,18 +3550,16 @@ function TutorScheduleContent() {
     for (let i = 0; i < 7; i++) byDay[i] = [];
 
     for (const lesson of effectiveLessons) {
-      // Show all statuses: booked, completed, cancelled
+      // Show all statuses: booked, completed, cancelled.
+      // Фильтра по рабочим часам больше НЕТ (Волна 1): сетка сама расширяется
+      // под занятия вне рабочих часов (visibleRange) — раньше они молча исчезали.
       const startDate = new Date(lesson.start_at);
       const dayOfWeek = (startDate.getDay() + 6) % 7;
-      const lessonHour = startDate.getHours();
-
-      if (lessonHour >= scheduleSettings.workDayStart && lessonHour < scheduleSettings.workDayEnd) {
-        byDay[dayOfWeek].push(lesson);
-      }
+      byDay[dayOfWeek].push(lesson);
     }
 
     return byDay;
-  }, [effectiveLessons, scheduleSettings]);
+  }, [effectiveLessons]);
 
   const eventsByDay = useMemo(() => {
     const byDay: Record<number, TutorCalendarEvent[]> = {};
@@ -4592,14 +3568,11 @@ function TutorScheduleContent() {
     for (const ev of effectiveEvents) {
       const startDate = new Date(ev.start_at);
       const dayOfWeek = (startDate.getDay() + 6) % 7;
-      const evHour = startDate.getHours();
-      if (evHour >= scheduleSettings.workDayStart && evHour < scheduleSettings.workDayEnd) {
-        byDay[dayOfWeek].push(ev);
-      }
+      byDay[dayOfWeek].push(ev);
     }
 
     return byDay;
-  }, [effectiveEvents, scheduleSettings]);
+  }, [effectiveEvents]);
 
   const activeMembershipByTutorStudentId = useMemo(() => {
     const map = new Map<string, TutorGroupMembership>();
@@ -4883,14 +3856,15 @@ function TutorScheduleContent() {
   }, []);
 
   const getSnappedTimeFromPosition = useCallback((positionY: number, durationMin: number = 0) => {
-    const workStartMinutes = scheduleSettings.workDayStart * 60;
-    const workEndMinutes = scheduleSettings.workDayEnd * 60;
+    // Сетка стартует с visibleStartHour (рабочие часы, расширенные ранними занятиями).
+    const gridStartMinutes = visibleStartHour * 60;
+    const gridEndMinutes = visibleRange.end * 60;
     const minutesFromStart = Math.floor(positionY / PIXELS_PER_MINUTE);
-    const rawTotalMinutes = workStartMinutes + minutesFromStart;
+    const rawTotalMinutes = gridStartMinutes + minutesFromStart;
     const roundedTotalMinutes = Math.round(rawTotalMinutes / 15) * 15;
-    const latestAllowedStart = Math.max(workStartMinutes, workEndMinutes - durationMin);
+    const latestAllowedStart = Math.max(gridStartMinutes, gridEndMinutes - durationMin);
     const clampedTotalMinutes = Math.max(
-      workStartMinutes,
+      gridStartMinutes,
       Math.min(roundedTotalMinutes, latestAllowedStart)
     );
 
@@ -4898,16 +3872,21 @@ function TutorScheduleContent() {
       hour: Math.floor(clampedTotalMinutes / 60),
       minute: clampedTotalMinutes % 60
     };
-  }, [scheduleSettings.workDayStart, scheduleSettings.workDayEnd]);
+  }, [visibleStartHour, visibleRange.end]);
 
-  const handleGridClick = useCallback((dayOfWeek: number, clickY: number) => {
+  // Клик по пустой ячейке → меню «Занятие / Личное дело» (Волна 1), не сразу форма.
+  const handleGridClick = useCallback((dayOfWeek: number, clickY: number, clientX: number, clientY: number) => {
     const { hour, minute } = getSnappedTimeFromPosition(clickY);
 
     const date = getDateForDayOfWeek(weekStart, dayOfWeek);
     setSelectedDate(date);
     setSelectedHour(hour);
     setSelectedMinute(minute);
-    setAddLessonOpen(true);
+    setQuickAdd({
+      x: clientX,
+      y: clientY,
+      label: `${format(date, 'EEEEEE, d MMM', { locale: ru })}, ${formatTime(hour, minute)}`,
+    });
   }, [getSnappedTimeFromPosition, weekStart]);
 
   const handleLessonClick = useCallback((lesson: TutorLessonWithStudent) => {
@@ -4922,6 +3901,11 @@ function TutorScheduleContent() {
     setGroupDetailsOpen(true);
   }, []);
 
+  // Стабильный хендлер клика по личному делу (инлайн-стрелка убила бы memo CalendarEventBlock).
+  const handleEventClick = useCallback((ev: TutorCalendarEvent) => {
+    setDetailsEvent(ev);
+  }, []);
+
   const handleGroupDetailsOpenChange = useCallback((open: boolean) => {
     setGroupDetailsOpen(open);
     if (!open) {
@@ -4934,13 +3918,13 @@ function TutorScheduleContent() {
     draggedEventIdRef.current = null; // не смешивать с drag личного дела
     draggedLessonIdRef.current = lessonId;
     draggedLessonDurationRef.current = durationMin;
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
     event.dataTransfer.setData('text/plain', lessonId);
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
   const handleLessonDragEnd = useCallback(() => {
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
     draggedLessonDurationRef.current = 60;
     // Reset immediately so click handler is not blocked
     isLessonDragInProgressRef.current = false;
@@ -4954,13 +3938,13 @@ function TutorScheduleContent() {
     draggedLessonIdRef.current = null; // не смешивать с drag занятия
     draggedEventIdRef.current = eventId;
     draggedLessonDurationRef.current = durationMin;
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
     event.dataTransfer.setData('text/plain', eventId);
     event.dataTransfer.effectAllowed = 'move';
   }, []);
 
   const handleEventDragEnd = useCallback(() => {
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
     draggedLessonDurationRef.current = 60;
     isLessonDragInProgressRef.current = false;
     draggedEventIdRef.current = null;
@@ -4969,7 +3953,7 @@ function TutorScheduleContent() {
 
   const handleDayDragOver = useCallback((dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
     if (!isWorkDay) {
-      setDragPreview(null);
+      dragPreviewRef.current?.clear();
       return;
     }
 
@@ -4985,27 +3969,10 @@ function TutorScheduleContent() {
     const rect = event.currentTarget.getBoundingClientRect();
     const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
     const { hour, minute } = getSnappedTimeFromPosition(positionY, durationMin);
-    const topPx = ((hour * 60) + minute - (scheduleSettings.workDayStart * 60)) * PIXELS_PER_MINUTE;
+    const topPx = ((hour * 60) + minute - (visibleStartHour * 60)) * PIXELS_PER_MINUTE;
 
-    setDragPreview((prev) => {
-      if (
-        prev &&
-        prev.visible &&
-        prev.dayIndex === dayIndex &&
-        prev.topPx === topPx &&
-        prev.durationMin === durationMin
-      ) {
-        return prev;
-      }
-
-      return {
-        dayIndex,
-        topPx,
-        durationMin,
-        visible: true
-      };
-    });
-  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, scheduleSettings.workDayStart]);
+    dragPreviewRef.current?.set({ dayIndex, topPx, durationMin });
+  }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, visibleStartHour]);
 
   // Перенос одиночного занятия (оптимистично) — для не-серийных и выбора «Только это».
   const moveSingleLessonOptimistic = useCallback(async (
@@ -5155,12 +4122,12 @@ function TutorScheduleContent() {
 
   const handleLessonDrop = useCallback(async (dayIndex: number, isWorkDay: boolean, event: React.DragEvent<HTMLDivElement>) => {
     if (!isWorkDay) {
-      setDragPreview(null);
+      dragPreviewRef.current?.clear();
       return;
     }
 
     event.preventDefault();
-    setDragPreview(null);
+    dragPreviewRef.current?.clear();
 
     // Перетаскивают личное дело? Обрабатываем отдельно (тот же drop-target).
     if (draggedEventIdRef.current) {
@@ -5347,6 +4314,35 @@ function TutorScheduleContent() {
           </div>
 
           <div className="flex gap-2 flex-wrap">
+            {/* Кнопки добавления в шапке (Волна 1): раньше жили только под сеткой,
+                на мобиле до них надо было доскроллить. «Добавить занятие» — primary
+                (единственный на странице, rule 90). */}
+            <Button
+              size="sm"
+              className="bg-accent text-white hover:bg-accent/90"
+              onClick={() => {
+                setSelectedDate(new Date());
+                setSelectedHour(new Date().getHours());
+                setSelectedMinute(0);
+                setAddLessonOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Добавить занятие
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSelectedDate(new Date());
+                setSelectedHour(new Date().getHours());
+                setSelectedMinute(0);
+                setAddEventOpen(true);
+              }}
+            >
+              <Ban className="h-4 w-4 mr-2" />
+              Личное дело
+            </Button>
             <Button onClick={handleCopyBookingLink} variant="outline" size="sm">
               {copiedLink ? (
                 <>
@@ -5499,14 +4495,19 @@ function TutorScheduleContent() {
           )
         )}
 
-        {/* Stats bar */}
-        <div className="flex flex-wrap gap-4 text-sm">
+        {/* Stats bar / легенда */}
+        <div className="flex flex-wrap items-center gap-4 text-sm">
           {LESSON_TYPES.map(t => (
             <div key={t.value} className="flex items-center gap-2">
               <div className={cn("w-3 h-3 rounded", t.color)} />
               <span>{t.shortLabel}</span>
             </div>
           ))}
+          {(studentColorById.size > 0 || groupColorById.size > 0) && (
+            <span className="text-xs text-muted-foreground">
+              Фон ячейки — цвет группы/ученика, полоска слева — тип занятия
+            </span>
+          )}
           <span className="text-muted-foreground ml-auto">
             Сегодня: {todayLessons} | Неделя: {weekLessons}
           </span>
@@ -5601,11 +4602,11 @@ function TutorScheduleContent() {
                               suppressNextGridClickRef.current = false;
                               return;
                             }
-                            if (isWorkDay) {
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const clickY = e.clientY - rect.top;
-                              handleGridClick(dayIndex, clickY);
-                            }
+                            // Меню открывается и на нерабочий день (Волна 1) — раньше клик
+                            // молча игнорировался, а личное дело в выходной — валидный сценарий.
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const clickY = e.clientY - rect.top;
+                            handleGridClick(dayIndex, clickY, e.clientX, e.clientY);
                           }}
                         >
                           {/* Hour lines */}
@@ -5626,46 +4627,44 @@ function TutorScheduleContent() {
                             />
                           ))}
 
-                          {/* Drag preview */}
-                          {dragPreview?.visible && dragPreview.dayIndex === dayIndex && (
-                            <>
-                              <div
-                                className="absolute left-0.5 right-0.5 rounded-md border border-primary/40 bg-primary/15 pointer-events-none z-20"
-                                style={{
-                                  top: `${dragPreview.topPx}px`,
-                                  height: `${Math.max(4, dragPreview.durationMin * PIXELS_PER_MINUTE)}px`
-                                }}
-                              />
-                              <div
-                                className="absolute left-0 right-0 h-0.5 bg-primary pointer-events-none z-30"
-                                style={{ top: `${dragPreview.topPx}px` }}
-                              />
-                            </>
-                          )}
-
-                          {/* Lessons */}
+                          {/* Lessons — memo-блоки со СТАБИЛЬНЫМИ хендлерами (инлайн-стрелки убили бы memo) */}
                           {dayRenderItems.map((item) => {
                             if (item.kind === 'single') {
                               const lesson = item.lesson;
+                              const flags = materialFlags.get(lesson.id);
                               return (
                                 <LessonBlock
                                   key={lesson.id}
                                   lesson={lesson}
-                                  workDayStart={scheduleSettings.workDayStart}
-                                  onClick={() => handleLessonClick(lesson)}
-                                  onDragStart={(event) => handleLessonDragStart(lesson.id, lesson.duration_min, event)}
+                                  workDayStart={visibleStartHour}
+                                  customColor={lesson.tutor_students ? studentColorById.get(lesson.tutor_students.id) ?? null : null}
+                                  hasMaterials={flags?.hasMaterials}
+                                  hasHomework={flags?.hasHomework}
+                                  onClick={handleLessonClick}
+                                  onDragStart={handleLessonDragStart}
                                   onDragEnd={handleLessonDragEnd}
                                 />
                               );
                             }
 
+                            let bucketHasMaterials = false;
+                            let bucketHasHomework = false;
+                            for (const lesson of item.bucket.lessons) {
+                              const f = materialFlags.get(lesson.id);
+                              if (f?.hasMaterials) bucketHasMaterials = true;
+                              if (f?.hasHomework) bucketHasHomework = true;
+                            }
+                            const bucketGroupId = item.bucket.groupSourceTutorGroupId ?? item.bucket.groupId;
                             return (
                               <GroupLessonBlock
                                 key={item.bucket.key}
                                 bucket={item.bucket}
-                                workDayStart={scheduleSettings.workDayStart}
-                                onClick={() => handleGroupBucketClick(item.bucket)}
-                                onDragStart={(event) => handleLessonDragStart(item.bucket.lessons[0].id, item.bucket.durationMin, event)}
+                                workDayStart={visibleStartHour}
+                                customColor={bucketGroupId ? groupColorById.get(bucketGroupId) ?? null : null}
+                                hasMaterials={bucketHasMaterials}
+                                hasHomework={bucketHasHomework}
+                                onClick={handleGroupBucketClick}
+                                onDragStart={handleLessonDragStart}
                                 onDragEnd={handleLessonDragEnd}
                               />
                             );
@@ -5676,9 +4675,9 @@ function TutorScheduleContent() {
                             <CalendarEventBlock
                               key={ev.id}
                               event={ev}
-                              workDayStart={scheduleSettings.workDayStart}
-                              onClick={() => setDetailsEvent(ev)}
-                              onDragStart={(event) => handleEventDragStart(ev.id, ev.duration_min, event)}
+                              workDayStart={visibleStartHour}
+                              onClick={handleEventClick}
+                              onDragStart={handleEventDragStart}
                               onDragEnd={handleEventDragEnd}
                             />
                           ))}
@@ -5686,6 +4685,9 @@ function TutorScheduleContent() {
                       );
                     })}
                   </div>
+
+                  {/* Превью перетаскивания — отдельный слой со своим стейтом (см. LessonBlocks) */}
+                  <DragPreviewLayer ref={dragPreviewRef} />
                 </div>
               </div>
             </div>
@@ -5720,25 +4722,37 @@ function TutorScheduleContent() {
           </Button>
         </div>
 
-        {/* Dialogs */}
-        <AddLessonDialog
-          open={addLessonOpen}
-          onOpenChange={setAddLessonOpen}
-          miniGroupsEnabled={miniGroupsEnabled}
-          groups={primaryGroupsForLesson}
-          memberships={memberships}
-          groupsLoading={groupsLoading}
-          membershipsLoading={membershipsLoading}
-          groupsError={groupsError}
-          membershipsError={membershipsError}
-          students={students}
-          initialDate={selectedDate}
-          initialHour={selectedHour}
-          initialMinute={selectedMinute}
-          weekLessons={effectiveLessons}
-          weekEvents={effectiveEvents}
-          onSuccess={() => refetchLessons()}
+        {/* Меню «Занятие / Личное дело» по клику на ячейку (Волна 1) */}
+        <QuickAddMenu
+          state={quickAdd}
+          onClose={() => setQuickAdd(null)}
+          onAddLesson={() => setAddLessonOpen(true)}
+          onAddEvent={() => setAddEventOpen(true)}
         />
+
+        {/* Dialogs */}
+        {addLessonOpen && (
+          <Suspense fallback={null}>
+            <AddLessonDialog
+              open={addLessonOpen}
+              onOpenChange={setAddLessonOpen}
+              miniGroupsEnabled={miniGroupsEnabled}
+              groups={primaryGroupsForLesson}
+              memberships={memberships}
+              groupsLoading={groupsLoading}
+              membershipsLoading={membershipsLoading}
+              groupsError={groupsError}
+              membershipsError={membershipsError}
+              students={students}
+              initialDate={selectedDate}
+              initialHour={selectedHour}
+              initialMinute={selectedMinute}
+              weekLessons={effectiveLessons}
+              weekEvents={effectiveEvents}
+              onSuccess={() => refetchLessons()}
+            />
+          </Suspense>
+        )}
 
         <AddEventDialog
           open={addEventOpen}
@@ -5778,7 +4792,7 @@ function TutorScheduleContent() {
           <Suspense fallback={null}>
             <LessonMaterialsDrawer
               open={!!materialsDrawerLesson}
-              onOpenChange={(o) => { if (!o) setMaterialsDrawerLesson(null); }}
+              onOpenChange={(o) => { if (!o) { setMaterialsDrawerLesson(null); invalidateMaterialFlags(); } }}
               lesson={materialsDrawerLesson}
             />
           </Suspense>
@@ -5788,7 +4802,7 @@ function TutorScheduleContent() {
           <Suspense fallback={null}>
             <PostLessonSheet
               open={!!postLessonSheetLesson}
-              onOpenChange={(o) => { if (!o) setPostLessonSheetLesson(null); }}
+              onOpenChange={(o) => { if (!o) { setPostLessonSheetLesson(null); invalidateMaterialFlags(); } }}
               lesson={postLessonSheetLesson}
             />
           </Suspense>

@@ -1,11 +1,27 @@
 import { supabase } from '@/lib/supabaseClient';
 import { createLesson } from '@/lib/tutorSchedule';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
+import { generateSeriesDates, type RecurrenceRule } from '@/lib/recurrenceDates';
 import type {
   LessonType,
   TutorLessonParticipantWithStudent,
   TutorLessonWithStudent,
 } from '@/types/tutor';
+
+/**
+ * Уникальный group_session_id (Safari-safe: crypto.randomUUID есть только в
+ * Safari 15.4+ и на HTTPS — rule 80). Жил в TutorSchedule.tsx, вынесен при
+ * извлечении AddLessonDialog (Волна 1).
+ */
+export function generateGroupSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  // Fallback UUIDv4-like string for older environments.
+  const randomHex = () => Math.floor((1 + Math.random()) * 0x10000).toString(16).slice(1);
+  return `${randomHex()}${randomHex()}-${randomHex()}-4${randomHex().slice(1)}-${((8 + Math.floor(Math.random() * 4)).toString(16))}${randomHex().slice(1)}-${randomHex()}${randomHex()}${randomHex()}`;
+}
 
 export interface MiniGroupCreateMember {
   tutorStudentId: string;
@@ -137,6 +153,12 @@ interface CreateMiniGroupLessonSeriesParams {
   lessonInput: MiniGroupCreateLessonInput;
   /** ISO-дата окончания серии (включительно). */
   repeatUntil: string;
+  /**
+   * Период повторения (Волна 1). ⚠️ daily для мини-групп ЗАПРЕЩЁН на UI-уровне:
+   * per-occurrence цикл (1 lesson + N участников на повтор) на 92 ежедневных
+   * занятиях = UI-фриз на минуты; батч-RPC — отдельная задача.
+   */
+  rule?: RecurrenceRule;
   /** Фабрика уникальных group_session_id (Safari-safe) для каждого повтора. */
   makeGroupSessionId: () => string;
 }
@@ -158,23 +180,17 @@ export async function createMiniGroupLessonSeries({
   members,
   lessonInput,
   repeatUntil,
+  rule = 'weekly',
   makeGroupSessionId,
 }: CreateMiniGroupLessonSeriesParams): Promise<MiniGroupCreateSeriesResult> {
   if (members.length === 0) {
     return { ok: false, count: 0, expected: 0, failedCount: 0, errorMessage: 'Нет участников' };
   }
 
-  const MAX_INSTANCES = 60;
   const startDate = new Date(lessonInput.start_at);
   const untilDate = new Date(new Date(repeatUntil).setHours(23, 59, 59, 999));
 
-  const dates: Date[] = [];
-  for (let week = 0; dates.length < MAX_INSTANCES; week++) {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + week * 7);
-    if (d > untilDate) break;
-    dates.push(d);
-  }
+  const dates = generateSeriesDates(startDate, untilDate, rule);
 
   if (dates.length === 0) {
     return { ok: false, count: 0, expected: 0, failedCount: 0, errorMessage: 'Нет дат для серии занятий' };
@@ -191,7 +207,7 @@ export async function createMiniGroupLessonSeries({
       ...lessonInput,
       start_at: dates[0].toISOString(),
       is_recurring: isSeries,
-      recurrence_rule: isSeries ? 'weekly' : undefined,
+      recurrence_rule: isSeries ? rule : undefined,
       parent_lesson_id: undefined,
     },
   });
@@ -218,7 +234,7 @@ export async function createMiniGroupLessonSeries({
         start_at: dates[i].toISOString(),
         group_session_id: makeGroupSessionId(),
         is_recurring: true,
-        recurrence_rule: 'weekly',
+        recurrence_rule: rule,
         parent_lesson_id: rootLesson.id,
       },
     });

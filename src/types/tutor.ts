@@ -81,6 +81,12 @@ export interface TutorStudent {
   last_lesson_at: string | null;
   hourly_rate_cents: number | null;
   /**
+   * Цвет ученика в расписании (#RRGGBB из пресет-палитры scheduleColors.ts,
+   * NULL = без цвета — ячейка красится по типу занятия). Волна 1 Расписания,
+   * миграция 20260806130000. Optional defensively — старые ответы/кэш.
+   */
+  color?: string | null;
+  /**
    * Баланс ученика (РУБЛИ, ledger-managed — rule 60 «Баланс ученика»). Отрицательный = долг.
    * Optional defensively: кэш/старые ответы могли не нести колонку.
    */
@@ -228,6 +234,8 @@ export interface UpdateTutorStudentInput {
   parent_contact?: string;
   last_lesson_at?: string;
   hourly_rate_cents?: number | null;
+  /** Цвет ученика в расписании (#RRGGBB из пресетов, null = сбросить). Волна 1. */
+  color?: string | null;
 }
 
 // =============================================
@@ -391,6 +399,12 @@ export interface TutorLesson {
   source: LessonSource;
   lesson_type: LessonType;
   subject: string | null;
+  /**
+   * Тема урока (видна ученику — edge student-lessons-api несёт её в whitelist).
+   * Показывается на ячейке календаря. Волна 1 Расписания, миграция 20260806130000.
+   * Optional defensively — старые ответы/кэш.
+   */
+  topic?: string | null;
   notes: string | null;
   cancelled_at: string | null;
   cancelled_by: 'tutor' | 'student' | null;
@@ -438,6 +452,7 @@ export interface CreateLessonInput {
   duration_min?: number;
   lesson_type?: LessonType;
   subject?: string;
+  topic?: string;
   notes?: string;
   // Recurring
   is_recurring?: boolean;
@@ -454,6 +469,7 @@ export interface UpdateLessonInput {
   group_size_snapshot?: number | null;
   lesson_type?: LessonType;
   subject?: string;
+  topic?: string | null;
   notes?: string;
   cancelled_by?: 'tutor' | 'student';
   student_id?: string;

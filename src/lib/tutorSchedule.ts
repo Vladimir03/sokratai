@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
+import { generateSeriesDates, type RecurrenceRule } from '@/lib/recurrenceDates';
 import type {
   TutorWeeklySlot,
   TutorLessonWithStudent,
@@ -214,6 +215,8 @@ interface CreateLessonInput {
   duration_min?: number;
   lesson_type?: LessonType;
   subject?: string;
+  /** Тема урока (видна ученику через edge-whitelist). НЕ копируется в серию — у каждого занятия своя. */
+  topic?: string;
   notes?: string;
   source?: 'manual' | 'self_booking';
   is_recurring?: boolean;
@@ -248,9 +251,9 @@ export async function createLesson(input: CreateLessonInput): Promise<TutorLesso
 
 export async function createLessonSeries(
   input: CreateLessonInput,
-  repeatUntil: string // ISO date string (inclusive)
+  repeatUntil: string, // ISO date string (inclusive)
+  rule: RecurrenceRule = 'weekly'
 ): Promise<{ root: TutorLessonWithStudent | null; count: number }> {
-  const MAX_INSTANCES = 60;
   const startDate = new Date(input.start_at);
   const untilDate = new Date(new Date(repeatUntil).setHours(23, 59, 59, 999));
 
@@ -264,20 +267,14 @@ export async function createLessonSeries(
     tutorId = tutor.id;
   }
 
-  // Generate weekly dates immutably (calendar-day addition preserves DST correctness)
-  const dates: Date[] = [];
-  for (let week = 0; dates.length < MAX_INSTANCES; week++) {
-    const d = new Date(startDate);
-    d.setDate(startDate.getDate() + week * 7);
-    if (d > untilDate) break;
-    dates.push(d);
-  }
+  // Периоды повторения (Волна 1): daily/weekly/biweekly/monthly — единый генератор.
+  const dates = generateSeriesDates(startDate, untilDate, rule);
 
   if (dates.length === 0) {
     return { root: null, count: 0 };
   }
 
-  const recurrenceRule = 'weekly';
+  const recurrenceRule = rule;
 
   // A single generated date is not an actual series; create a regular lesson.
   if (dates.length === 1) {
@@ -410,6 +407,68 @@ export async function getLastLessonPriceForStudent(
   return bestAmount;
 }
 
+/**
+ * Батч-версия getLastLessonPriceForStudent для формы группового занятия (Волна 1, перф):
+ * 2 запроса на ВЕСЬ состав вместо N×2 (группа из 6 человек делала 12 запросов).
+ * Та же семантика: только payment_amount > 0, НЕ cancelled, самое позднее по start_at.
+ * Best-effort: ошибка любой ветки → просто меньше префиллов (UI возьмёт ставка×длит).
+ */
+export async function getLastLessonPricesForStudents(
+  tutorStudentIds: string[]
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const ids = tutorStudentIds.filter(Boolean);
+  if (ids.length === 0) return result;
+
+  const bestAt = new Map<string, number>();
+  const consider = (id: string | null | undefined, amount: number | null, startAt: string | null | undefined) => {
+    if (!id || amount == null || amount <= 0 || !startAt) return;
+    const t = new Date(startAt).getTime();
+    if (!Number.isFinite(t)) return;
+    if (t > (bestAt.get(id) ?? -Infinity)) {
+      bestAt.set(id, t);
+      result.set(id, amount);
+    }
+  };
+
+  const individualPromise = supabase
+    .from('tutor_lessons')
+    .select('tutor_student_id, payment_amount, start_at')
+    .in('tutor_student_id', ids)
+    .gt('payment_amount', 0)
+    .neq('status', 'cancelled');
+
+  const groupPromise = supabase
+    .from('tutor_lesson_participants')
+    .select('tutor_student_id, payment_amount, tutor_lessons!inner(start_at, status)')
+    .in('tutor_student_id', ids)
+    .gt('payment_amount', 0);
+
+  const [individualRes, groupRes] = await Promise.all([individualPromise, groupPromise]);
+
+  if (!individualRes.error && Array.isArray(individualRes.data)) {
+    for (const raw of individualRes.data) {
+      const row = raw as { tutor_student_id: string | null; payment_amount: number | null; start_at: string | null };
+      consider(row.tutor_student_id, row.payment_amount, row.start_at);
+    }
+  }
+
+  if (!groupRes.error && Array.isArray(groupRes.data)) {
+    for (const raw of groupRes.data) {
+      const row = raw as {
+        tutor_student_id: string | null;
+        payment_amount: number | null;
+        tutor_lessons: { start_at: string; status?: string } | { start_at: string; status?: string }[] | null;
+      };
+      const lessonRel = Array.isArray(row.tutor_lessons) ? row.tutor_lessons[0] : row.tutor_lessons;
+      if (lessonRel?.status === 'cancelled') continue;
+      consider(row.tutor_student_id, row.payment_amount, lessonRel?.start_at);
+    }
+  }
+
+  return result;
+}
+
 interface UpdateLessonInput {
   status?: 'booked' | 'completed' | 'cancelled';
   start_at?: string;
@@ -420,6 +479,7 @@ interface UpdateLessonInput {
   group_size_snapshot?: number | null;
   lesson_type?: LessonType;
   subject?: string;
+  topic?: string | null;
   notes?: string;
   cancelled_by?: 'tutor' | 'student';
   student_id?: string;

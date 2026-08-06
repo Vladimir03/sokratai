@@ -717,6 +717,14 @@ function TutorStudentsContent() {
                     <div key={section.key} className="space-y-2.5">
                       <div className="flex items-center gap-2 px-1">
                         <Users className="h-4 w-4 text-slate-400" aria-hidden="true" />
+                        {/* Цвет группы (Волна 1 расписания) — та же точка, что на ячейках календаря */}
+                        {sectionGroup?.color && (
+                          <span
+                            className="h-2.5 w-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: sectionGroup.color }}
+                            aria-hidden="true"
+                          />
+                        )}
                         <h3 className="text-sm font-semibold text-slate-700">{section.label}</h3>
                         <span className="text-xs text-slate-400">{section.students.length}</span>
                         {sectionGroup && (

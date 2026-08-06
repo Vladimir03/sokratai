@@ -50,7 +50,7 @@ type StudentContactInfoRow = {
 // только on-demand через RPC tutor_ensure_student_claim_token в ConnectStudentSheet
 // (review P1 #3). claimed_at (не секрет) оставляем — статус подключения.
 const TUTOR_STUDENT_COLUMNS =
-  'archived_at, balance, claimed_at, created_at, current_score, display_name, ' +
+  'archived_at, balance, claimed_at, color, created_at, current_score, display_name, ' +
   'exam_type, gender, hourly_rate_cents, id, last_activity_at, last_lesson_at, ' +
   'notes, paid_until, parent_contact, start_score, status, student_id, subject, ' +
   'target_score, tutor_id, updated_at';
@@ -848,7 +848,9 @@ export async function getTutorStudent(
     return null;
   }
 
-  const student = data as TutorStudentWithProfile;
+  // `as unknown`: сгенерированный types.ts отстаёт от миграции (color, 20260806130000)
+  // до регена Lovable — колонко-перечисляющий select валиден, но тип select-строки не резолвится.
+  const student = data as unknown as TutorStudentWithProfile;
   const [debtMap, contactInfo] = await Promise.all([
     getTutorStudentsDebtMap(),
     getStudentsContactInfo([student.student_id]),

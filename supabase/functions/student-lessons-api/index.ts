@@ -41,8 +41,10 @@ const SIGNED_URL_TTL_SEC = 3600;
 // `group_source_tutor_group_id`. `tutor_id` (→ name/avatar) and `student_id`
 // (→ membership check; always == uid or NULL for the rows a student can see) are
 // used server-side only and dropped from the response (mapping is explicit).
+// topic — student-visible ЯВНЫМ решением (Волна 1 расписания, 2026-08-06): тема урока
+// видна ученику во вкладке «Занятия» (rule 98: расширяем edge-whitelist, не клиентский select).
 const LESSON_SELECT =
-  "id, student_id, start_at, duration_min, subject, status, lesson_type, group_session_id, group_title_snapshot, tutor_id";
+  "id, student_id, start_at, duration_min, subject, topic, status, lesson_type, group_session_id, group_title_snapshot, tutor_id";
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 
@@ -352,6 +354,7 @@ interface LessonRow {
   start_at: string;
   duration_min: number | null;
   subject: string | null;
+  topic: string | null;
   status: string;
   lesson_type: string | null;
   group_session_id: string | null;
@@ -500,6 +503,7 @@ async function assembleFeedItems(
         start_at: l.start_at,
         duration_min: l.duration_min,
         subject: l.subject,
+        topic: l.topic ?? null,
         status: l.status,
         lesson_type: l.lesson_type,
         group_session_id: l.group_session_id,

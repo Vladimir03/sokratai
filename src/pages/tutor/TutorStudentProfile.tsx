@@ -57,6 +57,7 @@ import {
 } from '@/lib/tutorScheduleGroupCreate';
 import type { TutorGroup, TutorGroupMembership } from '@/types/tutor';
 import { StudentTagsEditor } from '@/components/tutor/StudentTagsEditor';
+import { ColorSwatchPicker } from '@/components/tutor/ColorSwatchPicker';
 import { AddToGroupLessonsPrompt } from '@/components/tutor/AddToGroupLessonsPrompt';
 import { buildAiAddressPreview, AI_ADDRESS_SEVERITY_STYLES } from '@/lib/studentAiAddressPreview';
 
@@ -293,6 +294,20 @@ function TutorStudentProfileContent() {
       setIsSaving(false);
     }
   }, [tutorStudentId, notes, parentContact, lastLessonAt, hourlyRate, queryClient, refetchStudent]);
+
+  // Цвет ученика в расписании — мгновенный persist (паттерн StudentTagsEditor,
+  // не в общий save: выбор цвета — самостоятельное действие).
+  const handleColorChange = useCallback(async (color: string | null) => {
+    if (!tutorStudentId) return;
+    const updated = await updateTutorStudent(tutorStudentId, { color });
+    if (!updated) {
+      toast.error('Не удалось сохранить цвет');
+      return;
+    }
+    await invalidateTutorStudentDependentQueries(queryClient, tutorStudentId);
+    refetchStudent();
+    toast.success(color ? 'Цвет сохранён — занятия ученика будут этого цвета' : 'Цвет сброшен');
+  }, [tutorStudentId, queryClient, refetchStudent]);
 
   const handleDeleteStudent = useCallback(async () => {
     if (!tutorStudentId) return;
@@ -767,6 +782,12 @@ function TutorStudentProfileContent() {
                       @{student.profiles.telegram_username}
                     </span>
                   )}
+                </div>
+
+                {/* Цвет ученика в расписании (Волна 1) — мгновенный persist, как метки */}
+                <div className="flex items-center gap-2 flex-wrap pt-1">
+                  <span className="text-xs text-muted-foreground">Цвет в расписании:</span>
+                  <ColorSwatchPicker value={student.color ?? null} onChange={handleColorChange} />
                 </div>
               </div>
             </div>
