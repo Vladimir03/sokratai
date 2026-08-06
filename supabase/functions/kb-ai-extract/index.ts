@@ -125,8 +125,8 @@ const KB_EXTRACT_SYSTEM_PROMPT = String.raw`Ты — ассистент репе
    НЕСКОЛЬКО задач — система вырежет нужный фрагмент. Если в задаче нет рисунка
    (чисто текстовая задача) — image_index = null, image_bbox = null. Если
    сомневаешься, нужен ли рисунок — оба null и добавь "image" в needs_review_fields.
-   НЕ описывай рисунок текстом вместо самого рисунка и НЕ перерисовывай его;
-   image_action = "attach_original". НИКОГДА не считай рисунком бланк ответов,
+   НЕ описывай рисунок текстом вместо самого рисунка и НЕ перерисовывай его —
+   система сама приложит оригинал. НИКОГДА не считай рисунком бланк ответов,
    номер задания, рамку или служебные пометки.
 8. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
 9. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
@@ -171,7 +171,6 @@ const KB_EXTRACT_SCHEMA_BLOCK = String.raw`СХЕМА ВЫХОДА — верн�
       "image_index": "integer (0-based) | null",
       "image_bbox": "[ymin, xmin, ymax, xmax] — целые 0..1000, рамка рисунка | null",
       "source_image_index": "integer (0-based) | null",
-      "image_action": "attach_original",
       "needs_review_fields": ["string"],
       "notes": "string | null"
     }
@@ -180,6 +179,12 @@ const KB_EXTRACT_SCHEMA_BLOCK = String.raw`СХЕМА ВЫХОДА — верн�
   "answers_table": [{ "num": 0, "answer": "string" }]
 }
 
+ЭКОНОМИЯ ВЫВОДА. Поле, значение которого null или пустой массив, НЕ включай в JSON
+вообще — пропущенное поле система читает как null. Сокращай ТОЛЬКО так: содержимое
+полей, и в первую очередь "text", НЕ урезай и не пересказывай.
+ДВА ПОЛЯ ПИШИ ВСЕГДА, даже когда кажется очевидным: "text" и "answer_confidence".
+Без "answer_confidence" система считает уверенность низкой и СТИРАЕТ ответ.
+
 ПРИМЕР. Вход: «ЕГЭ-2026. 1. Тело движется равноускоренно со скоростью v0 = 2 м/с
 с ускорением a = 0,5 м/с². Какова скорость через t = 6 с? Ответ: 5 м/с.
 2. Камень свободно падает с высоты h = 20 м (g = 10 м/с²). Найдите время падения.
@@ -187,7 +192,7 @@ const KB_EXTRACT_SCHEMA_BLOCK = String.raw`СХЕМА ВЫХОДА — верн�
 и «t, с»; ниже на том же изображении идёт текст задачи 4) По графику определите
 ускорение тела. Ответ: 2 м/с² или 2.»
 Выход:
-{"tasks":[{"text":"Тело движется равноускоренно со скоростью $v_0 = 2\\ \\text{м/с}$ с ускорением $a = 0{,}5\\ \\text{м/с}^2$. Какова скорость через $t = 6\\ \\text{с}$?","answer":"5 м/с","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null},{"text":"Камень свободно падает с высоты $h = 20\\ \\text{м}$ ($g = 10\\ \\text{м/с}^2$). Найдите время падения.","answer":null,"answer_confidence":"low","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Свободное падение","source_label":"ЕГЭ-2026","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":["answer"],"notes":"Ответ в материале не указан — оставлено пустым"},{"text":"По графику зависимости скорости от времени определите ускорение тела.","answer":"2 м/с² или 2","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"rubric_text":null,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":0,"image_bbox":[40,60,520,700],"source_image_index":0,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":3,"low_confidence_answers":1,"unreadable_images":0}}`;
+{"tasks":[{"text":"Тело движется равноускоренно со скоростью $v_0 = 2\\ \\text{м/с}$ с ускорением $a = 0{,}5\\ \\text{м/с}^2$. Какова скорость через $t = 6\\ \\text{с}$?","answer":"5 м/с","answer_confidence":"high","answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026"},{"text":"Камень свободно падает с высоты $h = 20\\ \\text{м}$ ($g = 10\\ \\text{м/с}^2$). Найдите время падения.","answer_confidence":"low","answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"topic_suggestion":"Кинематика","subtopic_suggestion":"Свободное падение","source_label":"ЕГЭ-2026","needs_review_fields":["answer"],"notes":"Ответ в материале не указан"},{"text":"По графику зависимости скорости от времени определите ускорение тела.","answer":"2 м/с² или 2","answer_confidence":"high","answer_format":"number","check_format":"short_answer","kim_number":1,"exam":"ege","primary_score":1,"topic_suggestion":"Кинематика","subtopic_suggestion":"Равноускоренное движение","source_label":"ЕГЭ-2026","image_index":0,"image_bbox":[40,60,520,700],"source_image_index":0}],"stats":{"found":3,"low_confidence_answers":1,"unreadable_images":0}}`;
 
 // ─── System prompt (обществознание) — мультипредметный каталог (2026-07-06) ───
 // Мираж физического промпта под обществознание: НЕТ формул/LaTeX; типы заданий —
@@ -251,8 +256,8 @@ const KB_EXTRACT_SYSTEM_PROMPT_SOCIAL = String.raw`Ты — ассистент �
    Рамка работает и когда на изображении НЕСКОЛЬКО заданий. Таблицу
    с данными по возможности переписывай текстом. Нет иллюстрации → image_index =
    null, image_bbox = null. Сомневаешься → оба null и добавь "image" в
-   needs_review_fields. НЕ перерисовывай иллюстрацию; image_action =
-   "attach_original". НИКОГДА не считай рисунком бланк ответов, номер задания
+   needs_review_fields. НЕ перерисовывай иллюстрацию — система сама приложит
+   оригинал. НИКОГДА не считай рисунком бланк ответов, номер задания
    или рамку.
 9. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
 10. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
@@ -294,7 +299,6 @@ const KB_EXTRACT_SCHEMA_BLOCK_SOCIAL = String.raw`СХЕМА ВЫХОДА — в
       "image_index": "integer (0-based) | null",
       "image_bbox": "[ymin, xmin, ymax, xmax] — целые 0..1000, рамка рисунка | null",
       "source_image_index": "integer (0-based) | null",
-      "image_action": "attach_original",
       "needs_review_fields": ["string"],
       "notes": "string | null"
     }
@@ -303,13 +307,19 @@ const KB_EXTRACT_SCHEMA_BLOCK_SOCIAL = String.raw`СХЕМА ВЫХОДА — в
   "answers_table": [{ "num": 0, "answer": "string" }]
 }
 
+ЭКОНОМИЯ ВЫВОДА. Поле, значение которого null или пустой массив, НЕ включай в JSON
+вообще — пропущенное поле система читает как null. Сокращай ТОЛЬКО так: содержимое
+полей, и в первую очередь "text", НЕ урезай и не пересказывай.
+ДВА ПОЛЯ ПИШИ ВСЕГДА, даже когда кажется очевидным: "text" и "answer_confidence".
+Без "answer_confidence" система считает уверенность низкой и СТИРАЕТ ответ.
+
 ПРИМЕР. Вход: «2. Выберите верные суждения об обществе и запишите цифры, под которыми
 они указаны. 1) Общество — часть материального мира. 2) Общество создаёт условия для
 самореализации личности. 3) Развитие общества может иметь прогрессивный характер.
 4) Изменения в обществе происходят только под влиянием внешних факторов. 5) Обществом
 называют устойчивую систему социальных связей. Ответ: 235.»
 Выход:
-{"tasks":[{"text":"Выберите верные суждения об обществе и запишите цифры, под которыми они указаны.\n1) Общество — часть материального мира.\n2) Общество создаёт условия для самореализации личности.\n3) Развитие общества может иметь прогрессивный характер.\n4) Изменения в обществе происходят только под влиянием внешних факторов.\n5) Обществом называют устойчивую систему социальных связей.","answer":"235","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":2,"exam":"ege","primary_score":2,"rubric_text":null,"topic_suggestion":"Человек и общество","subtopic_suggestion":"Общество как система","source_label":"","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
+{"tasks":[{"text":"Выберите верные суждения об обществе и запишите цифры, под которыми они указаны.\n1) Общество — часть материального мира.\n2) Общество создаёт условия для самореализации личности.\n3) Развитие общества может иметь прогрессивный характер.\n4) Изменения в обществе происходят только под влиянием внешних факторов.\n5) Обществом называют устойчивую систему социальных связей.","answer":"235","answer_confidence":"high","answer_format":"number","check_format":"short_answer","kim_number":2,"exam":"ege","primary_score":2,"topic_suggestion":"Человек и общество","subtopic_suggestion":"Общество как система"}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
 
 // ─── Generic-промпт для остальных школьных предметов (2026-07-07) ─────────────
 // Полный словарь SUBJECTS (mirror-copy `src/types/homework.ts` — Deno не может
@@ -399,8 +409,8 @@ function buildGenericExtractPrompt(subjectId: string): string {
    ЗАПАСОМ: лучше захватить лишнее пустое место, чем отрезать хоть одну подпись.
    Рамка работает и когда на изображении НЕСКОЛЬКО заданий. Нет
    рисунка → image_index = null, image_bbox = null. Сомневаешься → оба null и
-   добавь "image" в needs_review_fields. НЕ перерисовывай рисунок; image_action =
-   "attach_original". НИКОГДА не считай рисунком бланк ответов, номер задания
+   добавь "image" в needs_review_fields. НЕ перерисовывай рисунок — система сама
+   приложит оригинал. НИКОГДА не считай рисунком бланк ответов, номер задания
    или рамку.
 9. Уверенность: для каждого сомнительного поля добавь его имя в needs_review_fields.
 10. Верни СТРОГО валидный JSON по заданной схеме. Без пояснений, без markdown-обёрток.
@@ -443,7 +453,6 @@ const KB_EXTRACT_SCHEMA_BLOCK_GENERIC = String.raw`СХЕМА ВЫХОДА — �
       "image_index": "integer (0-based) | null",
       "image_bbox": "[ymin, xmin, ymax, xmax] — целые 0..1000, рамка рисунка | null",
       "source_image_index": "integer (0-based) | null",
-      "image_action": "attach_original",
       "needs_review_fields": ["string"],
       "notes": "string | null"
     }
@@ -452,10 +461,16 @@ const KB_EXTRACT_SCHEMA_BLOCK_GENERIC = String.raw`СХЕМА ВЫХОДА — �
   "answers_table": [{ "num": 0, "answer": "string" }]
 }
 
+ЭКОНОМИЯ ВЫВОДА. Поле, значение которого null или пустой массив, НЕ включай в JSON
+вообще — пропущенное поле система читает как null. Сокращай ТОЛЬКО так: содержимое
+полей, и в первую очередь "text", НЕ урезай и не пересказывай.
+ДВА ПОЛЯ ПИШИ ВСЕГДА, даже когда кажется очевидным: "text" и "answer_confidence".
+Без "answer_confidence" система считает уверенность низкой и СТИРАЕТ ответ.
+
 ПРИМЕР. Вход: «4. Расположите в хронологической последовательности исторические события.
 1) Крещение Руси 2) Куликовская битва 3) призвание варягов. Ответ: 312.»
 Выход:
-{"tasks":[{"text":"Расположите в хронологической последовательности исторические события. Запишите цифры, которыми обозначены события, в правильной последовательности.\n1) Крещение Руси\n2) Куликовская битва\n3) призвание варягов","answer":"312","answer_confidence":"high","solution":null,"answer_format":"number","check_format":"short_answer","kim_number":null,"exam":null,"primary_score":null,"rubric_text":null,"topic_suggestion":"Древняя Русь","subtopic_suggestion":"","source_label":"","image_index":null,"image_bbox":null,"source_image_index":null,"image_action":"attach_original","needs_review_fields":[],"notes":null}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
+{"tasks":[{"text":"Расположите в хронологической последовательности исторические события. Запишите цифры, которыми обозначены события, в правильной последовательности.\n1) Крещение Руси\n2) Куликовская битва\n3) призвание варягов","answer":"312","answer_confidence":"high","answer_format":"number","check_format":"short_answer","topic_suggestion":"Древняя Русь"}],"stats":{"found":1,"low_confidence_answers":0,"unreadable_images":0}}`;
 
 /**
  * Системный промпт + схема под предмет: physics/social — выделенные калиброванные;
