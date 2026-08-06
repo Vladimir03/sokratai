@@ -42,6 +42,8 @@ export interface MiniGroupCreateLessonInput {
   duration_min: number;
   lesson_type: LessonType;
   subject?: string;
+  /** Тема урока — per-lesson: в серии остаётся ТОЛЬКО у корня (ревью 5.6 P1 #2). */
+  topic?: string;
   notes?: string;
   group_session_id?: string;
   group_source_tutor_group_id?: string;
@@ -84,6 +86,7 @@ export async function createMiniGroupLesson({
     duration_min: lessonInput.duration_min,
     lesson_type: lessonInput.lesson_type,
     subject: lessonInput.subject,
+    topic: lessonInput.topic,
     notes: lessonInput.notes,
     group_session_id: lessonInput.group_session_id,
     group_source_tutor_group_id: lessonInput.group_source_tutor_group_id,
@@ -233,6 +236,9 @@ export async function createMiniGroupLessonSeries({
         ...lessonInput,
         start_at: dates[i].toISOString(),
         group_session_id: makeGroupSessionId(),
+        // Тема — per-lesson: у повторов НЕ дублируется (ревью 5.6 P1 #2; та же
+        // семантика, что у индивидуальной серии — childInputs без topic).
+        topic: undefined,
         is_recurring: true,
         recurrence_rule: rule,
         parent_lesson_id: rootLesson.id,

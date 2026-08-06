@@ -256,6 +256,7 @@ function GroupDetailsDialog({
   const [addScope, setAddScope] = useState<'this' | 'future'>('this');
   const [showGroupEdit, setShowGroupEdit] = useState(false);
   const [editGroupSubject, setEditGroupSubject] = useState('');
+  const [editGroupTopic, setEditGroupTopic] = useState('');
   const [editGroupNotes, setEditGroupNotes] = useState('');
   const [groupSeriesAction, setGroupSeriesAction] = useState<'save' | 'cancel' | null>(null);
   const [groupMoveScopeOpen, setGroupMoveScopeOpen] = useState(false);
@@ -367,6 +368,7 @@ function GroupDetailsDialog({
     setLastParticipantActionStatus(null);
     const ml = bucket.lessons[0];
     setEditGroupSubject(ml?.subject || '');
+    setEditGroupTopic(ml?.topic || '');
     setEditGroupNotes(ml?.notes || '');
     setShowGroupEdit(false);
     setGroupSeriesAction(null);
@@ -617,6 +619,7 @@ function GroupDetailsDialog({
       if (scope === 'this') {
         const result = await updateLesson(mainLesson.id, {
           subject: editGroupSubject || undefined,
+          topic: editGroupTopic.trim() || null,
           notes: editGroupNotes || undefined,
         });
         if (result) {
@@ -633,6 +636,11 @@ function GroupDetailsDialog({
           notes: editGroupNotes || undefined,
           scope,
         });
+        // Тема — у КОНКРЕТНОГО занятия (в серию намеренно не копируется; RPC её не знает).
+        // Зеркало individual-диалога (ревью 5.6 P1 #2: у группы темы было не исправить вовсе).
+        if (result.ok && (editGroupTopic.trim() || '') !== (mainLesson.topic ?? '')) {
+          await updateLesson(mainLesson.id, { topic: editGroupTopic.trim() || null });
+        }
         if (result.ok) {
           toast.success(`Серия обновлена (${result.updatedCount})`);
           setShowGroupEdit(false);
@@ -649,7 +657,7 @@ function GroupDetailsDialog({
       setIsGroupSaving(false);
       setGroupSeriesAction(null);
     }
-  }, [mainLesson, editGroupSubject, editGroupNotes, onActionApplied, onOpenChange]);
+  }, [mainLesson, editGroupSubject, editGroupTopic, editGroupNotes, onActionApplied, onOpenChange]);
 
   const handleGroupEditSaveClick = useCallback(() => {
     if (groupIsRecurring) {
@@ -1019,6 +1027,15 @@ function GroupDetailsDialog({
                         value={editGroupSubject}
                         onChange={(e) => setEditGroupSubject(e.target.value)}
                         placeholder="Предмет"
+                        className="text-base"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Тема занятия</Label>
+                      <Input
+                        value={editGroupTopic}
+                        onChange={(e) => setEditGroupTopic(e.target.value)}
+                        placeholder="Тема (видна на ячейке и ученикам)"
                         className="text-base"
                       />
                     </div>
@@ -3197,10 +3214,15 @@ function TutorScheduleContent() {
     isFetching: lessonsIsFetching,
     isRecovering: lessonsIsRecovering,
     failureCount: lessonsFailureCount,
+    isPlaceholder: lessonsIsPlaceholder,
   } = useTutorLessons(weekStart);
 
   // Личные дела (busy blocks) той же недели.
-  const { events: calendarEvents, refetch: refetchEvents } = useTutorCalendarEvents(weekStart);
+  const {
+    events: calendarEvents,
+    refetch: refetchEvents,
+    isPlaceholder: eventsIsPlaceholder,
+  } = useTutorCalendarEvents(weekStart);
 
   // Dialogs
   const [addLessonOpen, setAddLessonOpen] = useState(false);
@@ -3502,8 +3524,22 @@ function TutorScheduleContent() {
     ));
   }, [calendarEvents, optimisticEventStartsById]);
 
+  // Ревью 5.6 P1 #1: пока keepPreviousData отдаёт ПРОШЛУЮ неделю (смена недели,
+  // cache miss), её занятия НЕ рендерим — группировка идёт по дню недели, и старые
+  // блоки легли бы под чужие даты, оставаясь кликабельными/таскабельными.
+  // Каркас сетки (часы/колонки) сохраняется — белого экрана всё равно нет.
+  const weekDataIsPlaceholder = lessonsIsPlaceholder || eventsIsPlaceholder;
+  const displayLessons = useMemo(
+    () => (weekDataIsPlaceholder ? [] : effectiveLessons),
+    [weekDataIsPlaceholder, effectiveLessons],
+  );
+  const displayEvents = useMemo(
+    () => (weekDataIsPlaceholder ? [] : effectiveEvents),
+    [weekDataIsPlaceholder, effectiveEvents],
+  );
+
   // Бейджи «МЗ»/«ДЗ» на ячейках: один батч-запрос по видимым занятиям недели (Волна 1).
-  const weekLessonIds = useMemo(() => effectiveLessons.map((l) => l.id), [effectiveLessons]);
+  const weekLessonIds = useMemo(() => displayLessons.map((l) => l.id), [displayLessons]);
   const materialFlags = useLessonMaterialFlags(weekLessonIds);
 
   // Диапазон часов сетки (Волна 1): рабочие часы, РАСШИРЕННЫЕ занятиями/делами вне их —
@@ -3518,10 +3554,10 @@ function TutorScheduleContent() {
       if (startH < start) start = startH;
       if (endH > end) end = Math.min(24, endH);
     };
-    for (const l of effectiveLessons) widen(l.start_at, l.duration_min);
-    for (const ev of effectiveEvents) widen(ev.start_at, ev.duration_min);
+    for (const l of displayLessons) widen(l.start_at, l.duration_min);
+    for (const ev of displayEvents) widen(ev.start_at, ev.duration_min);
     return { start, end };
-  }, [effectiveLessons, effectiveEvents, scheduleSettings]);
+  }, [displayLessons, displayEvents, scheduleSettings]);
 
   // Час, с которого рисуется сетка (= точка отсчёта top-позиций блоков).
   const visibleStartHour = visibleRange.start;
@@ -3549,7 +3585,7 @@ function TutorScheduleContent() {
     const byDay: Record<number, TutorLessonWithStudent[]> = {};
     for (let i = 0; i < 7; i++) byDay[i] = [];
 
-    for (const lesson of effectiveLessons) {
+    for (const lesson of displayLessons) {
       // Show all statuses: booked, completed, cancelled.
       // Фильтра по рабочим часам больше НЕТ (Волна 1): сетка сама расширяется
       // под занятия вне рабочих часов (visibleRange) — раньше они молча исчезали.
@@ -3559,20 +3595,20 @@ function TutorScheduleContent() {
     }
 
     return byDay;
-  }, [effectiveLessons]);
+  }, [displayLessons]);
 
   const eventsByDay = useMemo(() => {
     const byDay: Record<number, TutorCalendarEvent[]> = {};
     for (let i = 0; i < 7; i++) byDay[i] = [];
 
-    for (const ev of effectiveEvents) {
+    for (const ev of displayEvents) {
       const startDate = new Date(ev.start_at);
       const dayOfWeek = (startDate.getDay() + 6) % 7;
       byDay[dayOfWeek].push(ev);
     }
 
     return byDay;
-  }, [effectiveEvents]);
+  }, [displayEvents]);
 
   const activeMembershipByTutorStudentId = useMemo(() => {
     const map = new Map<string, TutorGroupMembership>();
@@ -3822,18 +3858,18 @@ function TutorScheduleContent() {
     }
   }, [groupDetailsOpen, groupedBucketsByKey, selectedGroupBucket]);
 
-  // Stats
+  // Stats (по displayLessons — placeholder-неделя не должна давать чужие цифры)
   const todayLessons = useMemo(() => {
     const today = new Date();
-    return effectiveLessons.filter(l => {
+    return displayLessons.filter(l => {
       const d = new Date(l.start_at);
       return l.status === 'booked' && d.toDateString() === today.toDateString();
     }).length;
-  }, [effectiveLessons]);
+  }, [displayLessons]);
 
   const weekLessons = useMemo(() => {
-    return effectiveLessons.filter(l => l.status === 'booked').length;
-  }, [effectiveLessons]);
+    return displayLessons.filter(l => l.status === 'booked').length;
+  }, [displayLessons]);
 
   const goToPrevWeek = useCallback(() => {
     setWeekStart(prev => {
@@ -4540,7 +4576,11 @@ function TutorScheduleContent() {
         <Card animate={false}>
           <CardContent className="p-0 overflow-visible">
             <div className="overflow-x-auto overflow-y-hidden max-h-none">
-              <div className="min-w-[700px]">
+              {/* Пока грузится новая неделя (placeholder) — каркас приглушён и неинтерактивен */}
+              <div className={cn(
+                'min-w-[700px] transition-opacity',
+                weekDataIsPlaceholder && 'opacity-60 pointer-events-none',
+              )}>
                 {/* Header row */}
                 <div className="grid grid-cols-8 border-b bg-muted/30">
                   <div className="p-2 text-sm font-medium text-muted-foreground border-r">
@@ -4747,8 +4787,8 @@ function TutorScheduleContent() {
               initialDate={selectedDate}
               initialHour={selectedHour}
               initialMinute={selectedMinute}
-              weekLessons={effectiveLessons}
-              weekEvents={effectiveEvents}
+              weekLessons={displayLessons}
+              weekEvents={displayEvents}
               onSuccess={() => refetchLessons()}
             />
           </Suspense>

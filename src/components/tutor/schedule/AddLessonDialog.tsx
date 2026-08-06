@@ -43,6 +43,7 @@ import {
 import { getLessonStudentName } from '@/components/tutor/schedule/LessonBlocks';
 import { LESSON_TYPES } from '@/components/tutor/schedule/scheduleColors';
 import { StudentCombobox, NO_STUDENT_VALUE } from '@/components/tutor/schedule/StudentCombobox';
+import { SUBJECT_REGISTRY } from '@/lib/subjects/registry';
 import type {
   LessonType,
   TutorCalendarEvent,
@@ -118,6 +119,10 @@ export function AddLessonDialog({
   // Быстрые плейсхолдеры, созданные из формы: попадают в пикер сразу, до рефетча списка.
   const [localCreated, setLocalCreated] = useState<TutorStudentWithProfile[]>([]);
   const [creatingStudent, setCreatingStudent] = useState(false);
+  // Мини-форма «+ Новый ученик»: имя + ОБЯЗАТЕЛЬНЫЙ канонический предмет
+  // (rule 60/AGENTS: имя + предмет — фронтовый gate; ревью 5.6 P1 #3).
+  const [pendingCreateName, setPendingCreateName] = useState<string | null>(null);
+  const [newStudentSubject, setNewStudentSubject] = useState('');
 
   const isRecurring = recurrence !== 'none';
 
@@ -139,6 +144,8 @@ export function AddLessonDialog({
       setPriceText('');
       setMemberPrices({});
       setLocalCreated([]);
+      setPendingCreateName(null);
+      setNewStudentSubject('');
       priceTouchedRef.current = false;
     }
   }, [open, initialDate, initialHour, initialMinute]);
@@ -310,12 +317,24 @@ export function AddLessonDialog({
   }, [date, hour, minute, duration, weekLessons, weekEvents]);
 
   // Смена периода: если дата окончания ещё не выбрана — дефолт «до конца учебного года».
+  // Считается от ДАТЫ ПЕРВОГО ЗАНЯТИЯ, не от сегодня (ревью 5.6 P1 #4: занятие,
+  // запланированное после 30 июня, давало repeatUntil < start → пустая серия).
   const handleRecurrenceChange = (value: RecurrenceChoice) => {
     setRecurrence(value);
     if (value !== 'none' && !repeatUntil) {
-      setRepeatUntil(defaultSeriesEndDate());
+      setRepeatUntil(defaultSeriesEndDate(date ?? new Date()));
     }
   };
+
+  // Перенесли старт за пределы выбранного окончания → пересчитать окончание,
+  // иначе серия молча генерит 0 занятий (ревью 5.6 P1 #4).
+  useEffect(() => {
+    if (recurrence === 'none' || !date || !repeatUntil) return;
+    if (repeatUntil < date) {
+      setRepeatUntil(defaultSeriesEndDate(date));
+    }
+    // repeatUntil в deps намеренно: ручной выбор даты раньше старта тоже чиним.
+  }, [date, repeatUntil, recurrence]);
 
   // Подсказка «Будет создано ~N занятий» — тем же генератором, что и создание.
   const plannedCount = useMemo(() => {
@@ -326,13 +345,24 @@ export function AddLessonDialog({
     return generateSeriesDates(start, until, recurrence as RecurrenceRule).length;
   }, [isRecurring, repeatUntil, date, hour, minute, recurrence]);
 
-  // Быстрый плейсхолдер «+ Новый ученик» (имя → edge tutor-manual-add-student;
-  // контакт/доступы — позже в карточке ученика, create-then-claim).
-  const handleCreateStudent = async (name: string) => {
-    if (creatingStudent) return;
+  // Быстрый плейсхолдер «+ Новый ученик»: клик в пикере открывает мини-форму
+  // (имя + обязательный канонический предмет — фронтовый gate rule 60; ревью 5.6 P1 #3).
+  const handleCreateStudentRequest = (name: string) => {
+    setPendingCreateName(name);
+  };
+
+  // Создание через edge tutor-manual-add-student; контакт/доступы — позже
+  // в карточке ученика (create-then-claim).
+  const handleConfirmCreateStudent = async () => {
+    const name = pendingCreateName?.trim();
+    if (!name || creatingStudent) return;
+    if (!newStudentSubject) {
+      toast.error('Выберите предмет ученика');
+      return;
+    }
     setCreatingStudent(true);
     try {
-      const res = await manualAddTutorStudent({ name, learning_goal: '' });
+      const res = await manualAddTutorStudent({ name, learning_goal: '', subject: newStudentSubject });
       const stub: TutorStudentWithProfile = {
         id: res.tutor_student_id,
         tutor_id: '',
@@ -342,7 +372,7 @@ export function AddLessonDialog({
         start_score: null,
         current_score: null,
         exam_type: null,
-        subject: null,
+        subject: newStudentSubject,
         notes: null,
         status: 'active',
         paid_until: null,
@@ -362,6 +392,8 @@ export function AddLessonDialog({
       };
       setLocalCreated((prev) => [...prev, stub]);
       setStudentId(res.student_id);
+      setPendingCreateName(null);
+      setNewStudentSubject('');
       void queryClient.invalidateQueries({ queryKey: ['tutor', 'students'] });
       toast.success(`Ученик «${name}» создан. Доступы можно выдать позже в его карточке.`);
     } catch (e) {
@@ -411,6 +443,11 @@ export function AddLessonDialog({
       }
       if (isRecurring && !repeatUntil) {
         toast.error('Выберите дату окончания повторений');
+        return;
+      }
+      if (isRecurring && repeatUntil && (plannedCount ?? 0) === 0) {
+        // Ревью 5.6 P1 #4: не даём молча создать «серию из 0 занятий».
+        toast.error('Дата окончания серии раньше первого занятия — поправьте «Повторять до»');
         return;
       }
 
@@ -489,6 +526,11 @@ export function AddLessonDialog({
       toast.error('Выберите дату окончания повторений');
       return;
     }
+    if (isRecurring && repeatUntil && (plannedCount ?? 0) === 0) {
+      // Ревью 5.6 P1 #4: не даём молча создать «серию из 0 занятий».
+      toast.error('Дата окончания серии раньше первого занятия — поправьте «Повторять до»');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -543,9 +585,10 @@ export function AddLessonDialog({
   };
 
   // Пресеты даты окончания серии (репорт: «до июня очень долго листать календарь»).
+  // Оба считаются от даты первого занятия (ревью 5.6 P1 #4).
   const applyEndPreset = (preset: 'school_year' | 'three_months') => {
     if (preset === 'school_year') {
-      setRepeatUntil(defaultSeriesEndDate());
+      setRepeatUntil(defaultSeriesEndDate(date ?? new Date()));
       return;
     }
     const base = date ? new Date(date) : new Date();
@@ -667,13 +710,57 @@ export function AddLessonDialog({
                 onChange={setStudentId}
                 disabled={isSaving}
                 allowNoStudent
-                onCreateStudent={handleCreateStudent}
+                onCreateStudent={handleCreateStudentRequest}
                 creatingStudent={creatingStudent}
               />
               {isNoStudent && (
                 <p className="text-xs text-muted-foreground">
                   Занятие без учеников: попадёт в расписание, деньги не списываются. Учеников можно добавить позже.
                 </p>
+              )}
+
+              {/* Мини-форма быстрого плейсхолдера: имя + обязательный предмет (rule 60) */}
+              {pendingCreateName !== null && (
+                <div className="space-y-2 rounded-md border p-3">
+                  <p className="text-sm font-medium">Новый ученик</p>
+                  <Input
+                    value={pendingCreateName}
+                    onChange={(e) => setPendingCreateName(e.target.value)}
+                    placeholder="Имя ученика"
+                    className="text-base"
+                  />
+                  <Select value={newStudentSubject} onValueChange={setNewStudentSubject}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Предмет *" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUBJECT_REGISTRY.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void handleConfirmCreateStudent()}
+                      disabled={creatingStudent || !pendingCreateName.trim() || !newStudentSubject}
+                    >
+                      {creatingStudent ? 'Создаём...' : 'Создать ученика'}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setPendingCreateName(null); setNewStudentSubject(''); }}
+                    >
+                      Отмена
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Контакт и доступы можно выдать позже в карточке ученика.
+                  </p>
+                </div>
               )}
             </div>
           )}

@@ -78,6 +78,12 @@ type UseTutorQueryParams<TData> = {
 
 type UseTutorQueryResult<TData> = {
   data: TData;
+  /**
+   * true, пока при keepPrevious показываются данные ПРОШЛОГО ключа (смена недели).
+   * Потребитель ОБЯЗАН гасить интерактив/рендер сущностей на это время — иначе
+   * занятия прошлой недели лягут под чужие даты (ревью 5.6 P1 #1).
+   */
+  isPlaceholder: boolean;
 } & TutorDiagnostics;
 
 function useTutorQuery<TData>({
@@ -143,6 +149,7 @@ function useTutorQuery<TData>({
     isFetching: query.isFetching,
     isRecovering,
     failureCount: query.failureCount,
+    isPlaceholder: query.isPlaceholderData,
   };
 }
 
@@ -532,6 +539,8 @@ export function useTutorLessons(weekStartDate: Date) {
     isFetching: result.isFetching,
     isRecovering: result.isRecovering,
     failureCount: result.failureCount,
+    /** Данные прошлой недели (keepPrevious) — сущности НЕ рендерить (ревью 5.6 P1 #1). */
+    isPlaceholder: result.isPlaceholder,
   };
 }
 
@@ -557,6 +566,8 @@ export function useTutorCalendarEvents(weekStartDate: Date) {
     error: result.error,
     refetch: result.refetch,
     isFetching: result.isFetching,
+    /** Данные прошлой недели (keepPrevious) — сущности НЕ рендерить (ревью 5.6 P1 #1). */
+    isPlaceholder: result.isPlaceholder,
   };
 }
 
