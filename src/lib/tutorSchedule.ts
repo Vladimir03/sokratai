@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
 import { generateSeriesDates, type RecurrenceRule } from '@/lib/recurrenceDates';
+import { mapLessonCostError } from '@/lib/tutorBalanceApi';
 import type {
   TutorWeeklySlot,
   TutorLessonWithStudent,
@@ -652,7 +653,9 @@ export async function updateLessonSeries(
 
   if (error) {
     console.error('Error updating lesson series:', error);
-    return { ok: false, updatedCount: 0, error: error.message };
+    // Триггер MOVE_VIA_RPC (Волна 2) и прочие RAISE-коды — русской фразой (rule 97),
+    // не сырым error.message (контроль-ревью P2).
+    return { ok: false, updatedCount: 0, error: mapLessonCostError(error.message).error };
   }
 
   const updatedCount = typeof data === 'number' ? data : Number(data ?? 0);

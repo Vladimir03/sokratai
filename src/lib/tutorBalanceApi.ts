@@ -302,13 +302,16 @@ export async function getReceivedPaymentsTotal(params?: {
 // ─── Phase 2b — авто-списание занятий (Stage A) ──────────────────────────────
 
 /** RAISE-коды cost-set RPC → RU (rule 97). */
-function mapLessonCostError(rawMsg: string): { code?: string; error: string } {
+/** Экспортирован (контроль-ревью P2): те же RAISE-коды прилетают и в updateLessonSeries
+ *  (триггер MOVE_VIA_RPC на series-shift) — мапить обязаны ВСЕ обёртки, не только RPC-шные. */
+export function mapLessonCostError(rawMsg: string): { code?: string; error: string } {
   const msg = rawMsg || '';
   if (msg.includes('INVALID_AMOUNT')) return { code: 'INVALID_AMOUNT', error: 'Стоимость должна быть 0 или больше.' };
   if (msg.includes('INVALID_SCOPE')) return { code: 'INVALID_SCOPE', error: 'Не удалось применить к серии — обновите страницу.' };
   if (msg.includes('INVALID_TIME')) return { code: 'INVALID_TIME', error: 'Некорректное время переноса.' };
+  if (msg.includes('INVALID_STUDENT')) return { code: 'INVALID_STUDENT', error: 'Ученик не найден.' };
   if (msg.includes('NOT_BOOKED')) return { code: 'NOT_BOOKED', error: 'Можно переносить только запланированные занятия.' };
-  if (msg.includes('MOVE_VIA_RPC')) return { code: 'MOVE_VIA_RPC', error: 'Обновите страницу — перенос прошедших занятий выполняется новым способом.' };
+  if (msg.includes('MOVE_VIA_RPC')) return { code: 'MOVE_VIA_RPC', error: 'Так перенести нельзя: прошедшие занятия переносятся по одному (если ошибка повторяется — обновите страницу).' };
   if (msg.includes('GROUP_LESSON')) return { code: 'GROUP_LESSON', error: 'Это групповое занятие — меняйте стоимость по участнику.' };
   if (msg.includes('PARTICIPANT_NOT_FOUND')) return { code: 'PARTICIPANT_NOT_FOUND', error: 'Участник не найден в занятии.' };
   if (msg.includes('NOT_OWNED')) return { code: 'NOT_OWNED', error: 'Занятие не найдено.' };
@@ -385,15 +388,35 @@ export async function setParticipantCostSeries(
   return { ok: true, updated: Number(row.updated ?? 0) };
 }
 
+export interface MoveLessonFields {
+  /** Новая длительность (money-поле: derived-цена). undefined = не менять. */
+  durationMin?: number;
+  /** true = записать нового ученика (tutorStudentId/studentId; null = убрать). Только индивидуальные. */
+  setStudent?: boolean;
+  tutorStudentId?: string | null;
+  studentId?: string | null;
+}
+
 /**
  * Волна 2: перенос занятия (индивид. или unified-группа — одна строка) через
  * money-aware RPC tutor_move_lesson: past→future снимает висящий debit, past→past
  * пересоздаёт debit с occurred_on новой даты. Только status='booked' (NOT_BOOKED).
+ * Money-поля (длительность / смена ученика) едут ТОЙ ЖЕ транзакцией (контроль-ревью
+ * P0: двухшаговый «move → update student» давал debit старому ученику).
  * Перенос — money-операция: после успеха invalidateBalanceCaches + refetchLessons.
  */
-export async function moveLesson(lessonId: string, newStartIso: string): Promise<BalanceMutationResult> {
+export async function moveLesson(
+  lessonId: string,
+  newStartIso: string,
+  fields?: MoveLessonFields,
+): Promise<BalanceMutationResult> {
   const { error } = await supabase.rpc('tutor_move_lesson' as never, {
-    _lesson_id: lessonId, _new_start_at: newStartIso,
+    _lesson_id: lessonId,
+    _new_start_at: newStartIso,
+    _new_duration_min: fields?.durationMin ?? null,
+    _set_student: fields?.setStudent ?? false,
+    _new_tutor_student_id: fields?.tutorStudentId ?? null,
+    _new_student_id: fields?.studentId ?? null,
   } as never);
   if (error) return { ok: false, ...mapLessonCostError(error.message) };
   return { ok: true };

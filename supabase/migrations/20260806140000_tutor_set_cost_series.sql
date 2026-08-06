@@ -82,7 +82,7 @@ RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   _tutor_id uuid; _root uuid; _anchor timestamptz;
-  _ids uuid[]; _id uuid; _updated int := 0;
+  _ids uuid[]; _id uuid; _status text; _updated int := 0;
 BEGIN
   IF _amount IS NULL OR _amount < 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
   IF _scope NOT IN ('this_and_following', 'all') THEN RAISE EXCEPTION 'INVALID_SCOPE'; END IF;
@@ -115,15 +115,19 @@ BEGIN
 
   FOREACH _id IN ARRAY _ids LOOP
     PERFORM pg_advisory_xact_lock(hashtext(_id::text), hashtext(_tutor_student_id::text));
-    -- Атомарная перепроверка под локом: участник ещё в занятии, занятие не cancelled.
+    -- Статус перепроверяется ЧЕРЕЗ row-lock строки занятия (контроль-ревью P0:
+    -- EXISTS-подзапрос без FOR UPDATE читал старый MVCC-снимок и мог перезаписать
+    -- сумму отмены при конкурентной tutor_cancel_lesson_with_charge).
+    -- Порядок локов: advisory → строка занятия → строка участника.
+    SELECT l.status INTO _status
+      FROM public.tutor_lessons l WHERE l.id = _id FOR UPDATE;
+    IF _status IS NULL OR _status NOT IN ('booked', 'completed') THEN
+      CONTINUE;  -- отменено/удалено параллельно — молча пропускаем
+    END IF;
     UPDATE public.tutor_lesson_participants p
        SET payment_amount = _amount
      WHERE p.lesson_id = _id
-       AND p.tutor_student_id = _tutor_student_id
-       AND EXISTS (
-         SELECT 1 FROM public.tutor_lessons l
-         WHERE l.id = _id AND l.status IN ('booked', 'completed')
-       );
+       AND p.tutor_student_id = _tutor_student_id;
     IF FOUND THEN
       -- _sync_lesson_debit внутри _apply дополнительно валидирует STUDENT_TUTOR_MISMATCH.
       PERFORM public._apply_lesson_debit_from_current_cost(_id, _tutor_student_id, auth.uid());

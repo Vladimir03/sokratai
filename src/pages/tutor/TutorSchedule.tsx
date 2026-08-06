@@ -509,6 +509,11 @@ function GroupDetailsDialog({
       (new Date(newStartAt).getTime() - new Date(mainLesson.start_at).getTime()) / 60000,
     );
     if (shiftMinutes === 0) return;
+    // Волна 2 (контроль-ревью P1): series-shift не money-aware — в прошлое нельзя.
+    if (new Date(newStartAt).getTime() <= Date.now()) {
+      toast.error('Перенос серии в прошлое недоступен — прошедшие занятия переносятся по одному');
+      return;
+    }
     setIsActionSaving(true);
     try {
       // 'all' клампим к now — не двигаем прошедшие занятия серии (висящий debit, review #5).
@@ -2228,6 +2233,10 @@ function LessonDetailsDialog({
           applyTimeShift,
           shiftMinutes,
           scope,
+          // Time-shift 'all' клампим к now, как move-пути (контроль-ревью P1): иначе
+          // past-booked occurrence с debit ловит триггер и роняет ВЕСЬ сдвиг серии.
+          // Метаданные без сдвига клампить нельзя (правка предмета должна бить всю серию).
+          fromStartAtOverride: applyTimeShift && scope === 'all' ? new Date().toISOString() : undefined,
         });
         // Тема — у КОНКРЕТНОГО занятия (в серию намеренно не копируется; RPC её не знает).
         if (result.ok && (editTopic.trim() || '') !== (lesson.topic ?? '')) {
@@ -2246,20 +2255,29 @@ function LessonDetailsDialog({
           }
         }
       } else {
-        // Волна 2: смена ВРЕМЕНИ — money-операция, только через tutor_move_lesson
-        // (rule 60 §13; прямой UPDATE start_at опасных случаев блокирует DB-триггер).
+        // Волна 2 (контроль-ревью P0): смена времени + money-полей (ученик/длительность)
+        // едет ОДНОЙ транзакцией tutor_move_lesson — двухшаговый вариант оставлял debit
+        // старому ученику / derived-цену по старой длительности. Не-money метаданные
+        // (тип/предмет/тема/заметки) — отдельным updateLesson (его сбой денег не трогает).
         const startChanged = new Date(lesson.start_at).getTime() !== newStart.getTime();
         if (startChanged) {
-          const moved = await moveLesson(lesson.id, newStart.toISOString());
+          const moved = await moveLesson(lesson.id, newStart.toISOString(), {
+            durationMin: Number.parseInt(editDuration, 10),
+            setStudent: true,
+            tutorStudentId: tutorStudent?.id ?? null,
+            studentId: actualStudentId || null,
+          });
           if (!moved.ok) {
             toast.error(moved.error || 'Не удалось перенести занятие');
             return;
           }
         }
         const result = await updateLesson(lesson.id, {
-          duration_min: Number.parseInt(editDuration, 10),
-          student_id: actualStudentId || undefined,
-          tutor_student_id: tutorStudent?.id || undefined,
+          ...(startChanged ? null : {
+            duration_min: Number.parseInt(editDuration, 10),
+            student_id: actualStudentId || undefined,
+            tutor_student_id: tutorStudent?.id || undefined,
+          }),
           lesson_type: editLessonType,
           subject: editSubject || undefined,
           topic: editTopic.trim() || null,
@@ -4218,6 +4236,12 @@ function TutorScheduleContent() {
       (new Date(newStartIso).getTime() - new Date(lesson.start_at).getTime()) / 60000,
     );
     if (shiftMinutes === 0) return;
+    // Волна 2 (контроль-ревью P1): series-shift не money-aware — сдвиг якоря в прошлое
+    // запрещаем на всех поверхностях (drag/группа/форма), не только в edit-форме.
+    if (new Date(newStartIso).getTime() <= Date.now()) {
+      toast.error('Перенос серии в прошлое недоступен — прошедшие занятия переносятся по одному');
+      return;
+    }
     setIsMovingSeries(true);
     try {
       // 'all' клампим к now — перенос не двигает уже прошедшие занятия (висящий debit, review #5).

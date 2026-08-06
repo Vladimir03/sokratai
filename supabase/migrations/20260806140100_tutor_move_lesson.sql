@@ -24,9 +24,22 @@
 --  - Триггер-гард блокирует и NEW-past прямые UPDATE (future→past мимо RPC).
 
 -- ════════════════════════════════════════════════════════════════════════════
--- 1. RPC переноса
+-- 1. RPC переноса (+ атомарные money-поля: длительность, смена ученика)
 -- ════════════════════════════════════════════════════════════════════════════
-CREATE OR REPLACE FUNCTION public.tutor_move_lesson(_lesson_id uuid, _new_start_at timestamptz)
+-- Контроль-ревью P0: «перенос + смена ученика/длительности» ДВУМЯ транзакциями
+-- давал debit старому ученику / derived по старой длительности. Поэтому RPC
+-- принимает money-поля опционально и применяет всё ОДНОЙ транзакцией:
+--   _new_duration_min  — NULL = не менять;
+--   _set_student=true  — записать _new_tutor_student_id/_new_student_id (NULL = убрать
+--                        ученика); только для индивидуальных занятий (GROUP_LESSON).
+-- Не-money метаданные (тип/предмет/тема/заметки) остаются на updateLesson.
+CREATE OR REPLACE FUNCTION public.tutor_move_lesson(
+  _lesson_id uuid,
+  _new_start_at timestamptz,
+  _new_duration_min integer DEFAULT NULL,
+  _set_student boolean DEFAULT false,
+  _new_tutor_student_id uuid DEFAULT NULL,
+  _new_student_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -35,14 +48,27 @@ DECLARE
   _debit_id uuid; _debit_on date;
 BEGIN
   IF _new_start_at IS NULL THEN RAISE EXCEPTION 'INVALID_TIME'; END IF;
+  IF _new_duration_min IS NOT NULL AND _new_duration_min <= 0 THEN RAISE EXCEPTION 'INVALID_TIME'; END IF;
 
   SELECT l.tutor_id INTO _tutor_id
   FROM public.tutor_lessons l JOIN public.tutors t ON t.id = l.tutor_id
   WHERE l.id = _lesson_id AND t.user_id = auth.uid();
   IF _tutor_id IS NULL THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
 
-  -- Money-набор: текущие участники группы ∪ ученик занятия ∪ владельцы активных
-  -- lesson-debit (снятые участники с висящим списанием — P0 ревью).
+  IF _set_student THEN
+    -- Смена ученика — только индивидуальные занятия (у группы состав правится
+    -- отдельными participant-RPC).
+    IF EXISTS (SELECT 1 FROM public.tutor_lesson_participants WHERE lesson_id = _lesson_id) THEN
+      RAISE EXCEPTION 'GROUP_LESSON';
+    END IF;
+    IF _new_tutor_student_id IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public.tutor_students ts
+      WHERE ts.id = _new_tutor_student_id AND ts.tutor_id = _tutor_id
+    ) THEN RAISE EXCEPTION 'INVALID_STUDENT'; END IF;
+  END IF;
+
+  -- Money-набор: текущие участники группы ∪ ученик занятия ∪ НОВЫЙ ученик ∪ владельцы
+  -- активных lesson-debit (снятые участники с висящим списанием — P0 ревью).
   -- ORDER BY sid — канонический порядок локов (rule 60 §15).
   SELECT ARRAY(
     SELECT DISTINCT sid FROM (
@@ -52,6 +78,8 @@ BEGIN
       SELECT l.tutor_student_id
         FROM public.tutor_lessons l
        WHERE l.id = _lesson_id AND l.tutor_student_id IS NOT NULL
+      UNION
+      SELECT _new_tutor_student_id WHERE _set_student AND _new_tutor_student_id IS NOT NULL
       UNION
       SELECT e.tutor_student_id
         FROM public.tutor_ledger_entries e
@@ -70,7 +98,10 @@ BEGIN
   -- обходим транзакционным GUC (паттерн app.ledger_op).
   PERFORM set_config('app.lesson_move', 'on', true);
   UPDATE public.tutor_lessons
-     SET start_at = _new_start_at
+     SET start_at = _new_start_at,
+         duration_min = COALESCE(_new_duration_min, duration_min),
+         tutor_student_id = CASE WHEN _set_student THEN _new_tutor_student_id ELSE tutor_student_id END,
+         student_id = CASE WHEN _set_student THEN _new_student_id ELSE student_id END
    WHERE id = _lesson_id AND status = 'booked'
    RETURNING COALESCE(duration_min, 60) INTO _dur;
   PERFORM set_config('app.lesson_move', 'off', true);
@@ -121,9 +152,9 @@ BEGIN
 END $$;
 
 -- Тройной паттерн грантов (rule 99): GRANT → REVOKE PUBLIC → REVOKE anon.
-GRANT EXECUTE ON FUNCTION public.tutor_move_lesson(uuid, timestamptz) TO authenticated, service_role;
-REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz) FROM anon;
+GRANT EXECUTE ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) FROM anon;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 2. DB-гард: прямой UPDATE start_at мимо RPC в опасных случаях
