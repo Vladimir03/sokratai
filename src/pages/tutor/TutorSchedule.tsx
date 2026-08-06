@@ -2211,6 +2211,13 @@ function LessonDetailsDialog({
         const shiftMinutes = Math.round((newStart.getTime() - oldStart.getTime()) / 60000);
         const applyTimeShift = shiftMinutes !== 0;
 
+        // Волна 2: series-shift не money-aware (update_lesson_series), сдвиг В ПРОШЛОЕ
+        // заблокирован и DB-триггером — не даём упереться в него молча.
+        if (applyTimeShift && newStart.getTime() <= Date.now()) {
+          toast.error('Перенос серии в прошлое недоступен — прошедшие занятия переносятся по одному');
+          return;
+        }
+
         const result = await updateLessonSeries(lesson, {
           student_id: actualStudentId || undefined,
           tutor_student_id: tutorStudent?.id || undefined,
@@ -2239,8 +2246,17 @@ function LessonDetailsDialog({
           }
         }
       } else {
+        // Волна 2: смена ВРЕМЕНИ — money-операция, только через tutor_move_lesson
+        // (rule 60 §13; прямой UPDATE start_at опасных случаев блокирует DB-триггер).
+        const startChanged = new Date(lesson.start_at).getTime() !== newStart.getTime();
+        if (startChanged) {
+          const moved = await moveLesson(lesson.id, newStart.toISOString());
+          if (!moved.ok) {
+            toast.error(moved.error || 'Не удалось перенести занятие');
+            return;
+          }
+        }
         const result = await updateLesson(lesson.id, {
-          start_at: newStart.toISOString(),
           duration_min: Number.parseInt(editDuration, 10),
           student_id: actualStudentId || undefined,
           tutor_student_id: tutorStudent?.id || undefined,

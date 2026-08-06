@@ -5,13 +5,23 @@
 -- Почему нельзя прямым UPDATE start_at (как делал клиент):
 --  - past→future: активный lesson-debit остаётся висеть — _apply_lesson_debit_from_current_cost
 --    для БУДУЩЕГО занятия no-op (IF NOT _is_past THEN RETURN), реверсить обязан вызывающий;
+--  - future→past: занятие мимо money-логики; дата старше cron-окна 60 дней = списание
+--    не появится ВООБЩЕ (P0 ревью Codex 5.6);
 --  - past→past со сменой даты: _sync_lesson_debit no-op при той же сумме, а occurred_on
---    активного debit обязан равняться НОВОЙ дате занятия (инвариант rule 60 §17 — иначе
+--    активного debit обязан равняться НОВОЙ дате занятия (rule 60 §17 — иначе
 --    «Доход за месяц» считает списание в старом месяце).
 --
 -- Одна RPC для индивидуального и unified-группы (одна строка tutor_lessons — участники
--- едут вместе с ней). completed/cancelled не переносятся (NOT_BOOKED): completed — ручной
--- статус, cancelled приглушён и двигать его бессмысленно.
+-- едут вместе с ней). completed/cancelled не переносятся (NOT_BOOKED).
+--
+-- Фиксы ревью Codex 5.6 (2026-08-07):
+--  - Статус перепроверяется АТОМАРНО под локами (UPDATE ... WHERE status='booked'
+--    RETURNING) — stale move после параллельной отмены больше не переносит cancelled
+--    и не снимает сумму отмены (P0).
+--  - Money-набор = текущие ученики ∪ владельцы АКТИВНЫХ lesson-debit (P0: у прошедшего
+--    занятия мог остаться debit СНЯТОГО участника — remove-participant его не реверсит);
+--    снятый-с-занятия владелец debit'а получает reverse в любой ветке.
+--  - Триггер-гард блокирует и NEW-past прямые UPDATE (future→past мимо RPC).
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 1. RPC переноса
@@ -20,42 +30,69 @@ CREATE OR REPLACE FUNCTION public.tutor_move_lesson(_lesson_id uuid, _new_start_
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  _tutor_id uuid; _student uuid; _status text; _dur int;
-  _students uuid[]; _s uuid; _now_past boolean;
+  _tutor_id uuid; _dur int;
+  _students uuid[]; _s uuid; _now_past boolean; _attached boolean;
   _debit_id uuid; _debit_on date;
 BEGIN
   IF _new_start_at IS NULL THEN RAISE EXCEPTION 'INVALID_TIME'; END IF;
 
-  SELECT l.tutor_id, l.tutor_student_id, l.status, COALESCE(l.duration_min, 60)
-    INTO _tutor_id, _student, _status, _dur
+  SELECT l.tutor_id INTO _tutor_id
   FROM public.tutor_lessons l JOIN public.tutors t ON t.id = l.tutor_id
   WHERE l.id = _lesson_id AND t.user_id = auth.uid();
   IF _tutor_id IS NULL THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
-  IF _status <> 'booked' THEN RAISE EXCEPTION 'NOT_BOOKED'; END IF;
 
-  -- Участники: unified-группа → все из junction; индивид → ученик занятия; без ученика → пусто.
-  -- ORDER BY tutor_student_id — канонический порядок локов (deadlock-safety с cron, M3).
+  -- Money-набор: текущие участники группы ∪ ученик занятия ∪ владельцы активных
+  -- lesson-debit (снятые участники с висящим списанием — P0 ревью).
+  -- ORDER BY sid — канонический порядок локов (rule 60 §15).
   SELECT ARRAY(
-    SELECT p.tutor_student_id FROM public.tutor_lesson_participants p
-    WHERE p.lesson_id = _lesson_id ORDER BY p.tutor_student_id
+    SELECT DISTINCT sid FROM (
+      SELECT p.tutor_student_id AS sid
+        FROM public.tutor_lesson_participants p WHERE p.lesson_id = _lesson_id
+      UNION
+      SELECT l.tutor_student_id
+        FROM public.tutor_lessons l
+       WHERE l.id = _lesson_id AND l.tutor_student_id IS NOT NULL
+      UNION
+      SELECT e.tutor_student_id
+        FROM public.tutor_ledger_entries e
+       WHERE e.source_lesson_id = _lesson_id AND e.source_kind = 'lesson'
+         AND e.kind = 'debit' AND e.reversed_by_entry_id IS NULL
+    ) s WHERE sid IS NOT NULL ORDER BY sid
   ) INTO _students;
-  IF COALESCE(array_length(_students, 1), 0) = 0 AND _student IS NOT NULL THEN
-    _students := ARRAY[_student];
-  END IF;
 
   -- Локи ДО UPDATE — сериализация с cron/setters (тот же 2-key namespace, реентерабельно).
   FOREACH _s IN ARRAY _students LOOP
     PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_s::text));
   END LOOP;
 
-  -- Триггер-гард прямого UPDATE (ниже) обходим транзакционным GUC (паттерн app.ledger_op).
+  -- Атомарная перепроверка статуса ПОД локами (P0 ревью: параллельная
+  -- tutor_cancel_lesson_with_charge между гейтом и UPDATE). Триггер-гард (ниже)
+  -- обходим транзакционным GUC (паттерн app.ledger_op).
   PERFORM set_config('app.lesson_move', 'on', true);
-  UPDATE public.tutor_lessons SET start_at = _new_start_at WHERE id = _lesson_id;
+  UPDATE public.tutor_lessons
+     SET start_at = _new_start_at
+   WHERE id = _lesson_id AND status = 'booked'
+   RETURNING COALESCE(duration_min, 60) INTO _dur;
   PERFORM set_config('app.lesson_move', 'off', true);
+  IF _dur IS NULL THEN RAISE EXCEPTION 'NOT_BOOKED'; END IF;
 
   _now_past := (_new_start_at + make_interval(mins => _dur) <= now());
 
   FOREACH _s IN ARRAY _students LOOP
+    -- Снятый с занятия владелец активного debit: списание не должно существовать —
+    -- reverse в ЛЮБОЙ ветке (в past-ветке _apply его бы молча пропустил).
+    SELECT (
+      EXISTS (SELECT 1 FROM public.tutor_lesson_participants p
+              WHERE p.lesson_id = _lesson_id AND p.tutor_student_id = _s)
+      OR EXISTS (SELECT 1 FROM public.tutor_lessons l
+                 WHERE l.id = _lesson_id AND l.tutor_student_id = _s)
+    ) INTO _attached;
+
+    IF NOT _attached THEN
+      PERFORM public._reverse_lesson_debit(_lesson_id, _s);
+      CONTINUE;
+    END IF;
+
     IF _now_past THEN
       -- past→past со сменой ДАТЫ: явный reverse (иначе _sync no-op на той же сумме
       -- оставит occurred_on старого дня), затем пересоздание по текущей цене.
@@ -67,6 +104,7 @@ BEGIN
       IF _debit_id IS NOT NULL AND _debit_on IS DISTINCT FROM _new_start_at::date THEN
         PERFORM public._reverse_lesson_debit(_lesson_id, _s);
       END IF;
+      _debit_id := NULL; _debit_on := NULL;
       PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _s, auth.uid());
     ELSE
       -- past→future (или future→future): будущее занятие не должно нести активный debit;
@@ -88,11 +126,13 @@ REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz) FROM anon;
 
 -- ════════════════════════════════════════════════════════════════════════════
--- 2. DB-гард: прямой UPDATE start_at у прошедшего занятия с активным списанием
+-- 2. DB-гард: прямой UPDATE start_at мимо RPC в опасных случаях
 -- ════════════════════════════════════════════════════════════════════════════
--- Закрывает ровно опасный случай (стейл-бандл / консоль двигает прошедшее занятие,
--- за которое уже списано → висящий debit или debit на не той дате). Метаданные,
--- будущие переносы и series-shift БУДУЩИХ занятий не задеты. Fail-loud (rule 60).
+-- Блокирует (fail-loud, rule 60):
+--  (а) двигают ПРОШЕДШЕЕ занятие с активным списанием (висящий debit / debit на не той дате);
+--  (б) двигают занятие В ПРОШЛОЕ (future→past мимо money-логики; дата старше cron-окна
+--      60 дней = молча несписанное занятие — P0 ревью).
+-- Метаданные (WHEN start_at не менялся), future→future series-shift и INSERT не задеты.
 CREATE OR REPLACE FUNCTION public.tutor_lessons_guard_start_move()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -107,6 +147,9 @@ BEGIN
          AND e.kind = 'debit' AND e.reversed_by_entry_id IS NULL
      )
   THEN
+    RAISE EXCEPTION 'MOVE_VIA_RPC';
+  END IF;
+  IF (NEW.start_at + make_interval(mins => COALESCE(NEW.duration_min, 60)) <= now()) THEN
     RAISE EXCEPTION 'MOVE_VIA_RPC';
   END IF;
   RETURN NEW;

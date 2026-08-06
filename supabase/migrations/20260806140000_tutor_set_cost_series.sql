@@ -5,16 +5,18 @@
 -- Семантика scope ЛИТЕРАЛЬНАЯ (дизайн-решение, план 1-valiant-papert):
 --   'this_and_following' — выбранное + занятия с start_at >= выбранного;
 --   'all'                — вся серия, ВКЛЮЧАЯ прошедшие (пересчёт списаний; UI предупреждает).
---   «Только это» клиент шлёт в существующие tutor_set_lesson_cost / tutor_set_participant_cost.
+--   «Только это» клиент шлёт в одиночные tutor_set_lesson_cost / tutor_set_participant_cost.
 -- Пересчёт append-only и обратим (reverse-пары видны в ленте) — «all, но прошлое не трогаем»
 -- было бы ложью в интерфейсе.
 --
--- Инварианты (rule 60):
---  - cancelled НЕ трогаем: их payment_amount = сумма отмены (tutor_cancel_lesson_with_charge),
---    и cron спишет именно её; перезапись = чужая механика.
---  - occurrence со сменённым учеником (tutor_student_id != выбранного) не трогаем.
---  - ORDER BY l.id — канонический порядок advisory-локов (deadlock-safety с cron, см. M3).
---  - Пересчёт трогает ТОЛЬКО debit; легаси lesson-credit до-cutover не пересчитывается (осознанно).
+-- Инварианты (rule 60) и фиксы ревью Codex 5.6 (2026-08-07):
+--  - Advisory-lock берётся ДО row-UPDATE каждого занятия (P1 ревью: bulk-UPDATE
+--    сначала держал row-lock и ждал advisory → deadlock-цикл с move/cron, у которых
+--    порядок обратный). Канонический порядок: lesson id ASC → tutor_student_id.
+--  - Статус/принадлежность перепроверяются АТОМАРНО под локом per-lesson (P0 ревью:
+--    параллельная отмена между построением набора и UPDATE перезаписала бы сумму
+--    отмены серийной ценой). cancelled/сменивший ученика occurrence — молча пропущен.
+--  - Пересчёт трогает ТОЛЬКО debit; легаси lesson-credit до-cutover не пересчитывается.
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 1. Индивидуальное занятие: цена на серию
@@ -25,7 +27,7 @@ RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   _tutor_id uuid; _student uuid; _root uuid; _anchor timestamptz;
-  _ids uuid[]; _id uuid;
+  _ids uuid[]; _id uuid; _updated int := 0;
 BEGIN
   IF _amount IS NULL OR _amount < 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
   IF _scope NOT IN ('this_and_following', 'all') THEN RAISE EXCEPTION 'INVALID_SCOPE'; END IF;
@@ -37,6 +39,8 @@ BEGIN
   IF _tutor_id IS NULL THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
   IF _student IS NULL THEN RAISE EXCEPTION 'GROUP_LESSON'; END IF;
 
+  -- Кандидаты (snapshot; финальная валидация — атомарно под локом в цикле).
+  -- ORDER BY id — канонический порядок advisory-локов (rule 60 §15).
   SELECT ARRAY(
     SELECT l.id FROM public.tutor_lessons l
     WHERE l.tutor_id = _tutor_id
@@ -48,15 +52,25 @@ BEGIN
   ) INTO _ids;
   IF COALESCE(array_length(_ids, 1), 0) = 0 THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
 
-  UPDATE public.tutor_lessons SET payment_amount = _amount WHERE id = ANY(_ids);
-
   FOREACH _id IN ARRAY _ids LOOP
-    -- Будущее → no-op (спишет cron по сохранённой цене); прошедшее → пересчёт под
-    -- 2-key advisory-lock; 0 → waive (reverse). Всё — внутри _apply (TOCTOU-safe).
-    PERFORM public._apply_lesson_debit_from_current_cost(_id, _student, auth.uid());
+    -- Лок ДО row-UPDATE (deadlock-safety с cron/move/setters).
+    PERFORM pg_advisory_xact_lock(hashtext(_id::text), hashtext(_student::text));
+    -- Атомарная перепроверка под локом: cancelled (хранит сумму отмены) и
+    -- occurrence со сменённым учеником НЕ перезаписываются (P0 ревью).
+    UPDATE public.tutor_lessons
+       SET payment_amount = _amount
+     WHERE id = _id
+       AND tutor_student_id = _student
+       AND status IN ('booked', 'completed');
+    IF FOUND THEN
+      -- Будущее → no-op (спишет cron по сохранённой цене); прошедшее → пересчёт;
+      -- 0 → waive (reverse). Всё — внутри _apply (TOCTOU-safe, лок реентерабелен).
+      PERFORM public._apply_lesson_debit_from_current_cost(_id, _student, auth.uid());
+      _updated := _updated + 1;
+    END IF;
   END LOOP;
 
-  RETURN jsonb_build_object('ok', true, 'updated', COALESCE(array_length(_ids, 1), 0));
+  RETURN jsonb_build_object('ok', true, 'updated', _updated);
 END $$;
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -68,7 +82,7 @@ RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   _tutor_id uuid; _root uuid; _anchor timestamptz;
-  _ids uuid[]; _id uuid;
+  _ids uuid[]; _id uuid; _updated int := 0;
 BEGIN
   IF _amount IS NULL OR _amount < 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
   IF _scope NOT IN ('this_and_following', 'all') THEN RAISE EXCEPTION 'INVALID_SCOPE'; END IF;
@@ -86,7 +100,7 @@ BEGIN
     WHERE p.lesson_id = _lesson_id AND p.tutor_student_id = _tutor_student_id
   ) THEN RAISE EXCEPTION 'PARTICIPANT_NOT_FOUND'; END IF;
 
-  -- Набор: занятия серии, где ЕСТЬ строка этого участника (снятые с занятия не трогаем).
+  -- Кандидаты: занятия серии, где ЕСТЬ строка этого участника (снапшот).
   SELECT ARRAY(
     SELECT l.id FROM public.tutor_lessons l
     JOIN public.tutor_lesson_participants p
@@ -99,15 +113,25 @@ BEGIN
   ) INTO _ids;
   IF COALESCE(array_length(_ids, 1), 0) = 0 THEN RAISE EXCEPTION 'PARTICIPANT_NOT_FOUND'; END IF;
 
-  UPDATE public.tutor_lesson_participants SET payment_amount = _amount
-   WHERE tutor_student_id = _tutor_student_id AND lesson_id = ANY(_ids);
-
   FOREACH _id IN ARRAY _ids LOOP
-    -- _sync_lesson_debit внутри _apply дополнительно валидирует STUDENT_TUTOR_MISMATCH.
-    PERFORM public._apply_lesson_debit_from_current_cost(_id, _tutor_student_id, auth.uid());
+    PERFORM pg_advisory_xact_lock(hashtext(_id::text), hashtext(_tutor_student_id::text));
+    -- Атомарная перепроверка под локом: участник ещё в занятии, занятие не cancelled.
+    UPDATE public.tutor_lesson_participants p
+       SET payment_amount = _amount
+     WHERE p.lesson_id = _id
+       AND p.tutor_student_id = _tutor_student_id
+       AND EXISTS (
+         SELECT 1 FROM public.tutor_lessons l
+         WHERE l.id = _id AND l.status IN ('booked', 'completed')
+       );
+    IF FOUND THEN
+      -- _sync_lesson_debit внутри _apply дополнительно валидирует STUDENT_TUTOR_MISMATCH.
+      PERFORM public._apply_lesson_debit_from_current_cost(_id, _tutor_student_id, auth.uid());
+      _updated := _updated + 1;
+    END IF;
   END LOOP;
 
-  RETURN jsonb_build_object('ok', true, 'updated', COALESCE(array_length(_ids, 1), 0));
+  RETURN jsonb_build_object('ok', true, 'updated', _updated);
 END $$;
 
 -- Тройной паттерн грантов (rule 99): GRANT → REVOKE PUBLIC → REVOKE anon.
@@ -117,5 +141,61 @@ REVOKE ALL ON FUNCTION public.tutor_set_lesson_cost_series(uuid, integer, text) 
 REVOKE ALL ON FUNCTION public.tutor_set_participant_cost_series(uuid, uuid, integer, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.tutor_set_lesson_cost_series(uuid, integer, text) FROM anon;
 REVOKE ALL ON FUNCTION public.tutor_set_participant_cost_series(uuid, uuid, integer, text) FROM anon;
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- 3. Одиночные setters — advisory-lock ДО row-UPDATE (P1 ревью, lock-ordering).
+--    Тела verbatim из 20260615190000/20260616210000 + PERFORM lock перед UPDATE.
+-- ════════════════════════════════════════════════════════════════════════════
+CREATE OR REPLACE FUNCTION public.tutor_set_lesson_cost(_lesson_id uuid, _amount integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE _tutor_id uuid; _student uuid;
+BEGIN
+  IF _amount IS NULL OR _amount < 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
+  SELECT l.tutor_id, l.tutor_student_id INTO _tutor_id, _student
+  FROM public.tutor_lessons l JOIN public.tutors t ON t.id = l.tutor_id
+  WHERE l.id = _lesson_id AND t.user_id = auth.uid();
+  IF _tutor_id IS NULL THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
+  IF _student IS NULL THEN RAISE EXCEPTION 'GROUP_LESSON'; END IF;
+
+  -- Лок ДО UPDATE (deadlock-ordering с cron/move; сам _apply лок реентерабелен).
+  PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_student::text));
+
+  UPDATE public.tutor_lessons SET payment_amount = _amount WHERE id = _lesson_id;
+  PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _student, auth.uid());  -- no-op если будущее
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+CREATE OR REPLACE FUNCTION public.tutor_set_participant_cost(
+  _lesson_id uuid, _tutor_student_id uuid, _amount integer)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE _tutor_id uuid;
+BEGIN
+  IF _amount IS NULL OR _amount < 0 THEN RAISE EXCEPTION 'INVALID_AMOUNT'; END IF;
+  SELECT l.tutor_id INTO _tutor_id
+  FROM public.tutor_lessons l JOIN public.tutors t ON t.id = l.tutor_id
+  WHERE l.id = _lesson_id AND t.user_id = auth.uid();
+  IF _tutor_id IS NULL THEN RAISE EXCEPTION 'NOT_OWNED'; END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.tutor_lesson_participants p
+    JOIN public.tutor_students ts ON ts.id = p.tutor_student_id AND ts.tutor_id = _tutor_id
+    WHERE p.lesson_id = _lesson_id AND p.tutor_student_id = _tutor_student_id
+  ) THEN RAISE EXCEPTION 'PARTICIPANT_NOT_FOUND'; END IF;
+
+  -- Лок ДО UPDATE (deadlock-ordering с cron/move).
+  PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_tutor_student_id::text));
+
+  UPDATE public.tutor_lesson_participants SET payment_amount = _amount
+   WHERE lesson_id = _lesson_id AND tutor_student_id = _tutor_student_id;
+  -- _sync_lesson_debit внутри _apply дополнительно валидирует STUDENT_TUTOR_MISMATCH.
+  PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _tutor_student_id, auth.uid());
+  RETURN jsonb_build_object('ok', true);
+END $$;
+
+REVOKE ALL ON FUNCTION public.tutor_set_lesson_cost(uuid, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tutor_set_participant_cost(uuid, uuid, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.tutor_set_lesson_cost(uuid, integer) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.tutor_set_participant_cost(uuid, uuid, integer) TO authenticated, service_role;
 
 NOTIFY pgrst, 'reload schema';

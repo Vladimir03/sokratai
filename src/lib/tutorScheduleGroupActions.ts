@@ -2,9 +2,8 @@ import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import {
   cancelLesson,
   completeLessonAndCreatePayment,
-  updateLesson,
 } from '@/lib/tutorSchedule';
-import { supabase } from '@/lib/supabaseClient';
+import { moveLesson } from '@/lib/tutorBalanceApi';
 
 export type GroupLessonActionType = 'move' | 'cancel' | 'complete';
 
@@ -79,13 +78,15 @@ export async function runMoveGroupLesson(
   }
 
   try {
-    const updated = await updateLesson(lesson.lessonId, { start_at: newStartAt });
+    // Волна 2: перенос — money-операция, ТОЛЬКО через tutor_move_lesson (rule 60 §13);
+    // прямой UPDATE start_at блокируется DB-триггером для опасных случаев.
+    const moved = await moveLesson(lesson.lessonId, newStartAt);
     results.push({
       lessonId: lesson.lessonId,
       studentName: allNames,
-      ok: !!updated,
+      ok: moved.ok,
       skipped: false,
-      reason: updated ? undefined : 'Не удалось перенести урок',
+      reason: moved.ok ? undefined : (moved.error || 'Не удалось перенести урок'),
     });
   } catch (error) {
     results.push({
@@ -250,14 +251,15 @@ export async function runMoveGroupAction({
     }
 
     try {
-      const updated = await updateLesson(lesson.lessonId, { start_at: newStartAt });
+      // Волна 2: перенос — money-операция, ТОЛЬКО через tutor_move_lesson (rule 60 §13).
+      const moved = await moveLesson(lesson.lessonId, newStartAt);
       results.push({
         lessonId: lesson.lessonId,
         tutorStudentId: lesson.tutorStudentId,
         studentName: lesson.studentName,
-        ok: !!updated,
+        ok: moved.ok,
         skipped: false,
-        reason: updated ? undefined : 'Не удалось перенести урок',
+        reason: moved.ok ? undefined : (moved.error || 'Не удалось перенести урок'),
       });
     } catch (error) {
       results.push({
