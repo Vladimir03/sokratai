@@ -101,11 +101,25 @@ describe("few-shot примеры kb-ai-extract", () => {
   });
 
   it("правило экономии присутствует во всех трёх схемах", () => {
-    const hits = SOURCE.split("ЭКОНОМИЯ ВЫВОДА").length - 1;
+    // Маркер — формулировка ИЗ ПРОМПТА: просто «ЭКОНОМИЯ ВЫВОДА» ловит ещё и
+    // ссылки на правило в комментариях кода.
+    const hits = SOURCE.split("ЭКОНОМИЯ ВЫВОДА. Поле,").length - 1;
     expect(hits).toBe(3);
   });
 
   it("нормализатор по-прежнему подставляет image_action сам", () => {
     expect(SOURCE).toContain('image_action: "attach_original"');
+  });
+
+  /**
+   * Страховка на случай, если модель ослушается и опустит `answer_confidence`.
+   * `normalizeTask` не тестируется напрямую (index.ts не импортируется в vitest
+   * из-за top-level `Deno.serve`), поэтому проверяем на уровне исходника, что
+   * различие «поля нет» vs «явный low» не схлопнули обратно рефакторингом:
+   * схлопывание стирает ответы у всей загрузки молча.
+   */
+  it("нормализатор отличает отсутствующий answer_confidence от явного low", () => {
+    expect(SOURCE).toContain("const confidenceProvided = VALID_ANSWER_CONFIDENCE.has(confidenceRaw)");
+    expect(SOURCE).toContain("!confidenceProvided && answer");
   });
 });

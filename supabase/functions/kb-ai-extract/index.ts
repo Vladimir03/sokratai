@@ -754,13 +754,25 @@ function normalizeTask(raw: unknown, imageRefs: string[]): ExtractedTask | null 
   const confidenceRaw = typeof r.answer_confidence === "string"
     ? r.answer_confidence.toLowerCase()
     : "";
-  const answer_confidence: ExtractedTask["answer_confidence"] =
-    VALID_ANSWER_CONFIDENCE.has(confidenceRaw)
-      ? (confidenceRaw as ExtractedTask["answer_confidence"])
-      : "low";
+  const confidenceProvided = VALID_ANSWER_CONFIDENCE.has(confidenceRaw);
+  const answerRaw = asTrimmedStringOrNull(r.answer);
+
+  // ⚠️ «Поля НЕТ» ≠ «уверенность низкая». Раньше эти случаи сливались, и это
+  // было безопасно, пока схема требовала `answer_confidence` всегда. С правилом
+  // «ЭКОНОМИЯ ВЫВОДА» (2026-08-06) модель опускает null-поля, и одна её
+  // забывчивость обнуляла бы ответы у ВСЕЙ загрузки — молча, без ошибки в логах
+  // и без единого отказа шлюза. Поэтому: поле не пришло, а ответ есть →
+  // считаем уверенность средней и помечаем ответ на ревью (репетитор увидит
+  // янтарное «проверьте»), а не стираем данные. Анти-галлюцинация не
+  // ослабляется: ЯВНЫЙ `low` по-прежнему стирает ответ.
+  const answer_confidence: ExtractedTask["answer_confidence"] = confidenceProvided
+    ? (confidenceRaw as ExtractedTask["answer_confidence"])
+    : answerRaw
+    ? "medium"
+    : "low";
 
   // Anti-hallucination: low confidence → never keep an answer.
-  let answer = asTrimmedStringOrNull(r.answer);
+  let answer = answerRaw;
   if (answer_confidence === "low") answer = null;
 
   const answerFormatRaw = typeof r.answer_format === "string" ? r.answer_format.toLowerCase() : "";
@@ -781,6 +793,11 @@ function normalizeTask(raw: unknown, imageRefs: string[]): ExtractedTask | null 
   const needs_review_fields = Array.isArray(r.needs_review_fields)
     ? r.needs_review_fields.filter((s): s is string => typeof s === "string" && s.trim().length > 0)
     : [];
+  // Ответ сохранён без явной уверенности модели (см. блок выше) — репетитор
+  // должен его глазами проверить, а не получить как подтверждённый.
+  if (!confidenceProvided && answer && !needs_review_fields.includes("answer")) {
+    needs_review_fields.push("answer");
+  }
 
   return {
     text,
