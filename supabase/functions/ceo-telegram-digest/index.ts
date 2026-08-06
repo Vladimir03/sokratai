@@ -397,7 +397,7 @@ Deno.serve(async (req) => {
             "🚨 <b>AI-кредиты Lovable на исходе</b>",
             `Израсходовано ≈${Math.round(credits.month.pct)}% месячного лимита (${MONTHLY_CREDIT_LIMIT} кредитов).`,
             "Когда лимит кончится, у учеников встанет автопроверка ДЗ и обсуждение с Сократом — молча, с ошибкой «не сработало».",
-            "Подними лимит: Lovable → Settings → Usage.",
+            "Подними лимит: Lovable → Settings → Workspace → Usage → View usage limits → AI features usage limit.",
           ].join("\n");
           for (const chatId of recipients) {
             await sendTelegramMessage(chatId, alertText);
