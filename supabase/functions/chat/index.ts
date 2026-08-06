@@ -12,6 +12,9 @@ import {
   checkAiQuota,
   FREE_DAILY_LIMIT as SHARED_FREE_DAILY_LIMIT,
 } from "../_shared/subscription-limits.ts";
+// Серверный потолок окна истории — в соседнем модуле, чтобы был покрыт vitest
+// (этот файл не импортируется: top-level `Deno.serve`). Подробности — там же.
+import { capHistoryWindow } from "./history_window.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1252,6 +1255,24 @@ async function processAIRequest(
         JSON.stringify({ error: `Сообщение слишком длинное (макс. ${MAX_MESSAGE_LENGTH} символов)` }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
+    }
+  }
+
+  // Потолок истории ДО резолва картинок: выброшенные сообщения не должны
+  // стоить нам ещё и signed-URL + base64-инлайна. Переприсваиваем параметр
+  // намеренно — так ни один из последующих читателей `messages` в этой длинной
+  // функции не может случайно взять необрезанный массив.
+  {
+    const capped = capHistoryWindow(messages);
+    if (capped.dropped > 0) {
+      // PII-free: только счётчики. Живые клиенты шлют ≤15 сообщений, поэтому
+      // сюда мы попадаем только при баге вызывающего — это сигнал, а не норма.
+      console.warn("chat_history_window_trimmed", {
+        received: messages.length,
+        kept: capped.messages.length,
+        dropped: capped.dropped,
+      });
+      messages = capped.messages as any[];
     }
   }
 
