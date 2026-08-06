@@ -27,7 +27,16 @@ export type AiGatewayErrorCode =
   | "timeout" //         AbortError — вызов не уложился в лимит
   | "network" //         TypeError — соединение не установилось
   | "empty_response" //  HTTP 200, но модель вернула пустой контент
-  | "invalid_json"; //   HTTP 200, но JSON не распарсился
+  | "invalid_json" //    HTTP 200, но JSON не распарсился (форма не определена)
+  // Уточнённые формы того же отказа (2026-08-06). Общий `invalid_json` давал
+  // 9 из 13 отказов за неделю и не отвечал на главный вопрос — ЧТО именно
+  // вернула модель. Колонка `error_code` — plain text без CHECK, поэтому новые
+  // значения НЕ требуют миграции; старые строки остаются `invalid_json`.
+  | "invalid_json_array" //     валидный JSON, но массив верхнего уровня
+  | "invalid_json_truncated" // структура открыта и не закрыта — вывод оборвался
+  | "invalid_json_prose" //     ответ начался не с { или [ — json-режим проигнорирован
+  | "invalid_json_scalar" //    валидный JSON, но строка/число/null
+  | "invalid_json_malformed"; // выглядит как структура, но не парсится
 
 const ALERT_TEXT =
   "🚨 <b>AI-шлюз отбивает вызовы</b>\n" +
@@ -112,7 +121,18 @@ export function classifyAiGatewayError(error: unknown): {
       return { code: "empty_response", httpStatus: null };
     }
     if (error.message.includes("Failed to extract valid JSON")) {
-      return { code: "invalid_json", httpStatus: null };
+      // `callLovableJson` дописывает PII-free структурный класс: `(shape: array)`.
+      // Копии вызова в homework-api/mock-exam-grade его не шлют — там остаётся
+      // общий `invalid_json`, и это ожидаемо, а не пропуск.
+      const shape = error.message.match(/\(shape: ([a-z_]+)\)/)?.[1];
+      const refined: Record<string, AiGatewayErrorCode> = {
+        array: "invalid_json_array",
+        truncated: "invalid_json_truncated",
+        prose: "invalid_json_prose",
+        scalar: "invalid_json_scalar",
+        malformed: "invalid_json_malformed",
+      };
+      return { code: (shape && refined[shape]) || "invalid_json", httpStatus: null };
     }
   }
   return { code: "network", httpStatus: null };

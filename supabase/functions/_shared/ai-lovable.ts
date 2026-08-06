@@ -130,15 +130,59 @@ function tryParseJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-function extractJsonObject(raw: string): Record<string, unknown> {
+/**
+ * Разобрать текст в объект. `arrayKey` (опционально) спасает самый частый
+ * промах модели: она отдаёт МАССИВ верхнего уровня вместо объекта-обёртки.
+ * `JSON.parse` такой ответ принимает, но `isRecord` отвергает, а последующий
+ * brace-слайс на `[{…},{…}]` режет по первой/последней фигурной скобке и даёт
+ * заведомо битый кусок — то есть валидный ответ модели терялся целиком.
+ * Опция включается ТОЛЬКО теми вызывающими, у кого схема — объект с одним
+ * массивом внутри; остальные ведут себя как раньше, байт-в-байт.
+ */
+function parseIntoObject(text: string, arrayKey?: string): Record<string, unknown> | null {
+  const obj = tryParseJsonObject(text);
+  if (obj) return obj;
+  if (!arrayKey) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return { [arrayKey]: parsed };
+  } catch {
+    // не JSON — идём дальше по цепочке стратегий
+  }
+  return null;
+}
+
+/**
+ * PII-free описание того, ЧЕМ именно оказался неразобранный ответ. Ни куска
+ * текста модели — только структурный класс, чтобы `ai_gateway_errors` называл
+ * причину, а не сваливал всё в общий `invalid_json` (9 из 13 отказов за неделю).
+ */
+function describeJsonFailure(text: string): string {
+  if (!text) return "empty";
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    const first = text[0];
+    if (first !== "{" && first !== "[") return "prose"; // модель проигнорировала json-режим
+    const last = text[text.length - 1];
+    // Структуру начали, но не закрыли — вывод оборвался (кап/стоп-токен).
+    return last === "}" || last === "]" ? "malformed" : "truncated";
+  }
+  if (Array.isArray(parsed)) return "array"; // валидный JSON, но не объект
+  return "scalar"; // строка / число / null
+}
+
+/** Экспортируется только ради юнит-тестов (`ai-lovable-json.test.ts`). */
+export function extractJsonObject(raw: string, arrayKey?: string): Record<string, unknown> {
   const normalized = raw.trim();
 
-  const direct = tryParseJsonObject(normalized);
+  const direct = parseIntoObject(normalized, arrayKey);
   if (direct) return direct;
 
   const fencedMatch = normalized.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (fencedMatch?.[1]) {
-    const parsedFence = tryParseJsonObject(fencedMatch[1].trim());
+    const parsedFence = parseIntoObject(fencedMatch[1].trim(), arrayKey);
     if (parsedFence) return parsedFence;
   }
 
@@ -151,8 +195,11 @@ function extractJsonObject(raw: string): Record<string, unknown> {
   }
 
   // Do NOT embed the model response in the error — it may contain task text /
-  // answers (PII per rule 40 telemetry-convention). Keep the message content-free.
-  throw new Error("Failed to extract valid JSON object from model response");
+  // answers (PII per rule 40 telemetry-convention). Keep the message content-free:
+  // наружу уходит ТОЛЬКО структурный класс из `describeJsonFailure`.
+  throw new Error(
+    `Failed to extract valid JSON object from model response (shape: ${describeJsonFailure(normalized)})`,
+  );
 }
 
 function extractMessageContent(content: unknown): string {
@@ -209,12 +256,17 @@ export async function callLovableJson(
   // словами промпта. По умолчанию ВКЛЮЧЕН: функция называется callLovableJson,
   // все её вызовы парсят ответ как JSON, и `invalid_json` — самый частый отказ
   // шлюза в логах (9 из 10 за месяц). `false` — для вызовов, где нужен текст.
+  // `arrayKey` — спасательный круг для схемы «объект с одним массивом»: если
+  // модель вернула массив верхнего уровня, обернуть его в `{ [arrayKey]: … }`
+  // вместо отказа. Опция, а не поведение по умолчанию: у вызывающих со сложной
+  // схемой тихое оборачивание скрыло бы настоящую поломку схемы.
   opts?: {
     maxTokens?: number;
     model?: string;
     fallbackModel?: string;
     timeoutMs?: number;
     jsonMode?: boolean;
+    arrayKey?: string;
   },
 ): Promise<Record<string, unknown>> {
   const apiKey = Deno.env.get("LOVABLE_API_KEY");
@@ -263,7 +315,7 @@ export async function callLovableJson(
       const rawContent = extractMessageContent(messageContent);
 
       if (!rawContent) throw new Error("Model response is empty");
-      return extractJsonObject(rawContent);
+      return extractJsonObject(rawContent, opts?.arrayKey);
     } catch (error) {
       // Model-fallback: шлюз отверг модель-override (неизвестная строка / модель
       // недоступна) → один заход на fallback-модели вместо провала вызова.

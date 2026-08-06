@@ -875,11 +875,18 @@ async function runExtraction(
       // дефолтные 35с — все плотные чанки таймаутились. Worst-case цепочка
       // (schema-retry ×2 × gateway-retry ×2 × 90с = 360с) < edge wall-clock 400с.
       // Типичная латентность не меняется — это потолок.
+      // `arrayKey` (2026-08-06): за неделю 9 из 13 отказов шлюза — `invalid_json`
+      // именно здесь, при выводе 348–510 токенов (то есть НЕ обрезка по капу:
+      // максимум за 30 дней — 12 224 при потолке 16 000). Самый вероятный промах
+      // модели — массив задач верхнего уровня вместо `{"tasks":[…]}`: такой ответ
+      // валиден как JSON, но отвергается как объект, и весь вызов терялся.
+      // Схема здесь ровно «объект с одним массивом», поэтому обёртка безопасна.
       const obj = await callLovableJson(attemptMessages, "kb_ai_extract", onUsage, {
         maxTokens: 16000,
         model,
         fallbackModel: EXTRACT_FALLBACK_MODEL,
         timeoutMs: 90_000,
+        arrayKey: "tasks",
       });
       if (Array.isArray(obj.tasks)) {
         return { tasks: obj.tasks, answersTable: normalizeAnswersTable(obj.answers_table) };

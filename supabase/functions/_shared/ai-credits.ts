@@ -56,7 +56,7 @@ export const USD_PER_CREDIT = 0.25;
  * иначе дайджест будет считать процент от несуществующего лимита.
  * Лимит месяца у Lovable сбрасывается 1-го числа **по UTC** (см. `aiUsageWindows`).
  */
-export const MONTHLY_CREDIT_LIMIT = 60;
+export const MONTHLY_CREDIT_LIMIT = 75;
 
 /**
  * Кредитов в плане Lovable Pro за месяц. С момента слияния кошельков («Your
