@@ -28,7 +28,16 @@ import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
 import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorCalendarEvents, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, weekRangeISO } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
-import { syncMyDueDebits, setLessonCost, setParticipantCost, cancelLessonWithCharge } from '@/lib/tutorBalanceApi';
+import {
+  syncMyDueDebits,
+  setLessonCost,
+  setParticipantCost,
+  setLessonCostSeries,
+  setParticipantCostSeries,
+  moveLesson,
+  cancelLessonWithCharge,
+  type CostSeriesScope,
+} from '@/lib/tutorBalanceApi';
 import { calculateLessonPaymentAmount } from '@/lib/paymentAmount';
 import {
   createCalendarEvent,
@@ -105,6 +114,7 @@ import {
 import { LESSON_TYPES, getLessonTypeLabel } from '@/components/tutor/schedule/scheduleColors';
 import { useLessonMaterialFlags } from '@/hooks/useLessonMaterialFlags';
 import { QuickAddMenu, type QuickAddMenuState } from '@/components/tutor/schedule/QuickAddMenu';
+import TopupDialog, { type TopupStudentOption } from '@/components/tutor/students/TopupDialog';
 
 // schedule-materials: drawer to attach recording/PDF/homework to a lesson.
 // Lazy — keeps this large page's chunk lean (performance.md); only loads on first open.
@@ -258,6 +268,12 @@ function GroupDetailsDialog({
   const [editGroupSubject, setEditGroupSubject] = useState('');
   const [editGroupTopic, setEditGroupTopic] = useState('');
   const [editGroupNotes, setEditGroupNotes] = useState('');
+  // Волна 2: введённая цена участника серийной группы ждёт выбора scope.
+  const [participantCostScope, setParticipantCostScope] = useState<{
+    participantRowId: string;
+    tutorStudentId: string;
+    amount: number;
+  } | null>(null);
   const [groupSeriesAction, setGroupSeriesAction] = useState<'save' | 'cancel' | null>(null);
   const [groupMoveScopeOpen, setGroupMoveScopeOpen] = useState(false);
   const [isGroupSaving, setIsGroupSaving] = useState(false);
@@ -713,6 +729,49 @@ function GroupDetailsDialog({
     setParticipantPaymentError(null);
   }, [isParticipantPaymentSaving]);
 
+  // Волна 2: применить стоимость участника с выбранным scope. 'this' — прежний
+  // setParticipantCost; серия — series-RPC (остальные участники не тронуты, rule 60).
+  const applyParticipantCost = useCallback(async (
+    participantRowId: string,
+    tutorStudentId: string,
+    amount: number,
+    scope: 'this' | CostSeriesScope,
+  ) => {
+    if (!mainLesson) return;
+    setParticipantPaymentError(null);
+    setIsParticipantPaymentSaving(true);
+    try {
+      const result = scope === 'this'
+        ? await setParticipantCost(mainLesson.id, tutorStudentId, amount)
+        : await setParticipantCostSeries(mainLesson.id, tutorStudentId, amount, scope);
+      if (!result.ok) {
+        setParticipantPaymentError(result.code ?? 'UPDATE_FAILED');
+        toast.error(result.error || 'Не удалось изменить стоимость');
+        return;
+      }
+      setParticipants((prev) => prev.map((participant) => (
+        participant.id === participantRowId
+          ? { ...participant, payment_amount: amount }
+          : participant
+      )));
+      if (scope === 'this') {
+        toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
+      } else {
+        const updated = 'updated' in result ? result.updated ?? 0 : 0;
+        toast.success(`Стоимость обновлена в ${updated} занятиях`);
+      }
+      setSelectedParticipantId(null);
+      onParticipantPaymentUpdated?.();
+    } catch (error) {
+      console.error(error);
+      setParticipantPaymentError('NETWORK_ERROR');
+      toast.error('Ошибка сети при сохранении стоимости');
+    } finally {
+      setIsParticipantPaymentSaving(false);
+      setParticipantCostScope(null);
+    }
+  }, [mainLesson, onParticipantPaymentUpdated]);
+
   // Phase 2b: сохранить стоимость занятия для участника (0 = не списывать). Прошедшее → сразу пересчёт.
   const handleSaveParticipantCost = useCallback(async () => {
     if (!mainLesson || !selectedParticipant) return;
@@ -726,32 +785,18 @@ function GroupDetailsDialog({
     const amount = Number.isFinite(parsed) ? parsed : 0;
     if (amount < 0) { toast.error('Стоимость должна быть 0 или больше'); return; }
 
-    const previousParticipant = selectedParticipant;
-    setParticipantPaymentError(null);
-    setIsParticipantPaymentSaving(true);
-    try {
-      const result = await setParticipantCost(mainLesson.id, previousParticipant.tutor_student_id, amount);
-      if (!result.ok) {
-        setParticipantPaymentError(result.code ?? 'UPDATE_FAILED');
-        toast.error(result.error || 'Не удалось изменить стоимость');
-        return;
-      }
-      setParticipants((prev) => prev.map((participant) => (
-        participant.id === previousParticipant.id
-          ? { ...participant, payment_amount: amount }
-          : participant
-      )));
-      toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
-      setSelectedParticipantId(null);
-      onParticipantPaymentUpdated?.();
-    } catch (error) {
-      console.error(error);
-      setParticipantPaymentError('NETWORK_ERROR');
-      toast.error('Ошибка сети при сохранении стоимости');
-    } finally {
-      setIsParticipantPaymentSaving(false);
+    // Серийная группа → спросить «только это / это и далее / вся серия» (Волна 2,
+    // запрос репетитора: «применить ко всем занятиям серии или только к одному»).
+    if (groupIsRecurring) {
+      setParticipantCostScope({
+        participantRowId: selectedParticipant.id,
+        tutorStudentId: selectedParticipant.tutor_student_id,
+        amount,
+      });
+      return;
     }
-  }, [isParticipantPaymentSaving, mainLesson, onParticipantPaymentUpdated, participantCostText, selectedParticipant]);
+    await applyParticipantCost(selectedParticipant.id, selectedParticipant.tutor_student_id, amount, 'this');
+  }, [isParticipantPaymentSaving, mainLesson, participantCostText, selectedParticipant, groupIsRecurring, applyParticipantCost]);
 
   const renderPaymentIndicator = useCallback((lesson: TutorLessonWithStudent) => {
     if (lesson.status !== 'completed') {
@@ -1299,6 +1344,46 @@ function GroupDetailsDialog({
           <Button onClick={() => doSaveGroupEdit('this')} disabled={isGroupSaving}>Только это</Button>
           <Button onClick={() => doSaveGroupEdit('this_and_following')} disabled={isGroupSaving}>Это и последующие</Button>
           <Button onClick={() => doSaveGroupEdit('all')} disabled={isGroupSaving}>Вся серия</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Волна 2: цена участника серийной группы — «только это / это и далее / вся серия».
+        «Вся серия» пересчитывает и ПРОШЕДШИЕ занятия участника (списания изменятся). */}
+    <AlertDialog open={participantCostScope !== null} onOpenChange={(open) => { if (!open) setParticipantCostScope(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Применить стоимость к серии?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Занятие входит в серию. {participantCostScope != null && participantCostScope.amount > 0
+              ? `Новая стоимость участника: ${participantCostScope.amount} ₽.`
+              : 'Стоимость 0 — занятия участника не будут списываться.'}{' '}
+            Остальные участники не затронуты. «Вся серия» пересчитает и уже прошедшие занятия.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel disabled={isParticipantPaymentSaving}>Назад</AlertDialogCancel>
+          <Button
+            disabled={isParticipantPaymentSaving}
+            onClick={() => participantCostScope && void applyParticipantCost(
+              participantCostScope.participantRowId, participantCostScope.tutorStudentId, participantCostScope.amount, 'this')}
+          >
+            Только это
+          </Button>
+          <Button
+            disabled={isParticipantPaymentSaving}
+            onClick={() => participantCostScope && void applyParticipantCost(
+              participantCostScope.participantRowId, participantCostScope.tutorStudentId, participantCostScope.amount, 'this_and_following')}
+          >
+            Это и последующие
+          </Button>
+          <Button
+            disabled={isParticipantPaymentSaving}
+            onClick={() => participantCostScope && void applyParticipantCost(
+              participantCostScope.participantRowId, participantCostScope.tutorStudentId, participantCostScope.amount, 'all')}
+          >
+            Всю серию
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -1897,6 +1982,8 @@ function LessonDetailsDialog({
   const [isEditingCost, setIsEditingCost] = useState(false);
   const [costText, setCostText] = useState('');
   const [isSavingCost, setIsSavingCost] = useState(false);
+  // Волна 2: серийное занятие → введённая цена ждёт выбора scope (это / далее / вся серия).
+  const [costScopeAmount, setCostScopeAmount] = useState<number | null>(null);
   const [showCancelCharge, setShowCancelCharge] = useState(false);
   const [cancelChargeText, setCancelChargeText] = useState('');
 
@@ -1965,26 +2052,49 @@ function LessonDetailsDialog({
   const hourlyRateCents = lesson.tutor_students?.hourly_rate_cents ?? null;
   const effectiveCost = lesson.payment_amount ?? calculateLessonPaymentAmount(lesson.duration_min, hourlyRateCents);
 
-  const handleSaveCost = async () => {
-    const parsed = Number.parseInt((costText || '').replace(/[^\d]/g, ''), 10);
-    const amount = Number.isFinite(parsed) ? parsed : 0;
-    if (amount < 0) { toast.error('Стоимость должна быть 0 или больше'); return; }
+  // Волна 2: применить цену с выбранным scope. 'this' — прежний setLessonCost;
+  // серия — series-RPC (пересчёт списаний прошедших под advisory-lock, rule 60).
+  const applyCost = async (amount: number, scope: 'this' | CostSeriesScope) => {
     setIsSavingCost(true);
     try {
-      const res = await setLessonCost(lesson.id, amount);
-      if (res.ok) {
-        toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
-        setIsEditingCost(false);
-        onUpdate();
+      if (scope === 'this') {
+        const res = await setLessonCost(lesson.id, amount);
+        if (res.ok) {
+          toast.success(amount > 0 ? `Стоимость: ${amount} ₽` : 'Списание отключено');
+          setIsEditingCost(false);
+          onUpdate();
+        } else {
+          toast.error(res.error || 'Не удалось сохранить стоимость');
+        }
       } else {
-        toast.error(res.error || 'Не удалось сохранить стоимость');
+        const res = await setLessonCostSeries(lesson.id, amount, scope);
+        if (res.ok) {
+          toast.success(`Стоимость обновлена в ${res.updated ?? 0} занятиях`);
+          setIsEditingCost(false);
+          onUpdate();
+        } else {
+          toast.error(res.error || 'Не удалось сохранить стоимость');
+        }
       }
     } catch (e) {
       console.error(e);
       toast.error('Ошибка при сохранении стоимости');
     } finally {
       setIsSavingCost(false);
+      setCostScopeAmount(null);
     }
+  };
+
+  const handleSaveCost = async () => {
+    const parsed = Number.parseInt((costText || '').replace(/[^\d]/g, ''), 10);
+    const amount = Number.isFinite(parsed) ? parsed : 0;
+    if (amount < 0) { toast.error('Стоимость должна быть 0 или больше'); return; }
+    // Серийное занятие → спросить «только это / это и далее / вся серия» (Волна 2).
+    if (isActualSeries) {
+      setCostScopeAmount(amount);
+      return;
+    }
+    await applyCost(amount, 'this');
   };
 
   const handleConfirmCancelCharge = async () => {
@@ -2555,6 +2665,34 @@ function LessonDetailsDialog({
           <AlertDialogCancel onClick={() => setShowCancelCharge(false)} disabled={isCancelling}>Назад</AlertDialogCancel>
           <Button variant="destructive" onClick={handleConfirmCancelCharge} disabled={isCancelling}>
             {isCancelling ? 'Отмена...' : 'Отменить занятие'}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Волна 2: цена серийного занятия — «только это / это и далее / вся серия».
+        «Вся серия» пересчитывает и ПРОШЕДШИЕ занятия (списания изменятся, видно в ленте). */}
+    <AlertDialog open={costScopeAmount !== null} onOpenChange={(open) => { if (!open) setCostScopeAmount(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Применить стоимость к серии?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Это занятие — часть серии. {costScopeAmount != null && costScopeAmount > 0
+              ? `Новая стоимость: ${costScopeAmount} ₽.`
+              : 'Стоимость 0 — занятия не будут списываться.'}{' '}
+            «Вся серия» пересчитает и уже прошедшие занятия — их списания изменятся.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+          <AlertDialogCancel disabled={isSavingCost}>Назад</AlertDialogCancel>
+          <Button onClick={() => costScopeAmount != null && void applyCost(costScopeAmount, 'this')} disabled={isSavingCost}>
+            Только это
+          </Button>
+          <Button onClick={() => costScopeAmount != null && void applyCost(costScopeAmount, 'this_and_following')} disabled={isSavingCost}>
+            Это и последующие
+          </Button>
+          <Button onClick={() => costScopeAmount != null && void applyCost(costScopeAmount, 'all')} disabled={isSavingCost}>
+            Всю серию
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -3241,6 +3379,9 @@ function TutorScheduleContent() {
   const [selectedMinute, setSelectedMinute] = useState<number>(0);
   // Меню «Занятие / Личное дело» по клику на пустую ячейку (Волна 1).
   const [quickAdd, setQuickAdd] = useState<QuickAddMenuState | null>(null);
+  // «Внести оплату» из расписания (Волна 2): существующий TopupDialog в select-режиме,
+  // никаких новых money-путей (topup = единственный «деньги получены», rule 60).
+  const [topupOpen, setTopupOpen] = useState(false);
   // Превью перетаскивания живёт в DragPreviewLayer со своим стейтом (через ref) —
   // dragover больше не ререндерит страницу-монолит (performance.md).
   const dragPreviewRef = useRef<DragPreviewHandle>(null);
@@ -3315,6 +3456,16 @@ function TutorScheduleContent() {
     }
     return map;
   }, [groups]);
+
+  // Опции для TopupDialog (select-режим) — «Внести оплату» из расписания (Волна 2).
+  const topupStudentOptions = useMemo<TopupStudentOption[]>(
+    () => students.map((s) => ({
+      id: s.id,
+      name: s.display_name?.trim() || s.profiles?.username || 'Без имени',
+      hourly_rate_cents: s.hourly_rate_cents,
+    })),
+    [students],
+  );
 
   useEffect(() => {
     if (!lessonDetailsOpen || !selectedLesson) return;
@@ -4011,6 +4162,8 @@ function TutorScheduleContent() {
   }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, visibleStartHour]);
 
   // Перенос одиночного занятия (оптимистично) — для не-серийных и выбора «Только это».
+  // Волна 2: через money-aware RPC tutor_move_lesson (НЕ прямой UPDATE start_at):
+  // past→future снимает висящий debit, past→past пересоздаёт debit с новой датой.
   const moveSingleLessonOptimistic = useCallback(async (
     lesson: TutorLessonWithStudent,
     newStartIso: string,
@@ -4023,20 +4176,21 @@ function TutorScheduleContent() {
         return rest;
       });
     try {
-      const result = await updateLesson(lesson.id, { start_at: newStartIso });
+      const result = await moveLesson(lesson.id, newStartIso);
       clearOptimistic();
-      if (result) {
+      if (result.ok) {
         toast.success('Занятие перенесено');
         refetchLessons();
+        invalidateBalanceCaches(); // перенос — money-операция (rule 60 §13)
       } else {
-        toast.error('Не удалось перенести');
+        toast.error(result.error || 'Не удалось перенести');
       }
     } catch (error) {
       console.error(error);
       clearOptimistic();
       toast.error('Ошибка при переносе');
     }
-  }, [refetchLessons]);
+  }, [refetchLessons, invalidateBalanceCaches]);
 
   // Перенос серии на ту же дельту времени (день недели и шаг сохраняются) — «Это и последующие» / «Вся серия».
   const moveLessonSeries = useCallback(async (
@@ -4177,13 +4331,8 @@ function TutorScheduleContent() {
     const draggedLesson = effectiveLessons.find(l => l.id === draggedLessonId && l.status === 'booked');
     if (!draggedLesson) return;
 
-    // Прошедшее занятие не переносим (review #5: иначе past→future оставит висящий debit).
-    const draggedEndMs = new Date(draggedLesson.start_at).getTime() + (draggedLesson.duration_min ?? 60) * 60000;
-    if (draggedEndMs < Date.now()) {
-      suppressNextGridClickRef.current = true;
-      toast.error('Прошедшее занятие нельзя перенести');
-      return;
-    }
+    // Волна 2: прошедшие booked-занятия переносятся через tutor_move_lesson
+    // (money-aware: реверс/пересоздание debit) — клиентский запрет снят.
 
     const rect = event.currentTarget.getBoundingClientRect();
     const positionY = Math.max(0, Math.min(event.clientY - rect.top, gridHeight));
@@ -4207,6 +4356,13 @@ function TutorScheduleContent() {
 
     await moveSingleLessonOptimistic(draggedLesson, newStartIso);
   }, [effectiveLessons, getSnappedTimeFromPosition, gridHeight, weekStart, moveSingleLessonOptimistic, handleEventDrop]);
+
+  // Прошедший якорь серии: только «Только это» (series-shift не money-aware, Волна 2).
+  const pendingMoveIsPast = useMemo(() => {
+    if (!pendingMove) return false;
+    const l = pendingMove.lesson;
+    return new Date(l.start_at).getTime() + (l.duration_min ?? 60) * 60000 <= Date.now();
+  }, [pendingMove]);
 
   // Применение выбора scope из диалога переноса серии (занятия).
   const handleMoveScopeChoice = useCallback(async (scope: 'this' | 'this_and_following' | 'all') => {
@@ -4378,6 +4534,12 @@ function TutorScheduleContent() {
             >
               <Ban className="h-4 w-4 mr-2" />
               Личное дело
+            </Button>
+            {/* «Внести оплату» прямо из расписания (Волна 2; «абонемент» отложен —
+                кнопка ведёт на существующее пополнение баланса) */}
+            <Button variant="outline" size="sm" onClick={() => setTopupOpen(true)}>
+              <Wallet className="h-4 w-4 mr-2" />
+              Внести оплату
             </Button>
             <Button onClick={handleCopyBookingLink} variant="outline" size="sm">
               {copiedLink ? (
@@ -4770,6 +4932,15 @@ function TutorScheduleContent() {
           onAddEvent={() => setAddEventOpen(true)}
         />
 
+        {/* «Внести оплату» — пополнение баланса из расписания (Волна 2) */}
+        <TopupDialog
+          open={topupOpen}
+          onOpenChange={setTopupOpen}
+          tutorStudentId=""
+          students={topupStudentOptions}
+          onSaved={() => invalidateBalanceCaches()}
+        />
+
         {/* Dialogs */}
         {addLessonOpen && (
           <Suspense fallback={null}>
@@ -4861,7 +5032,9 @@ function TutorScheduleContent() {
           students={students}
         />
 
-        {/* Перенос серии — выбор scope (Google-Calendar-style), общий для индивид. и групп */}
+        {/* Перенос серии — выбор scope (Google-Calendar-style), общий для индивид. и групп.
+            Прошедший якорь — ТОЛЬКО «Только это»: series-shift (update_lesson_series) не
+            money-aware, прошедшие занятия серии переносятся по одному через tutor_move_lesson. */}
         <AlertDialog
           open={pendingMove !== null}
           onOpenChange={(open) => { if (!open) setPendingMove(null); }}
@@ -4870,7 +5043,9 @@ function TutorScheduleContent() {
             <AlertDialogHeader>
               <AlertDialogTitle>Перенести занятие</AlertDialogTitle>
               <AlertDialogDescription>
-                Это занятие входит в повторяющуюся серию. Что перенести?
+                {pendingMoveIsPast
+                  ? 'Это прошедшее занятие из серии — переносится только по одному (списание пересчитается автоматически).'
+                  : 'Это занятие входит в повторяющуюся серию. Что перенести?'}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="flex-col sm:flex-row gap-2">
@@ -4882,19 +5057,23 @@ function TutorScheduleContent() {
               >
                 Только это
               </Button>
-              <Button
-                variant="outline"
-                disabled={isMovingSeries}
-                onClick={() => handleMoveScopeChoice('this_and_following')}
-              >
-                Это и последующие
-              </Button>
-              <AlertDialogAction
-                disabled={isMovingSeries}
-                onClick={() => handleMoveScopeChoice('all')}
-              >
-                Вся серия
-              </AlertDialogAction>
+              {!pendingMoveIsPast && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={isMovingSeries}
+                    onClick={() => handleMoveScopeChoice('this_and_following')}
+                  >
+                    Это и последующие
+                  </Button>
+                  <AlertDialogAction
+                    disabled={isMovingSeries}
+                    onClick={() => handleMoveScopeChoice('all')}
+                  >
+                    Вся серия
+                  </AlertDialogAction>
+                </>
+              )}
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

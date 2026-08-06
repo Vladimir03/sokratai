@@ -18,6 +18,11 @@
 10. **Мутации не ретраятся** (`mutations.retry: 0`, `src/App.tsx`) — ответ, съеденный DPI, неотличим от неотправленного запроса; ретрай = двойная запись.
 11. **Любой UI-путь, дёргающий money-RPC, ОБЯЗАН инвалидировать** `['tutor','balance'|'ledger'|'students'|'student']` + `['tutor','received-payments']` — хелпер `invalidateBalanceCaches`. Иначе stale-чипы долга.
 12. Legacy `payment:*` callback'и бота и `payment-reminder` — **dormant, не возрождать** money-мутацию: после cutover они завершали занятие без credit.
+13. **Перенос занятия — только RPC `tutor_move_lesson`** (Волна 2 расписания, 2026-08-06). `_apply_lesson_debit_from_current_cost` для БУДУЩЕГО занятия — no-op, НЕ reverse: путь past→future обязан сам звать `_reverse_lesson_debit` (RPC это делает). Прямой `UPDATE start_at` прошедшего занятия с активным debit блокирован триггером `trg_tutor_lessons_guard_start_move` (GUC `app.lesson_move`) → RAISE `MOVE_VIA_RPC`.
+14. **Series-cost RPC (`tutor_set_*_cost_series`) НЕ трогают cancelled** (их `payment_amount` = сумма отмены, cron спишет её) и occurrences с другим `tutor_student_id`. «Только это» — прежние одиночные setters.
+15. **Канонический порядок advisory-локов в multi-lock транзакциях: lesson id ASC → tutor_student_id ASC** (cron `tutor_auto_debit_due_lessons`, series-cost, move). Новый multi-lock цикл — тем же порядком, иначе deadlock с cron.
+16. **Смена цены меняет только debit**; легаси lesson-credit до-cutover не пересчитывается — net «оплаченного» старого занятия может стать ≠0 (осознанно, новых lesson-credits после cutover нет).
+17. **`occurred_on` активного debit = ТЕКУЩАЯ дата занятия**: перенос past→past со сменой даты обязан reverse+apply (в `tutor_move_lesson` встроено), иначе «Доход за месяц» считает списание в старом месяце.
 
 ⚠️ **`tutor_lesson_participants` ИМЕЕТ клиентские write-RLS-политики** (`20260224123937`). Комментарий «no client write policy» в `20260604140000` **устарел — не верить**. Таблица НЕ «RPC-only write».
 

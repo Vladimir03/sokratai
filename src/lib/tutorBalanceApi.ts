@@ -305,6 +305,10 @@ export async function getReceivedPaymentsTotal(params?: {
 function mapLessonCostError(rawMsg: string): { code?: string; error: string } {
   const msg = rawMsg || '';
   if (msg.includes('INVALID_AMOUNT')) return { code: 'INVALID_AMOUNT', error: 'Стоимость должна быть 0 или больше.' };
+  if (msg.includes('INVALID_SCOPE')) return { code: 'INVALID_SCOPE', error: 'Не удалось применить к серии — обновите страницу.' };
+  if (msg.includes('INVALID_TIME')) return { code: 'INVALID_TIME', error: 'Некорректное время переноса.' };
+  if (msg.includes('NOT_BOOKED')) return { code: 'NOT_BOOKED', error: 'Можно переносить только запланированные занятия.' };
+  if (msg.includes('MOVE_VIA_RPC')) return { code: 'MOVE_VIA_RPC', error: 'Обновите страницу — перенос прошедших занятий выполняется новым способом.' };
   if (msg.includes('GROUP_LESSON')) return { code: 'GROUP_LESSON', error: 'Это групповое занятие — меняйте стоимость по участнику.' };
   if (msg.includes('PARTICIPANT_NOT_FOUND')) return { code: 'PARTICIPANT_NOT_FOUND', error: 'Участник не найден в занятии.' };
   if (msg.includes('NOT_OWNED')) return { code: 'NOT_OWNED', error: 'Занятие не найдено.' };
@@ -340,6 +344,56 @@ export async function setParticipantCost(
 ): Promise<BalanceMutationResult> {
   const { error } = await supabase.rpc('tutor_set_participant_cost' as never, {
     _lesson_id: lessonId, _tutor_student_id: tutorStudentId, _amount: amount,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  return { ok: true };
+}
+
+export type CostSeriesScope = 'this_and_following' | 'all';
+
+export interface SeriesMutationResult extends BalanceMutationResult {
+  /** Сколько занятий обновлено (для тоста «Обновлено в N занятиях»). */
+  updated?: number;
+}
+
+/**
+ * Волна 2: цена индивидуального занятия НА СЕРИЮ («применить ко всем / к этому и далее»).
+ * «Только это» — существующий setLessonCost. Прошедшие занятия набора пересчитываются
+ * (all — вся серия; following — от выбранного, включая его). cancelled не трогается.
+ * После — invalidateBalanceCaches + refetchLessons.
+ */
+export async function setLessonCostSeries(
+  lessonId: string, amount: number, scope: CostSeriesScope,
+): Promise<SeriesMutationResult> {
+  const { data, error } = await supabase.rpc('tutor_set_lesson_cost_series' as never, {
+    _lesson_id: lessonId, _amount: amount, _scope: scope,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  const row = (data ?? {}) as { updated?: number };
+  return { ok: true, updated: Number(row.updated ?? 0) };
+}
+
+/** Волна 2: цена участника группы НА СЕРИЮ (остальные участники не тронуты). */
+export async function setParticipantCostSeries(
+  lessonId: string, tutorStudentId: string, amount: number, scope: CostSeriesScope,
+): Promise<SeriesMutationResult> {
+  const { data, error } = await supabase.rpc('tutor_set_participant_cost_series' as never, {
+    _lesson_id: lessonId, _tutor_student_id: tutorStudentId, _amount: amount, _scope: scope,
+  } as never);
+  if (error) return { ok: false, ...mapLessonCostError(error.message) };
+  const row = (data ?? {}) as { updated?: number };
+  return { ok: true, updated: Number(row.updated ?? 0) };
+}
+
+/**
+ * Волна 2: перенос занятия (индивид. или unified-группа — одна строка) через
+ * money-aware RPC tutor_move_lesson: past→future снимает висящий debit, past→past
+ * пересоздаёт debit с occurred_on новой даты. Только status='booked' (NOT_BOOKED).
+ * Перенос — money-операция: после успеха invalidateBalanceCaches + refetchLessons.
+ */
+export async function moveLesson(lessonId: string, newStartIso: string): Promise<BalanceMutationResult> {
+  const { error } = await supabase.rpc('tutor_move_lesson' as never, {
+    _lesson_id: lessonId, _new_start_at: newStartIso,
   } as never);
   if (error) return { ok: false, ...mapLessonCostError(error.message) };
   return { ok: true };

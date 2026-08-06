@@ -127,8 +127,10 @@ export const LessonBlock = memo(function LessonBlock({
   // Visual state classes (без платёжной окраски — только отменённое приглушаем).
   const statusClasses = cn(isCancelled && 'opacity-40 grayscale');
 
-  // Прошедшие занятия не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
-  const isDraggable = lesson.status === 'booked' && !isPast;
+  // Волна 2: прошедшие booked-занятия ТОЖЕ таскаются — перенос идёт через money-aware
+  // RPC tutor_move_lesson (реверс/пересоздание debit), висящих списаний больше нет.
+  // completed/cancelled не таскаются (ручной статус / приглушено).
+  const isDraggable = lesson.status === 'booked';
 
   return (
     <div
@@ -283,9 +285,9 @@ export const GroupLessonBlock = memo(function GroupLessonBlock({
   const isDraggable = !bucket.isLegacyFallback
     && !!bucket.groupSessionId
     && bucket.lessons.length === 1
-    && bucket.lessons[0].status === 'booked'
-    // Прошедшую группу не таскаем (нельзя двигать историю → не оставляем висящий debit, review #5).
-    && (new Date(bucket.startAt).getTime() + bucket.durationMin * 60000) >= Date.now();
+    // Волна 2: прошедшая booked-группа тоже таскается — перенос через tutor_move_lesson
+    // (реверс/пересоздание debit ПО КАЖДОМУ участнику под advisory-lock).
+    && bucket.lessons[0].status === 'booked';
   const startDate = new Date(bucket.startAt);
   const startMinutes = startDate.getHours() * 60 + startDate.getMinutes();
   const offsetMinutes = startMinutes - (workDayStart * 60);
