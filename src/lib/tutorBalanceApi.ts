@@ -302,26 +302,10 @@ export async function getReceivedPaymentsTotal(params?: {
 // ─── Phase 2b — авто-списание занятий (Stage A) ──────────────────────────────
 
 /** RAISE-коды cost-set RPC → RU (rule 97). */
-/** Экспортирован (контроль-ревью P2): те же RAISE-коды прилетают и в updateLessonSeries
- *  (триггер MOVE_VIA_RPC на series-shift) — мапить обязаны ВСЕ обёртки, не только RPC-шные. */
-export function mapLessonCostError(rawMsg: string): { code?: string; error: string } {
-  const msg = rawMsg || '';
-  if (msg.includes('INVALID_AMOUNT')) return { code: 'INVALID_AMOUNT', error: 'Стоимость должна быть 0 или больше.' };
-  if (msg.includes('INVALID_SCOPE')) return { code: 'INVALID_SCOPE', error: 'Не удалось применить к серии — обновите страницу.' };
-  if (msg.includes('INVALID_TIME')) return { code: 'INVALID_TIME', error: 'Некорректное время переноса.' };
-  if (msg.includes('INVALID_STUDENT')) return { code: 'INVALID_STUDENT', error: 'Ученик не найден.' };
-  if (msg.includes('NOT_BOOKED')) return { code: 'NOT_BOOKED', error: 'Можно переносить только запланированные занятия.' };
-  if (msg.includes('MOVE_VIA_RPC')) return { code: 'MOVE_VIA_RPC', error: 'Так перенести нельзя: прошедшие занятия переносятся по одному (если ошибка повторяется — обновите страницу).' };
-  if (msg.includes('GROUP_LESSON')) return { code: 'GROUP_LESSON', error: 'Это групповое занятие — меняйте стоимость по участнику.' };
-  if (msg.includes('PARTICIPANT_NOT_FOUND')) return { code: 'PARTICIPANT_NOT_FOUND', error: 'Участник не найден в занятии.' };
-  if (msg.includes('NOT_OWNED')) return { code: 'NOT_OWNED', error: 'Занятие не найдено.' };
-  if (msg.includes('NO_STUDENT')) return { code: 'NO_STUDENT', error: 'У занятия нет ученика.' };
-  if (msg.includes('STUDENT_TUTOR_MISMATCH')) return { code: 'STUDENT_TUTOR_MISMATCH', error: 'Ученик принадлежит другому репетитору.' };
-  if (msg.includes('LEDGER_DEBIT_RACE') || msg.includes('LEDGER_DEBIT_LOST')) {
-    return { code: 'LEDGER_CONFLICT', error: 'Не удалось применить — обновите страницу и попробуйте ещё раз.' };
-  }
-  return { error: 'Не удалось изменить стоимость. Попробуйте ещё раз.' };
-}
+// Маппер вынесен в @/lib/lessonMoneyErrors (без зависимостей) — импорт отсюда
+// в tutorSchedule давал транзитивный цикл модулей (контроль-ревью P2).
+import { mapLessonCostError } from '@/lib/lessonMoneyErrors';
+export { mapLessonCostError };
 
 /**
  * Lazy-reconcile: досписать прошедшие занятия ТЕКУЩЕГО тутора (scoped по auth.uid()→tutor_id).
@@ -391,10 +375,13 @@ export async function setParticipantCostSeries(
 export interface MoveLessonFields {
   /** Новая длительность (money-поле: derived-цена). undefined = не менять. */
   durationMin?: number;
-  /** true = записать нового ученика (tutorStudentId/studentId; null = убрать). Только индивидуальные. */
+  /**
+   * true = записать нового ученика (tutorStudentId; null = убрать). Только
+   * индивидуальные занятия. student_id (profile) сервер выводит из tutor_students
+   * сам — произвольную пару клиент задать не может (контроль-ревью-2 P1).
+   */
   setStudent?: boolean;
   tutorStudentId?: string | null;
-  studentId?: string | null;
 }
 
 /**
@@ -416,7 +403,6 @@ export async function moveLesson(
     _new_duration_min: fields?.durationMin ?? null,
     _set_student: fields?.setStudent ?? false,
     _new_tutor_student_id: fields?.tutorStudentId ?? null,
-    _new_student_id: fields?.studentId ?? null,
   } as never);
   if (error) return { ok: false, ...mapLessonCostError(error.message) };
   return { ok: true };

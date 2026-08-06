@@ -45,4 +45,92 @@ END $$;
 REVOKE ALL ON FUNCTION public.tutor_auto_debit_due_lessons(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.tutor_auto_debit_due_lessons(uuid) TO service_role;
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- 2. complete_lesson_and_create_payment — advisory-локи ДО UPDATE строки занятия
+-- ════════════════════════════════════════════════════════════════════════════
+-- Контроль-ревью Волны 2 (P1): completion делал row-lock (UPDATE tutor_lessons) и
+-- ЗАТЕМ ждал advisory внутри _apply; series-cost держит advisory и ждёт row-lock
+-- (FOR UPDATE) → взаимоблокировка. Единый порядок ВЕЗДЕ: advisory → row.
+-- Тело VERBATIM из 20260616203136 + блок предзахвата локов (пометка -- M3 LOCK).
+CREATE OR REPLACE FUNCTION public.complete_lesson_and_create_payment(
+  _lesson_id uuid,
+  _amount integer,
+  _payment_status text DEFAULT 'pending',
+  _tutor_telegram_id text DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = 'public'
+AS $$
+DECLARE
+  _tutor_id uuid;
+  _tutor_student_id uuid;
+  _is_group boolean;
+  _participant record;
+  _actor uuid;
+BEGIN
+  IF _tutor_telegram_id IS NOT NULL THEN
+    SELECT t.id, l.tutor_student_id INTO _tutor_id, _tutor_student_id
+    FROM public.tutors t JOIN public.tutor_lessons l ON l.tutor_id = t.id
+    WHERE l.id = _lesson_id AND t.telegram_id = _tutor_telegram_id;
+  ELSE
+    SELECT t.id, l.tutor_student_id INTO _tutor_id, _tutor_student_id
+    FROM public.tutors t JOIN public.tutor_lessons l ON l.tutor_id = t.id
+    WHERE l.id = _lesson_id AND t.user_id = auth.uid();
+  END IF;
+
+  IF _tutor_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  _actor := COALESCE(auth.uid(), (SELECT user_id FROM public.tutors WHERE id = _tutor_id));
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.tutor_lesson_participants WHERE lesson_id = _lesson_id
+  ) INTO _is_group;
+
+  -- M3 LOCK: advisory-локи всех учеников В КАНОНИЧЕСКОМ порядке (student ASC)
+  -- ДО UPDATE tutor_lessons — иначе цикл с series-cost/move (advisory → row).
+  IF _is_group THEN
+    FOR _participant IN
+      SELECT p.tutor_student_id FROM public.tutor_lesson_participants p
+      WHERE p.lesson_id = _lesson_id ORDER BY p.tutor_student_id
+    LOOP
+      PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_participant.tutor_student_id::text));
+    END LOOP;
+  ELSIF _tutor_student_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_tutor_student_id::text));
+  END IF;
+
+  UPDATE public.tutor_lessons
+  SET
+    status = 'completed',
+    payment_status = _payment_status,
+    payment_amount = CASE WHEN NOT _is_group THEN _amount ELSE NULL END,
+    paid_at = CASE WHEN _payment_status IN ('paid', 'paid_earlier') THEN NOW() ELSE NULL END,
+    payment_reminder_sent = true
+  WHERE id = _lesson_id;
+
+  IF _is_group THEN
+    FOR _participant IN
+      SELECT p.tutor_student_id FROM public.tutor_lesson_participants p WHERE p.lesson_id = _lesson_id
+    LOOP
+      PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _participant.tutor_student_id, _actor);
+      UPDATE public.tutor_lesson_participants
+      SET payment_status = _payment_status,
+          paid_at = CASE WHEN _payment_status IN ('paid', 'paid_earlier') THEN NOW() ELSE NULL END
+      WHERE lesson_id = _lesson_id AND tutor_student_id = _participant.tutor_student_id;
+    END LOOP;
+  ELSIF _tutor_student_id IS NOT NULL THEN
+    PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _tutor_student_id, _actor);
+  END IF;
+
+  RETURN true;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.complete_lesson_and_create_payment(uuid, integer, text, text)
+  TO authenticated, service_role;
+
 NOTIFY pgrst, 'reload schema';

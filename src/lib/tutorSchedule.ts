@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabaseClient';
 import { getCurrentTutor } from '@/lib/tutors';
 import { generateSeriesDates, type RecurrenceRule } from '@/lib/recurrenceDates';
-import { mapLessonCostError } from '@/lib/tutorBalanceApi';
+import { mapLessonCostError } from '@/lib/lessonMoneyErrors';
 import type {
   TutorWeeklySlot,
   TutorLessonWithStudent,

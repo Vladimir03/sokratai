@@ -30,21 +30,28 @@
 -- давал debit старому ученику / derived по старой длительности. Поэтому RPC
 -- принимает money-поля опционально и применяет всё ОДНОЙ транзакцией:
 --   _new_duration_min  — NULL = не менять;
---   _set_student=true  — записать _new_tutor_student_id/_new_student_id (NULL = убрать
---                        ученика); только для индивидуальных занятий (GROUP_LESSON).
+--   _set_student=true  — записать _new_tutor_student_id (NULL = убрать ученика);
+--                        student_id (profile) сервер ВЫВОДИТ из tutor_students сам
+--                        (контроль-ревью-2 P1: произвольная пара открывала бы занятие
+--                        постороннему auth.uid()); только индивидуальные (GROUP_LESSON).
 -- Не-money метаданные (тип/предмет/тема/заметки) остаются на updateLesson.
+--
+-- Сериализация конкурентных мутаций одного занятия (контроль-ревью-2 P0):
+-- состав/владельцы debit читаются ДО локов (порядок локов должен быть детерминирован),
+-- поэтому ПОД локами состав перечитывается; появился кто-то вне залоченного набора
+-- (двойная конкурентная смена ученика A→B и A→C) → RAISE 'LEDGER_CONFLICT' —
+-- fail-loud retry вместо тихого висящего debit.
 CREATE OR REPLACE FUNCTION public.tutor_move_lesson(
   _lesson_id uuid,
   _new_start_at timestamptz,
   _new_duration_min integer DEFAULT NULL,
   _set_student boolean DEFAULT false,
-  _new_tutor_student_id uuid DEFAULT NULL,
-  _new_student_id uuid DEFAULT NULL)
+  _new_tutor_student_id uuid DEFAULT NULL)
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  _tutor_id uuid; _dur int;
-  _students uuid[]; _s uuid; _now_past boolean; _attached boolean;
+  _tutor_id uuid; _dur int; _new_profile_student uuid;
+  _students uuid[]; _fresh uuid[]; _s uuid; _now_past boolean; _attached boolean;
   _debit_id uuid; _debit_on date;
 BEGIN
   IF _new_start_at IS NULL THEN RAISE EXCEPTION 'INVALID_TIME'; END IF;
@@ -61,10 +68,13 @@ BEGIN
     IF EXISTS (SELECT 1 FROM public.tutor_lesson_participants WHERE lesson_id = _lesson_id) THEN
       RAISE EXCEPTION 'GROUP_LESSON';
     END IF;
-    IF _new_tutor_student_id IS NOT NULL AND NOT EXISTS (
-      SELECT 1 FROM public.tutor_students ts
-      WHERE ts.id = _new_tutor_student_id AND ts.tutor_id = _tutor_id
-    ) THEN RAISE EXCEPTION 'INVALID_STUDENT'; END IF;
+    IF _new_tutor_student_id IS NOT NULL THEN
+      -- student_id (profile) выводится сервером — пара всегда согласована.
+      SELECT ts.student_id INTO _new_profile_student
+      FROM public.tutor_students ts
+      WHERE ts.id = _new_tutor_student_id AND ts.tutor_id = _tutor_id;
+      IF NOT FOUND THEN RAISE EXCEPTION 'INVALID_STUDENT'; END IF;
+    END IF;
   END IF;
 
   -- Money-набор: текущие участники группы ∪ ученик занятия ∪ НОВЫЙ ученик ∪ владельцы
@@ -93,6 +103,28 @@ BEGIN
     PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_s::text));
   END LOOP;
 
+  -- Перечитываем состав ПОД локами (контроль-ревью-2 P0): конкурентная мутация могла
+  -- сменить ученика/участников, пока мы ждали лок — их (lesson, student)-пары НЕ залочены,
+  -- продолжать нельзя. Fail-loud → клиентское «обновите страницу и попробуйте ещё раз».
+  SELECT ARRAY(
+    SELECT DISTINCT sid FROM (
+      SELECT p.tutor_student_id AS sid
+        FROM public.tutor_lesson_participants p WHERE p.lesson_id = _lesson_id
+      UNION
+      SELECT l.tutor_student_id
+        FROM public.tutor_lessons l
+       WHERE l.id = _lesson_id AND l.tutor_student_id IS NOT NULL
+      UNION
+      SELECT e.tutor_student_id
+        FROM public.tutor_ledger_entries e
+       WHERE e.source_lesson_id = _lesson_id AND e.source_kind = 'lesson'
+         AND e.kind = 'debit' AND e.reversed_by_entry_id IS NULL
+    ) s WHERE sid IS NOT NULL ORDER BY sid
+  ) INTO _fresh;
+  IF EXISTS (SELECT 1 FROM unnest(_fresh) f WHERE f <> ALL(_students)) THEN
+    RAISE EXCEPTION 'LEDGER_CONFLICT';
+  END IF;
+
   -- Атомарная перепроверка статуса ПОД локами (P0 ревью: параллельная
   -- tutor_cancel_lesson_with_charge между гейтом и UPDATE). Триггер-гард (ниже)
   -- обходим транзакционным GUC (паттерн app.ledger_op).
@@ -101,7 +133,7 @@ BEGIN
      SET start_at = _new_start_at,
          duration_min = COALESCE(_new_duration_min, duration_min),
          tutor_student_id = CASE WHEN _set_student THEN _new_tutor_student_id ELSE tutor_student_id END,
-         student_id = CASE WHEN _set_student THEN _new_student_id ELSE student_id END
+         student_id = CASE WHEN _set_student THEN _new_profile_student ELSE student_id END
    WHERE id = _lesson_id AND status = 'booked'
    RETURNING COALESCE(duration_min, 60) INTO _dur;
   PERFORM set_config('app.lesson_move', 'off', true);
@@ -152,9 +184,9 @@ BEGIN
 END $$;
 
 -- Тройной паттерн грантов (rule 99): GRANT → REVOKE PUBLIC → REVOKE anon.
-GRANT EXECUTE ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) TO authenticated, service_role;
-REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid) FROM anon;
+GRANT EXECUTE ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid) FROM anon;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- 2. DB-гард: прямой UPDATE start_at мимо RPC в опасных случаях

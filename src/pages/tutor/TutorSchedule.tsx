@@ -2255,17 +2255,21 @@ function LessonDetailsDialog({
           }
         }
       } else {
-        // Волна 2 (контроль-ревью P0): смена времени + money-полей (ученик/длительность)
-        // едет ОДНОЙ транзакцией tutor_move_lesson — двухшаговый вариант оставлял debit
-        // старому ученику / derived-цену по старой длительности. Не-money метаданные
-        // (тип/предмет/тема/заметки) — отдельным updateLesson (его сбой денег не трогает).
+        // Волна 2 (контроль-ревью P0): ЛЮБОЕ money-изменение (время / ученик /
+        // длительность) едет ОДНОЙ транзакцией tutor_move_lesson — двухшаговый
+        // вариант оставлял debit старому ученику / derived-цену по старой
+        // длительности, а «форма открыта до конца занятия» делала прямой UPDATE
+        // ученика у уже прошедшего занятия (контроль-ревью-2 P1). student_id
+        // (profile) сервер выводит сам. Не-money метаданные — отдельным
+        // updateLesson (его сбой денег не трогает).
         const startChanged = new Date(lesson.start_at).getTime() !== newStart.getTime();
-        if (startChanged) {
+        const durationChanged = Number.parseInt(editDuration, 10) !== (lesson.duration_min ?? 60);
+        const studentChanged = (tutorStudent?.id ?? null) !== (lesson.tutor_student_id ?? null);
+        if (startChanged || durationChanged || studentChanged) {
           const moved = await moveLesson(lesson.id, newStart.toISOString(), {
             durationMin: Number.parseInt(editDuration, 10),
             setStudent: true,
             tutorStudentId: tutorStudent?.id ?? null,
-            studentId: actualStudentId || null,
           });
           if (!moved.ok) {
             toast.error(moved.error || 'Не удалось перенести занятие');
@@ -2273,11 +2277,6 @@ function LessonDetailsDialog({
           }
         }
         const result = await updateLesson(lesson.id, {
-          ...(startChanged ? null : {
-            duration_min: Number.parseInt(editDuration, 10),
-            student_id: actualStudentId || undefined,
-            tutor_student_id: tutorStudent?.id || undefined,
-          }),
           lesson_type: editLessonType,
           subject: editSubject || undefined,
           topic: editTopic.trim() || null,
