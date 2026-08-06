@@ -67,8 +67,9 @@ DECLARE
   _tutor_id uuid;
   _tutor_student_id uuid;
   _is_group boolean;
-  _participant record;
   _actor uuid;
+  _locked_students uuid[];
+  _s uuid;
 BEGIN
   IF _tutor_telegram_id IS NOT NULL THEN
     SELECT t.id, l.tutor_student_id INTO _tutor_id, _tutor_student_id
@@ -93,15 +94,18 @@ BEGIN
   -- M3 LOCK: advisory-локи всех учеников В КАНОНИЧЕСКОМ порядке (student ASC)
   -- ДО UPDATE tutor_lessons — иначе цикл с series-cost/move (advisory → row).
   IF _is_group THEN
-    FOR _participant IN
+    SELECT ARRAY(
       SELECT p.tutor_student_id FROM public.tutor_lesson_participants p
       WHERE p.lesson_id = _lesson_id ORDER BY p.tutor_student_id
-    LOOP
-      PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_participant.tutor_student_id::text));
-    END LOOP;
+    ) INTO _locked_students;
   ELSIF _tutor_student_id IS NOT NULL THEN
-    PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_tutor_student_id::text));
+    _locked_students := ARRAY[_tutor_student_id];
+  ELSE
+    _locked_students := ARRAY[]::uuid[];
   END IF;
+  FOREACH _s IN ARRAY _locked_students LOOP
+    PERFORM pg_advisory_xact_lock(hashtext(_lesson_id::text), hashtext(_s::text));
+  END LOOP;
 
   UPDATE public.tutor_lessons
   SET
@@ -112,19 +116,19 @@ BEGIN
     payment_reminder_sent = true
   WHERE id = _lesson_id;
 
-  IF _is_group THEN
-    FOR _participant IN
-      SELECT p.tutor_student_id FROM public.tutor_lesson_participants p WHERE p.lesson_id = _lesson_id
-    LOOP
-      PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _participant.tutor_student_id, _actor);
+  -- M3 LOCK (контроль-ревью-3 P1): второй цикл идёт по ЗАЛОЧЕННОМУ снапшоту, НЕ по
+  -- свежему чтению — участник, добавленный конкурентно после пре-лока, не залочен,
+  -- и попытка _apply на нём под удерживаемым row-lock вернула бы deadlock-цикл
+  -- с series-cost. Его дебет создаст cron tutor_auto_debit_due_lessons (идемпотентно).
+  FOREACH _s IN ARRAY _locked_students LOOP
+    PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _s, _actor);
+    IF _is_group THEN
       UPDATE public.tutor_lesson_participants
       SET payment_status = _payment_status,
           paid_at = CASE WHEN _payment_status IN ('paid', 'paid_earlier') THEN NOW() ELSE NULL END
-      WHERE lesson_id = _lesson_id AND tutor_student_id = _participant.tutor_student_id;
-    END LOOP;
-  ELSIF _tutor_student_id IS NOT NULL THEN
-    PERFORM public._apply_lesson_debit_from_current_cost(_lesson_id, _tutor_student_id, _actor);
-  END IF;
+      WHERE lesson_id = _lesson_id AND tutor_student_id = _s;
+    END IF;
+  END LOOP;
 
   RETURN true;
 END;

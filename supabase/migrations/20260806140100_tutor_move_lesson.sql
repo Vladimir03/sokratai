@@ -41,6 +41,12 @@
 -- поэтому ПОД локами состав перечитывается; появился кто-то вне залоченного набора
 -- (двойная конкурентная смена ученика A→B и A→C) → RAISE 'LEDGER_CONFLICT' —
 -- fail-loud retry вместо тихого висящего debit.
+-- Защита от оверлоада (контроль-ревью-3): если где-то успела примениться прежняя
+-- ревизия этого файла с 6-аргументной сигнатурой (_new_student_id) — сносим её,
+-- иначе PostgREST получит две перегрузки tutor_move_lesson. Идемпотентно.
+DROP FUNCTION IF EXISTS public.tutor_move_lesson(uuid, timestamptz, integer, boolean, uuid, uuid);
+DROP FUNCTION IF EXISTS public.tutor_move_lesson(uuid, timestamptz);
+
 CREATE OR REPLACE FUNCTION public.tutor_move_lesson(
   _lesson_id uuid,
   _new_start_at timestamptz,
