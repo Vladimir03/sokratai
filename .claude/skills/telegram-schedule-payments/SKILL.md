@@ -338,3 +338,24 @@ P0-разблокировка: (1) единый пикер даты/времен
 
 ### ⚠️ RLS `tutor_lesson_participants` НЕ write-protected (КРИТИЧНО — hardening pending)
 Таблица **ИМЕЕТ клиентские INSERT/UPDATE/DELETE RLS-политики** (`20260224123937` строки 46/51/56, `WITH CHECK owns_lesson`, никогда не дропались) → тутор может писать участников (вкл. произвольный `payment_amount`) напрямую PostgREST в обход RPC-гардов. **НЕ считать таблицу «RPC-only write».** `createMiniGroupLesson` (`tutorScheduleGroupCreate.ts`) полагается на INSERT-политику. Bypass ограничен своими занятиями (`owns_lesson`, не cross-tenant; тутор и так ставит цены) → низкий риск, не блокер. Комментарий «no client write policy» в `20260604140000` **устарел — не верить.** Hardening (drop политик + insert через SECURITY DEFINER RPC) — отдельная money-critical задача.
+
+## Расписание для групповиков — Волны 1–2 (2026-08-06/07)
+
+Спека: `docs/delivery/features/schedule-groups-ux/spec.md`. Инварианты money-части — rule 60 §13–17. Дискавери: план `1-valiant-papert` (данные прода: 3 тяжёлых групповика, группы 26% занятий, цвет групп был в БД без UI — 0/31).
+
+### Волна 1 (UX/перф)
+- **Цвета:** фон ячейки = `tutor_groups.color` / `tutor_students.color` (миграция `20260806130000`, CHECK `#RRGGBB`); тип занятия = полоска слева. Палитра — ТОЛЬКО пресеты `schedule/scheduleColors.ts` (8 цветов, контраст ≥4.5:1 с белым — текст остаётся text-white). Пикер `ColorSwatchPicker` в Create/RenameGroupModal и профиле ученика (мгновенный persist).
+- **Тема урока** `tutor_lessons.topic` — student-visible ЯВНЫМ решением (whitelist edge `student-lessons-api`). В серии тема ТОЛЬКО у корня (и у индивидуальной, и у групповой — ревью 5.6); редактирование темы серии правит только ВЫБРАННОЕ занятие отдельным updateLesson (RPC update_lesson_series тему не знает).
+- **Бейджи МЗ/ДЗ** — `useLessonMaterialFlags`: один батч `.in('lesson_id', ids)`, колонки ЯВНО (column-grant, `select('*')` упадёт). Инвалидация при закрытии materials-drawer/PostLessonSheet.
+- **Серии:** генератор `lib/recurrenceDates.ts` (daily/weekly/biweekly/monthly; кап 60, daily 92). Дефолт «Повторять до» = ближайшее 30 июня ОТ ДАТЫ ПЕРВОГО ЗАНЯТИЯ (не от сегодня — ревью); серия из 0 занятий блокируется до submit. daily у мини-групп ОТКЛЮЧЁН (per-occurrence цикл создания).
+- **Быстрый плейсхолдер** из формы занятия: имя + ОБЯЗАТЕЛЬНЫЙ канонический предмет (SUBJECT_REGISTRY) → `tutor-manual-add-student`; локальный стаб в пикер до рефетча.
+- **keepPreviousData-урок:** окно-зависимый ключ (неделя) отдаёт данные ЧУЖОГО окна под новыми заголовками — обязателен `isPlaceholderData`-гейт (сущности не рендерить, каркас приглушить). Префетч соседних недель — ключи строить ТЕМ ЖЕ `weekRangeISO`, иначе двойные запросы.
+- Занятия вне рабочих часов больше НЕ скрываются: `visibleRange` расширяется данными; все top-позиции блоков считаются от `visibleStartHour`, не от settings.workDayStart.
+
+### Волна 2 (money) — итог 4 раундов Codex-ревью
+- **Протокол сериализации (главный урок):** порядок локов ВЕЗДЕ `advisory (lesson, student ASC) → row`; состав/ученик, прочитанные ДО лока, ОБЯЗАНЫ перечитываться ПОД локом; расхождение → RAISE `LEDGER_CONFLICT` (fail-loud retry). Внедрено в `tutor_move_lesson`, series-cost (per-lesson conditional UPDATE; у участника — `SELECT ... FOR UPDATE` строки занятия против MVCC-снимка EXISTS), completion (переиздан: пре-лок + итерация ЗАЛОЧЕННОГО снапшота), cancel-with-charge (`20260806140300` re-read).
+- **`tutor_move_lesson`** — единственный путь смены `start_at` И money-полей (длительность, ученик — `student_id` выводит сервер, клиентская пара запрещена). past→future реверсит debit ЯВНО (`_apply` будущее НЕ реверсит — вечная ловушка), past→past reverse+apply при смене `occurred_on` (иначе «Доход за месяц» врёт). Edit-форма зовёт RPC при ЛЮБОМ money-изменении (время/ученик/длительность), не только времени.
+- **Триггер `trg_tutor_lessons_guard_start_move`:** прямой UPDATE start_at прошедшего-с-debit ИЛИ уводящий занятие В ПРОШЛОЕ → `MOVE_VIA_RPC` (GUC `app.lesson_move`). Series-shift (update_lesson_series) остаётся не-money-aware: клиент запрещает сдвиг в прошлое на ВСЕХ поверхностях + `all` клампится к now; прошедший серийный якорь — только «Только это».
+- **Series-cost scope литеральный:** `all` пересчитывает и прошедшие (диалог предупреждает); cancelled хранит сумму отмены — НЕ перезаписывать; «Только это» — одиночные setters (advisory ДО row-UPDATE).
+- Маппер RAISE-кодов — `lib/lessonMoneyErrors.ts` (модуль без зависимостей: импорт из tutorBalanceApi в tutorSchedule давал цикл). Легаси lesson-credit до-cutover НЕ пересчитывается (net ≠ 0 у старых оплаченных — осознанно).
+- **Процессный урок:** money-код сходился 4 раунда ревью (4×P0 → 2×P0 → 1×P0 → 2×P1 → APPROVE-класс); каждая «закрывающая» правка сама проверялась на новые дыры. Не пушенные миграции можно править in-place, но прежние сигнатуры функций сносить защитным `DROP FUNCTION IF EXISTS` (оверлоад с прежним grant).
