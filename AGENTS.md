@@ -104,6 +104,8 @@ Hard rules for any Supabase HTTP call:
 
 Additive only: new tables / columns / indexes OK. **Forbidden:** modifying existing migrations, dropping or renaming columns. Adding a subject to `SUBJECTS` (`src/types/homework.ts`) → add a CHECK-constraint migration for **both** `homework_tutor_assignments` and `homework_tutor_templates` (rule 40). Run the `config.toml` drift-check before changing `verify_jwt` / `--no-verify-jwt`.
 
+⚠️ **Пиши миграции ИДЕМПОТЕНТНЫМИ** (`IF NOT EXISTS`, `CREATE OR REPLACE`, `INSERT … WHERE NOT EXISTS`). Причина не гигиена, а механика Lovable: он **не применяет наш файл — он пересоздаёт его SQL под своим именем** (`2026…_<uuid>.sql`) и коммитит рядом. В репозитории остаются ДВА файла с одним и тем же SQL, и на чистом прогоне оба выполнятся. Следствие №2: **факт применения нельзя проверять по `supabase_migrations.schema_migrations`** — наших имён там нет никогда, будет ложное «не применено». Проверять только по данным (`select … from <таблица>`). Проверено 2026-08-07 на паре миграций таксономии.
+
 ---
 
 ## Hard rules for new code
