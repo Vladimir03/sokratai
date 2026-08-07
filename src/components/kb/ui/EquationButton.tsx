@@ -154,7 +154,15 @@ export function EquationButton({
         // строки становятся недостижимы — у Radix своего скролла нет.
         // Фолбэк 24rem — на случай, если переменная Radix не выставлена
         // (ревью 5.6 P1, 2026-08-07).
-        className="max-h-[var(--radix-popover-content-available-height,24rem)] w-[320px] overflow-y-auto overscroll-contain p-2"
+        //
+        // ⚠️ `z-[330]` ОБЯЗАТЕЛЕН: базовый `PopoverContent` приходит с `z-50`,
+        // а модалки Базы знаний — кастомные, с `z-[300]`/`z-[301]`. Портал
+        // попапа рендерится в body, но по z-index уходил ПОД модалку — список
+        // шаблонов было видно за её краем (репорт владельца 2026-08-07).
+        // Шкала проекта: тосты 100 · модалки KB 300/301 · BboxEditor 320 ·
+        // конфетти 9999 (pointer-events-none). Конфликт с `z-50` разрешает
+        // tailwind-merge внутри `cn` — побеждает класс отсюда.
+        className="z-[330] max-h-[var(--radix-popover-content-available-height,24rem)] w-[320px] overflow-y-auto overscroll-contain p-2"
         // Без этого Radix забирает фокус себе, и вставка уезжает в позицию 0
         // (прецедент — MathQuickPicker).
         onOpenAutoFocus={(e) => e.preventDefault()}
