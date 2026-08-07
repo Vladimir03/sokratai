@@ -5947,6 +5947,16 @@ export type Database = {
       tutor_get_invite_code: { Args: never; Returns: string }
       tutor_ids_with_due_lessons: { Args: never; Returns: string[] }
       tutor_intro_price_available: { Args: never; Returns: boolean }
+      tutor_move_lesson: {
+        Args: {
+          _lesson_id: string
+          _new_duration_min?: number
+          _new_start_at: string
+          _new_tutor_student_id?: string
+          _set_student?: boolean
+        }
+        Returns: Json
+      }
       tutor_received_payments_summary: {
         Args: { _from?: string; _student_id?: string; _to?: string }
         Returns: Json
