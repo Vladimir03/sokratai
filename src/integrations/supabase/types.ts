@@ -4296,6 +4296,7 @@ export type Database = {
           status: string
           student_id: string | null
           subject: string | null
+          topic: string | null
           tutor_id: string
           tutor_student_id: string | null
           updated_at: string | null
@@ -4325,6 +4326,7 @@ export type Database = {
           status?: string
           student_id?: string | null
           subject?: string | null
+          topic?: string | null
           tutor_id: string
           tutor_student_id?: string | null
           updated_at?: string | null
@@ -4354,6 +4356,7 @@ export type Database = {
           status?: string
           student_id?: string | null
           subject?: string | null
+          topic?: string | null
           tutor_id?: string
           tutor_student_id?: string | null
           updated_at?: string | null
@@ -4710,6 +4713,7 @@ export type Database = {
           claim_token: string | null
           claim_token_created_at: string | null
           claimed_at: string | null
+          color: string | null
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -4737,6 +4741,7 @@ export type Database = {
           claim_token?: string | null
           claim_token_created_at?: string | null
           claimed_at?: string | null
+          color?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -4764,6 +4769,7 @@ export type Database = {
           claim_token?: string | null
           claim_token_created_at?: string | null
           claimed_at?: string | null
+          color?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
