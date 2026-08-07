@@ -19,6 +19,8 @@ import {
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
+import { EquationButton } from '@/components/kb/ui/EquationButton';
+import { useInsertAtCursor } from '@/components/kb/ui/useInsertAtCursor';
 import {
   TaskClassificationFields,
   type TaskClassType,
@@ -72,6 +74,10 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
   // Answer / solution (collapsible section)
   const [answer, setAnswer] = useState('');
   const [solution, setSolution] = useState('');
+  const solutionRef = useRef<HTMLTextAreaElement>(null);
+  // Кнопка «Уравнение» (2026-08-07) — в условии и решении.
+  const insertIntoText = useInsertAtCursor(textRef);
+  const insertIntoSolution = useInsertAtCursor(solutionRef);
   const [rubricText, setRubricText] = useState('');
   // unified-task-model F1 (2026-07-05): AI-настройка — паритет с конструктором.
   const [checkFormat, setCheckFormat] = useState<'' | 'short_answer' | 'detailed_solution'>('');
@@ -324,8 +330,21 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
           {/* Task text */}
           <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Условие задачи {conditionImages.totalImages === 0 && <span className="text-red-500">*</span>}
+            {/* Кнопка ВНУТРИ legend (он обязан быть прямым потомком fieldset,
+                иначе теряется подпись группы для скринридера), но flex — на
+                ВНУТРЕННЕМ span: `display` у самого legend в WebKit исторически
+                капризен (rule 80, baseline Safari 15), а width — нет.
+                Ревью 5.6 P2, 2026-08-07. */}
+            <legend className="mb-1.5 w-full text-xs font-semibold text-slate-500">
+              <span className="flex w-full items-center justify-between gap-2">
+                <span>
+                  Условие задачи {conditionImages.totalImages === 0 && <span className="text-red-500">*</span>}
+                </span>
+                {/* Без `disabled={isBusy}`: textarea во время загрузки фото
+                    остаётся активным — печатать можно, значит и вставлять
+                    формулу тоже (ревью 5.6 P1). */}
+                <EquationButton onInsert={insertIntoText} />
+              </span>
             </legend>
             <textarea
               ref={textRef}
@@ -389,8 +408,14 @@ export function CreateTaskModal({ defaultFolderId, onClose }: CreateTaskModalPro
 
               {/* Solution */}
               <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
+                <legend className="mb-1.5 w-full text-xs font-semibold text-slate-500">
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span>Решение / пояснение</span>
+                    <EquationButton onInsert={insertIntoSolution} />
+                  </span>
+                </legend>
                 <textarea
+                  ref={solutionRef}
                   value={solution}
                   onChange={(e) => setSolution(e.target.value)}
                   onPaste={solutionImages.handlePaste}

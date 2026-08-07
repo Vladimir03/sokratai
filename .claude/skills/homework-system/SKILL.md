@@ -111,6 +111,8 @@ Validator pattern: `const scaled = value*10; if (Math.abs(scaled - Math.round(sc
 
 **Frontend UX контракт (`HWTaskCard.tsx`):** локальный `scoreText: string` (раздельно от `task.max_score: number`) — тутор может печатать «12.» прежде «5». Sync извне через `useEffect([task.max_score])`. Snap-on-blur: 12.7 → 12.5 silently (без error modal); negative/NaN/< 0.5 → 1. Hint: «Шаг 0.5 — например 1, 1.5, 12, 12.5».
 
+**Кнопка «Уравнение» в конструкторе (2026-08-07):** `EquationButton` + `useInsertAtCursor` (оба `components/kb/ui/`) у поля «Текст задачи» в `HWTaskCard` и внутри `SolutionField` («Эталонное решение»). Инварианты, купленные ревью: `disabled` НЕ передаём (textarea во время загрузки фото живой — блокировать только кнопку значит «печатать можно, вставить нельзя»); попап обязан нести `max-h-[var(--radix-popover-content-available-height,24rem)] overflow-y-auto` (у Radix своего скролла нет, 9 шаблонов не влезают в телефон с клавиатурой); триггер `h-11 md:h-9` (44px тач-цель). Мемоизация `TaskCardRow` не страдает — `useRef`/`useInsertAtCursor` стабильны. KaTeX не уезжает в eager-граф: `PopoverContent` без `forceMount`, а `katexPromise` схлопывает параллельные `import()` в одну загрузку.
+
 ### Invite preview edge function — отдельный share URL
 
 **Два** канонических helper'а в `src/utils/telegramLinks.ts` — **НЕ путать:**

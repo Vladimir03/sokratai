@@ -273,7 +273,6 @@ const VariantTaskCard = memo(function VariantTaskCard({
   disabled,
   duplicateKim,
   blockLabel,
-  subject,
   onUpdate,
   onRemove,
   onChangePart,
@@ -285,8 +284,6 @@ const VariantTaskCard = memo(function VariantTaskCard({
   duplicateKim: boolean;
   /** Read-only бейдж блока; правится чипами в секции блоков (один источник). */
   blockLabel: string | null;
-  /** Только для порядка шаблонов в «Уравнении» — не гейт. */
-  subject: string;
   onUpdate: (localId: string, patch: Partial<VariantTaskDraft>) => void;
   onRemove: (localId: string) => void;
   /** Смена типа ответа = смена части. Перенос делает родитель (задача живёт
@@ -396,11 +393,7 @@ const VariantTaskCard = memo(function VariantTaskCard({
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
           <Label className="block text-xs font-semibold text-slate-500">Условие</Label>
-          <EquationButton
-            subject={subject}
-            disabled={disabled}
-            onInsert={insertIntoTaskText}
-          />
+          <EquationButton disabled={disabled} onInsert={insertIntoTaskText} />
         </div>
         <textarea
           ref={taskTextRef}
@@ -1284,7 +1277,6 @@ function VariantEditorContent() {
               index={i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
-              subject={subject}
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}
@@ -1311,7 +1303,6 @@ function VariantEditorContent() {
               index={part1Tasks.length + i}
               disabled={contentLocked || isSubmitting}
               duplicateKim={duplicateKims.has(t.kimNumber.trim()) && t.kimNumber.trim() !== ''}
-              subject={subject}
               blockLabel={blockLabelFor(t.blockId)}
               onUpdate={updateTask}
               onRemove={removeTask}

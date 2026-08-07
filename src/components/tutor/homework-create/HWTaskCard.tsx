@@ -26,6 +26,8 @@ import {
   MAX_SOLUTION_IMAGES,
 } from '@/lib/attachmentRefs';
 import { compressForUpload } from '@/lib/imageCompression';
+import { EquationButton } from '@/components/kb/ui/EquationButton';
+import { useInsertAtCursor } from '@/components/kb/ui/useInsertAtCursor';
 import { describeTaskOptions, normalizeOptionsJson } from '@/lib/taskOptions';
 import { TaskOptionsList } from '@/components/homework/shared/TaskOptionsList';
 import { validateStructuredAnswer } from '@/lib/taskAnswerValidation';
@@ -682,6 +684,12 @@ export function HWTaskCard({
     telemetryTag: 'hw_task_paste',
   });
 
+  // Кнопка «Уравнение» у поля условия (2026-08-07): та же пара
+  // `useInsertAtCursor` + `EquationButton`, что в редакторе варианта пробника.
+  // Ref нужен свой — общего компонента textarea в редакторах задач нет.
+  const taskTextRef = useRef<HTMLTextAreaElement>(null);
+  const insertIntoTaskText = useInsertAtCursor(taskTextRef);
+
   // Phase 9 (2026-05-25): drag-and-drop в каждой из 3 секций. Per-section hooks
   // вместо одного card-level — drag-drop НЕ имеет last-focused fallback (как
   // paste), drop landing должен быть unambiguous. Routing идёт по тому, в какой
@@ -849,8 +857,12 @@ export function HWTaskCard({
         >
           {taskDragDrop.isDragging && <DropOverlay />}
           <div className="space-y-2">
-            <Label>Текст задачи {taskRefs.length === 0 && <span className="text-red-500">*</span>}</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label>Текст задачи {taskRefs.length === 0 && <span className="text-red-500">*</span>}</Label>
+              <EquationButton onInsert={insertIntoTaskText} />
+            </div>
             <textarea
+              ref={taskTextRef}
               className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
               placeholder={taskRefs.length > 0 ? 'Описание (опционально — фото прикреплено)' : 'Условие задачи (можно вставить скриншот Ctrl+V)...'}
               value={task.task_text}

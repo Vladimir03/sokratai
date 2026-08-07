@@ -150,6 +150,8 @@ description: "База знаний SokratAI: Каталог Сократа и �
 
 Упрощение загрузки задач в «Мою базу» (`CreateTaskModal` / `EditTaskModal`). Аддитивно поверх self-serve каталога. Миграции `20260621120000` (difficulty) + `20260621120100` (kb_sources). НЕ задеплоено. Build-лог: memory `project_kb_task_loader_egor_2026_06_21.md`. План `~/.claude/plans/zesty-discovering-sphinx.md`.
 
+**Кнопка «Уравнение» (2026-08-07):** `EquationButton` + `useInsertAtCursor` (`components/kb/ui/`) стоят у «Условие задачи» и «Решение / пояснение» в **обеих** модалках. Инварианты: кнопка рендерится ВНУТРИ `<legend>` (он обязан остаться прямым потомком `fieldset`), но flex — на внутреннем `<span>`, а не на самом legend (`display` у legend капризен в WebKit, baseline Safari 15 — rule 80); `disabled` не передаём (textarea при загрузке фото активен). Порядок шаблонов общий для всех предметов, поверхности перечислены в шапке `EquationButton.tsx`.
+
 **Общий каскад — `src/components/kb/TaskClassificationFields.tsx` (НЕ дублировать в модалках):** Тип (`Не указан / ЕГЭ / ОГЭ / Олимпиада`) → фильтрует темы (`useTopics(filter)`) → Тема → Подтема. Оба модала рендерят этот компонент; каждый держит state + хендлеры сброса (смена типа → сброс темы/подтемы/балла + очистка противоположного КИМ↔сложность; смена КИМ → сброс ручного балла; смена темы → сброс подтемы). Сброс подтемы — **в хендлере, не в useEffect** (иначе клобберит prefill на mount — урок EditTaskModal).
 
 **`kb_tasks.difficulty SMALLINT 1–5` (олимпиада) — КЛАССИФИКАЦИЯ, не рубрика:**

@@ -15,6 +15,8 @@ import { inferCheckFormatFromKim } from '@/lib/checkFormatHelpers';
 import { cn } from '@/lib/utils';
 import { ImageUploadField } from '@/components/kb/ui/ImageUploadField';
 import { AnswerAlternativesField } from '@/components/kb/ui/AnswerAlternativesField';
+import { EquationButton } from '@/components/kb/ui/EquationButton';
+import { useInsertAtCursor } from '@/components/kb/ui/useInsertAtCursor';
 import {
   TaskClassificationFields,
   type TaskClassType,
@@ -44,6 +46,11 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
   const [text, setText] = useState(task.text);
   const [answer, setAnswer] = useState(task.answer ?? '');
   const [solution, setSolution] = useState(task.solution ?? '');
+  // Кнопка «Уравнение» (2026-08-07) — в условии и решении, как в создании.
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const solutionRef = useRef<HTMLTextAreaElement>(null);
+  const insertIntoText = useInsertAtCursor(textRef);
+  const insertIntoSolution = useInsertAtCursor(solutionRef);
   // Field-parity fix (2026-06-03): рубрика — first-class поле задачи в «Моей базе».
   const [rubricText, setRubricText] = useState(task.rubric_text ?? '');
   // unified-task-model F1 (2026-07-05): AI-настройка — паритет с конструктором.
@@ -298,10 +305,18 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
         <div className="relative flex-1 space-y-4 overflow-auto px-5 py-4">
           {/* Task text */}
           <fieldset>
-            <legend className="mb-1.5 text-xs font-semibold text-slate-500">
-              Условие задачи {!hasImage && <span className="text-red-500">*</span>}
+            {/* Кнопка внутри legend, flex — на внутреннем span: см. CreateTaskModal. */}
+            <legend className="mb-1.5 w-full text-xs font-semibold text-slate-500">
+              <span className="flex w-full items-center justify-between gap-2">
+                <span>
+                  Условие задачи {!hasImage && <span className="text-red-500">*</span>}
+                </span>
+                {/* disabled намеренно НЕ передаём — см. CreateTaskModal. */}
+                <EquationButton onInsert={insertIntoText} />
+              </span>
             </legend>
             <textarea
+              ref={textRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onPaste={conditionImages.handlePaste}
@@ -351,8 +366,14 @@ export function EditTaskModal({ task, onClose }: EditTaskModalProps) {
 
               {/* Solution */}
               <fieldset>
-                <legend className="mb-1.5 text-xs font-semibold text-slate-500">Решение / пояснение</legend>
+                <legend className="mb-1.5 w-full text-xs font-semibold text-slate-500">
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span>Решение / пояснение</span>
+                    <EquationButton onInsert={insertIntoSolution} />
+                  </span>
+                </legend>
                 <textarea
+                  ref={solutionRef}
                   value={solution}
                   onChange={(e) => setSolution(e.target.value)}
                   onPaste={solutionImages.handlePaste}

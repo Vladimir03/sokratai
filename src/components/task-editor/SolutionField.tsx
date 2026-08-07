@@ -4,10 +4,12 @@
  * Gallery-as-props: upload-пайплайн остаётся у поверхности.
  */
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { MAX_SOLUTION_IMAGES } from '@/lib/attachmentRefs';
 import { PhotoGallery } from './PhotoGallery';
+import { EquationButton } from '@/components/kb/ui/EquationButton';
+import { useInsertAtCursor } from '@/components/kb/ui/useInsertAtCursor';
 
 export interface SolutionFieldProps {
   value: string;
@@ -36,6 +38,9 @@ export function SolutionField({
 }: SolutionFieldProps) {
   // Open by default when there's content (including KB-imported) — репетитор должен видеть, что AI получит эталон.
   const [open, setOpen] = useState(Boolean(value) || solutionRefs.length > 0);
+  // Формулы в эталоне нужны не меньше, чем в условии (2026-08-07).
+  const textRef = useRef<HTMLTextAreaElement>(null);
+  const insertAtCursor = useInsertAtCursor(textRef);
 
   return (
     <div className="space-y-2">
@@ -54,10 +59,14 @@ export function SolutionField({
       </button>
       {open && (
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            AI будет опираться на решение при подсказках и проверке, но не покажет его ученику. Можно редактировать свободно.
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              AI будет опираться на решение при подсказках и проверке, но не покажет его ученику. Можно редактировать свободно.
+            </p>
+            <EquationButton className="shrink-0" onInsert={insertAtCursor} />
+          </div>
           <textarea
+            ref={textRef}
             className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-base ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 min-h-[80px] resize-y"
             placeholder="Пошаговое решение, ключевые формулы, ответ с размерностями (можно вставить скриншот Ctrl+V)..."
             value={value}
