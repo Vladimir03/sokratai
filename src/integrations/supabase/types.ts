@@ -4296,6 +4296,7 @@ export type Database = {
           status: string
           student_id: string | null
           subject: string | null
+          topic: string | null
           tutor_id: string
           tutor_student_id: string | null
           updated_at: string | null
@@ -4325,6 +4326,7 @@ export type Database = {
           status?: string
           student_id?: string | null
           subject?: string | null
+          topic?: string | null
           tutor_id: string
           tutor_student_id?: string | null
           updated_at?: string | null
@@ -4354,6 +4356,7 @@ export type Database = {
           status?: string
           student_id?: string | null
           subject?: string | null
+          topic?: string | null
           tutor_id?: string
           tutor_student_id?: string | null
           updated_at?: string | null
@@ -4710,6 +4713,7 @@ export type Database = {
           claim_token: string | null
           claim_token_created_at: string | null
           claimed_at: string | null
+          color: string | null
           created_at: string | null
           current_score: number | null
           display_name: string | null
@@ -4737,6 +4741,7 @@ export type Database = {
           claim_token?: string | null
           claim_token_created_at?: string | null
           claimed_at?: string | null
+          color?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -4764,6 +4769,7 @@ export type Database = {
           claim_token?: string | null
           claim_token_created_at?: string | null
           claimed_at?: string | null
+          color?: string | null
           created_at?: string | null
           current_score?: number | null
           display_name?: string | null
@@ -5941,6 +5947,16 @@ export type Database = {
       tutor_get_invite_code: { Args: never; Returns: string }
       tutor_ids_with_due_lessons: { Args: never; Returns: string[] }
       tutor_intro_price_available: { Args: never; Returns: boolean }
+      tutor_move_lesson: {
+        Args: {
+          _lesson_id: string
+          _new_duration_min?: number
+          _new_start_at: string
+          _new_tutor_student_id?: string
+          _set_student?: boolean
+        }
+        Returns: Json
+      }
       tutor_received_payments_summary: {
         Args: { _from?: string; _student_id?: string; _to?: string }
         Returns: Json
@@ -5971,8 +5987,21 @@ export type Database = {
         Args: { _amount: number; _lesson_id: string }
         Returns: Json
       }
+      tutor_set_lesson_cost_series: {
+        Args: { _amount: number; _lesson_id: string; _scope: string }
+        Returns: Json
+      }
       tutor_set_participant_cost: {
         Args: { _amount: number; _lesson_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_set_participant_cost_series: {
+        Args: {
+          _amount: number
+          _lesson_id: string
+          _scope: string
+          _tutor_student_id: string
+        }
         Returns: Json
       }
       tutor_settle_debt_by_telegram: {
