@@ -5977,8 +5977,21 @@ export type Database = {
         Args: { _amount: number; _lesson_id: string }
         Returns: Json
       }
+      tutor_set_lesson_cost_series: {
+        Args: { _amount: number; _lesson_id: string; _scope: string }
+        Returns: Json
+      }
       tutor_set_participant_cost: {
         Args: { _amount: number; _lesson_id: string; _tutor_student_id: string }
+        Returns: Json
+      }
+      tutor_set_participant_cost_series: {
+        Args: {
+          _amount: number
+          _lesson_id: string
+          _scope: string
+          _tutor_student_id: string
+        }
         Returns: Json
       }
       tutor_settle_debt_by_telegram: {
