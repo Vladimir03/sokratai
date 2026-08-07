@@ -65,12 +65,16 @@ function MaterialBadges({ hasMaterials, hasHomework }: { hasMaterials?: boolean;
   );
 }
 
-/** Полоска-индикатор типа занятия слева (видна, когда фон ячейки = цвет группы/ученика). */
+/**
+ * Полоска-индикатор типа занятия слева (видна, когда фон ячейки = цвет группы/ученика).
+ * Цвет — как в легенде; тонкая белая грань отделяет её от любого фона сущности.
+ */
 function TypeStripe({ lessonType }: { lessonType: string }) {
   return (
     <div
       className={cn(
-        'absolute left-0 top-0 bottom-0 w-1 rounded-l-md pointer-events-none',
+        'absolute left-0 top-0 bottom-0 w-1.5 rounded-l-md pointer-events-none',
+        'shadow-[inset_-1px_0_0_rgba(255,255,255,0.55)]',
         getLessonTypeStripeColor(lessonType),
       )}
     />

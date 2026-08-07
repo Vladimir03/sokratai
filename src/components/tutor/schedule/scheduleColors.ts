@@ -24,31 +24,50 @@ export const ENTITY_COLOR_PRESETS: { value: string; label: string }[] = [
   { value: '#57534E', label: 'Графитовый' },
 ];
 
-/** Типы занятий: класс фона (когда цвета сущности нет) + класс полоски-индикатора. */
+/**
+ * Типы занятий, предлагаемые при создании (они же — легенда календаря).
+ *
+ * `consultation` УБРАН 2026-08-07 (решение владельца по данным прода: 4 занятия
+ * у одного репетитора, последнее в феврале — тип мёртв). Существующие строки
+ * не мигрируем: подпись для них живёт в LEGACY_LESSON_TYPE_LABELS ниже, цвет
+ * приходит из фолбэка — история не переименовывается в «Урок».
+ */
 export const LESSON_TYPES: {
   value: LessonType;
   label: string;
   shortLabel: string;
   color: string;
-  /** bg-класс для полоски типа поверх цветной ячейки (primary → отдельный видимый цвет). */
-  stripeColor: string;
 }[] = [
-  { value: 'regular', label: 'Обычный урок', shortLabel: 'Урок', color: 'bg-primary', stripeColor: 'bg-white/60' },
-  { value: 'trial', label: 'Пробное занятие', shortLabel: 'Пробное', color: 'bg-amber-500', stripeColor: 'bg-amber-400' },
-  { value: 'mock_exam', label: 'Пробный экзамен', shortLabel: 'Пробник', color: 'bg-purple-500', stripeColor: 'bg-purple-300' },
-  { value: 'consultation', label: 'Консультация', shortLabel: 'Консультация', color: 'bg-teal-500', stripeColor: 'bg-teal-300' },
+  { value: 'regular', label: 'Обычный урок', shortLabel: 'Урок', color: 'bg-primary' },
+  { value: 'trial', label: 'Пробное занятие', shortLabel: 'Пробное', color: 'bg-amber-500' },
+  { value: 'mock_exam', label: 'Пробный экзамен', shortLabel: 'Пробник', color: 'bg-purple-500' },
 ];
+
+/** Типы, которые больше не предлагаются, но существуют в старых строках. */
+const LEGACY_LESSON_TYPE_LABELS: Record<string, string> = {
+  consultation: 'Консультация',
+};
 
 export function getLessonTypeColor(type: LessonType | string): string {
   return LESSON_TYPES.find(t => t.value === type)?.color || 'bg-primary';
 }
 
+/**
+ * Цвет полоски-индикатора типа на цветной ячейке = ТОТ ЖЕ класс, что в легенде.
+ * Раньше здесь были отдельные «мягкие» оттенки (у обычного урока — bg-white/60),
+ * и на цветном фоне полоска фактически исчезала: репетитор видел синюю ячейку
+ * без зелёной метки «Урок» (репорт владельца 2026-08-07).
+ */
 export function getLessonTypeStripeColor(type: LessonType | string): string {
-  return LESSON_TYPES.find(t => t.value === type)?.stripeColor || 'bg-white/60';
+  return getLessonTypeColor(type);
 }
 
 export function getLessonTypeLabel(type: LessonType | string): string {
-  return LESSON_TYPES.find(t => t.value === type)?.label || 'Урок';
+  return (
+    LESSON_TYPES.find(t => t.value === type)?.label
+    || LEGACY_LESSON_TYPE_LABELS[type as string]
+    || 'Урок'
+  );
 }
 
 /** Валидный пресет-hex или null (защита от мусора в кэше/старых строках). */

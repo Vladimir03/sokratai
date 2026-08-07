@@ -10,7 +10,7 @@
 //
 // rule 80 (Safari): touch-action:manipulation. rule 90: one primary CTA.
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import type { TutorLessonWithStudent } from '@/types/tutor';
 import {
@@ -27,17 +27,26 @@ interface LessonMaterialsDrawerProps {
 
 export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMaterialsDrawerProps) {
   const panelRef = useRef<LessonMaterialsPanelHandle>(null);
+  const [finishing, setFinishing] = useState(false);
 
-  // TASK-7: close via «Готово» / overlay / Esc → one digest if materials added.
-  const handleClose = useCallback(() => {
-    panelRef.current?.flushNotifyOnClose();
-    onOpenChange(false);
-  }, [onOpenChange]);
+  // Закрытие: досохраняем введённую ссылку записи + один notify-дайджест (TASK-7).
+  // strict=true («Готово») — не закрываем, если ссылку сохранить не удалось, чтобы
+  // ввод не пропал; Esc/overlay закрывают всегда (репорт владельца 2026-08-07).
+  const finish = useCallback(async (strict: boolean) => {
+    if (finishing) return;
+    setFinishing(true);
+    try {
+      const canClose = (await panelRef.current?.commitPendingAndNotify({ strict })) ?? true;
+      if (canClose) onOpenChange(false);
+    } finally {
+      setFinishing(false);
+    }
+  }, [finishing, onOpenChange]);
 
   if (!lesson) return null;
 
   return (
-    <Sheet open={open} onOpenChange={(next) => { if (!next) handleClose(); }}>
+    <Sheet open={open} onOpenChange={(next) => { if (!next) void finish(false); }}>
       <SheetContent side="right" className="flex w-full flex-col gap-0 bg-white p-0 sm:max-w-lg">
         <SheetTitle className="sr-only">Материалы занятия</SheetTitle>
         <SheetDescription className="sr-only">
@@ -58,15 +67,16 @@ export function LessonMaterialsDrawer({ open, onOpenChange, lesson }: LessonMate
           onRequestClose={() => onOpenChange(false)}
         />
 
-        {/* Footer — one primary CTA */}
+        {/* Footer — one primary CTA: сохраняет введённую ссылку и закрывает */}
         <div className="border-t border-socrat-border px-5 py-4">
           <button
             type="button"
-            onClick={handleClose}
-            className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
+            onClick={() => void finish(true)}
+            disabled={finishing}
+            className="w-full rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:opacity-60"
             style={{ touchAction: 'manipulation' }}
           >
-            Готово
+            {finishing ? 'Сохраняем...' : 'Готово'}
           </button>
         </div>
       </SheetContent>

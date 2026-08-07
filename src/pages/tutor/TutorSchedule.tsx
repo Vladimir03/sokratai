@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, Repeat, FileText, ClipboardCheck, Wallet, Ban, PenLine } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Link2, Copy, Check, Plus, X, Clock, Bell, Settings, CalendarIcon, Trash2, CalendarDays, MessageCircle, MoreVertical, Repeat, FileText, Wallet, Ban, PenLine } from 'lucide-react';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from '@/components/ui/alert-dialog';
 import { format, addMinutes, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -18,14 +18,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Calendar } from '@/components/ui/calendar';
 import { DateTimeField } from '@/components/ui/date-time-field';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
-import { formatCurrency } from '@/lib/formatters';
 import { TutorDataStatus } from '@/components/tutor/TutorDataStatus';
-import ConfettiBurst from '@/components/ConfettiBurst';
 import { useTutor, useTutorWeeklySlots, useTutorLessons, useTutorCalendarEvents, useTutorStudents, useTutorReminderSettings, useTutorCalendarSettings, useTutorAvailabilityExceptions, useTutorGroups, weekRangeISO } from '@/hooks/useTutor';
 import { getBookingLink } from '@/lib/tutors';
 import {
@@ -61,7 +65,6 @@ import {
   deleteAvailabilityException,
   syncWorkHoursToSlots,
   updateLesson,
-  completeLessonAndCreatePayment,
   getLessonSeriesCount,
   updateLessonSeries,
   cancelLessonSeries,
@@ -124,11 +127,9 @@ const LessonMaterialsDrawer = lazy(() =>
   })),
 );
 
-const PostLessonSheet = lazy(() =>
-  import('@/components/tutor/schedule/PostLessonSheet').then((m) => ({
-    default: m.PostLessonSheet,
-  })),
-);
+// PostLessonSheet удалён (2026-08-07): он был байт-в-байт той же обёрткой вокруг
+// LessonMaterialsPanel, что и LessonMaterialsDrawer, и давал ВТОРУЮ кнопку
+// материалов в карточке занятия (репорт владельца). Остался один вход — «Материалы».
 
 // Форма создания занятия — извлечена из монолита (Волна 1, rule 10), lazy:
 // грузится при первом открытии, основной чанк страницы худеет.
@@ -1946,10 +1947,7 @@ interface LessonDetailsDialogProps {
   students: TutorStudentWithProfile[];
   onCancel: () => void;
   onUpdate: () => void;
-  isCompleting?: boolean;
   onOpenMaterials?: () => void;
-  /** Open the guided post-lesson Sheet (past booked individual lessons). */
-  onOpenPostLesson?: () => void;
 }
 
 function LessonDetailsDialog({
@@ -1959,9 +1957,7 @@ function LessonDetailsDialog({
   students,
   onCancel,
   onUpdate,
-  isCompleting = false,
   onOpenMaterials,
-  onOpenPostLesson,
 }: LessonDetailsDialogProps) {
   // Доска открывается по маршруту-резолверу /board/lesson/:id — она сама
   // найдёт-или-создаст доску занятия. Так в этом high-risk файле остаётся
@@ -2347,7 +2343,7 @@ function LessonDetailsDialog({
           
           {lesson.tutor_students?.hourly_rate_cents != null && (
             <div className="flex items-center gap-3">
-              <span className="h-5 w-5 flex items-center justify-center text-muted-foreground">💰</span>
+              <Wallet className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
               <div>
                 <p className="font-medium">{lesson.tutor_students.hourly_rate_cents / 100} ₽/ч</p>
                 <p className="text-sm text-muted-foreground">Ставка ученика</p>
@@ -2599,20 +2595,10 @@ function LessonDetailsDialog({
                 <Trash2 className="mr-1.5 h-4 w-4" />
                 {isDeleting ? 'Удаление...' : 'Удалить'}
               </Button>
-              {lesson.status === 'booked' && (
-              isPast ? (
-                /* Phase 2b: занятие уже авто-списано (cost-driven) — кнопка ведёт к материалам,
-                   а не «провести+оплата». Стоимость/отмена — в карточке (Редактировать). */
-                <Button
-                  className="w-full"
-                  style={{ touchAction: 'manipulation' }}
-                  onClick={() => onOpenPostLesson?.()}
-                  disabled={isCompleting || isCancelling}
-                >
-                  <ClipboardCheck className="mr-1.5 h-4 w-4" />
-                  Материалы занятия
-                </Button>
-              ) : (
+              {/* Прошедшее booked-занятие: отдельной кнопки материалов НЕТ — она дублировала
+                  «Материалы» слева (тот же LessonMaterialsPanel), репорт владельца 2026-08-07.
+                  Стоимость правится инлайн в карточке, удаление — «Удалить». */}
+              {lesson.status === 'booked' && !isPast && (
                 /* Future booked lesson — edit / cancel */
                 <>
                   <Button variant="outline" onClick={() => setIsEditing(true)}>
@@ -2626,8 +2612,7 @@ function LessonDetailsDialog({
                     {isCancelling ? 'Отмена...' : 'Отменить занятие'}
                   </Button>
                 </>
-              )
-            )}
+              )}
             </>
           )}
         </DialogFooter>
@@ -3405,7 +3390,6 @@ function TutorScheduleContent() {
   const [calendarSettingsOpen, setCalendarSettingsOpen] = useState(false);
   const [selectedLesson, setSelectedLesson] = useState<TutorLessonWithStudent | null>(null);
   const [materialsDrawerLesson, setMaterialsDrawerLesson] = useState<TutorLessonWithStudent | null>(null);
-  const [postLessonSheetLesson, setPostLessonSheetLesson] = useState<TutorLessonWithStudent | null>(null);
   const [selectedGroupBucket, setSelectedGroupBucket] = useState<GroupLessonBucket | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedHour, setSelectedHour] = useState<number | null>(null);
@@ -3436,9 +3420,6 @@ function TutorScheduleContent() {
 
   // Payment onboarding
   const [paymentOnboardingOpen, setPaymentOnboardingOpen] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [completingLessonIds, setCompletingLessonIds] = useState<Record<string, boolean>>({});
-  const completingLessonIdsRef = useRef<Record<string, boolean>>({});
   const participantPaymentRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const miniGroupsEnabled = Boolean(tutor?.mini_groups_enabled);
   const {
@@ -4427,72 +4408,9 @@ function TutorScheduleContent() {
     }
   }, [pendingEventMove, moveSingleEventOptimistic, moveEventSeries]);
 
-  const handleCompleteLesson = useCallback(async (lessonId: string, amount: number, paymentStatus: string) => {
-    if (completingLessonIdsRef.current[lessonId]) {
-      return;
-    }
-
-    completingLessonIdsRef.current = { ...completingLessonIdsRef.current, [lessonId]: true };
-    setCompletingLessonIds((prev) => ({ ...prev, [lessonId]: true }));
-    try {
-      const ok = await completeLessonAndCreatePayment(lessonId, amount, paymentStatus);
-      if (ok) {
-        if (paymentStatus === 'paid') {
-          setShowConfetti(true);
-          toast.success(amount > 0 ? `Отлично! Оплата ${formatCurrency(amount)} получена` : 'Урок отмечен как оплаченный');
-        } else {
-          toast.success(amount > 0 ? `Урок завершён. Ждём оплату ${formatCurrency(amount)}` : 'Урок завершён');
-        }
-        setLessonDetailsOpen(false);
-        refetchLessons();
-        invalidateBalanceCaches(); // complete пишет ledger-debit (rule 60)
-        // Keep the post-lesson sheet open and flip step ① to ✓ (optimistic) so the
-        // tutor continues straight to materials / ДЗ without re-opening anything.
-        // The sheet IS the post-completion materials surface (TASK-9 нудж subsumed).
-        setPostLessonSheetLesson((prev) =>
-          prev && prev.id === lessonId
-            ? {
-                ...prev,
-                status: 'completed',
-                payment_status: paymentStatus as TutorLessonWithStudent['payment_status'],
-                payment_amount: amount,
-              }
-            : prev,
-        );
-      } else {
-        toast.error('Не удалось завершить урок');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Ошибка при завершении урока');
-    } finally {
-      const nextById = { ...completingLessonIdsRef.current };
-      delete nextById[lessonId];
-      completingLessonIdsRef.current = nextById;
-      setCompletingLessonIds((prev) => {
-        const { [lessonId]: _removed, ...rest } = prev;
-        return rest;
-      });
-    }
-  }, [refetchLessons, invalidateBalanceCaches]);
-
-  // Single-lesson cancel from the post-lesson sheet («Урок не состоялся»). The
-  // series-scope cancel stays inside the dialog; here scope is one occurrence.
-  const handleCancelLessonFromSheet = useCallback(async (lessonId: string) => {
-    try {
-      const ok = !!(await cancelLesson(lessonId));
-      if (ok) {
-        toast.success('Занятие отменено');
-        setPostLessonSheetLesson(null);
-        refetchLessons();
-      } else {
-        toast.error('Не удалось отменить занятие');
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error('Не удалось отменить занятие');
-    }
-  }, [refetchLessons]);
+  // handleCompleteLesson / handleCancelLessonFromSheet удалены вместе с PostLessonSheet
+  // (2026-08-07): после Phase 2b cutover занятие списывается cost-driven, шага
+  // «провести + оплата» в UI нет, и оба хендлера уже были недостижимы из интерфейса.
 
   const handleCopyBookingLink = useCallback(async () => {
     const link = await getBookingLink();
@@ -4536,8 +4454,10 @@ function TutorScheduleContent() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
+            {/* rule 90: в заголовках — Lucide, не эмодзи */}
             <h1 className="text-2xl font-bold flex items-center gap-2">
-              <span>📅</span> Расписание
+              <CalendarDays className="h-6 w-6 text-accent" aria-hidden="true" />
+              Расписание
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Нажмите на сетку, чтобы добавить занятие
@@ -4580,20 +4500,6 @@ function TutorScheduleContent() {
               <Wallet className="h-4 w-4 mr-2" />
               Внести оплату
             </Button>
-            <Button onClick={handleCopyBookingLink} variant="outline" size="sm">
-              {copiedLink ? (
-                <>
-                  <Check className="h-4 w-4 mr-2" />
-                  Скопировано
-                </>
-              ) : (
-                <>
-                  <Link2 className="h-4 w-4 mr-2" />
-                  Ссылка для записи
-                </>
-              )}
-            </Button>
-
             {/* Work Hours Settings Popover */}
             <Popover>
               <PopoverTrigger asChild>
@@ -4682,23 +4588,29 @@ function TutorScheduleContent() {
               </PopoverContent>
             </Popover>
 
-            <Button
-              onClick={() => setCalendarSettingsOpen(true)}
-              variant="outline"
-              size="icon"
-              title="Настройки календаря"
-            >
-              <CalendarDays className="h-4 w-4" />
-            </Button>
-
-            <Button
-              onClick={() => setReminderSettingsOpen(true)}
-              variant="outline"
-              size="icon"
-              title="Настройки напоминаний"
-            >
-              <Bell className="h-4 w-4" />
-            </Button>
+            {/* Редкие действия — под одним kebab (2026-08-07): раньше шапка несла
+                7 контролов в ряд, из них три отдельные иконки настроек. */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon" title="Ещё">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleCopyBookingLink}>
+                  {copiedLink ? <Check className="mr-2 h-4 w-4" /> : <Link2 className="mr-2 h-4 w-4" />}
+                  {copiedLink ? 'Скопировано' : 'Ссылка для записи'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setCalendarSettingsOpen(true)}>
+                  <CalendarDays className="mr-2 h-4 w-4" />
+                  Настройки календаря
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setReminderSettingsOpen(true)}>
+                  <Bell className="mr-2 h-4 w-4" />
+                  Напоминания
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
           </div>
         </div>
@@ -4935,33 +4847,9 @@ function TutorScheduleContent() {
           </CardContent>
         </Card>
 
-        {/* Quick add buttons */}
-        <div className="flex flex-wrap justify-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSelectedDate(new Date());
-              setSelectedHour(new Date().getHours());
-              setSelectedMinute(0);
-              setAddLessonOpen(true);
-            }}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Добавить занятие
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSelectedDate(new Date());
-              setSelectedHour(new Date().getHours());
-              setSelectedMinute(0);
-              setAddEventOpen(true);
-            }}
-          >
-            <Ban className="h-4 w-4 mr-2" />
-            Личное дело
-          </Button>
-        </div>
+        {/* Дублирующий нижний ряд «Добавить занятие / Личное дело» удалён (2026-08-07):
+            те же два действия жили в шапке И в меню по клику на сетку — три входа
+            в одно и то же (репорт владельца). Остались шапка + клик по сетке. */}
 
         {/* Меню «Занятие / Личное дело» по клику на ячейку (Волна 1) */}
         <QuickAddMenu
@@ -5027,14 +4915,9 @@ function TutorScheduleContent() {
           students={students}
           onCancel={() => { refetchLessons(); invalidateBalanceCaches(); }}
           onUpdate={() => { refetchLessons(); invalidateBalanceCaches(); }}
-          isCompleting={selectedLesson ? Boolean(completingLessonIds[selectedLesson.id]) : false}
           onOpenMaterials={() => {
             setLessonDetailsOpen(false);
             setMaterialsDrawerLesson(selectedLesson);
-          }}
-          onOpenPostLesson={() => {
-            setLessonDetailsOpen(false);
-            setPostLessonSheetLesson(selectedLesson);
           }}
         />
 
@@ -5044,16 +4927,6 @@ function TutorScheduleContent() {
               open={!!materialsDrawerLesson}
               onOpenChange={(o) => { if (!o) { setMaterialsDrawerLesson(null); invalidateMaterialFlags(); } }}
               lesson={materialsDrawerLesson}
-            />
-          </Suspense>
-        )}
-
-        {postLessonSheetLesson && (
-          <Suspense fallback={null}>
-            <PostLessonSheet
-              open={!!postLessonSheetLesson}
-              onOpenChange={(o) => { if (!o) { setPostLessonSheetLesson(null); invalidateMaterialFlags(); } }}
-              lesson={postLessonSheetLesson}
             />
           </Suspense>
         )}
@@ -5166,7 +5039,6 @@ function TutorScheduleContent() {
           onEnablePaymentReminders={handleEnablePaymentReminders}
         />
 
-        <ConfettiBurst active={showConfetti} onComplete={() => setShowConfetti(false)} />
       </div>
   );
 }

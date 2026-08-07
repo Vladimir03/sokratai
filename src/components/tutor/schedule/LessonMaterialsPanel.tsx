@@ -75,6 +75,18 @@ export function lessonSubtitle(lesson: TutorLessonWithStudent): string {
 export interface LessonMaterialsPanelHandle {
   /** Fire the TASK-7 notify digest once (host calls this before a «Готово»/Esc close). */
   flushNotifyOnClose: () => void;
+  /**
+   * Закрытие хоста: сначала ДОСОХРАНИТЬ введённую, но не добавленную ссылку записи
+   * (репорт владельца 2026-08-07: «Добавить ссылку» перед «Готово» — лишнее действие),
+   * затем отправить notify-дайджест.
+   *
+   * `strict` = закрытие по кнопке «Готово»: недописанная/битая ссылка НЕ теряется молча —
+   * возвращаем false, хост НЕ закрывается, тост объясняет, что не так. При Esc/overlay
+   * (`strict: false`) поле просто игнорируется — иначе шит нельзя было бы закрыть.
+   *
+   * @returns true = можно закрывать.
+   */
+  commitPendingAndNotify: (opts?: { strict?: boolean }) => Promise<boolean>;
 }
 
 interface LessonMaterialsPanelProps {
@@ -443,36 +455,17 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       }
     }, [active, lessonId]);
 
-    // TASK-7: host triggers the notify digest exactly once on a «Готово»/Esc close.
-    useImperativeHandle(
-      ref,
-      () => ({
-        flushNotifyOnClose() {
-          if (materialsAddedRef.current && !notifiedRef.current) {
-            notifiedRef.current = true;
-            notifyLessonMaterials(lessonId)
-              .then((res) => {
-                if (res?.notify && res.notify.recipients > 0) {
-                  toast.success('Ученик получит уведомление о материалах');
-                }
-              })
-              .catch(() => {
-                toast.error('Не удалось отправить уведомление ученику');
-              });
-          }
-        },
-      }),
-      [lessonId],
-    );
-
     const errMessage = (err: unknown, fallback: string) =>
       err instanceof Error && err.message ? err.message : fallback;
 
-    const handleAddRecording = useCallback(async () => {
+    const recordingLimitReached = recordings.length >= MAX_LESSON_RECORDINGS;
+
+    /** @returns true, если ссылка сохранена (или сохранять было нечего). */
+    const handleAddRecording = useCallback(async (): Promise<boolean> => {
       const url = recordingUrl.trim();
       if (!/^https?:\/\/.+/i.test(url)) {
         toast.error('Ссылка должна начинаться с http:// или https://');
-        return;
+        return false;
       }
       setAddingRecording(true);
       try {
@@ -482,12 +475,58 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
         setRecordingTitle('');
         await invalidate();
         toast.success('Ссылка добавлена');
+        return true;
       } catch (err) {
         toast.error(errMessage(err, 'Не удалось добавить ссылку'));
+        return false;
       } finally {
         setAddingRecording(false);
       }
     }, [lessonId, recordingUrl, recordingTitle, invalidate]);
+
+    // TASK-7: host triggers the notify digest exactly once on a «Готово»/Esc close.
+    const flushNotify = useCallback(() => {
+      if (materialsAddedRef.current && !notifiedRef.current) {
+        notifiedRef.current = true;
+        notifyLessonMaterials(lessonId)
+          .then((res) => {
+            if (res?.notify && res.notify.recipients > 0) {
+              toast.success('Ученик получит уведомление о материалах');
+            }
+          })
+          .catch(() => {
+            toast.error('Не удалось отправить уведомление ученику');
+          });
+      }
+    }, [lessonId]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        flushNotifyOnClose: flushNotify,
+        async commitPendingAndNotify({ strict = false } = {}) {
+          const pendingUrl = recordingUrl.trim();
+          if (pendingUrl && !recordingLimitReached) {
+            const isValid = /^https?:\/\/.+/i.test(pendingUrl);
+            if (!isValid) {
+              // Esc/overlay — не держим шит заложником недописанной ссылки.
+              if (!strict) {
+                flushNotify();
+                return true;
+              }
+              toast.error('Ссылка должна начинаться с http:// или https://');
+              return false;
+            }
+            const saved = await handleAddRecording();
+            // «Готово» + сбой сети: не закрываем, чтобы ввод не пропал.
+            if (!saved && strict) return false;
+          }
+          flushNotify();
+          return true;
+        },
+      }),
+      [flushNotify, handleAddRecording, recordingUrl, recordingLimitReached],
+    );
 
     const uploadOnePdf = useCallback(
       async (file: File) => {
@@ -656,8 +695,6 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
       [navigate, onRequestClose],
     );
 
-    const recordingLimitReached = recordings.length >= MAX_LESSON_RECORDINGS;
-
     return (
       <div className="flex-1 space-y-6 overflow-y-auto px-5 py-4">
         {/* ── Запись ── */}
@@ -687,16 +724,21 @@ export const LessonMaterialsPanel = forwardRef<LessonMaterialsPanelHandle, Lesso
                 className="w-full rounded-md border border-socrat-border px-3 py-2 text-base text-slate-900 outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
                 style={{ touchAction: 'manipulation' }}
               />
-              <button
-                type="button"
-                onClick={handleAddRecording}
-                disabled={addingRecording || !recordingUrl.trim()}
-                className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ touchAction: 'manipulation' }}
-              >
-                {addingRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-                Добавить ссылку
-              </button>
+              {/* Кнопка нужна ТОЛЬКО чтобы добавить вторую-третью ссылку не закрывая шит:
+                  одиночная ссылка сохраняется сама по «Готово» (репорт владельца 2026-08-07),
+                  поэтому на пустом поле кнопку не показываем — меньше шума. */}
+              {recordingUrl.trim().length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleAddRecording()}
+                  disabled={addingRecording}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-socrat-border bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ touchAction: 'manipulation' }}
+                >
+                  {addingRecording ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  Сохранить и добавить ещё
+                </button>
+              )}
             </div>
           )}
           {recordings.map((m) => (

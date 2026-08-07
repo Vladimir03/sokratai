@@ -18,7 +18,7 @@ export interface LessonMaterialFlags {
  * refetchOnWindowFocus допустим, smoke §8 не задет.
  *
  * Инвалидация: prefix ['tutor','lesson-material-flags'] — дёргается при закрытии
- * LessonMaterialsDrawer / PostLessonSheet (там же, где refetchLessons).
+ * LessonMaterialsDrawer (там же, где refetchLessons).
  */
 export function useLessonMaterialFlags(lessonIds: string[]) {
   // Стабильный ключ по составу занятий: сортировка отвязывает от порядка рендера.

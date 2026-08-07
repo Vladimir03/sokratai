@@ -132,12 +132,23 @@ export const StudentCard = memo(function StudentCard({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <h3 className="font-medium text-foreground truncate flex items-center gap-1.5">
+                {/* Точка = ЦВЕТ УЧЕНИКА в расписании (тот же, что красит его занятия).
+                    Раньше здесь единственной точкой была янтарная «AI не настроен» —
+                    её принимали за цветовую метку (репорт владельца 2026-08-07),
+                    поэтому нудж переехал на иконку-предупреждение ниже. */}
+                {student.color && (
+                  <span
+                    className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: student.color }}
+                    aria-hidden="true"
+                  />
+                )}
                 {displayName}
                 {showAiSetupNudge && (
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span
-                        className="inline-flex h-2 w-2 rounded-full bg-amber-500 cursor-help"
+                      <AlertTriangle
+                        className="h-3.5 w-3.5 shrink-0 text-amber-500 cursor-help"
                         aria-label="AI настройки не заполнены"
                       />
                     </TooltipTrigger>
