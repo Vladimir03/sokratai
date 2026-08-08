@@ -71,12 +71,25 @@ export interface PdfRenderResult {
    * Нужен для смежности («ПРОДОЛЖЕНИЕ» — только соседняя страница ТОГО ЖЕ PDF).
    */
   pageNumbers: number[];
+  /**
+   * P1 (2026-08-08, случай Маргариты): рендер прерван пользователем. Страницы,
+   * успевшие отрисоваться, ВОЗВРАЩАЮТСЯ — «Отменить» на зависшем файле должно
+   * оставлять то, что уже готово, а не обнулять минуты ожидания.
+   */
+  aborted: boolean;
 }
 
 export interface PdfRenderOptions {
   maxPages: number;
   /** Прогресс по страницам (UX review P1: «Страница N из M» вместо немого спиннера). */
   onProgress?: (done: number, total: number) => void;
+  /**
+   * Отмена рендера (P1, 2026-08-08). Проверяется на границе страниц: одну
+   * страницу `page.render()` не прерывает, поэтому отмена срабатывает в
+   * пределах одной страницы, а не мгновенно. Без сигнала цикл не остановить
+   * ничем — именно поэтому «крутит колёсико и всё» было безвыходным.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -177,7 +190,15 @@ export async function renderPdfPagesToFiles(
     const pageTexts: (string | null)[] = [];
     const pageNumbers: number[] = [];
 
+    let aborted = false;
+
     for (let n = 1; n <= pagesToRender; n++) {
+      // Проверка на границе страницы: `page.render()` не прерывается, поэтому
+      // раньше сюда вернуться нельзя. Уже отрисованные страницы сохраняем.
+      if (opts.signal?.aborted) {
+        aborted = true;
+        break;
+      }
       opts.onProgress?.(n - 1, pagesToRender);
       // Пауза между страницами: даём Safari отрисовать прогресс + отпустить
       // canvas-память (iOS лимитирует суммарную площадь canvas).
@@ -216,13 +237,17 @@ export async function renderPdfPagesToFiles(
         page.cleanup();
       }
     }
-    opts.onProgress?.(pagesToRender, pagesToRender);
+    if (!aborted) opts.onProgress?.(pagesToRender, pagesToRender);
 
     if (files.length === 0) {
-      throw new PdfRenderError('Не удалось отрисовать ни одной страницы PDF. Попробуйте другой файл.');
+      throw new PdfRenderError(
+        aborted
+          ? 'Обработка PDF отменена — ни одной страницы не успело подготовиться.'
+          : 'Не удалось отрисовать ни одной страницы PDF. Попробуйте другой файл.',
+      );
     }
 
-    return { files, pageCount, renderedPages: files.length, pageTexts, pageNumbers };
+    return { files, pageCount, renderedPages: files.length, pageTexts, pageNumbers, aborted };
   } finally {
     await loadingTask.destroy().catch(() => undefined);
     terminateWorker();

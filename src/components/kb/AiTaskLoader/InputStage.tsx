@@ -56,6 +56,18 @@ const SHORTFALL_RATIO = 0.6;
 /** Кап текста одного вызова (зеркало edge MAX_TEXT_CHARS с запасом). */
 const CHUNK_TEXT_CAP = 59_000;
 
+/**
+ * P1 (2026-08-08, случай Маргариты): сколько ждать сдвига страницы, прежде чем
+ * предложить выход. Репетитор на слабом ноутбуке видел «крутит колёсико и всё»
+ * — 27 страниц рендерятся последовательно на главном потоке, и спиннер не
+ * отличал «долго» от «умерло». Rule 95: у зависшей загрузки обязан быть выход.
+ *
+ * ⚠️ Порог НЕ обрывает рендер сам — только показывает кнопку. Авто-обрыв убил
+ * бы медленный, но живой рендер: 20 с на страницу для скана 600 dpi на слабом
+ * устройстве — это нормально, а не сбой. Решение оставляем человеку.
+ */
+const PDF_STALL_NOTICE_MS = 20_000;
+
 /** Общий класс select'ов каскада «тема по умолчанию» (16px + touch — rule 80/90). */
 const CASCADE_SELECT_CLASS =
   'w-full rounded-lg border border-socrat-border px-3 py-2 text-[16px] transition-colors duration-200 focus:border-socrat-primary/50 focus:outline-none [touch-action:manipulation]';
@@ -187,6 +199,10 @@ export function InputStage({
   const [isRenderingPdf, setIsRenderingPdf] = useState(false);
   /** «Страница N из M» при рендере PDF (UX review P1 — не немой спиннер). */
   const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null);
+  /** P1: прогресс не двигается дольше PDF_STALL_NOTICE_MS → предлагаем выход. */
+  const [pdfStalled, setPdfStalled] = useState(false);
+  /** P1: отмена рендера PDF — без неё цикл по страницам не остановить ничем. */
+  const pdfAbortRef = useRef<AbortController | null>(null);
   /** «Загружаем N/M» при аплоаде в storage (UX review P2 — фаза видна отдельно от OCR). */
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   /** W4: живой прогресс распознавания — «Страница k из m · найдено N задач» + %. */
@@ -219,6 +235,26 @@ export function InputStage({
   // hw-режим: папка резолвится лениво в handleExtract — folderId не требуется.
   const canExtract = (isHw || folderId !== '') && hasMaterial && !isExtracting && !isRenderingPdf;
 
+  /**
+   * P1: сторож зависшего рендера. Таймер перевзводится на КАЖДОМ сдвиге
+   * страницы, поэтому медленный, но живой рендер плашку не показывает.
+   * Покрывает и фазу «Открываем PDF…» (до первого onProgress): отсчёт
+   * начинается со старта рендера, а `pdfProgress` там ещё null.
+   */
+  useEffect(() => {
+    if (!isRenderingPdf) {
+      setPdfStalled(false);
+      return;
+    }
+    setPdfStalled(false);
+    const timer = window.setTimeout(() => setPdfStalled(true), PDF_STALL_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [isRenderingPdf, pdfProgress]);
+
+  const cancelPdfRender = () => {
+    pdfAbortRef.current?.abort();
+  };
+
   // PDF → картинки страниц (client-side, pdfjs lazy) → существующий image-пайплайн.
   // W3.1: страницы сверх первых 10 слотов идут в очередь и распознаются
   // автоматически прогонами по 10 — сборник больше не грузят 10 раз руками.
@@ -237,15 +273,18 @@ export function InputStage({
       return;
     }
 
+    const abort = new AbortController();
+    pdfAbortRef.current = abort;
     setIsRenderingPdf(true);
     try {
       // Lazy: pdfjs (~тяжёлый) грузится только при реальном выборе PDF.
       const { renderPdfPagesToFiles, PdfRenderError } = await import('@/lib/pdfToImages');
       try {
-        const { files, pageCount, renderedPages, pageTexts, pageNumbers } =
+        const { files, pageCount, renderedPages, pageTexts, pageNumbers, aborted } =
           await renderPdfPagesToFiles(file, {
             maxPages: queueCapacity,
             onProgress: (done, total) => setPdfProgress({ done, total }),
+            signal: abort.signal,
           });
         // W4: мета каждой страницы — по File-идентичности (выровнена с files).
         // docId/docPageNo — для смежности «ПРОДОЛЖЕНИЯ» (ревью P1).
@@ -262,7 +301,13 @@ export function InputStage({
         if (visible.length > 0) imageUpload.addFiles(visible);
         if (queued.length > 0) setPdfQueue((prev) => [...prev, ...queued]);
         trackKbAiLoaderEvent('kb_ai_pdf_rendered', { pageCount, renderedPages });
-        if (pageCount > renderedPages) {
+        if (aborted) {
+          // Отмена на зависшем файле: то, что успело отрисоваться, остаётся —
+          // репетитор может распознать хотя бы часть, а не начинать заново.
+          toast.info(
+            `Обработка остановлена. Готовых страниц: ${renderedPages} из ${pageCount} — их можно распознать сейчас.`,
+          );
+        } else if (pageCount > renderedPages) {
           // No silent caps (rule 40): честно говорим, что взяли не всё.
           toast.info(`В PDF ${pageCount} стр. — обработаем первые ${renderedPages}. Остальные загрузите отдельным заходом.`);
         } else if (queued.length > 0) {
@@ -279,8 +324,10 @@ export function InputStage({
       // Сбой загрузки самого чанка pdfjs (сеть/DPI) — отдельно от ошибок файла.
       toast.error('Не удалось загрузить модуль PDF. Проверьте соединение и попробуйте ещё раз.');
     } finally {
+      pdfAbortRef.current = null;
       setIsRenderingPdf(false);
       setPdfProgress(null);
+      setPdfStalled(false);
     }
   };
 
@@ -934,6 +981,31 @@ export function InputStage({
             </>
           )}
         </button>
+        {/* P1 (2026-08-08): выход из ожидания. Кнопка — СИБЛИНГ кнопки выбора
+            файла, а не вложенная: вложенная <button> невалидна и не кликается. */}
+        {isRenderingPdf ? (
+          <div
+            className={cn(
+              'mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2',
+              pdfStalled
+                ? 'border-amber-300 bg-amber-50'
+                : 'border-socrat-border bg-slate-50',
+            )}
+          >
+            <span className={cn('text-xs', pdfStalled ? 'text-amber-900' : 'text-slate-600')}>
+              {pdfStalled
+                ? 'Файл тяжёлый для этого устройства — страницы готовятся дольше обычного. Можно подождать ещё или остановить и распознать то, что уже готово.'
+                : 'Готовим страницы. Это может занять до минуты на большом файле.'}
+            </span>
+            <button
+              type="button"
+              onClick={cancelPdfRender}
+              className="shrink-0 rounded-lg border border-socrat-border bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors duration-200 hover:border-socrat-primary/40 hover:text-socrat-primary [touch-action:manipulation]"
+            >
+              Остановить
+            </button>
+          </div>
+        ) : null}
         <p className="mt-1 text-[11px] text-slate-400">
           Первые {MAX_LOADER_IMAGES} страниц появятся выше (лишние можно удалить), остальные
           распознаются автоматически по частям.
